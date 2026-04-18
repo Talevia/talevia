@@ -19,6 +19,39 @@ targets:
     deploymentTarget: "17.0"
     sources:
       - path: Talevia
+      # Read-only browse groups so Xcode shows Kotlin sources alongside Swift.
+      # `buildPhase: none` keeps Xcode from trying to compile them.
+      - path: ../../core/src/commonMain/kotlin
+        name: "Core · commonMain"
+        type: folder
+        buildPhase: none
+        optional: true
+      - path: ../../core/src/iosMain/kotlin
+        name: "Core · iosMain"
+        type: folder
+        buildPhase: none
+        optional: true
+      - path: ../../core/src/commonMain/sqldelight
+        name: "Core · sqldelight"
+        type: folder
+        buildPhase: none
+        optional: true
+    preBuildScripts:
+      - name: Build TaleviaCore KMP framework
+        basedOnDependencyAnalysis: false
+        script: |
+          set -euo pipefail
+          cd "$SRCROOT/../.."
+          export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+
+          # Pick the framework slice matching the simulator arch (or device).
+          case "${PLATFORM_NAME}-${ARCHS}" in
+            iphonesimulator-x86_64)  TASK=":core:linkDebugFrameworkIosX64" ;;
+            iphonesimulator-arm64)   TASK=":core:linkDebugFrameworkIosSimulatorArm64" ;;
+            iphoneos-arm64)          TASK=":core:linkDebugFrameworkIosArm64" ;;
+            *)                       TASK=":core:linkDebugFrameworkIosX64" ;;
+          esac
+          ./gradlew $TASK --quiet
     info:
       path: Talevia/Resources/Info.plist
       properties:
