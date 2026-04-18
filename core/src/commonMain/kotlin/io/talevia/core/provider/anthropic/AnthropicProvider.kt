@@ -191,19 +191,37 @@ class AnthropicProvider(
         else -> FinishReason.STOP
     }
 
-    private fun buildRequestBody(request: LlmRequest): JsonObject = buildJsonObject {
+    internal fun buildRequestBody(request: LlmRequest): JsonObject = buildJsonObject {
         put("model", request.model.modelId)
         put("max_tokens", request.maxTokens)
         request.temperature?.let { put("temperature", it) }
         put("stream", true)
-        request.systemPrompt?.let { put("system", it) }
+        // Prompt caching: encode system as a block array with an ephemeral
+        // cache_control breakpoint. The system prompt is typically stable
+        // across turns, so this is the highest-ROI caching point.
+        request.systemPrompt?.takeIf { it.isNotEmpty() }?.let { prompt ->
+            put("system", buildJsonArray {
+                addJsonObject {
+                    put("type", "text")
+                    put("text", prompt)
+                    putJsonObject("cache_control") { put("type", "ephemeral") }
+                }
+            })
+        }
         if (request.tools.isNotEmpty()) {
             putJsonArray("tools") {
-                request.tools.forEach { spec ->
+                val lastIdx = request.tools.lastIndex
+                request.tools.forEachIndexed { idx, spec ->
                     addJsonObject {
                         put("name", spec.id)
                         put("description", spec.helpText)
                         put("input_schema", spec.inputSchema)
+                        // A single breakpoint on the final tool caches the
+                        // whole tool block (caching covers everything up to
+                        // and including the marker).
+                        if (idx == lastIdx) {
+                            putJsonObject("cache_control") { put("type", "ephemeral") }
+                        }
                     }
                 }
             }
