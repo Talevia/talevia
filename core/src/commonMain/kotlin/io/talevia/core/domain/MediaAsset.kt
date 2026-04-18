@@ -28,7 +28,7 @@ sealed class MediaSource {
 
 @Serializable
 data class MediaMetadata(
-    @Serializable(with = DurationSerializer::class) val duration: Duration,
+    val duration: Duration,
     val resolution: Resolution? = null,
     val frameRate: FrameRate? = null,
     val videoCodec: String? = null,

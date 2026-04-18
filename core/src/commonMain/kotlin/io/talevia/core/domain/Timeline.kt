@@ -8,7 +8,7 @@ import kotlin.time.Duration
 @Serializable
 data class Timeline(
     val tracks: List<Track> = emptyList(),
-    @Serializable(with = DurationSerializer::class) val duration: Duration = Duration.ZERO,
+    val duration: Duration = Duration.ZERO,
     val frameRate: FrameRate = FrameRate.FPS_30,
     val resolution: Resolution = Resolution(1920, 1080),
 )

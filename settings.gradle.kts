@@ -21,6 +21,8 @@ dependencyResolutionManagement {
 rootProject.name = "talevia"
 
 include(":core")
+include(":platform-impls:video-ffmpeg-jvm")
+include(":apps:desktop")
 
-// Apps & platform-impls 模块在后续 Milestone 加入：
-// include(":apps:desktop", ":apps:server", ":apps:android", ":platform-impls:video-ffmpeg-jvm")
+// Future milestones:
+// include(":apps:server", ":apps:android")

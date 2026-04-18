@@ -1,0 +1,23 @@
+CREATE TABLE Projects (
+    id            TEXT NOT NULL PRIMARY KEY,
+    title         TEXT NOT NULL,
+    -- Full Project model (timeline + assets + outputProfile) serialised as JSON.
+    data          TEXT NOT NULL,
+    time_created  INTEGER NOT NULL,
+    time_updated  INTEGER NOT NULL
+);
+
+CREATE INDEX Projects_updated_idx ON Projects(time_updated DESC);
+
+upsert:
+INSERT OR REPLACE INTO Projects(id, title, data, time_created, time_updated)
+VALUES (?, ?, ?, ?, ?);
+
+selectById:
+SELECT * FROM Projects WHERE id = ?;
+
+selectAll:
+SELECT * FROM Projects ORDER BY time_updated DESC;
+
+delete:
+DELETE FROM Projects WHERE id = ?;
