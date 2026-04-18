@@ -11,8 +11,11 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.map
+import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.json.Json
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * SQLDelight-backed [SessionStore]. Sessions/Messages/Parts are stored as JSON blobs;
@@ -127,6 +130,55 @@ class SqlDelightSessionStore(
             .filterIsInstance<BusEvent.PartUpdated>()
             .filter { it.sessionId == sessionId }
             .map { it.part }
+
+    @OptIn(ExperimentalUuidApi::class)
+    override suspend fun fork(parentId: SessionId, newTitle: String?): SessionId {
+        val parent = getSession(parentId) ?: error("Cannot fork unknown session $parentId")
+        val now = Clock.System.now()
+        val newId = SessionId(Uuid.random().toString())
+        val branch = parent.copy(
+            id = newId,
+            parentId = parentId,
+            title = newTitle ?: "${parent.title} (fork)",
+            createdAt = now,
+            updatedAt = now,
+            archived = false,
+        )
+        createSession(branch)
+
+        val parentMessages = listMessagesWithParts(parentId)
+        val messageIdRemap = mutableMapOf<MessageId, MessageId>()
+        for (mwp in parentMessages) {
+            val newMid = MessageId(Uuid.random().toString())
+            messageIdRemap[mwp.message.id] = newMid
+            val newMessage = when (val m = mwp.message) {
+                is Message.User -> m.copy(id = newMid, sessionId = newId)
+                is Message.Assistant -> m.copy(
+                    id = newMid,
+                    sessionId = newId,
+                    parentId = messageIdRemap[m.parentId] ?: m.parentId,
+                )
+            }
+            appendMessage(newMessage)
+            for (part in mwp.parts) {
+                upsertPart(rebindPart(part, newId, newMid))
+            }
+        }
+        return newId
+    }
+
+    @OptIn(ExperimentalUuidApi::class)
+    private fun rebindPart(p: Part, newSession: SessionId, newMessage: MessageId): Part = when (p) {
+        is Part.Text -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
+        is Part.Reasoning -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
+        is Part.Tool -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
+        is Part.Media -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
+        is Part.TimelineSnapshot -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
+        is Part.RenderProgress -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
+        is Part.StepStart -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
+        is Part.StepFinish -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
+        is Part.Compaction -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
+    }
 
     private fun kindOf(p: Part): String = when (p) {
         is Part.Text -> "text"

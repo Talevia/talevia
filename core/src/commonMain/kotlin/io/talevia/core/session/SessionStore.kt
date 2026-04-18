@@ -32,4 +32,11 @@ interface SessionStore {
 
     /** Live stream of part-level changes for a single session. */
     fun observeSessionParts(sessionId: SessionId): Flow<Part>
+
+    /**
+     * Branch a session: create a new session whose `parentId` points at [parentId],
+     * copying every message + part with fresh IDs so the branch can diverge without
+     * touching the parent's history. Returns the new session id.
+     */
+    suspend fun fork(parentId: SessionId, newTitle: String? = null): SessionId
 }
