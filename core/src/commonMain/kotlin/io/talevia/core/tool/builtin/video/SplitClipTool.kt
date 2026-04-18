@@ -57,7 +57,7 @@ class SplitClipTool(
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         var left: ClipId? = null
         var right: ClipId? = null
-        store.mutate(ProjectId(input.projectId)) { project ->
+        val updated = store.mutate(ProjectId(input.projectId)) { project ->
             val splitAt = input.atTimelineSeconds.seconds
             val newTracks = project.timeline.tracks.map { track ->
                 val target = track.clips.firstOrNull { it.id.value == input.clipId } ?: return@map track
@@ -73,9 +73,10 @@ class SplitClipTool(
         }
         val cs = (input.atTimelineSeconds * 100).toLong()
         val pretty = "${cs / 100}.${(cs % 100).toString().padStart(2, '0')}"
+        val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
         return ToolResult(
             title = "split clip @ ${pretty}s",
-            outputForLlm = "Split clip ${input.clipId} into ${left?.value} + ${right?.value}",
+            outputForLlm = "Split clip ${input.clipId} into ${left?.value} + ${right?.value}. Timeline snapshot: ${snapshotId.value}",
             data = Output(left!!.value, right!!.value),
         )
     }

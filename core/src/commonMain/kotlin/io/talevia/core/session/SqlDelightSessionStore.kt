@@ -111,6 +111,10 @@ class SqlDelightSessionStore(
         db.partsQueries.markCompacted(time_compacted = at.toEpochMilliseconds(), id = id.value)
     }
 
+    override suspend fun getPart(id: PartId): Part? =
+        db.partsQueries.selectById(id.value).executeAsOneOrNull()
+            ?.let { decodePart(it.data_, it.time_compacted) }
+
     override suspend fun listParts(messageId: MessageId): List<Part> =
         db.partsQueries.selectByMessage(messageId.value).executeAsList()
             .map { decodePart(it.data_, it.time_compacted) }

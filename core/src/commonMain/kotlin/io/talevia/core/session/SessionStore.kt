@@ -24,6 +24,7 @@ interface SessionStore {
 
     suspend fun upsertPart(part: Part)
     suspend fun markPartCompacted(id: PartId, at: kotlinx.datetime.Instant)
+    suspend fun getPart(id: PartId): Part?
     suspend fun listParts(messageId: MessageId): List<Part>
     suspend fun listSessionParts(sessionId: SessionId, includeCompacted: Boolean = true): List<Part>
 

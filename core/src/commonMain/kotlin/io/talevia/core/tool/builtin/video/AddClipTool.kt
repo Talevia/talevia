@@ -101,9 +101,10 @@ class AddClipTool(
             timelineEndSeconds = addedClip.timeRange.end.toDouble(DurationUnit.SECONDS),
             trackId = addedTrack.id.value,
         )
+        val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
         return ToolResult(
             title = "add clip @ ${formatSeconds(out.timelineStartSeconds)}s",
-            outputForLlm = "Added clip ${out.clipId} on track ${out.trackId} (${out.timelineStartSeconds}s..${out.timelineEndSeconds}s)",
+            outputForLlm = "Added clip ${out.clipId} on track ${out.trackId} (${out.timelineStartSeconds}s..${out.timelineEndSeconds}s). Timeline snapshot: ${snapshotId.value}",
             data = out,
         )
     }

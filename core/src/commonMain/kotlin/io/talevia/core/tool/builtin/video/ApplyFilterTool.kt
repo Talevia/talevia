@@ -64,7 +64,7 @@ class ApplyFilterTool(
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         var filterCount = 0
-        store.mutate(ProjectId(input.projectId)) { project ->
+        val project = store.mutate(ProjectId(input.projectId)) { project ->
             val newTracks = project.timeline.tracks.map { track ->
                 val target = track.clips.firstOrNull { it.id.value == input.clipId } ?: return@map track
                 if (target !is Clip.Video) error("apply_filter only supports video clips")
@@ -75,9 +75,10 @@ class ApplyFilterTool(
             project.copy(timeline = project.timeline.copy(tracks = newTracks))
         }
         if (filterCount == 0) error("clip ${input.clipId} not found in project ${input.projectId}")
+        val snapshotId = emitTimelineSnapshot(ctx, project.timeline)
         return ToolResult(
             title = "filter ${input.filterName}",
-            outputForLlm = "Applied filter '${input.filterName}' to clip ${input.clipId} (now $filterCount filters total).",
+            outputForLlm = "Applied filter '${input.filterName}' to clip ${input.clipId} (now $filterCount filters total). Timeline snapshot: ${snapshotId.value}",
             data = Output(input.clipId, filterCount),
         )
     }

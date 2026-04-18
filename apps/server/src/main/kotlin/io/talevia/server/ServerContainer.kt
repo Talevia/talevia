@@ -24,6 +24,7 @@ import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
+import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
 import io.talevia.platform.ffmpeg.FfmpegVideoEngine
 
@@ -54,6 +55,7 @@ class ServerContainer(env: Map<String, String> = System.getenv()) {
         register(ApplyFilterTool(projects))
         register(AddSubtitleTool(projects))
         register(AddTransitionTool(projects))
+        register(RevertTimelineTool(sessions, projects))
     }
 
     val httpClient: HttpClient = HttpClient(CIO)

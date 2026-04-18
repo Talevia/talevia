@@ -17,6 +17,7 @@ import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
+import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
 
 /**
@@ -39,5 +40,6 @@ class AndroidAppContainer(context: Context) {
         register(AddClipTool(projects, media))
         register(SplitClipTool(projects))
         register(ExportTool(projects, engine))
+        register(RevertTimelineTool(sessions, projects))
     }
 }

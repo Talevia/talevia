@@ -69,7 +69,7 @@ class AddSubtitleTool(
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         val clipId = ClipId(Uuid.random().toString())
         var trackId: TrackId? = null
-        store.mutate(ProjectId(input.projectId)) { project ->
+        val updated = store.mutate(ProjectId(input.projectId)) { project ->
             val (subtitleTrack, others) = pickSubtitleTrack(project.timeline.tracks)
             val tlRange = TimeRange(input.timelineStartSeconds.seconds, input.durationSeconds.seconds)
             val clip = Clip.Text(
@@ -89,9 +89,10 @@ class AddSubtitleTool(
             val duration = maxOf(project.timeline.duration, tlRange.end)
             project.copy(timeline = project.timeline.copy(tracks = tracks, duration = duration))
         }
+        val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
         return ToolResult(
             title = "subtitle '${input.text.take(24)}'",
-            outputForLlm = "Added subtitle clip ${clipId.value} from ${input.timelineStartSeconds}s for ${input.durationSeconds}s",
+            outputForLlm = "Added subtitle clip ${clipId.value} from ${input.timelineStartSeconds}s for ${input.durationSeconds}s. Timeline snapshot: ${snapshotId.value}",
             data = Output(clipId.value, trackId!!.value),
         )
     }

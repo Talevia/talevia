@@ -73,7 +73,7 @@ class AddTransitionTool(
         val transitionId = ClipId(Uuid.random().toString())
         var resolvedTrackId: TrackId? = null
 
-        store.mutate(ProjectId(input.projectId)) { project ->
+        val updated = store.mutate(ProjectId(input.projectId)) { project ->
             val from = project.timeline.tracks.flatMap { it.clips }.firstOrNull { it.id.value == input.fromClipId }
                 ?: error("fromClipId ${input.fromClipId} not found")
             val to = project.timeline.tracks.flatMap { it.clips }.firstOrNull { it.id.value == input.toClipId }
@@ -100,9 +100,10 @@ class AddTransitionTool(
             project.copy(timeline = project.timeline.copy(tracks = others + newTrack))
         }
 
+        val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
         return ToolResult(
             title = "transition ${input.transitionName}",
-            outputForLlm = "Added ${input.transitionName} transition between ${input.fromClipId} and ${input.toClipId}",
+            outputForLlm = "Added ${input.transitionName} transition between ${input.fromClipId} and ${input.toClipId}. Timeline snapshot: ${snapshotId.value}",
             data = Output(transitionId.value, resolvedTrackId!!.value),
         )
     }
