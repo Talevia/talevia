@@ -7,6 +7,8 @@ import io.talevia.core.PartId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
+import io.talevia.core.compaction.Compactor
+import io.talevia.core.compaction.TokenEstimator
 import io.talevia.core.permission.PermissionRequest
 import io.talevia.core.permission.PermissionRule
 import io.talevia.core.permission.PermissionService
@@ -56,6 +58,14 @@ class Agent(
     private val maxSteps: Int = 25,
     private val systemPrompt: String? = null,
     private val json: Json = JsonConfig.default,
+    /**
+     * Optional compaction hook. When set, the Agent estimates the current history
+     * before each LLM turn and calls [Compactor.process] once the estimate crosses
+     * [compactionTokenThreshold] (OpenCode uses ~85 % of the model's context
+     * window; ~120k for 200k-context Claude models is roughly equivalent).
+     */
+    private val compactor: Compactor? = null,
+    private val compactionTokenThreshold: Int = 120_000,
 ) {
 
     @OptIn(ExperimentalUuidApi::class)
@@ -87,7 +97,16 @@ class Agent(
         while (step < maxSteps) {
             step++
 
-            val history = store.listMessagesWithParts(input.sessionId)
+            var history = store.listMessagesWithParts(input.sessionId, includeCompacted = false)
+
+            // Compaction hook: before asking the provider for another turn, estimate
+            // token usage and let the Compactor prune + summarise if we are over budget.
+            // The post-process history is re-read from the store because Compactor
+            // writes a new CompactionPart and marks older parts compacted.
+            if (compactor != null && TokenEstimator.forHistory(history) > compactionTokenThreshold) {
+                compactor.process(input.sessionId, history, input.model)
+                history = store.listMessagesWithParts(input.sessionId, includeCompacted = false)
+            }
 
             val asstMsg = Message.Assistant(
                 id = MessageId(Uuid.random().toString()),

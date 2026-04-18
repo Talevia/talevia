@@ -27,6 +27,9 @@ SELECT * FROM Parts WHERE message_id = ? ORDER BY time_created ASC, id ASC;
 selectBySession:
 SELECT * FROM Parts WHERE session_id = ? ORDER BY time_created ASC, id ASC;
 
+selectActiveBySession:
+SELECT * FROM Parts WHERE session_id = ? AND time_compacted IS NULL ORDER BY time_created ASC, id ASC;
+
 markCompacted:
 UPDATE Parts SET time_compacted = ? WHERE id = ?;
 

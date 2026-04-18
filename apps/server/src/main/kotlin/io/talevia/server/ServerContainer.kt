@@ -5,6 +5,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.talevia.core.agent.Agent
 import io.talevia.core.bus.EventBus
+import io.talevia.core.compaction.Compactor
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
@@ -69,6 +70,11 @@ class ServerContainer(env: Map<String, String> = System.getenv()) {
             store = sessions,
             permissions = permissions,
             bus = bus,
+            compactor = Compactor(
+                provider = provider,
+                store = sessions,
+                bus = bus,
+            ),
         )
     }
 }

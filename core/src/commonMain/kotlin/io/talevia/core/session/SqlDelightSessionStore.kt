@@ -113,15 +113,43 @@ class SqlDelightSessionStore(
 
     override suspend fun listParts(messageId: MessageId): List<Part> =
         db.partsQueries.selectByMessage(messageId.value).executeAsList()
-            .map { json.decodeFromString(Part.serializer(), it.data_) }
+            .map { decodePart(it.data_, it.time_compacted) }
 
-    override suspend fun listSessionParts(sessionId: SessionId): List<Part> =
-        db.partsQueries.selectBySession(sessionId.value).executeAsList()
-            .map { json.decodeFromString(Part.serializer(), it.data_) }
+    override suspend fun listSessionParts(sessionId: SessionId, includeCompacted: Boolean): List<Part> {
+        val rows = if (includeCompacted) db.partsQueries.selectBySession(sessionId.value).executeAsList()
+        else db.partsQueries.selectActiveBySession(sessionId.value).executeAsList()
+        return rows.map { decodePart(it.data_, it.time_compacted) }
+    }
 
-    override suspend fun listMessagesWithParts(sessionId: SessionId): List<MessageWithParts> {
+    /**
+     * Reconstruct a [Part] from its JSON blob, overlaying the `time_compacted`
+     * column. [markPartCompacted] only updates the column (for cheap set-once
+     * writes); without this overlay, callers that read the Part back see the
+     * stale `compactedAt = null` from the JSON blob.
+     */
+    private fun decodePart(dataJson: String, timeCompactedMs: Long?): Part {
+        val decoded = json.decodeFromString(Part.serializer(), dataJson)
+        if (timeCompactedMs == null || decoded.compactedAt != null) return decoded
+        val at = Instant.fromEpochMilliseconds(timeCompactedMs)
+        return when (decoded) {
+            is Part.Text -> decoded.copy(compactedAt = at)
+            is Part.Reasoning -> decoded.copy(compactedAt = at)
+            is Part.Tool -> decoded.copy(compactedAt = at)
+            is Part.Media -> decoded.copy(compactedAt = at)
+            is Part.TimelineSnapshot -> decoded.copy(compactedAt = at)
+            is Part.RenderProgress -> decoded.copy(compactedAt = at)
+            is Part.StepStart -> decoded.copy(compactedAt = at)
+            is Part.StepFinish -> decoded.copy(compactedAt = at)
+            is Part.Compaction -> decoded.copy(compactedAt = at)
+        }
+    }
+
+    override suspend fun listMessagesWithParts(
+        sessionId: SessionId,
+        includeCompacted: Boolean,
+    ): List<MessageWithParts> {
         val messages = listMessages(sessionId)
-        val partsByMessage = listSessionParts(sessionId).groupBy { it.messageId }
+        val partsByMessage = listSessionParts(sessionId, includeCompacted).groupBy { it.messageId }
         return messages.map { MessageWithParts(it, partsByMessage[it.id].orEmpty()) }
     }
 
@@ -146,7 +174,7 @@ class SqlDelightSessionStore(
         )
         createSession(branch)
 
-        val parentMessages = listMessagesWithParts(parentId)
+        val parentMessages = listMessagesWithParts(parentId, includeCompacted = true)
         val messageIdRemap = mutableMapOf<MessageId, MessageId>()
         for (mwp in parentMessages) {
             val newMid = MessageId(Uuid.random().toString())

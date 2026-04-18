@@ -25,10 +25,19 @@ interface SessionStore {
     suspend fun upsertPart(part: Part)
     suspend fun markPartCompacted(id: PartId, at: kotlinx.datetime.Instant)
     suspend fun listParts(messageId: MessageId): List<Part>
-    suspend fun listSessionParts(sessionId: SessionId): List<Part>
+    suspend fun listSessionParts(sessionId: SessionId, includeCompacted: Boolean = true): List<Part>
 
-    /** Hydrated view: messages + their parts in chronological order. */
-    suspend fun listMessagesWithParts(sessionId: SessionId): List<MessageWithParts>
+    /**
+     * Hydrated view: messages + their parts in chronological order.
+     *
+     * When [includeCompacted] is false, parts whose `compactedAt` is non-null are
+     * omitted — the Agent loop wants the post-compaction view when building the
+     * next LLM request, while UI code browsing history generally wants everything.
+     */
+    suspend fun listMessagesWithParts(
+        sessionId: SessionId,
+        includeCompacted: Boolean = true,
+    ): List<MessageWithParts>
 
     /** Live stream of part-level changes for a single session. */
     fun observeSessionParts(sessionId: SessionId): Flow<Part>
