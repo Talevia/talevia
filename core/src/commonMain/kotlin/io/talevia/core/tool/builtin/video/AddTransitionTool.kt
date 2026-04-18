@@ -49,7 +49,7 @@ class AddTransitionTool(
     @Serializable data class Output(val transitionClipId: String, val trackId: String)
 
     override val id = "add_transition"
-    override val description = "Add a named transition (fade, dissolve, slide, ...) between two adjacent clips."
+    override val helpText = "Add a named transition (fade, dissolve, slide, ...) between two adjacent clips."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("timeline.write")

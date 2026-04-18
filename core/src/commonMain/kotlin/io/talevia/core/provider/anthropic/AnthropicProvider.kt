@@ -202,7 +202,7 @@ class AnthropicProvider(
                 request.tools.forEach { spec ->
                     addJsonObject {
                         put("name", spec.id)
-                        put("description", spec.description)
+                        put("description", spec.helpText)
                         put("input_schema", spec.inputSchema)
                     }
                 }

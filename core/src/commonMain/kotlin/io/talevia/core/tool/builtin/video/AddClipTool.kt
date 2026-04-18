@@ -50,7 +50,7 @@ class AddClipTool(
     )
 
     override val id = "add_clip"
-    override val description = "Append a video clip to the project timeline (optionally on a specific track and at a specific time)."
+    override val helpText = "Append a video clip to the project timeline (optionally on a specific track and at a specific time)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("timeline.write")

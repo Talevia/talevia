@@ -70,7 +70,6 @@ private fun AppRoot(container: AndroidAppContainer) {
                 runCatching {
                     container.media.import(
                         source = MediaSource.File(path),
-                        explicitId = AssetId(path),
                         probe = { container.engine.probe(it) },
                     )
                 }

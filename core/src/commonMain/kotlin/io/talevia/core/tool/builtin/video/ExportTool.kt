@@ -51,7 +51,7 @@ class ExportTool(
     )
 
     override val id = "export"
-    override val description = "Render the project's timeline to a media file at outputPath. Streams progress as render-progress parts."
+    override val helpText = "Render the project's timeline to a media file at outputPath. Streams progress as render-progress parts."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("media.export.write")

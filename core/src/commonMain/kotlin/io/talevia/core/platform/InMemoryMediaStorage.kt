@@ -10,8 +10,10 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * In-memory [MediaStorage] for tests and the M2 desktop demo. Persistent storage is a
- * later concern (asset library proper goes into ProjectStore once we model it).
+ * In-memory [MediaStorage]. Assets are assigned a UUID [AssetId]; [resolve] maps
+ * [AssetId] back to the underlying local file path when the source is
+ * [MediaSource.File]. Other source kinds (HTTP / Platform) still fail — by design,
+ * those need a per-platform resolver that downloads / dereferences them first.
  */
 @OptIn(ExperimentalUuidApi::class)
 class InMemoryMediaStorage : MediaStorage {
@@ -20,12 +22,11 @@ class InMemoryMediaStorage : MediaStorage {
 
     override suspend fun import(
         source: MediaSource,
-        explicitId: AssetId?,
         probe: suspend (MediaSource) -> MediaMetadata,
     ): MediaAsset {
         val metadata = probe(source)
         val asset = MediaAsset(
-            id = explicitId ?: AssetId(Uuid.random().toString()),
+            id = AssetId(Uuid.random().toString()),
             source = source,
             metadata = metadata,
         )
@@ -38,4 +39,13 @@ class InMemoryMediaStorage : MediaStorage {
     override suspend fun list(): List<MediaAsset> = mutex.withLock { assets.values.toList() }
 
     override suspend fun delete(id: AssetId) = mutex.withLock { assets.remove(id); Unit }
+
+    override suspend fun resolve(assetId: AssetId): String {
+        val asset = mutex.withLock { assets[assetId] } ?: error("Unknown assetId $assetId")
+        return when (val s = asset.source) {
+            is MediaSource.File -> s.path
+            is MediaSource.Http -> error("Http sources must be downloaded before resolve()")
+            is MediaSource.Platform -> error("Platform source (${s.scheme}) not resolvable in InMemoryMediaStorage")
+        }
+    }
 }

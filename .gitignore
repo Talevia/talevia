@@ -33,3 +33,5 @@ hs_err_pid*
 xcuserdata/
 *.xcuserstate
 DerivedData/
+# xcodegen generates this from apps/ios/project.yml
+apps/ios/Talevia.xcodeproj/

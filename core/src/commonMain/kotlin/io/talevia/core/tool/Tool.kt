@@ -19,7 +19,8 @@ import kotlinx.serialization.json.JsonObject
  */
 interface Tool<I : Any, O : Any> {
     val id: String
-    val description: String
+    /** Human-readable help sent to the LLM as the tool's `description` field. */
+    val helpText: String
     val inputSchema: JsonObject
     val inputSerializer: KSerializer<I>
     val outputSerializer: KSerializer<O>

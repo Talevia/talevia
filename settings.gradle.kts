@@ -24,7 +24,4 @@ include(":core")
 include(":platform-impls:video-ffmpeg-jvm")
 include(":apps:desktop")
 include(":apps:server")
-
-// Android module is on disk under apps/android but not on the build graph until
-// an Android SDK is installed and AGP is wired in. See docs/ANDROID_INTEGRATION.md.
-// include(":apps:android")
+include(":apps:android")

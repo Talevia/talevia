@@ -22,7 +22,7 @@ class EchoTool : Tool<EchoTool.Input, EchoTool.Output> {
     @Serializable data class Output(val echoed: String)
 
     override val id: String = "echo"
-    override val description: String = "Echoes the provided text back unchanged. Used for smoke-testing tool dispatch."
+    override val helpText: String = "Echoes the provided text back unchanged. Used for smoke-testing tool dispatch."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("echo")

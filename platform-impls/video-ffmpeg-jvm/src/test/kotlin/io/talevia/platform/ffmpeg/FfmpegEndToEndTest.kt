@@ -71,7 +71,7 @@ class FfmpegEndToEndTest {
         val db = TaleviaDb(driver)
         val bus = EventBus()
         val media = InMemoryMediaStorage()
-        val engine = FfmpegVideoEngine()
+        val engine = FfmpegVideoEngine(pathResolver = media)
         val projects = SqlDelightProjectStore(db)
         val perms = AllowAllPermissionService()
 
@@ -96,21 +96,24 @@ class FfmpegEndToEndTest {
             messages = emptyList(),
         )
 
-        // 3. Drive the chain.
+        // 3. Drive the chain. AssetIds come back from import_media; MediaPathResolver
+        //    (InMemoryMediaStorage) resolves them to the original file paths at render time.
         val importA = registry["import_media"]!!.dispatch(buildJsonObject { put("path", inputA.absolutePath) }, ctx)
         val importB = registry["import_media"]!!.dispatch(buildJsonObject { put("path", inputB.absolutePath) }, ctx)
+        val assetIdA = (importA.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
+        val assetIdB = (importB.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
 
         registry["add_clip"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("assetId", inputA.absolutePath)
+                put("assetId", assetIdA)
             },
             ctx,
         )
         registry["add_clip"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("assetId", inputB.absolutePath)
+                put("assetId", assetIdB)
             },
             ctx,
         )

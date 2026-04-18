@@ -41,7 +41,7 @@ class ApplyFilterTool(
     @Serializable data class Output(val clipId: String, val filterCount: Int)
 
     override val id = "apply_filter"
-    override val description = "Append a named filter (e.g. blur, brightness, saturation) to a video clip with optional float params."
+    override val helpText = "Append a named filter (e.g. blur, brightness, saturation) to a video clip with optional float params."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("timeline.write")

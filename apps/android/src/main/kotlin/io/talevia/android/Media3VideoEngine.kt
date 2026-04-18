@@ -21,15 +21,20 @@ import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
+import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.flowOn
-import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileInputStream
@@ -44,7 +49,10 @@ import kotlin.time.DurationUnit
  * Probe metadata via `MediaMetadataRetriever`. Concat is via
  * `EditedMediaItemSequence` of clipped `EditedMediaItem`s.
  */
-class Media3VideoEngine(private val context: Context) : VideoEngine {
+class Media3VideoEngine(
+    private val context: Context,
+    private val pathResolver: MediaPathResolver,
+) : VideoEngine {
 
     override suspend fun probe(source: MediaSource): MediaMetadata = withContext(Dispatchers.IO) {
         val path = sourceToPath(source)
@@ -68,19 +76,21 @@ class Media3VideoEngine(private val context: Context) : VideoEngine {
         }
     }
 
-    override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> = flow {
+    override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> = callbackFlow {
         val jobId = UUID.randomUUID().toString()
-        emit(RenderProgress.Started(jobId))
+        trySend(RenderProgress.Started(jobId))
 
         val videoClips = videoClips(timeline)
         if (videoClips.isEmpty()) {
-            emit(RenderProgress.Failed(jobId, "no video clips to render"))
-            return@flow
+            trySend(RenderProgress.Failed(jobId, "no video clips to render"))
+            close()
+            return@callbackFlow
         }
 
         val items = videoClips.map { c ->
+            val resolvedPath = pathResolver.resolve(c.assetId)
             val mediaItem = MediaItem.Builder()
-                .setUri(Uri.parse("file://${c.assetId.value}"))
+                .setUri(Uri.parse("file://$resolvedPath"))
                 .setClippingConfiguration(
                     MediaItem.ClippingConfiguration.Builder()
                         .setStartPositionMs((c.sourceRange.start.inWholeMilliseconds))
@@ -100,25 +110,40 @@ class Media3VideoEngine(private val context: Context) : VideoEngine {
         val transformer = Transformer.Builder(context)
             .setVideoMimeType(MimeTypes.VIDEO_H264)
             .setAudioMimeType(MimeTypes.AUDIO_AAC)
-            .build()
-
-        val result = suspendCancellableCoroutine<Result<ExportResult>> { cont ->
-            transformer.addListener(object : Transformer.Listener {
+            .addListener(object : Transformer.Listener {
                 override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-                    cont.resume(Result.success(exportResult))
+                    trySend(RenderProgress.Completed(jobId, output.targetPath))
+                    close()
                 }
                 override fun onError(composition: Composition, exportResult: ExportResult, exportException: ExportException) {
-                    cont.resume(Result.failure(exportException))
+                    trySend(RenderProgress.Failed(jobId, exportException.message ?: "media3 transformer error"))
+                    close()
                 }
             })
-            transformer.start(composition, outFile.absolutePath)
-            cont.invokeOnCancellation { transformer.cancel() }
+            .build()
+
+        transformer.start(composition, outFile.absolutePath)
+
+        // Media3 doesn't push per-frame progress callbacks — poll getProgress() at
+        // ~10 Hz while the export is running. ProgressHolder is a small mutable holder
+        // the Transformer fills in synchronously on the same thread.
+        val pollScope = CoroutineScope(Dispatchers.Default)
+        pollScope.launch {
+            val holder = androidx.media3.transformer.ProgressHolder()
+            while (isActive) {
+                val state = transformer.getProgress(holder)
+                if (state == Transformer.PROGRESS_STATE_AVAILABLE) {
+                    trySend(RenderProgress.Frames(jobId, holder.progress / 100f))
+                } else if (state == Transformer.PROGRESS_STATE_NOT_STARTED) {
+                    break
+                }
+                delay(100)
+            }
         }
 
-        result.onSuccess {
-            emit(RenderProgress.Completed(jobId, output.targetPath))
-        }.onFailure { e ->
-            emit(RenderProgress.Failed(jobId, e.message ?: "media3 transformer error"))
+        awaitClose {
+            pollScope.cancel()
+            transformer.cancel()
         }
     }.flowOn(Dispatchers.Default)
 

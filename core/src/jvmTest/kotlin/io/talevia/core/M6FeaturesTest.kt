@@ -47,7 +47,7 @@ class M6FeaturesTest {
         val (store, projects, registry, ctx, projectId) = newWiring()
         // Register a fake asset directly so add_clip works without ffmpeg.
         val media = InMemoryMediaStorage()
-        media.import(io.talevia.core.domain.MediaSource.File("/tmp/x.mp4"), AssetId("/tmp/x.mp4")) {
+        val fakeAsset = media.import(io.talevia.core.domain.MediaSource.File("/tmp/x.mp4")) {
             io.talevia.core.domain.MediaMetadata(duration = 10.seconds)
         }
         val r = ToolRegistry().apply {
@@ -58,7 +58,7 @@ class M6FeaturesTest {
         val addResp = r["add_clip"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("assetId", "/tmp/x.mp4")
+                put("assetId", fakeAsset.id.value)
             },
             ctx,
         )

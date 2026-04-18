@@ -3,14 +3,28 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.sqldelight)
     alias(libs.plugins.skie)
+    alias(libs.plugins.android.library)
+}
+
+android {
+    namespace = "io.talevia.core"
+    compileSdk = 36
+    defaultConfig { minSdk = 26 }
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_21
+        targetCompatibility = JavaVersion.VERSION_21
+    }
 }
 
 kotlin {
     jvmToolchain(21)
 
     jvm()
+    androidTarget()
 
-    listOf(iosArm64(), iosSimulatorArm64()).forEach { target ->
+    // iosX64 covers Intel Mac simulators; iosSimulatorArm64 covers Apple Silicon
+    // Mac simulators; iosArm64 is the real-device slice.
+    listOf(iosArm64(), iosSimulatorArm64(), iosX64()).forEach { target ->
         target.binaries.framework {
             baseName = "TaleviaCore"
             isStatic = true
@@ -46,6 +60,10 @@ kotlin {
         iosMain.dependencies {
             implementation(libs.sqldelight.driver.native)
             implementation(libs.ktor.client.darwin)
+        }
+        androidMain.dependencies {
+            implementation(libs.sqldelight.driver.android)
+            implementation(libs.ktor.client.cio)
         }
     }
 }

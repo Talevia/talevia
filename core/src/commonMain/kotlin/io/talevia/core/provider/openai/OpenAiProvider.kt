@@ -171,7 +171,7 @@ class OpenAiProvider(
                         put("type", "function")
                         putJsonObject("function") {
                             put("name", spec.id)
-                            put("description", spec.description)
+                            put("description", spec.helpText)
                             put("parameters", spec.inputSchema)
                         }
                     }

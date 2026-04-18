@@ -50,4 +50,23 @@ class ServerSmokeTest {
         val resp = client.get("/sessions")
         assertEquals(HttpStatusCode.OK, resp.status)
     }
+
+    @Test
+    fun submitMessageFailsWithoutProviderKeys() = testApplication {
+        // env = empty → ProviderRegistry.default is null → 501 Not Implemented
+        application { serverModule(ServerContainer(env = emptyMap())) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val createResp = client.post("/sessions") {
+            contentType(ContentType.Application.Json)
+            setBody(CreateSessionRequest(projectId = "p-2"))
+        }
+        val sessionId = createResp.body<CreateSessionResponse>().sessionId
+
+        val resp = client.post("/sessions/$sessionId/messages") {
+            contentType(ContentType.Application.Json)
+            setBody(SubmitMessageRequest(text = "hello"))
+        }
+        assertEquals(HttpStatusCode.NotImplemented, resp.status)
+    }
 }

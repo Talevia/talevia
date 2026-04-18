@@ -8,6 +8,7 @@ import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.domain.Clip
+import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
@@ -45,6 +46,7 @@ import kotlin.uuid.Uuid
  */
 @OptIn(ExperimentalUuidApi::class)
 class FfmpegVideoEngine(
+    private val pathResolver: MediaPathResolver,
     private val ffmpegPath: String = "ffmpeg",
     private val ffprobePath: String = "ffprobe",
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -103,18 +105,14 @@ class FfmpegVideoEngine(
             return@flow
         }
 
-        // Resolve asset paths via the resolver passed at construction time? — we don't
-        // have one here. M2 simplification: the Tool layer must pre-substitute the
-        // MediaSource paths into a transient Timeline whose VideoClip.assetId can be
-        // looked up by the caller. For now we require the assetId to encode a file path.
-        // (See WORKAROUNDS in docs.)
+        val resolvedPaths = videoClips.map { clip -> pathResolver.resolve(clip.assetId) }
         val args = mutableListOf(
             ffmpegPath, "-y", "-progress", "pipe:2",
         )
-        for (clip in videoClips) {
+        for ((clip, path) in videoClips.zip(resolvedPaths)) {
             args += listOf("-ss", "${clip.sourceRange.start.toDouble(kotlin.time.DurationUnit.SECONDS)}")
             args += listOf("-t", "${clip.sourceRange.duration.toDouble(kotlin.time.DurationUnit.SECONDS)}")
-            args += listOf("-i", assetIdToPath(clip.assetId))
+            args += listOf("-i", path)
         }
         val n = videoClips.size
         val filter = buildString {
@@ -188,12 +186,6 @@ class FfmpegVideoEngine(
         is MediaSource.Http -> error("Http MediaSource not supported by FfmpegVideoEngine yet (download first)")
         is MediaSource.Platform -> error("Platform MediaSource not supported on JVM (${source.scheme})")
     }
-
-    /**
-     * Workaround for M2: we treat AssetId as the file path. The proper resolution
-     * goes through MediaStorage, which we'll wire into the tool layer in the next pass.
-     */
-    private fun assetIdToPath(assetId: AssetId): String = assetId.value
 
     private data class ProcessResult(val exitCode: Int, val stdout: String, val stderr: String)
 

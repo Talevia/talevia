@@ -15,14 +15,20 @@ import io.ktor.server.routing.routing
 import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.PartId
+import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
+import io.talevia.core.agent.RunInput
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
 import io.talevia.core.session.Session
 import io.talevia.core.session.TokenUsage
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -47,6 +53,7 @@ import kotlin.uuid.Uuid
 @OptIn(ExperimentalUuidApi::class)
 fun Application.serverModule(container: ServerContainer = ServerContainer()) {
     val json = JsonConfig.default
+    val agentScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     install(ContentNegotiation) { json(Json { classDiscriminator = "type"; ignoreUnknownKeys = true }) }
     install(StatusPages) {
@@ -100,6 +107,42 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
             call.respond(AppendTextResponse(msg.id.value))
         }
 
+        /**
+         * POST /sessions/{id}/messages — submit a user prompt and run the agent.
+         * Returns 202 Accepted immediately with a correlation id; stream response
+         * events over the session's SSE channel (`GET /sessions/{id}/events`).
+         */
+        post("/sessions/{id}/messages") {
+            val sid = SessionId(call.parameters["id"]!!)
+            val body = call.receive<SubmitMessageRequest>()
+            val agent = container.newAgent()
+            if (agent == null) {
+                call.respond(HttpStatusCode.NotImplemented, mapOf(
+                    "error" to "No provider API key set (ANTHROPIC_API_KEY / OPENAI_API_KEY).",
+                ))
+                return@post
+            }
+
+            val providerId = body.providerId ?: container.providers.default!!.id
+            val modelId = body.modelId ?: defaultModelFor(providerId)
+            val correlationId = Uuid.random().toString()
+
+            agentScope.launch {
+                runCatching {
+                    agent.run(
+                        RunInput(
+                            sessionId = sid,
+                            text = body.text,
+                            model = ModelRef(providerId, modelId),
+                            permissionRules = container.permissionRules,
+                        ),
+                    )
+                }
+            }
+
+            call.respond(HttpStatusCode.Accepted, SubmitMessageResponse(correlationId, providerId, modelId))
+        }
+
         get("/sessions/{id}/events") {
             val sid = SessionId(call.parameters["id"]!!)
             call.respondTextWriter(io.ktor.http.ContentType.Text.EventStream) {
@@ -133,6 +176,23 @@ private fun eventName(e: BusEvent): String = when (e) {
     val modelId: String? = null,
 )
 @Serializable data class AppendTextResponse(val messageId: String)
+
+@Serializable data class SubmitMessageRequest(
+    val text: String,
+    val providerId: String? = null,
+    val modelId: String? = null,
+)
+@Serializable data class SubmitMessageResponse(
+    val correlationId: String,
+    val providerId: String,
+    val modelId: String,
+)
+
+private fun defaultModelFor(providerId: String): String = when (providerId) {
+    "anthropic" -> "claude-opus-4-7"
+    "openai" -> "gpt-4o"
+    else -> "default"
+}
 
 /**
  * Wire-format BusEvent. Mirrors the Kotlin sealed hierarchy but uses plain strings

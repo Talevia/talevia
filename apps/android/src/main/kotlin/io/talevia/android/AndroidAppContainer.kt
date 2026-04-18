@@ -31,7 +31,7 @@ class AndroidAppContainer(context: Context) {
     val sessions: SessionStore = SqlDelightSessionStore(db, bus)
     val projects: ProjectStore = SqlDelightProjectStore(db)
     val media: MediaStorage = InMemoryMediaStorage()
-    val engine: VideoEngine = Media3VideoEngine(context)
+    val engine: VideoEngine = Media3VideoEngine(context, media)
     val permissions = DefaultPermissionService(bus)
     val permissionRules = DefaultPermissionRuleset.rules.toMutableList()
     val tools: ToolRegistry = ToolRegistry().apply {

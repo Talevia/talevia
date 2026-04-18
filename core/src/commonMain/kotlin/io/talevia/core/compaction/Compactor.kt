@@ -91,16 +91,15 @@ class Compactor(
     /**
      * Compute which parts should be marked compacted.
      *
-     * Algorithm:
-     *  1. Identify the last [protectUserTurns] user turns. Everything from the
-     *     earliest of those turns onward is kept verbatim.
-     *  2. In everything older, drop completed tool outputs ([ToolState.Completed]).
-     *     Reasoning, text, tool inputs, timeline snapshots are kept — those are
-     *     the tokens-cheap signals worth preserving.
-     *
-     * The [pruneProtectTokens] knob is reserved for a later refinement that lets
-     * us keep *some* older completed-tool outputs when there's headroom; for now
-     * pruning is binary (in window vs out).
+     * Two-tier algorithm, modelled on OpenCode's `compaction.ts`:
+     *  1. **Protect window** — the last [protectUserTurns] user turns (and the
+     *     assistant turns after the earliest protected user turn) are kept verbatim.
+     *  2. **Budget envelope** outside the window — walk backwards, accumulating
+     *     token estimates as we go. As long as we're still under
+     *     [pruneProtectTokens], keep everything (so a modest amount of pre-window
+     *     history survives). Once we cross the budget, drop completed tool
+     *     **outputs** only; text / reasoning / tool inputs / timeline snapshots
+     *     are still preserved because they are cheap signals worth keeping.
      */
     internal fun prune(history: List<MessageWithParts>): Set<PartId> {
         val userTurnIndices = history.mapIndexedNotNull { i, m ->
@@ -110,9 +109,24 @@ class Compactor(
         val protectFromIndex = userTurnIndices[userTurnIndices.size - protectUserTurns]
 
         val drop = mutableSetOf<PartId>()
-        for (i in 0 until protectFromIndex) {
-            for (part in history[i].parts) {
-                if (part is Part.Tool && part.state is ToolState.Completed) drop += part.id
+        var tokens = 0
+
+        // Tier 1: everything from protectFromIndex onward is protected; count its tokens
+        // toward the budget so older content must fit under whatever's left.
+        for (i in protectFromIndex until history.size) {
+            for (part in history[i].parts) tokens += TokenEstimator.forPart(part)
+        }
+
+        // Tier 2: walk pre-window messages newest → oldest.
+        for (i in (protectFromIndex - 1) downTo 0) {
+            for (part in history[i].parts.asReversed()) {
+                val cost = TokenEstimator.forPart(part)
+                val outOfBudget = tokens + cost > pruneProtectTokens
+                if (outOfBudget && part is Part.Tool && part.state is ToolState.Completed) {
+                    drop += part.id
+                } else {
+                    tokens += cost
+                }
             }
         }
         return drop

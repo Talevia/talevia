@@ -28,10 +28,10 @@ class ToolRegistry {
 
 class RegisteredTool internal constructor(private val tool: Tool<*, *>) {
     val id: String get() = tool.id
-    val description: String get() = tool.description
+    val helpText: String get() = tool.helpText
     val permission get() = tool.permission
 
-    val spec: ToolSpec by lazy { ToolSpec(tool.id, tool.description, tool.inputSchema) }
+    val spec: ToolSpec by lazy { ToolSpec(tool.id, tool.helpText, tool.inputSchema) }
 
     suspend fun dispatch(rawInput: JsonElement, ctx: ToolContext): ToolResult<*> {
         @Suppress("UNCHECKED_CAST")

@@ -1,0 +1,52 @@
+name: Talevia
+options:
+  bundleIdPrefix: io.talevia
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+# Build the KMP framework before Xcode compiles Swift. The simulator-arm64
+# debug framework is what matches a typical Mac (Apple Silicon) simulator run.
+preGenCommand: |
+  cd "$SRCROOT/../.."
+  DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+    ./gradlew :core:linkDebugFrameworkIosSimulatorArm64 :core:linkDebugFrameworkIosX64 --quiet || true
+
+targets:
+  Talevia:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Talevia
+    info:
+      path: Talevia/Resources/Info.plist
+      properties:
+        CFBundleDisplayName: Talevia
+        CFBundleShortVersionString: 0.1.0
+        CFBundleVersion: "1"
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSPhotoLibraryUsageDescription: "Talevia needs access to your photo library to import videos for editing."
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.talevia.app
+        SWIFT_VERSION: "5.10"
+        ONLY_ACTIVE_ARCH: "YES"
+        # -lsqlite3: SQLDelight's native SQLite driver cinterops against
+        # libsqlite3 which iOS ships but isn't auto-linked.
+        OTHER_LDFLAGS: -framework TaleviaCore -lsqlite3
+        TARGETED_DEVICE_FAMILY: "1,2"
+      configs:
+        Debug:
+          # Per-arch framework paths: Kotlin/Native produces separate .framework
+          # directories for arm64 vs x86_64 simulator builds.
+          FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=arm64]:
+            - $(SRCROOT)/../../core/build/bin/iosSimulatorArm64/debugFramework
+          FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=x86_64]:
+            - $(SRCROOT)/../../core/build/bin/iosX64/debugFramework
+          FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*][arch=arm64]:
+            - $(SRCROOT)/../../core/build/bin/iosArm64/debugFramework

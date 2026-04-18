@@ -43,7 +43,7 @@ class AddSubtitleTool(
     @Serializable data class Output(val clipId: String, val trackId: String)
 
     override val id = "add_subtitle"
-    override val description = "Place a text overlay (subtitle) on the timeline for the given duration."
+    override val helpText = "Place a text overlay (subtitle) on the timeline for the given duration."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("timeline.write")

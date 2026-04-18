@@ -9,15 +9,9 @@ import io.talevia.core.domain.MediaSource
  * (iOS Photos library, Android MediaStore, raw filesystem on Desktop/Server) so the
  * Core only knows about [MediaSource] tokens and [MediaAsset] metadata.
  */
-interface MediaStorage {
-    /**
-     * @param explicitId workaround for the M2 demo: a tool may pass the file path as
-     *   the AssetId so that downstream ffmpeg invocations can dereference the asset
-     *   without an extra resolver. Pass `null` to let the storage allocate a UUID.
-     */
+interface MediaStorage : MediaPathResolver {
     suspend fun import(
         source: MediaSource,
-        explicitId: AssetId? = null,
         probe: suspend (MediaSource) -> io.talevia.core.domain.MediaMetadata,
     ): MediaAsset
     suspend fun get(id: AssetId): MediaAsset?

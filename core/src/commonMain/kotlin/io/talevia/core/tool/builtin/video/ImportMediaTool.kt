@@ -34,7 +34,7 @@ class ImportMediaTool(
     )
 
     override val id = "import_media"
-    override val description = "Import a media file by path; probes its metadata and registers it as a project asset."
+    override val helpText = "Import a media file by path; probes its metadata and registers it as a project asset."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("media.import")
@@ -52,12 +52,7 @@ class ImportMediaTool(
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        // M2 workaround: AssetId == file path so FfmpegVideoEngine can dereference it
-        // directly. A proper MediaPathResolver is a later concern.
-        val asset = storage.import(
-            source = MediaSource.File(input.path),
-            explicitId = io.talevia.core.AssetId(input.path),
-        ) { source -> engine.probe(source) }
+        val asset = storage.import(MediaSource.File(input.path)) { source -> engine.probe(source) }
         val out = Output(
             assetId = asset.id.value,
             durationSeconds = asset.metadata.duration.toDouble(DurationUnit.SECONDS),

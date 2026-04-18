@@ -9,6 +9,10 @@ kermit = "2.0.5"
 turbine = "1.2.0"
 compose = "1.7.3"
 skie = "0.10.4"
+agp = "8.8.0"
+androidx-activity-compose = "1.9.3"
+androidx-compose-bom = "2024.12.01"
+media3 = "1.5.1"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -20,6 +24,17 @@ sqldelight-runtime = { module = "app.cash.sqldelight:runtime", version.ref = "sq
 sqldelight-coroutines = { module = "app.cash.sqldelight:coroutines-extensions", version.ref = "sqldelight" }
 sqldelight-driver-sqlite = { module = "app.cash.sqldelight:sqlite-driver", version.ref = "sqldelight" }
 sqldelight-driver-native = { module = "app.cash.sqldelight:native-driver", version.ref = "sqldelight" }
+sqldelight-driver-android = { module = "app.cash.sqldelight:android-driver", version.ref = "sqldelight" }
+
+androidx-activity-compose = { module = "androidx.activity:activity-compose", version.ref = "androidx-activity-compose" }
+androidx-compose-bom = { module = "androidx.compose:compose-bom", version.ref = "androidx-compose-bom" }
+androidx-compose-material3 = { module = "androidx.compose.material3:material3" }
+androidx-compose-ui = { module = "androidx.compose.ui:ui" }
+androidx-compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
+
+media3-transformer = { module = "androidx.media3:media3-transformer", version.ref = "media3" }
+media3-effect = { module = "androidx.media3:media3-effect", version.ref = "media3" }
+media3-common = { module = "androidx.media3:media3-common", version.ref = "media3" }
 
 ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
@@ -46,3 +61,5 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }
 compose = { id = "org.jetbrains.compose", version.ref = "compose" }
 skie = { id = "co.touchlab.skie", version.ref = "skie" }
+android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }

@@ -33,7 +33,7 @@ class AppContainer {
     val sessions = SqlDelightSessionStore(db, bus)
     val projects: ProjectStore = SqlDelightProjectStore(db)
     val media: MediaStorage = InMemoryMediaStorage()
-    val engine: VideoEngine = FfmpegVideoEngine()
+    val engine: VideoEngine = FfmpegVideoEngine(pathResolver = media)
     val permissions = DefaultPermissionService(bus)
     val permissionRules = DefaultPermissionRuleset.rules.toMutableList()
 

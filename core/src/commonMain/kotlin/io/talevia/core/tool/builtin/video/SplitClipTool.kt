@@ -38,7 +38,7 @@ class SplitClipTool(
     @Serializable data class Output(val leftClipId: String, val rightClipId: String)
 
     override val id = "split_clip"
-    override val description = "Split a clip in two at the given timeline position. New clip IDs are generated for both halves."
+    override val helpText = "Split a clip in two at the given timeline position. New clip IDs are generated for both halves."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("timeline.write")
