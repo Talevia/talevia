@@ -5,7 +5,8 @@ import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
-import io.talevia.core.permission.AllowAllPermissionService
+import io.talevia.core.permission.DefaultPermissionRuleset
+import io.talevia.core.permission.DefaultPermissionService
 import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.VideoEngine
@@ -33,7 +34,8 @@ class AppContainer {
     val projects: ProjectStore = SqlDelightProjectStore(db)
     val media: MediaStorage = InMemoryMediaStorage()
     val engine: VideoEngine = FfmpegVideoEngine()
-    val permissions = AllowAllPermissionService()
+    val permissions = DefaultPermissionService(bus)
+    val permissionRules = DefaultPermissionRuleset.rules.toMutableList()
 
     val tools: ToolRegistry = ToolRegistry().apply {
         register(ImportMediaTool(media, engine))

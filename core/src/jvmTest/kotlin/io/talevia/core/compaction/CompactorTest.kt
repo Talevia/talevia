@@ -1,0 +1,142 @@
+package io.talevia.core.compaction
+
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import io.talevia.core.CallId
+import io.talevia.core.MessageId
+import io.talevia.core.PartId
+import io.talevia.core.ProjectId
+import io.talevia.core.SessionId
+import io.talevia.core.agent.FakeProvider
+import io.talevia.core.bus.EventBus
+import io.talevia.core.db.TaleviaDb
+import io.talevia.core.provider.LlmEvent
+import io.talevia.core.session.FinishReason
+import io.talevia.core.session.Message
+import io.talevia.core.session.MessageWithParts
+import io.talevia.core.session.ModelRef
+import io.talevia.core.session.Part
+import io.talevia.core.session.Session
+import io.talevia.core.session.SqlDelightSessionStore
+import io.talevia.core.session.TokenUsage
+import io.talevia.core.session.ToolState
+import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
+
+class CompactorTest {
+
+    @Test
+    fun pruneDropsOldCompletedToolOutputsButKeepsRecentTurns() {
+        val sid = SessionId("s")
+        val now = Instant.fromEpochMilliseconds(0)
+        val history = buildHistory(sid, now)
+
+        val compactor = Compactor(
+            provider = FakeProvider(emptyList()),
+            store = noopStore(),
+            bus = EventBus(),
+            clock = Clock.System,
+            protectUserTurns = 1,         // protect only the latest user turn
+            pruneProtectTokens = 100,
+        )
+
+        val dropped = compactor.prune(history)
+        // Old tool part (oldHugeTool) should be dropped; recent tool part should be kept.
+        assertTrue(dropped.contains(PartId("old-tool-out")), "old tool output should be pruned")
+        assertTrue(!dropped.contains(PartId("recent-tool-out")), "recent tool output should be retained")
+    }
+
+    @Test
+    fun summarisesAndPersistsCompactionPart() = runTest {
+        val (store, bus) = inMemoryStore()
+        val sid = SessionId("s")
+        val now = Clock.System.now()
+        store.createSession(Session(sid, ProjectId("p"), title = "x", createdAt = now, updatedAt = now))
+        val history = buildHistory(sid, now)
+        history.forEach { mwp ->
+            store.appendMessage(mwp.message)
+            mwp.parts.forEach { store.upsertPart(it) }
+        }
+
+        val summaryTurn = listOf(
+            LlmEvent.TextStart(PartId("summary-text")),
+            LlmEvent.TextEnd(PartId("summary-text"), "Goal: cut a 30s clip.\nDiscoveries: ..."),
+            LlmEvent.StepFinish(FinishReason.END_TURN, TokenUsage(input = 50, output = 20)),
+        )
+        val provider = FakeProvider(listOf(summaryTurn))
+
+        val compactor = Compactor(
+            provider = provider,
+            store = store,
+            bus = bus,
+            protectUserTurns = 1,
+            pruneProtectTokens = 100,
+        )
+
+        val result = compactor.process(sid, history, ModelRef("fake", "test"))
+        assertTrue(result is Compactor.Result.Compacted, "should produce a compaction result")
+        val r = result as Compactor.Result.Compacted
+        assertTrue(r.summary.startsWith("Goal:"), "summary should start with Goal section")
+
+        // The CompactionPart is in the store.
+        val compactionParts = store.listSessionParts(sid).filterIsInstance<Part.Compaction>()
+        assertEquals(1, compactionParts.size)
+        assertTrue(compactionParts.single().summary.contains("Discoveries"))
+    }
+
+    private fun buildHistory(sid: SessionId, baseTime: Instant): List<MessageWithParts> {
+        val u1 = Message.User(MessageId("u-1"), sid, baseTime, agent = "default", model = ModelRef("fake", "x"))
+        val a1 = Message.Assistant(
+            id = MessageId("a-1"), sessionId = sid, createdAt = baseTime,
+            parentId = u1.id, model = ModelRef("fake", "x"),
+            finish = FinishReason.TOOL_CALLS,
+        )
+        val oldHugeTool = Part.Tool(
+            id = PartId("old-tool-out"), messageId = a1.id, sessionId = sid, createdAt = baseTime,
+            callId = CallId("c-1"), toolId = "echo",
+            state = ToolState.Completed(
+                input = JsonObject(mapOf("text" to JsonPrimitive("hi"))),
+                outputForLlm = "x".repeat(2_000),
+                data = JsonObject(emptyMap()),
+            ),
+        )
+        val u2 = Message.User(MessageId("u-2"), sid, baseTime, agent = "default", model = ModelRef("fake", "x"))
+        val u2Text = Part.Text(PartId("u-2-text"), u2.id, sid, baseTime, text = "do another thing")
+        val a2 = Message.Assistant(
+            id = MessageId("a-2"), sessionId = sid, createdAt = baseTime,
+            parentId = u2.id, model = ModelRef("fake", "x"),
+            finish = FinishReason.TOOL_CALLS,
+        )
+        val recentTool = Part.Tool(
+            id = PartId("recent-tool-out"), messageId = a2.id, sessionId = sid, createdAt = baseTime,
+            callId = CallId("c-2"), toolId = "echo",
+            state = ToolState.Completed(
+                input = buildJsonObject { put("text", "later") },
+                outputForLlm = "later",
+                data = JsonObject(emptyMap()),
+            ),
+        )
+        return listOf(
+            MessageWithParts(u1, listOf(Part.Text(PartId("u-1-text"), u1.id, sid, baseTime, text = "do something"))),
+            MessageWithParts(a1, listOf(oldHugeTool)),
+            MessageWithParts(u2, listOf(u2Text)),
+            MessageWithParts(a2, listOf(recentTool)),
+        )
+    }
+
+    private fun inMemoryStore(): Pair<SqlDelightSessionStore, EventBus> {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
+        val db = TaleviaDb(driver)
+        val bus = EventBus()
+        return SqlDelightSessionStore(db, bus) to bus
+    }
+
+    private fun noopStore(): SqlDelightSessionStore = inMemoryStore().first
+}

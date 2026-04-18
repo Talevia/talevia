@@ -117,6 +117,8 @@ private fun AppRoot(container: AppContainer, projectId: ProjectId) {
         }
     }
 
+    PermissionDialog(container = container) { log += it }
+
     Row(modifier = Modifier.fillMaxSize().padding(12.dp)) {
         // ── Left: assets + actions ────────────────────────────────────────────
         Column(modifier = Modifier.width(360.dp).fillMaxHeight()) {
@@ -269,7 +271,7 @@ private fun AppContainer.dummyToolContext(projectId: ProjectId): ToolContext {
         sessionId = sid,
         messageId = mid,
         callId = cid,
-        askPermission = { permissions.check(emptyList(), it) },
+        askPermission = { permissions.check(permissionRules.toList(), it) },
         emitPart = { p -> sessions.upsertPart(p) },
         messages = emptyList(),
     )
