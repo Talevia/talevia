@@ -1,0 +1,27 @@
+CREATE TABLE Messages (
+    id            TEXT NOT NULL PRIMARY KEY,
+    session_id    TEXT NOT NULL,
+    role          TEXT NOT NULL,            -- 'user' | 'assistant'
+    -- Full Message model serialised as JSON.
+    data          TEXT NOT NULL,
+    time_created  INTEGER NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES Sessions(id) ON DELETE CASCADE
+);
+
+CREATE INDEX Messages_session_idx ON Messages(session_id, time_created, id);
+
+insert:
+INSERT INTO Messages(id, session_id, role, data, time_created)
+VALUES (?, ?, ?, ?, ?);
+
+update:
+UPDATE Messages SET data = ? WHERE id = ?;
+
+selectById:
+SELECT * FROM Messages WHERE id = ?;
+
+selectBySession:
+SELECT * FROM Messages WHERE session_id = ? ORDER BY time_created ASC, id ASC;
+
+deleteBySession:
+DELETE FROM Messages WHERE session_id = ?;
