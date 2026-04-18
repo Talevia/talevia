@@ -76,7 +76,6 @@ Ignore OpenCode's Effect.js Service/Layer/Context organisation, its TUI, Web UI,
 ## Known incomplete
 
 These are visible in code but not yet wired end-to-end (expected follow-ups, not bugs):
-- **Agent cancellation** — only coroutine cancellation works; no explicit interrupt protocol.
 - **Prompt caching hints** (Anthropic `cache_control: ephemeral`) — not emitted; long sessions pay full input tokens every turn.
 - **Session title auto-generation** — sessions are stuck with whatever title the caller set.
 - **iOS Swift side** — `AVFoundationVideoEngine.swift` is a compile-only stub. SKIE bridging for value classes / `fun interface` / `Duration` needs a small iosMain helper before the real implementation can land. See `docs/IOS_INTEGRATION.md`.

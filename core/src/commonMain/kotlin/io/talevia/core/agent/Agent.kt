@@ -27,7 +27,14 @@ import io.talevia.core.session.ToolState
 import io.talevia.core.tool.RegisteredTool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.json.Json
@@ -68,8 +75,72 @@ class Agent(
     private val compactionTokenThreshold: Int = 120_000,
 ) {
 
+    /**
+     * Per-session handle tracking an in-flight [run] so [cancel] can reach into
+     * the running coroutine and finalise the current assistant message with
+     * [FinishReason.CANCELLED] rather than letting it hang at `finish = null`.
+     */
+    private class RunHandle(val job: Job) {
+        @Volatile var currentAssistantId: MessageId? = null
+    }
+
+    private val inflightMutex = Mutex()
+    private val inflight = mutableMapOf<SessionId, RunHandle>()
+
+    /**
+     * Cancel any in-flight [run] for [sessionId]. Returns true if a run was
+     * found and cancelled; false if no run was in flight. Safe to call from
+     * any coroutine.
+     */
+    suspend fun cancel(sessionId: SessionId): Boolean {
+        val handle = inflightMutex.withLock { inflight[sessionId] } ?: return false
+        handle.job.cancel(CancellationException("Agent.cancel($sessionId)"))
+        return true
+    }
+
+    /** True while [run] for [sessionId] is executing. */
+    suspend fun isRunning(sessionId: SessionId): Boolean =
+        inflightMutex.withLock { sessionId in inflight }
+
     @OptIn(ExperimentalUuidApi::class)
     suspend fun run(input: RunInput): Message.Assistant {
+        val thisJob = currentCoroutineContext()[Job]
+            ?: error("Agent.run must be called from a coroutine with a Job")
+        val handle = RunHandle(thisJob)
+        inflightMutex.withLock {
+            check(input.sessionId !in inflight) {
+                "Session ${input.sessionId} already has an in-flight Agent.run; cancel it first"
+            }
+            inflight[input.sessionId] = handle
+        }
+
+        try {
+            return runLoop(input, handle)
+        } catch (e: CancellationException) {
+            withContext(NonCancellable) {
+                finalizeCancelled(handle, e.message)
+                bus.publish(BusEvent.SessionCancelled(input.sessionId))
+            }
+            throw e
+        } finally {
+            inflightMutex.withLock { inflight.remove(input.sessionId) }
+        }
+    }
+
+    private suspend fun finalizeCancelled(handle: RunHandle, reason: String?) {
+        val mid = handle.currentAssistantId ?: return
+        val existing = runCatching { store.getMessage(mid) }.getOrNull() as? Message.Assistant ?: return
+        // Avoid overwriting a finish that already landed (race with streamTurn).
+        if (existing.finish != null) return
+        val cancelled = existing.copy(
+            finish = FinishReason.CANCELLED,
+            error = reason ?: "cancelled",
+        )
+        runCatching { store.updateMessage(cancelled) }
+    }
+
+    @OptIn(ExperimentalUuidApi::class)
+    private suspend fun runLoop(input: RunInput, handle: RunHandle): Message.Assistant {
         val now = clock.now()
 
         // Append user message + a single text part to record the prompt.
@@ -116,6 +187,7 @@ class Agent(
                 model = input.model,
             )
             store.appendMessage(asstMsg)
+            handle.currentAssistantId = asstMsg.id
 
             val turnResult = streamTurn(asstMsg, history, input)
 

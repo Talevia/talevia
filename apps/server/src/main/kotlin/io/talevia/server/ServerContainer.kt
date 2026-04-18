@@ -64,9 +64,14 @@ class ServerContainer(env: Map<String, String> = System.getenv()) {
     val providers: ProviderRegistry =
         ProviderRegistry.Builder().addEnv(httpClient, env).build()
 
-    fun newAgent(): Agent? {
-        val provider = providers.default ?: return null
-        return Agent(
+    /**
+     * Shared [Agent] singleton. A single instance is required so /cancel endpoints
+     * observe in-flight runs started by earlier requests — [Agent.cancel] relies on
+     * per-instance state. Null when no provider API key is configured.
+     */
+    val agent: Agent? by lazy {
+        val provider = providers.default ?: return@lazy null
+        Agent(
             provider = provider,
             registry = tools,
             store = sessions,
@@ -79,4 +84,7 @@ class ServerContainer(env: Map<String, String> = System.getenv()) {
             ),
         )
     }
+
+    @Deprecated("Use `agent` — the shared instance is required for cancellation.", ReplaceWith("agent"))
+    fun newAgent(): Agent? = agent
 }

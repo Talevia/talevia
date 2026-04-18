@@ -66,6 +66,7 @@ enum class FinishReason {
     @SerialName("content-filter") CONTENT_FILTER,
     @SerialName("tool-calls") TOOL_CALLS,
     @SerialName("error") ERROR,
+    @SerialName("cancelled") CANCELLED,
 }
 
 data class MessageWithParts(

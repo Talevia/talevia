@@ -58,4 +58,7 @@ sealed interface BusEvent {
         val accepted: Boolean,
         val remembered: Boolean,
     ) : SessionEvent
+
+    /** An in-flight Agent.run for this session was cancelled via [io.talevia.core.agent.Agent.cancel]. */
+    data class SessionCancelled(override val sessionId: SessionId) : SessionEvent
 }

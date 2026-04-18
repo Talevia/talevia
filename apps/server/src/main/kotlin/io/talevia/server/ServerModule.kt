@@ -115,7 +115,7 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
         post("/sessions/{id}/messages") {
             val sid = SessionId(call.parameters["id"]!!)
             val body = call.receive<SubmitMessageRequest>()
-            val agent = container.newAgent()
+            val agent = container.agent
             if (agent == null) {
                 call.respond(HttpStatusCode.NotImplemented, mapOf(
                     "error" to "No provider API key set (ANTHROPIC_API_KEY / OPENAI_API_KEY).",
@@ -143,6 +143,26 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
             call.respond(HttpStatusCode.Accepted, SubmitMessageResponse(correlationId, providerId, modelId))
         }
 
+        /**
+         * POST /sessions/{id}/cancel — interrupt an in-flight Agent.run for this session.
+         * Returns 200 if a run was cancelled, 409 if the session was idle.
+         */
+        post("/sessions/{id}/cancel") {
+            val sid = SessionId(call.parameters["id"]!!)
+            val agent = container.agent
+            if (agent == null) {
+                call.respond(HttpStatusCode.NotImplemented, mapOf(
+                    "error" to "No provider API key set (ANTHROPIC_API_KEY / OPENAI_API_KEY).",
+                ))
+                return@post
+            }
+            if (agent.cancel(sid)) {
+                call.respond(HttpStatusCode.OK, mapOf("cancelled" to true))
+            } else {
+                call.respond(HttpStatusCode.Conflict, mapOf("cancelled" to false, "reason" to "no in-flight run"))
+            }
+        }
+
         get("/sessions/{id}/events") {
             val sid = SessionId(call.parameters["id"]!!)
             call.respondTextWriter(io.ktor.http.ContentType.Text.EventStream) {
@@ -160,6 +180,7 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.SessionCreated -> "session.created"
     is BusEvent.SessionUpdated -> "session.updated"
     is BusEvent.SessionDeleted -> "session.deleted"
+    is BusEvent.SessionCancelled -> "session.cancelled"
     is BusEvent.MessageUpdated -> "message.updated"
     is BusEvent.PartUpdated -> "message.part.updated"
     is BusEvent.PartDelta -> "message.part.delta"
@@ -217,6 +238,7 @@ data class BusEventDto(
             is BusEvent.SessionCreated -> BusEventDto("session.created", e.sessionId.value)
             is BusEvent.SessionUpdated -> BusEventDto("session.updated", e.sessionId.value)
             is BusEvent.SessionDeleted -> BusEventDto("session.deleted", e.sessionId.value)
+            is BusEvent.SessionCancelled -> BusEventDto("session.cancelled", e.sessionId.value)
             is BusEvent.MessageUpdated -> BusEventDto("message.updated", e.sessionId.value, messageId = e.messageId.value)
             is BusEvent.PartUpdated -> BusEventDto("message.part.updated", e.sessionId.value, messageId = e.messageId.value, partId = e.partId.value)
             is BusEvent.PartDelta -> BusEventDto(

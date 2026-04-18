@@ -61,7 +61,6 @@ LLM provider 通过环境变量读取 key：`ANTHROPIC_API_KEY` / `OPENAI_API_KE
 
 以下能力在代码中可见但未端到端打通，属于预期中的后续工作：
 
-- Agent 显式取消协议
 - Anthropic prompt caching 提示
 - Session 标题自动生成
 - iOS `AVFoundationVideoEngine.swift` 仍是编译用桩
