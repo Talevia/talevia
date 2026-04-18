@@ -8,6 +8,7 @@ ktor = "3.0.3"
 kermit = "2.0.5"
 turbine = "1.2.0"
 compose = "1.7.3"
+skie = "0.10.4"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -37,3 +38,4 @@ kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }
 compose = { id = "org.jetbrains.compose", version.ref = "compose" }
+skie = { id = "co.touchlab.skie", version.ref = "skie" }
