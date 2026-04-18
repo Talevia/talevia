@@ -22,6 +22,10 @@ kotlin {
             implementation(libs.sqldelight.runtime)
             implementation(libs.sqldelight.coroutines)
             implementation(libs.kermit)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.client.content.negotiation)
+            implementation(libs.ktor.client.logging)
+            implementation(libs.ktor.serialization.kotlinx.json)
         }
         commonTest.dependencies {
             implementation(kotlin("test"))
@@ -30,9 +34,11 @@ kotlin {
         }
         jvmMain.dependencies {
             implementation(libs.sqldelight.driver.sqlite)
+            implementation(libs.ktor.client.cio)
         }
         iosMain.dependencies {
             implementation(libs.sqldelight.driver.native)
+            implementation(libs.ktor.client.darwin)
         }
     }
 }
