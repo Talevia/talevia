@@ -110,6 +110,36 @@ fun TimelinePanel(
     // membership; the header row shows batch actions when any are selected.
     val selected = remember(projectId) { mutableStateListOf<String>() }
 
+    fun undoLastMutation() {
+        scope.launch {
+            // UI-emitted snapshots all land under SessionId(projectId.value) —
+            // see uiToolContext. Pull the session's parts, filter to
+            // TimelineSnapshots in order, and revert to the *second-to-last*
+            // (the state right before the most recent mutation landed).
+            val uiSessionId = io.talevia.core.SessionId(projectId.value)
+            val snapshots = runCatching {
+                container.sessions.listSessionParts(uiSessionId, includeCompacted = false)
+                    .filterIsInstance<io.talevia.core.session.Part.TimelineSnapshot>()
+            }.getOrElse { emptyList() }
+            if (snapshots.size < 2) {
+                log += "nothing to undo"
+                return@launch
+            }
+            val target = snapshots[snapshots.size - 2]
+            runCatching {
+                container.tools["revert_timeline"]!!.dispatch(
+                    buildJsonObject {
+                        put("projectId", projectId.value)
+                        put("snapshotPartId", target.id.value)
+                    },
+                    container.uiToolContext(projectId),
+                )
+                project = container.projects.get(projectId)
+                log += "undo → snapshot ${target.id.value.take(8)}"
+            }.onFailure { log += "undo failed: ${friendly(it)}" }
+        }
+    }
+
     fun batchApply(name: String, params: Map<String, Float>) {
         if (selected.isEmpty()) return
         val snapshot = selected.toList()
@@ -156,6 +186,9 @@ fun TimelinePanel(
                 TextButton(onClick = { batchApply("blur", mapOf("radius" to 4f)) }) { Text("blur") }
                 TextButton(onClick = { batchApply("vignette", mapOf("intensity" to 0.5f)) }) { Text("vignette") }
                 TextButton(onClick = { selected.clear() }) { Text("clear") }
+            } else {
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { undoLastMutation() }) { Text("Undo") }
             }
         }
 
