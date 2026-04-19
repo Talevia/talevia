@@ -14,13 +14,14 @@ private func avfError(_ message: String) -> NSError {
 /// Pick an export preset from the requested output height. Mirrors the way
 /// the FFmpeg engine picks h264 profiles by resolution — AVFoundation doesn't
 /// let us specify codec + bitrate on `AVAssetExportSession` directly, so
-/// preset is the only knob.
+/// preset is the only knob. OutputSpec.videoCodec/bitrate/audioBitrate are
+/// ignored — TODO: a future refactor could swap in AVAssetWriter for
+/// finer-grained control.
 private func exportPreset(for height: Int32) -> String {
     switch height {
-    case 2160...: return AVAssetExportPresetHighestQuality
     case 1080...: return AVAssetExportPreset1920x1080
     case 720...:  return AVAssetExportPreset1280x720
-    default:      return AVAssetExportPreset640x480
+    default:      return AVAssetExportPresetHighestQuality
     }
 }
 
@@ -52,10 +53,11 @@ private func runExport(
         withMediaType: .video,
         preferredTrackID: kCMPersistentTrackID_Invalid
     )
-    let audioTrack = composition.addMutableTrack(
-        withMediaType: .audio,
-        preferredTrackID: kCMPersistentTrackID_Invalid
-    )
+    // Add an audio track lazily — only once we find a source clip that has
+    // audio. AVAssetExportSession has been known to choke on empty
+    // composition audio tracks with confusing error codes (we hit -16976
+    // "OperationStopped" without this guard).
+    var audioTrack: AVMutableCompositionTrack?
 
     for plan in plans {
         // Route every asset path through MediaPathResolver (architecture
@@ -79,6 +81,12 @@ private func runExport(
             try videoTrack?.insertTimeRange(insertRange, of: srcVideo, at: timelineStart)
         }
         if let srcAudio = tracks.first(where: { $0.mediaType == .audio }) {
+            if audioTrack == nil {
+                audioTrack = composition.addMutableTrack(
+                    withMediaType: .audio,
+                    preferredTrackID: kCMPersistentTrackID_Invalid
+                )
+            }
             try audioTrack?.insertTimeRange(insertRange, of: srcAudio, at: timelineStart)
         }
     }

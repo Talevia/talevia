@@ -152,9 +152,15 @@ fun Timeline.toIosVideoPlan(): List<IosVideoClipPlan> =
 // and `DROP_OLDEST` means a slow consumer can't block the exporter.
 class SwiftRenderFlowAdapter {
     private val sentinelCompleted = RenderProgress.Completed(jobId = "__swift_adapter_eof__", outputPath = "")
+    // `replay = 64` means late subscribers still see everything the Swift side
+    // emitted *before* the caller started collecting — this matters because
+    // `AVFoundationVideoEngine.render(...)` fires a `Started` event right away
+    // and callers typically collect on a subsequent line. A cold Flow shape
+    // would solve this too, but SharedFlow lets Swift push events without
+    // suspending, which keeps the Swift code path simple.
     private val flow = MutableSharedFlow<RenderProgress>(
-        replay = 0,
-        extraBufferCapacity = 32,
+        replay = 64,
+        extraBufferCapacity = 64,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
 
@@ -177,3 +183,27 @@ class SwiftRenderFlowAdapter {
     fun asFlow(): Flow<RenderProgress> =
         flow.asSharedFlow().takeWhile { it !== sentinelCompleted }
 }
+
+// =============================================================================
+// Test-oriented import helper
+// =============================================================================
+//
+// `MediaStorage.import(source, probe)` takes a `suspend (MediaSource) ->
+// MediaMetadata` lambda which SKIE exposes as `KotlinSuspendFunction1` — that
+// type is painful to construct from Swift. For tests (and any iOS code path
+// that already has the metadata in hand) this helper avoids the suspend-closure
+// dance: probe first via the engine, then upsert via a pre-known metadata.
+
+/**
+ * Import [source] into [storage] using a metadata value you already have. The
+ * returned asset is also stored in-place via the standard `import` pathway so
+ * subsequent `resolve(assetId)` calls work.
+ *
+ * This is a convenience for iOS consumers; the canonical flow (agent +
+ * ImportMediaTool) still goes through the suspend-probe path.
+ */
+suspend fun importWithKnownMetadata(
+    storage: io.talevia.core.platform.MediaStorage,
+    source: io.talevia.core.domain.MediaSource,
+    metadata: io.talevia.core.domain.MediaMetadata,
+): io.talevia.core.domain.MediaAsset = storage.import(source) { metadata }

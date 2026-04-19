@@ -83,3 +83,39 @@ targets:
             - $(SRCROOT)/../../core/build/bin/iosX64/debugFramework
           FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*][arch=arm64]:
             - $(SRCROOT)/../../core/build/bin/iosArm64/debugFramework
+
+  TaleviaTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: TaleviaTests
+    dependencies:
+      - target: Talevia
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.talevia.app.tests
+        SWIFT_VERSION: "5.10"
+        ONLY_ACTIVE_ARCH: "YES"
+        # Tests need the same TaleviaCore framework the app links against —
+        # plus the sqlite3 shim and framework search paths.
+        OTHER_LDFLAGS: -framework TaleviaCore -lsqlite3
+        GENERATE_INFOPLIST_FILE: "YES"
+      configs:
+        Debug:
+          FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=arm64]:
+            - $(SRCROOT)/../../core/build/bin/iosSimulatorArm64/debugFramework
+          FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=x86_64]:
+            - $(SRCROOT)/../../core/build/bin/iosX64/debugFramework
+          FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*][arch=arm64]:
+            - $(SRCROOT)/../../core/build/bin/iosArm64/debugFramework
+
+schemes:
+  Talevia:
+    build:
+      targets:
+        Talevia: all
+        TaleviaTests: [test]
+    test:
+      targets:
+        - TaleviaTests
