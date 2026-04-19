@@ -71,6 +71,7 @@ import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitleTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.AddTransitionTool
+import io.talevia.core.tool.builtin.video.ApplyFilterToClipsTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
@@ -210,6 +211,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(SetClipTransformTool(projects))
         register(ExportTool(projects, engine))
         register(ApplyFilterTool(projects))
+        register(ApplyFilterToClipsTool(projects))
         register(ApplyLutTool(projects, media))
         register(AddSubtitleTool(projects))
         register(AddSubtitlesTool(projects))
