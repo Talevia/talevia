@@ -1,13 +1,13 @@
 package io.talevia.core.domain.source
 
 import io.talevia.core.SourceNodeId
+import io.talevia.core.util.contentHashOf
 
 /**
  * Pure, value-level mutations on [Source]. Each returns a new [Source] with:
  *  - the [Source]'s [Source.revision] bumped by one,
  *  - the touched node's [SourceNode.revision] bumped by one,
- *  - the touched node's [SourceNode.contentHash] recomputed from the new revision
- *    (stubbed — see `TODO(DAG)` in [SourceNode]).
+ *  - the touched node's [SourceNode.contentHash] recomputed from `(kind, body, parents)`.
  *
  * These are genre-agnostic. Genre layers call them via typed builders in
  * `core/domain/source/genre/<genre>/`.
@@ -63,12 +63,11 @@ fun Source.removeNode(id: SourceNodeId): Source {
 }
 
 /**
- * Internal: bump a node's [SourceNode.revision] + recompute [SourceNode.contentHash].
- * Kept private to this file so genre code cannot forget to bump on write — all writes
- * go through [addNode] / [replaceNode].
+ * Internal: bump a node's [SourceNode.revision] + recompute [SourceNode.contentHash]
+ * from the new `(kind, body, parents)`. Kept private to this file so genre code cannot
+ * forget to bump on write — all writes go through [addNode] / [replaceNode].
  */
-private fun SourceNode.bumpedForWrite(): SourceNode {
-    val nextRev = revision + 1
-    // TODO(DAG): recompute contentHash from (kind, body, parents); today we mirror revision.
-    return copy(revision = nextRev, contentHash = nextRev.toString())
-}
+private fun SourceNode.bumpedForWrite(): SourceNode = copy(
+    revision = revision + 1,
+    contentHash = contentHashOf(kind, body, parents),
+)

@@ -57,7 +57,11 @@ class SourceMutationTest {
         assertNotNull(node)
         assertEquals(VlogNodeKinds.RAW_FOOTAGE, node.kind)
         assertEquals(1L, node.revision, "new node's revision must bump on write")
-        assertEquals("1", node.contentHash, "contentHash tracks revision in the stub")
+        assertEquals(
+            16,
+            node.contentHash.length,
+            "contentHash must be a stable FNV-1a 64-bit hex string",
+        )
         assertEquals(listOf(AssetId("a-1")), node.asVlogRawFootage()?.assetIds)
     }
 
@@ -82,7 +86,7 @@ class SourceMutationTest {
         assertEquals(2L, after.source.revision)
         val node = after.source.byId.getValue(SourceNodeId("n-1"))
         assertEquals(2L, node.revision)
-        assertEquals("2", node.contentHash)
+        assertEquals(16, node.contentHash.length)
         assertEquals(
             listOf(AssetId("a-1"), AssetId("a-2")),
             node.asVlogRawFootage()?.assetIds,

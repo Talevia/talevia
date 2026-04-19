@@ -1,6 +1,7 @@
 package io.talevia.core.domain.source
 
 import io.talevia.core.SourceNodeId
+import io.talevia.core.util.contentHashOf
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -19,11 +20,15 @@ import kotlinx.serialization.json.JsonObject
  * @property body Opaque payload. Typed genre accessors round-trip it through the canonical
  *   [io.talevia.core.JsonConfig.default]. Defaults to [JsonObject] empty for nodes that
  *   carry no body (pure relationship nodes).
- * @property parents References to upstream nodes (future DAG lane). Included in v1 so the
- *   field's serialized shape is stable before stale-propagation lands.
+ * @property parents References to upstream nodes in the Source DAG. An edit to any
+ *   ancestor flows through [Source.stale] to mark this node (and its descendants) as
+ *   needing recomputation.
  * @property revision Monotonic per-node counter bumped on each in-place replacement.
- * @property contentHash Stubbed to `revision.toString()` today — the DAG lane will
- *   replace this with a real hash over `(kind, body, parents)`.
+ *   Useful for debugging / UI ordering — *not* a substitute for [contentHash] in cache
+ *   keys, because two unrelated edits can produce the same revision.
+ * @property contentHash Deterministic fingerprint over `(kind, body, parents)`. Stable
+ *   across re-encodings, unaffected by [revision]. This is what cache keys downstream
+ *   of Source key off of (per VISION §3.2 "cache key is source hash + toolchain version").
  */
 @Serializable
 data class SourceNode(
@@ -32,9 +37,28 @@ data class SourceNode(
     val body: JsonElement = JsonObject(emptyMap()),
     val parents: List<SourceRef> = emptyList(),
     val revision: Long = 0,
-    // TODO(DAG): replace with real content hash over (kind, body, parents) once the
-    //  stale-propagation lane lands. Today this is just a string of `revision` so
-    //  downstream code can already read the field without us committing to the hash
-    //  algorithm.
-    val contentHash: String = revision.toString(),
-)
+    val contentHash: String = contentHashOf(kind, body, parents),
+) {
+    companion object {
+        /**
+         * Construct a node with a correctly computed [contentHash]. Prefer this over the
+         * raw data-class constructor when creating nodes outside of [Source.addNode] /
+         * [Source.replaceNode] (e.g., in tests or adapters reading nodes from external
+         * systems). All mutation helpers in [SourceMutations] go through this path.
+         */
+        fun create(
+            id: SourceNodeId,
+            kind: String,
+            body: JsonElement = JsonObject(emptyMap()),
+            parents: List<SourceRef> = emptyList(),
+            revision: Long = 0,
+        ): SourceNode = SourceNode(
+            id = id,
+            kind = kind,
+            body = body,
+            parents = parents,
+            revision = revision,
+            contentHash = contentHashOf(kind, body, parents),
+        )
+    }
+}

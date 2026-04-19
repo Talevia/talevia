@@ -2,6 +2,7 @@ package io.talevia.core.domain
 
 import io.talevia.core.AssetId
 import io.talevia.core.ClipId
+import io.talevia.core.SourceNodeId
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
@@ -13,6 +14,17 @@ sealed class Clip {
     /** Position in the source media (for media-backed clips); ignored for synthetic clips. */
     abstract val sourceRange: TimeRange?
     abstract val transforms: List<Transform>
+    /**
+     * Which [io.talevia.core.domain.source.SourceNode]s this clip derives from.
+     *
+     * Empty set means "not bound to any source node" — acceptable for hand-authored
+     * clips from pre-source workflows, but such clips cannot benefit from incremental
+     * compilation (VISION §3.2). AIGC-produced clips should populate this with the
+     * ids of the nodes whose contentHash went into the prompt / parameters, so a
+     * change upstream flows through `Source.stale` → `Project.staleClips` → the
+     * incremental render path.
+     */
+    abstract val sourceBinding: Set<SourceNodeId>
 
     @Serializable @SerialName("video")
     data class Video(
@@ -22,6 +34,7 @@ sealed class Clip {
         override val transforms: List<Transform> = emptyList(),
         val assetId: AssetId,
         val filters: List<Filter> = emptyList(),
+        override val sourceBinding: Set<SourceNodeId> = emptySet(),
     ) : Clip()
 
     @Serializable @SerialName("audio")
@@ -32,6 +45,7 @@ sealed class Clip {
         override val transforms: List<Transform> = emptyList(),
         val assetId: AssetId,
         val volume: Float = 1.0f,
+        override val sourceBinding: Set<SourceNodeId> = emptySet(),
     ) : Clip()
 
     @Serializable @SerialName("text")
@@ -41,6 +55,7 @@ sealed class Clip {
         override val transforms: List<Transform> = emptyList(),
         val text: String,
         val style: TextStyle = TextStyle(),
+        override val sourceBinding: Set<SourceNodeId> = emptySet(),
     ) : Clip() {
         override val sourceRange: TimeRange? = null
     }
