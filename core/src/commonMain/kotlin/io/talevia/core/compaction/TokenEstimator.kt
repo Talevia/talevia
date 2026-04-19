@@ -1,11 +1,12 @@
 package io.talevia.core.compaction
 
+import io.talevia.core.AssetId
+import io.talevia.core.domain.MediaAsset
+import io.talevia.core.domain.Resolution
 import io.talevia.core.session.MessageWithParts
 import io.talevia.core.session.Part
 import io.talevia.core.session.ToolState
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 
 /**
  * Heuristic token estimator. Real tokenisation is provider-specific (BPE/tiktoken
@@ -25,11 +26,17 @@ object TokenEstimator {
     /** Tokens for a serialised JSON element (rough). */
     fun forJson(element: JsonElement): Int = forText(element.toString())
 
-    /** Tokens for an entire conversation snapshot. */
-    fun forHistory(messages: List<MessageWithParts>): Int =
-        messages.sumOf { mwp -> mwp.parts.sumOf(::forPart) }
+    /**
+     * Tokens for an entire conversation snapshot. [resolveAsset] is consulted
+     * for every [Part.Media] so the estimator can size image/video attachments
+     * from their actual resolution; omit it to fall back to a coarse default.
+     */
+    fun forHistory(
+        messages: List<MessageWithParts>,
+        resolveAsset: (AssetId) -> MediaAsset? = { null },
+    ): Int = messages.sumOf { mwp -> mwp.parts.sumOf { forPart(it, resolveAsset) } }
 
-    fun forPart(part: Part): Int = when (part) {
+    fun forPart(part: Part, resolveAsset: (AssetId) -> MediaAsset? = { null }): Int = when (part) {
         is Part.Text -> forText(part.text)
         is Part.Reasoning -> forText(part.text)
         is Part.Tool -> when (val s = part.state) {
@@ -38,11 +45,28 @@ object TokenEstimator {
             is ToolState.Completed -> 24 + forJson(s.input) + forText(s.outputForLlm) + forJson(s.data)
             is ToolState.Failed -> 24 + (s.input?.let(::forJson) ?: 0) + forText(s.message)
         }
-        is Part.Media -> 32  // placeholder — real cost depends on whether the media is sent inline
+        is Part.Media -> forMedia(resolveAsset(part.assetId)?.metadata?.resolution)
         is Part.TimelineSnapshot -> forText(part.timeline.toString())
         is Part.RenderProgress -> 8
         is Part.StepStart -> 4
         is Part.StepFinish -> 8
         is Part.Compaction -> forText(part.summary)
     }
+
+    /**
+     * Image/video token cost approximation. Matches the Anthropic formula
+     * `tokens = (width * height) / 750` (Claude's vision pricing), capped at
+     * ~1.6k per image so a single 4K frame doesn't dominate the estimate —
+     * both Anthropic and OpenAI downscale very large inputs server-side. When
+     * no resolution is known we pick 1568 (Anthropic's "standard 1092x1092"
+     * budget) since 32 was far too low for inline image attachments.
+     */
+    internal fun forMedia(resolution: Resolution?): Int {
+        if (resolution == null) return DEFAULT_IMAGE_TOKENS
+        val raw = (resolution.width.toLong() * resolution.height.toLong()) / 750L
+        return raw.coerceIn(DEFAULT_IMAGE_TOKENS.toLong(), MAX_IMAGE_TOKENS.toLong()).toInt()
+    }
+
+    private const val DEFAULT_IMAGE_TOKENS = 1568
+    private const val MAX_IMAGE_TOKENS = 6144
 }
