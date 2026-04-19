@@ -30,5 +30,8 @@ object DefaultPermissionRuleset {
         PermissionRule(permission = "project.destructive", pattern = "*", action = PermissionAction.ASK),
         // AIGC providers incur external cost + seed-locked artifacts. Ask before running.
         PermissionRule(permission = "aigc.generate", pattern = "*", action = PermissionAction.ASK),
+        // ML enhancement (ASR / future upscale / colorize) uploads media to a third-party
+        // provider. Ask the user the same way we ask for AIGC.
+        PermissionRule(permission = "ml.transcribe", pattern = "*", action = PermissionAction.ASK),
     )
 }

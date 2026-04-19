@@ -12,6 +12,7 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.permission.DefaultPermissionService
+import io.talevia.core.platform.AsrEngine
 import io.talevia.core.platform.FileBlobWriter
 import io.talevia.core.platform.FileMediaStorage
 import io.talevia.core.platform.FilePicker
@@ -23,9 +24,11 @@ import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.provider.openai.OpenAiImageGenEngine
+import io.talevia.core.provider.openai.OpenAiWhisperEngine
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
+import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
@@ -94,6 +97,11 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         ?.takeIf { it.isNotBlank() }
         ?.let { OpenAiImageGenEngine(httpClient, it) }
 
+    /** Whisper-backed ASR engine, wired alongside [imageGen] when OpenAI key is set. */
+    val asr: AsrEngine? = env["OPENAI_API_KEY"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { OpenAiWhisperEngine(httpClient, it) }
+
     /** JVM blob writer backing AIGC tools. Paired with [mediaRootDir]. */
     val blobWriter: MediaBlobWriter = FileBlobWriter(mediaRootDir)
 
@@ -116,6 +124,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(ListSourceNodesTool(projects))
         register(RemoveSourceNodeTool(projects))
         imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
+        asr?.let { register(TranscribeAssetTool(it, media)) }
     }
 
     /** Provider registry built from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env. */

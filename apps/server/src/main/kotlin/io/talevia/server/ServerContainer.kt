@@ -14,6 +14,7 @@ import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.metrics.EventBusMetricsSink
 import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.permission.DefaultPermissionRuleset
+import io.talevia.core.platform.AsrEngine
 import io.talevia.core.platform.FileBlobWriter
 import io.talevia.core.platform.FileMediaStorage
 import io.talevia.core.platform.ImageGenEngine
@@ -26,10 +27,12 @@ import io.talevia.core.platform.VideoEngine
 import io.talevia.core.provider.LlmProvider
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.provider.openai.OpenAiImageGenEngine
+import io.talevia.core.provider.openai.OpenAiWhisperEngine
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
+import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
@@ -121,6 +124,14 @@ class ServerContainer(
         ?.takeIf { it.isNotBlank() }
         ?.let { OpenAiImageGenEngine(httpClient, it) }
 
+    /**
+     * Whisper-backed [AsrEngine], wired alongside [imageGen] when the OpenAI key
+     * is present. Same conditional pattern: no key → no ml-transcribe tool.
+     */
+    val asr: AsrEngine? = env["OPENAI_API_KEY"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { OpenAiWhisperEngine(httpClient, it) }
+
     /** JVM blob writer backing AIGC tools. */
     val blobWriter: MediaBlobWriter = FileBlobWriter(mediaRootDir)
 
@@ -143,6 +154,7 @@ class ServerContainer(
         register(ListSourceNodesTool(projects))
         register(RemoveSourceNodeTool(projects))
         imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
+        asr?.let { register(TranscribeAssetTool(it, media)) }
     }
 
     /** Provider registry built from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env vars. */

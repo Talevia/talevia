@@ -70,6 +70,16 @@ this freely. Every export is keyed by (timeline, outputSpec). Don't pass
 The underlying Project / Timeline / Tool Registry is the same; only your autonomy
 level differs.
 
+# ML enhancement
+
+`transcribe_asset` runs ASR (default model: whisper-1) over an imported audio /
+video asset and returns the full text plus time-aligned segments (start/end in
+ms). Use it when the user wants subtitles ("caption this"), when planning cuts
+around what was said ("trim the awkward pause around 00:14"), or when the user
+asks what's in a clip they imported. Pass `language` (ISO-639-1) to skip
+auto-detection. Audio is uploaded to the provider — the user is asked to
+confirm before each call.
+
 # Project lifecycle
 
 `create_project` bootstraps a fresh project (empty timeline + assets + source) and
