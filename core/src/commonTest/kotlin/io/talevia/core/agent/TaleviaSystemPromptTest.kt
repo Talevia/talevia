@@ -34,6 +34,8 @@ class TaleviaSystemPromptTest {
         "get_project_state",
         // ML enhancement lane — ASR transcription is the first ML tool.
         "transcribe_asset",
+        // Vision describe — the image-side counterpart to ASR.
+        "describe_asset",
         // Batch subtitles — the pair that closes the transcribe → caption loop.
         "add_subtitles",
         // AIGC audio lane — TTS pairs with ASR for the round-trip.
@@ -53,6 +55,8 @@ class TaleviaSystemPromptTest {
         "move_clip",
         // Re-trim after creation — edits sourceRange without losing bound filters.
         "trim_clip",
+        // Audio volume control — adjust playback level on an audio clip in place.
+        "set_clip_volume",
         // Project-level named snapshots (VISION §3.4) — survive across chat sessions.
         "save_project_snapshot",
         "list_project_snapshots",

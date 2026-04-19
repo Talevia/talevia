@@ -46,6 +46,7 @@ final class AppContainer {
         registry.register(tool: RemoveClipTool(store: self.projects))
         registry.register(tool: MoveClipTool(store: self.projects))
         registry.register(tool: TrimClipTool(store: self.projects, media: self.media))
+        registry.register(tool: SetClipVolumeTool(store: self.projects))
         registry.register(tool: ExportTool(store: self.projects, engine: self.engine, clock: clock))
         registry.register(tool: ApplyFilterTool(store: self.projects))
         registry.register(tool: ApplyLutTool(store: self.projects, media: self.media))

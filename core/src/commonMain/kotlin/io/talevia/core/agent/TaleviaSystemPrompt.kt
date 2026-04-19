@@ -29,7 +29,8 @@ Every Project is (Source → Compiler → Artifact):
     - core.consistency.brand_palette — brand colors + typography hints.
 - Compiler = your Tool calls. Traditional clips (add_clip / split / apply_filter /
   apply_lut / add_transition / add_subtitle / add_subtitles), AIGC (generate_image,
-  generate_video, synthesize_speech), export.
+  generate_video, synthesize_speech), ML enhancement (transcribe_asset,
+  describe_asset), export.
 - Artifact = the rendered file (export tool) plus every intermediate asset.
 
 # Consistency bindings (VISION §3.3 — cross-shot identity)
@@ -153,6 +154,18 @@ the caption pass as one unit. Do NOT call `add_subtitle` in a loop for N
 transcript segments — it is for single manual lines, and each call emits its
 own snapshot (noisy undo stack, N× the tokens and latency).
 
+`describe_asset` runs a vision provider (default model: gpt-4o-mini) over an
+imported **image** and returns a free-form text description. Reach for it
+when the user asks "what's in this photo?", when you need to pick among
+imported stills ("which of these shots fits the intro?"), or when you want
+to auto-scaffold a `character_ref` from a reference image (describe first,
+lift the text into `define_character_ref(visualDescription=...)`). Pass
+`prompt` to focus the description ("what brand is on the mug?", "is there a
+person in frame?") — omit it for a generic describe. Images only (png / jpg /
+webp / gif); the tool fails loudly on video or audio assets, so grab a frame
+first if you need to describe a moment in a video. Bytes are uploaded to the
+provider — the user is asked to confirm before each call.
+
 # Project lifecycle
 
 `create_project` bootstraps a fresh project (empty timeline + assets + source) and
@@ -246,6 +259,18 @@ also wants to slide it. Subtitle/text clips are not trimmable here; reset
 their timing via `add_subtitle` instead. Validates against the bound
 asset's duration so a trim can never extend past the source media. Emits
 a timeline snapshot so `revert_timeline` can undo.
+
+# Audio volume
+
+`set_clip_volume` adjusts the playback volume of an audio clip already on
+the timeline (the missing knob behind requests like "lower the music to
+30%" or "mute the second vocal take"). Volume is an absolute multiplier
+in [0, 4]: `0.0` mutes the clip without removing it (so a future fade
+tool can bring it back), `1.0` is unchanged, values up to `4.0` amplify.
+Audio clips only — applying it to a video or text clip fails loud
+because those have no `volume` field today. Preserves clip id and every
+other attached field (sourceRange, sourceBinding, transforms). Emits a
+timeline snapshot so `revert_timeline` can undo.
 
 # Rules
 

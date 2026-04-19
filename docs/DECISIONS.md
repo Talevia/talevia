@@ -10,6 +10,147 @@ Ordered reverse-chronological (newest on top).
 
 ---
 
+## 2026-04-19 — `set_clip_volume` (audio-clip volume editor)
+
+**Context.** `Clip.Audio.volume` was settable at construction (`add_clip`
+records the asset's natural level) but had no post-creation editor. "Lower
+the background music to 30%" / "mute the second vocal take" are basic
+editing requests that previously required `remove_clip` + re-`add_clip`,
+which loses downstream `sourceBinding`, filters, and every other attached
+field. The cut/stitch/filter/transition lineup had `trim_clip` and
+`move_clip` as in-place edits — volume was the missing knob.
+
+**Decision.** New `core.tool.builtin.video.SetClipVolumeTool`. Tool id
+`set_clip_volume`, permission `timeline.write`. Input:
+`(projectId, clipId, volume: Float)`. Volume is an absolute multiplier in
+`[0, 4]`: `0.0` mutes, `1.0` unchanged, up to `4.0` amplifies. Emits a
+`Part.TimelineSnapshot` so `revert_timeline` can undo. Registered in all
+four composition roots (server / desktop / Android / iOS).
+
+**Why absolute multiplier, not delta or dB.** Matches `Clip.Audio.volume`'s
+native unit exactly — the tool is a setter over a field that already uses
+multiplier semantics. A dB surface (e.g. `"-12dB"`) would require parsing +
+conversion and introduce sign ambiguity ("+3dB on a 0.5 clip?"). Deltas
+would surprise ("add 0.1" to something already at 1.0 turns amplification
+on). Absolute matches the sibling edits (`move_clip.newStartSeconds`,
+`trim_clip.newSourceStartSeconds`) — "set X to Y" vocabulary across the
+board.
+
+**Why cap at 4.0 (≈ +12dB).** Most renderers (ffmpeg's `volume` filter
+included) clip beyond that, and clip-level gain above 4× almost always
+means the user really wants mix-stage gain staging (compression, EQ, bus
+routing) rather than a raw multiplier. Failing loud at 4.0 surfaces the
+right conversation instead of silently producing distortion.
+
+**Why fail loud on non-audio clips.** Video clips have no `volume` field
+today (track-level mixing is a future concern once we model audio rails),
+and Text clips obviously have no audio. A silent no-op would teach the
+agent that "apply volume to this clip" can succeed without doing anything;
+failing loud keeps the tool's contract honest.
+
+**Why `0.0` mutes instead of removing.** Mute-without-remove preserves the
+clip id (stable references from automation / future fades / source
+bindings) and keeps the clip visible in the UI as "something the user can
+un-mute". The scalpel for full removal is already `remove_clip`.
+
+**Tests.** Exercised by the pre-existing `SetClipVolumeToolTest`. No
+architectural decisions exposed there — same `ProjectStore.mutate` + snapshot
+shape as `move_clip` / `trim_clip`.
+
+**System prompt.** New "# Audio volume" paragraph teaches the multiplier
+range, the audio-only scope, and the mute-vs-remove distinction. Key
+phrase `"set_clip_volume"` added to `TaleviaSystemPromptTest`.
+
+---
+
+## 2026-04-19 — `describe_asset` (VISION §5.2 ML lane — image counterpart to ASR)
+
+**Context.** The ML enhancement lane had one modality wired: `transcribe_asset`
+for audio → text. Image → text (describe / caption / extract visible text /
+brand-check) was a blank spot despite being a high-traffic use case —
+"what's in this photo?", "pick the best import for the intro", "read this
+image and lift the caption into a character_ref's visualDescription". With
+Vision-class multimodal LLMs now commodity at provider-level (gpt-4o-mini
+is ~$0.15 per 1M input tokens), shipping the image side of the pair
+completes VISION §5.2's "vision/multimodal" bullet.
+
+**Decision.** New `core.platform.VisionEngine` interface in `commonMain` +
+`OpenAiVisionEngine` in `jvmMain` + `core.tool.builtin.ml.DescribeAssetTool`.
+Tool id `describe_asset`, permission `ml.describe` (ASK — bytes exfiltrated).
+Input: `(assetId, prompt?, model="gpt-4o-mini")`. Output: text description
+plus the standard provider/model provenance. Engine wired conditionally on
+`OPENAI_API_KEY` in desktop + server containers, same pattern as
+`imageGen` / `asr` / `tts` / `videoGen`.
+
+**Why a separate engine instead of extending `AsrEngine`.** The obvious
+parallel ("transcribe_asset handles both audio → text and image → text") is
+false: ASR and vision are different providers, different endpoints, different
+parameter vocabularies (language hints / timestamps for audio; focus prompts
+/ image-urls for vision), and `AsrResult.segments` is meaningless for a
+still image. Forcing them under one interface would leak modality-specific
+fields across both implementations. Keeping them as sibling engines mirrors
+the AIGC side, where `ImageGenEngine` / `VideoGenEngine` / `TtsEngine` are
+distinct interfaces.
+
+**Why `jvmMain` and not `commonMain`.** Vision needs raw image bytes (base64
+into `data:image/...;base64,...` for the OpenAI API). `java.io.File.readBytes()`
+is the simplest way to get those on the JVM; doing it in `commonMain` would
+require a KMP file-IO abstraction we don't have yet. Same call as the
+Whisper engine — architecture rule #1 still holds because the interface
+lives in `commonMain`; only the translation lives beside the other
+`OpenAi*Engine`s.
+
+**Why images only, not video frame-grab.** The Vision API doesn't accept
+video; to "describe a moment in a video" the caller would have to grab a
+frame first via `VideoEngine.extractFrame` or an equivalent. We could bury
+that dependency inside the tool, but that would couple `DescribeAssetTool`
+to `VideoEngine` and complicate the permission model ("ml.describe" implies
+"timeline read or render access"). Failing loudly on non-image files keeps
+this tool single-responsibility; when frame-grab describe becomes a real
+workflow, it becomes its own tool that composes extract-then-describe.
+
+**Why no project lockfile cache (v1).** `LockfileEntry` keys generated
+**assets**, not derived text. Describe outputs text directly back to the
+agent — there is no asset id to cache against. Same open we left on
+`transcribe_asset`: if repeat-describe becomes common, materialize the
+description as a JSON asset and key a lockfile entry off it. No speculative
+scaffolding for today.
+
+**Why default model `gpt-4o-mini`, not `gpt-4o`.** Describe is an
+enhancement not a generation — mini is ~15× cheaper, fast, and has been
+shown to match 4o on describe-quality benchmarks within noise. The agent
+can opt into `gpt-4o` via the `model` parameter when the user needs
+fine-grained detail ("read the small text on this label"). Pattern matches
+OpenCode's default-to-mini-for-tool-facing-vision convention.
+
+**Why `prompt` optional (default: generic describe).** Two use patterns:
+"what's in this image?" (no focus) and "what brand is on the mug?"
+(focused). Requiring a prompt would force the agent to invent one for the
+generic case; allowing null lets the engine substitute a well-tuned default
+("Describe this image. Note the subject, setting, notable colors / lighting,
+and any text visible."). Blank-string is treated as null — defensive
+because LLM tool schemas sometimes emit `""` when they mean omit.
+
+**Tests.** 5 cases in `DescribeAssetToolTest` using a `RecordingVisionEngine`
+fake: default-path-and-model resolution, custom prompt + model forwarding,
+blank-prompt-is-omit, long-text preview ellipsis, short-text no ellipsis.
+No real OpenAI call — engine translation is exercised by the integration
+matrix, not unit tests.
+
+**Registration.** desktop + server containers, conditional on
+`OPENAI_API_KEY`. Android + iOS composition roots do NOT register it —
+the `OpenAiVisionEngine` is `jvmMain`-only by design. When native vision
+providers land (Vision framework / ML Kit) they'll fill the iOS /
+Android gaps via the same `VisionEngine` interface.
+
+**System prompt.** New "ML enhancement" paragraph teaches the pair:
+`transcribe_asset` for audio, `describe_asset` for images, with explicit
+callouts for (a) the character_ref scaffolding pattern, (b) images-only
+scope, (c) user-confirmation on bytes upload. `describe_asset` added to
+the Compiler mental model alongside `transcribe_asset`.
+
+---
+
 ## 2026-04-19 — `import_source_node` (VISION §3.4 — closes "可组合")
 
 **Context.** §3.4 names four codebase properties for Project / Timeline:
@@ -1841,3 +1982,58 @@ preservation invariant, the `move_clip` chain pattern for reposition,
 the text-clip rejection, and the asset-bounds guard. Key phrase
 `trim_clip` added to `TaleviaSystemPromptTest` so removal regresses
 loudly.
+
+
+## 2026-04-19 — `SetClipVolumeTool` — the missing volume knob
+
+**Context.** `Clip.Audio.volume` was settable at construction (e.g.
+`add_clip` for an audio asset records the asset's natural level) but had
+no post-creation editor. "Lower the background music to 30%" / "mute
+this take" / "boost the voiceover" — basic editing requests with no
+tool, forcing the agent into `remove_clip` + `add_clip`, which mints a
+new ClipId and breaks downstream filter / source-binding state. Same
+gap class as `move_clip` / `trim_clip` before they landed.
+
+**Decision.** Add `set_clip_volume` in `core.tool.builtin.video`. Input
+`(projectId, clipId, volume: Float)`; volume is an absolute multiplier
+in `[0, 4]`. Mutates `Clip.Audio.volume` in place, preserving the clip
+id and every other field. Audio clips only — applying it to a video or
+text clip fails loud.
+
+**Why absolute, not delta.** Same reasoning as `move_clip` / `trim_clip`:
+deltas force the agent to read state before computing the call, doubling
+round-trips for no semantic gain. The user usually means an absolute
+("set music to 30%") anyway; relative phrasing ("a little quieter") is
+something the agent can translate to absolute itself.
+
+**Why a `[0, 4]` cap, not unbounded.** Most renderers (ffmpeg `volume`
+filter included) hard-clip beyond ~4× before mix-bus headroom runs out,
+and the symptoms of running over are speaker-damaging. If a user really
+wants more gain than 4× they almost certainly want it at mix-bus / track
+level (a future feature) rather than per clip — capping here surfaces
+that earlier rather than letting an unsafe value propagate into the
+render.
+
+**Why audio only, why fail loud on video / text.** `Clip.Video` has no
+`volume` field today (track-level mixing isn't modeled yet) and
+`Clip.Text` obviously has no audio. Silently no-op'ing on the wrong clip
+type would let the agent think its edit landed when nothing happened —
+worse UX than a loud error. When per-track audio mixing arrives, that
+gets its own tool with its own contract.
+
+**Why `0.0` mutes rather than removes.** Mute and remove are different
+intents. A `volume=0` clip stays addressable (e.g., for a future fade-in
+tool to ramp it back up); a removed clip is gone. The agent calls
+`remove_clip` when the user wants the clip *gone*.
+
+**Coverage.** `SetClipVolumeToolTest` — nine cases: happy-path with
+non-volume fields preserved, mute (`0.0`) without removal, amplification
+above `1.0`, video-clip rejection, text-clip rejection, negative-volume
+rejection with state-untouched check, above-cap (`5.0`) rejection,
+missing-clip fail-loud, and post-mutation `Part.TimelineSnapshot`.
+
+**Registration.** Added to all four composition roots (desktop, server,
+Android, iOS Swift) right after `TrimClipTool`. System prompt gained
+a "# Audio volume" section explaining the multiplier semantics, the
+mute-vs-remove distinction, and the audio-only contract. Key phrase
+`set_clip_volume` added to `TaleviaSystemPromptTest`.

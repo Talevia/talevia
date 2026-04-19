@@ -33,5 +33,7 @@ object DefaultPermissionRuleset {
         // ML enhancement (ASR / future upscale / colorize) uploads media to a third-party
         // provider. Ask the user the same way we ask for AIGC.
         PermissionRule(permission = "ml.transcribe", pattern = "*", action = PermissionAction.ASK),
+        // Vision describe lane — uploads image bytes to a multimodal provider.
+        PermissionRule(permission = "ml.describe", pattern = "*", action = PermissionAction.ASK),
     )
 }

@@ -24,16 +24,19 @@ import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.platform.VideoGenEngine
+import io.talevia.core.platform.VisionEngine
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.provider.openai.OpenAiImageGenEngine
 import io.talevia.core.provider.openai.OpenAiSoraVideoGenEngine
 import io.talevia.core.provider.openai.OpenAiTtsEngine
+import io.talevia.core.provider.openai.OpenAiVisionEngine
 import io.talevia.core.provider.openai.OpenAiWhisperEngine
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
 import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
+import io.talevia.core.tool.builtin.ml.DescribeAssetTool
 import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
@@ -64,6 +67,7 @@ import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
+import io.talevia.core.tool.builtin.video.SetClipVolumeTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
 import io.talevia.core.tool.builtin.video.TrimClipTool
 import io.talevia.platform.ffmpeg.FfmpegVideoEngine
@@ -132,6 +136,11 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         ?.takeIf { it.isNotBlank() }
         ?.let { OpenAiSoraVideoGenEngine(httpClient, it) }
 
+    /** Vision-describe engine for the ML lane, gated on the same `OPENAI_API_KEY`. */
+    val vision: VisionEngine? = env["OPENAI_API_KEY"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { OpenAiVisionEngine(httpClient, it) }
+
     /** JVM blob writer backing AIGC tools. Paired with [mediaRootDir]. */
     val blobWriter: MediaBlobWriter = FileBlobWriter(mediaRootDir)
 
@@ -143,6 +152,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(RemoveClipTool(projects))
         register(MoveClipTool(projects))
         register(TrimClipTool(projects, media))
+        register(SetClipVolumeTool(projects))
         register(ExportTool(projects, engine))
         register(ApplyFilterTool(projects))
         register(ApplyLutTool(projects, media))
@@ -171,6 +181,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         videoGen?.let { register(GenerateVideoTool(it, media, blobWriter, projects)) }
         tts?.let { register(SynthesizeSpeechTool(it, media, blobWriter, projects)) }
         asr?.let { register(TranscribeAssetTool(it, media)) }
+        vision?.let { register(DescribeAssetTool(it, media)) }
     }
 
     /** Provider registry built from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env. */
