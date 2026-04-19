@@ -2,6 +2,9 @@ package io.talevia.core
 
 import app.cash.sqldelight.driver.native.NativeSqliteDriver
 import io.talevia.core.db.TaleviaDb
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
+import kotlin.time.DurationUnit
 
 /**
  * Helpers exposed to Swift via SKIE so the iOS app composition root can stand up
@@ -54,3 +57,19 @@ fun clipIdRaw(id: ClipId): String = id.value
 
 fun callId(value: String): CallId = CallId(value)
 fun callIdRaw(id: CallId): String = id.value
+
+// =============================================================================
+// SKIE bridging: kotlin.time.Duration ↔ Double seconds / Long millis
+// =============================================================================
+//
+// `kotlin.time.Duration` surfaces through SKIE as an opaque KotlinDuration
+// wrapper — construction from Swift requires a Kotlin-side factory, and reading
+// the value back requires knowing which unit to request. Seconds + millis is
+// enough for AVFoundation consumers (`CMTime`/`CMTimeRange` want seconds as
+// Double, progress events want millis).
+
+fun durationOfSeconds(seconds: Double): Duration = seconds.seconds
+
+fun durationToSeconds(d: Duration): Double = d.toDouble(DurationUnit.SECONDS)
+
+fun durationToMillis(d: Duration): Long = d.inWholeMilliseconds
