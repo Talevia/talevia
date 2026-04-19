@@ -1,6 +1,7 @@
 package io.talevia.core.domain
 
 import io.talevia.core.ProjectId
+import io.talevia.core.domain.source.Source
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -8,6 +9,7 @@ data class Project(
     val id: ProjectId,
     val timeline: Timeline,
     val assets: List<MediaAsset> = emptyList(),
+    val source: Source = Source.EMPTY,
     val outputProfile: OutputProfile = OutputProfile.DEFAULT_1080P,
 )
 
