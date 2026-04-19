@@ -1,6 +1,7 @@
 package io.talevia.core.domain
 
 import io.talevia.core.ProjectId
+import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.source.Source
 import kotlinx.serialization.Serializable
 
@@ -11,6 +12,13 @@ data class Project(
     val assets: List<MediaAsset> = emptyList(),
     val source: Source = Source.EMPTY,
     val outputProfile: OutputProfile = OutputProfile.DEFAULT_1080P,
+    /**
+     * Per-project record of every AIGC production — the VISION §3.1 lockfile. Defaults
+     * empty so pre-lockfile projects decode without migration. AIGC tools append a
+     * [io.talevia.core.domain.lockfile.LockfileEntry] after each generation and check
+     * [Lockfile.findByInputHash] first to short-circuit redundant provider calls.
+     */
+    val lockfile: Lockfile = Lockfile.EMPTY,
 )
 
 @Serializable

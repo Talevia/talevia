@@ -202,6 +202,50 @@ class GenerateImageToolTest {
         assertEquals(listOf("mei"), result.data.appliedConsistencyBindingIds)
     }
 
+    @Test fun secondCallWithIdenticalInputsIsLockfileCacheHit() = runTest {
+        val tmpDir = createTempDirectory("gen-image-cache").toFile()
+        val engine = FakeImageGenEngine(tinyPng, fixedModelVersion = "v1")
+        val storage = InMemoryMediaStorage()
+        val writer = FakeBlobWriter(tmpDir)
+
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val projectId = ProjectId("p-cache")
+        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
+
+        val tool = GenerateImageTool(engine, storage, writer, store)
+        val input = GenerateImageTool.Input(
+            prompt = "a cat on a mat",
+            width = 64,
+            height = 48,
+            seed = 1234L,
+            projectId = projectId.value,
+        )
+
+        val first = tool.execute(input, ctx())
+        assertEquals(false, first.data.cacheHit)
+        val writesAfterFirst = writer.written.size
+
+        val second = tool.execute(input, ctx())
+        assertEquals(true, second.data.cacheHit, "identical inputs must hit the lockfile")
+        assertEquals(first.data.assetId, second.data.assetId, "cache hit must reuse the same asset id")
+        assertEquals(
+            writesAfterFirst,
+            writer.written.size,
+            "cache hit must not write new blob bytes",
+        )
+
+        // Change a field (seed) — should be a miss and regenerate a distinct asset.
+        val third = tool.execute(input.copy(seed = 9999L), ctx())
+        assertEquals(false, third.data.cacheHit)
+        assertTrue(third.data.assetId != first.data.assetId)
+
+        // Lockfile has 2 entries (original + third).
+        val lockfile = store.get(projectId)!!.lockfile
+        assertEquals(2, lockfile.entries.size)
+    }
+
     @Test fun consistencyBindingWithUnknownIdIsSkippedWithoutThrowing() = runTest {
         val tmpDir = createTempDirectory("gen-image-test-5").toFile()
         val engine = FakeImageGenEngine(tinyPng)
