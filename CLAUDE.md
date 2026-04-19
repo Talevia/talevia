@@ -68,6 +68,15 @@ Operational red lines. If a task seems to require any of these, stop and challen
 - ❌ Designing for hypothetical future needs (multi-agent coordinator, IDE bridge, plugin marketplace, etc.) without a concrete driver
 - ❌ Optimising for a single LLM provider at the cost of the provider abstraction
 
+## Platform priority — 当前阶段
+
+当下优先级：**macOS 桌面端先做到"相对完善可用"，再补其他平台**。
+
+- "相对完善可用"的判断：desktop 路径上 VISION §5 rubric 的每一节都至少达到"部分"及格线 —— source 层可用、工具集覆盖主要编辑意图、AIGC 产物可 pin、agent 能跑出可看初稿、专家能接管。
+- 在此之前，iOS / Android 只维持**不退化**（能编译、已有 E2E 测试继续通过），不主动扩新特性；Server 作为 desktop 的无头孪生同步演进。
+- 跨平台抽象（`core/platform` 接口、`ToolRegistry` 注册等）**不得**因为 desktop 赶进度而省略 —— 红线仍是 CommonMain 零平台依赖。
+- 任务梳理 / Gap-finding 时先按 VISION §5 打分，再按此平台优先级过滤候选项。
+
 ## OpenCode as a "runnable spec"
 
 OpenCode lives at `/Volumes/Code/CodingAgent/opencode`. Treat it as **behavioral reference**, not code to port:
