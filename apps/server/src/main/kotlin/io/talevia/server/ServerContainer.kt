@@ -10,7 +10,6 @@ import io.talevia.core.compaction.Compactor
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
-import io.talevia.core.permission.AllowAllPermissionService
 import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.MediaStorage
@@ -33,9 +32,13 @@ import io.talevia.platform.ffmpeg.FfmpegVideoEngine
  * Composition root for the server, mirrors `apps/desktop/AppContainer.kt`. Single
  * shared graph because v0 is single-tenant; multi-tenant isolation is a later concern.
  *
- * Permission strategy on the server side defaults to AllowAll because there's no
- * UI to prompt — the API surface should make permission decisions explicit per
- * request once we add auth, but for v0 this matches the stated "极简 headless" scope.
+ * Auth: if the `TALEVIA_SERVER_TOKEN` env var is non-empty, every HTTP request
+ * must carry `Authorization: Bearer <token>`; otherwise the server runs open
+ * (intended for local development only).
+ *
+ * Permissions: [ServerPermissionService] rejects any tool that would otherwise
+ * need to ASK the user — callers must grant the right permissions up-front via
+ * a session's `permissionRules` or accept the container's default ruleset.
  */
 class ServerContainer(env: Map<String, String> = System.getenv()) {
     val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
@@ -45,8 +48,11 @@ class ServerContainer(env: Map<String, String> = System.getenv()) {
     val projects: ProjectStore = SqlDelightProjectStore(db)
     val media: MediaStorage = InMemoryMediaStorage()
     val engine: VideoEngine = FfmpegVideoEngine(pathResolver = media)
-    val permissions = AllowAllPermissionService()
+    val permissions = ServerPermissionService(bus)
     val permissionRules = DefaultPermissionRuleset.rules
+
+    /** Bearer token required on every request when set. Empty = auth disabled. */
+    val authToken: String = env["TALEVIA_SERVER_TOKEN"].orEmpty()
 
     val tools: ToolRegistry = ToolRegistry().apply {
         register(ImportMediaTool(media, engine))

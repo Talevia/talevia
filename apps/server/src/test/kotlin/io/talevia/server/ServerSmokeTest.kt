@@ -3,10 +3,12 @@ package io.talevia.server
 import io.ktor.client.call.body
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
@@ -49,6 +51,30 @@ class ServerSmokeTest {
         val client = createClient { install(ContentNegotiation) { json() } }
         val resp = client.get("/sessions")
         assertEquals(HttpStatusCode.OK, resp.status)
+    }
+
+    @Test
+    fun authTokenRequiredWhenEnvSet() = testApplication {
+        application {
+            serverModule(ServerContainer(env = mapOf("TALEVIA_SERVER_TOKEN" to "secret-123")))
+        }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val unauthed = client.post("/sessions") {
+            contentType(ContentType.Application.Json)
+            setBody(CreateSessionRequest(projectId = "p-auth"))
+        }
+        assertEquals(HttpStatusCode.Unauthorized, unauthed.status)
+
+        val authed = client.post("/sessions") {
+            header(HttpHeaders.Authorization, "Bearer secret-123")
+            contentType(ContentType.Application.Json)
+            setBody(CreateSessionRequest(projectId = "p-auth"))
+        }
+        assertEquals(HttpStatusCode.OK, authed.status)
+
+        val health = client.get("/health")
+        assertEquals(HttpStatusCode.OK, health.status, "/health must bypass auth")
     }
 
     @Test

@@ -77,7 +77,6 @@ Ignore OpenCode's Effect.js Service/Layer/Context organisation, its TUI, Web UI,
 
 These are visible in code but not yet wired end-to-end (expected follow-ups, not bugs):
 - **iOS Swift side** — `AVFoundationVideoEngine.swift` is a compile-only stub. SKIE bridging for value classes / `fun interface` / `Duration` needs a small iosMain helper before the real implementation can land. See `docs/IOS_INTEGRATION.md`.
-- **Server permissions** — uses `AllowAllPermissionService`; no auth model.
 
 If a task touches one of these, expect to wire it up rather than work around it.
 

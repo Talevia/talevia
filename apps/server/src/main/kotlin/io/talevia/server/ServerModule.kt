@@ -1,11 +1,15 @@
 package io.talevia.server
 
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
+import io.ktor.server.application.createApplicationPlugin
+import io.ktor.server.application.hooks.CallSetup
 import io.ktor.server.application.install
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
+import io.ktor.server.request.path
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondTextWriter
@@ -19,6 +23,7 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.agent.RunInput
 import io.talevia.core.bus.BusEvent
+import io.talevia.core.permission.PermissionRule
 import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
@@ -62,7 +67,28 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
         }
     }
 
+    // Bearer-token gate. When TALEVIA_SERVER_TOKEN is empty (dev mode) the
+    // plugin is not installed; otherwise every non-health request must carry
+    // a matching Authorization: Bearer header.
+    if (container.authToken.isNotEmpty()) {
+        val expected = "Bearer ${container.authToken}"
+        val bearerAuth = createApplicationPlugin("BearerAuth") {
+            on(CallSetup) { call ->
+                if (call.request.path() == "/health") return@on
+                val header = call.request.headers[HttpHeaders.Authorization]
+                if (header != expected) {
+                    call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "missing or invalid bearer token"))
+                }
+            }
+        }
+        install(bearerAuth)
+    }
+
     routing {
+        get("/health") {
+            call.respond(mapOf("status" to "ok"))
+        }
+
         post("/sessions") {
             val req = call.receive<CreateSessionRequest>()
             val now = Clock.System.now()
@@ -71,6 +97,7 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
                 id = sid,
                 projectId = io.talevia.core.ProjectId(req.projectId),
                 title = req.title ?: "Untitled",
+                permissionRules = req.permissionRules.orEmpty(),
                 createdAt = now,
                 updatedAt = now,
             )
@@ -127,6 +154,12 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
             val modelId = body.modelId ?: defaultModelFor(providerId)
             val correlationId = Uuid.random().toString()
 
+            // Merge session-specific rules with the container baseline. Session
+            // rules come first so an explicit DENY on a session overrides a
+            // broader ALLOW in the defaults during evaluation.
+            val session = container.sessions.getSession(sid)
+            val rules = (session?.permissionRules.orEmpty()) + container.permissionRules
+
             agentScope.launch {
                 runCatching {
                     agent.run(
@@ -134,7 +167,7 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
                             sessionId = sid,
                             text = body.text,
                             model = ModelRef(providerId, modelId),
-                            permissionRules = container.permissionRules,
+                            permissionRules = rules,
                         ),
                     )
                 }
@@ -188,7 +221,11 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.PermissionReplied -> "permission.replied"
 }
 
-@Serializable data class CreateSessionRequest(val projectId: String, val title: String? = null)
+@Serializable data class CreateSessionRequest(
+    val projectId: String,
+    val title: String? = null,
+    val permissionRules: List<PermissionRule>? = null,
+)
 @Serializable data class CreateSessionResponse(val sessionId: String)
 @Serializable data class AppendTextRequest(
     val text: String,
