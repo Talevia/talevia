@@ -354,25 +354,66 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
         return
     }
 
-    val sessionId = remember { SessionId(Uuid.random().toString()) }
-    val sessionBootstrapped = remember { androidx.compose.runtime.mutableStateOf(false) }
-    val chatLines = remember { mutableStateListOf<ChatLine>() }
-    var prompt by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
+    // Session restore: look up the most-recent session for this project and
+    // reuse it so chat history survives app restarts. Create a fresh one only
+    // when the project has no prior sessions. Keyed on projectId so switching
+    // projects swaps the thread (each project keeps its own chat stream).
+    val sessionId = remember(projectId) {
+        androidx.compose.runtime.mutableStateOf(SessionId(Uuid.random().toString()))
+    }
+    val sessionBootstrapped = remember(projectId) { androidx.compose.runtime.mutableStateOf(false) }
+    val chatLines = remember(projectId) { mutableStateListOf<ChatLine>() }
+    var prompt by remember(projectId) { mutableStateOf("") }
+    var busy by remember(projectId) { mutableStateOf(false) }
 
-    // Bootstrap: persist an empty Session so Agent.run has a row to append to.
-    remember {
+    // Bootstrap: prefer the most-recent persisted session for this project;
+    // otherwise mint a fresh one and persist it so Agent.run has a row to
+    // append to. Also replays stored parts so the visible history survives
+    // restarts.
+    remember(projectId) {
         scope.launch {
-            container.sessions.createSession(
-                Session(
-                    id = sessionId,
-                    projectId = projectId,
-                    title = "Chat",
-                    createdAt = Clock.System.now(),
-                    updatedAt = Clock.System.now(),
-                ),
-            )
-            sessionBootstrapped.value = true
+            val existing = container.sessions.listSessions(projectId)
+                .filter { !it.archived }
+                .maxByOrNull { it.updatedAt }
+            if (existing != null) {
+                sessionId.value = existing.id
+                // Replay stored parts into the visible chatLines.
+                runCatching {
+                    container.sessions.listSessionParts(existing.id, includeCompacted = false)
+                        .forEach { p ->
+                            when (p) {
+                                is Part.Text -> chatLines += ChatLine("assistant", p.text.take(400))
+                                is Part.Tool -> {
+                                    val st = p.state
+                                    val path = if (st is io.talevia.core.session.ToolState.Completed) {
+                                        runCatching { resolveOpenablePath(container, st.data) }.getOrNull()
+                                    } else {
+                                        null
+                                    }
+                                    chatLines += ChatLine(
+                                        role = "tool/${p.toolId}",
+                                        text = "→ ${p.state::class.simpleName}" + (path?.let { " · $it" } ?: ""),
+                                        openPath = path,
+                                    )
+                                }
+                                else -> {}
+                            }
+                        }
+                }
+                sessionBootstrapped.value = true
+                log += "resumed session ${existing.id.value.take(8)} · ${chatLines.size} line(s)"
+            } else {
+                container.sessions.createSession(
+                    Session(
+                        id = sessionId.value,
+                        projectId = projectId,
+                        title = "Chat",
+                        createdAt = Clock.System.now(),
+                        updatedAt = Clock.System.now(),
+                    ),
+                )
+                sessionBootstrapped.value = true
+            }
         }
     }
 
@@ -386,7 +427,7 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
             container.bus.subscribe<BusEvent.PartUpdated>()
                 .filterIsInstance<BusEvent.PartUpdated>()
                 .collect { ev ->
-                    if (ev.sessionId != sessionId) return@collect
+                    if (ev.sessionId != sessionId.value) return@collect
                     val line: ChatLine? = when (val p = ev.part) {
                         is Part.Text -> ChatLine("assistant", p.text.take(400))
                         is Part.Tool -> {
@@ -454,7 +495,7 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
                 runCatching {
                     agent.run(
                         RunInput(
-                            sessionId = sessionId,
+                            sessionId = sessionId.value,
                             text = text,
                             model = ModelRef(provider.id, defaultModelFor(provider.id)),
                             permissionRules = container.permissionRules.toList(),
