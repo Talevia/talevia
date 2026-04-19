@@ -1,7 +1,11 @@
 import AVFoundation
 import CoreMedia
 import Foundation
+import ImageIO
+import MobileCoreServices
 import TaleviaCore
+import UIKit
+import UniformTypeIdentifiers
 
 /// One-line helper for the `NSError` shape the Kotlin side sees on failed
 /// suspend calls. Keeps the concrete engine methods readable.
@@ -134,7 +138,71 @@ final class AVFoundationVideoEngine: NSObject, VideoEngine {
         time: Int64,
         completionHandler: @escaping @Sendable (KotlinByteArray?, (any Error)?) -> Void
     ) {
-        completionHandler(nil, avfError("thumbnail: not yet implemented — lands in commit B3"))
+        // `time` is kotlin.time.Duration nanoseconds (see IosBridges comments).
+        // Convert → CMTime via seconds for AVAssetImageGenerator.
+        let seconds = IosBridgesKt.durationToSeconds(d: time)
+
+        let path: String
+        switch onEnum(of: source) {
+        case .file(let file):
+            path = file.path
+        case .http:
+            completionHandler(nil, avfError("Http MediaSource not supported (download first)"))
+            return
+        case .platform(let platform):
+            completionHandler(nil, avfError("Platform MediaSource (\(platform.scheme)) not resolvable in AVFoundationVideoEngine"))
+            return
+        }
+
+        let url = URL(fileURLWithPath: path)
+        let asset = AVURLAsset(url: url)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        // Allow any frame, not just keyframes — callers often want a frame at
+        // a precise timecode (e.g. thumbnail of a clipped segment's start).
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+
+        let requestTime = CMTime(seconds: seconds, preferredTimescale: 600)
+
+        // Use the synchronous `copyCGImage(at:actualTime:)` API wrapped on a
+        // background thread. The async `image(at:)` variant is iOS 16+ but
+        // isn't uniformly stable across Xcode toolchain versions; the
+        // synchronous path is the well-trodden route and the work happens
+        // off-main via `Task.detached`.
+        Task.detached {
+            do {
+                var actualTime = CMTime.zero
+                let cgImage = try generator.copyCGImage(at: requestTime, actualTime: &actualTime)
+                // CGImage → PNG bytes. Using CGImageDestination avoids pulling
+                // UIImage into the render path (which would block on
+                // UIKit's main-thread assumptions for some operations).
+                let data = NSMutableData()
+                guard let destination = CGImageDestinationCreateWithData(
+                    data, UTType.png.identifier as CFString, 1, nil
+                ) else {
+                    completionHandler(nil, avfError("CGImageDestination creation failed"))
+                    return
+                }
+                CGImageDestinationAddImage(destination, cgImage, nil)
+                guard CGImageDestinationFinalize(destination) else {
+                    completionHandler(nil, avfError("CGImageDestination finalize failed"))
+                    return
+                }
+
+                // Transfer NSData → Kotlin ByteArray.
+                let bytes = data as Data
+                let kotlinBytes = KotlinByteArray(size: Int32(bytes.count))
+                for (i, byte) in bytes.enumerated() {
+                    // Byte is unsigned in Swift's Data but Kotlin's Byte is
+                    // signed. Reinterpret bit-pattern via Int8 cast.
+                    kotlinBytes.set(index: Int32(i), value: Int8(bitPattern: byte))
+                }
+                completionHandler(kotlinBytes, nil)
+            } catch {
+                completionHandler(nil, error)
+            }
+        }
     }
     // swiftlint:enable identifier_name
 
