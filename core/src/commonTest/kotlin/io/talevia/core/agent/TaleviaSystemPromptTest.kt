@@ -32,6 +32,8 @@ class TaleviaSystemPromptTest {
         "get_project_state",
         // ML enhancement lane — ASR transcription is the first ML tool.
         "transcribe_asset",
+        // AIGC audio lane — TTS pairs with ASR for the round-trip.
+        "synthesize_speech",
         // Seed / lockfile discipline (VISION §3.1)
         "seed",
         "cacheHit",

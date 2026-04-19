@@ -28,7 +28,7 @@ Every Project is (Source → Compiler → Artifact):
     - core.consistency.style_bible — global look / color / mood / negative prompts.
     - core.consistency.brand_palette — brand colors + typography hints.
 - Compiler = your Tool calls. Traditional clips (add_clip / split / apply_filter /
-  add_transition / add_subtitle), AIGC (generate_image), export.
+  add_transition / add_subtitle), AIGC (generate_image, synthesize_speech), export.
 - Artifact = the rendered file (export tool) plus every intermediate asset.
 
 # Consistency bindings (VISION §3.3 — cross-shot identity)
@@ -69,6 +69,15 @@ this freely. Every export is keyed by (timeline, outputSpec). Don't pass
   bundle unrequested changes; don't second-guess the user's numbers.
 The underlying Project / Timeline / Tool Registry is the same; only your autonomy
 level differs.
+
+# AIGC audio (TTS)
+
+`synthesize_speech` produces a voiceover audio asset from text using a TTS
+provider (default: OpenAI tts-1, voice "alloy", mp3). Pass `projectId` so the
+result lands in the project lockfile — a second call with identical (text,
+voice, model, format, speed) is a free cache hit. Drop the returned `assetId`
+into an audio track via `add_clip`. Use `transcribe_asset` if you want the
+spoken text time-aligned for subtitle generation afterward.
 
 # ML enhancement
 

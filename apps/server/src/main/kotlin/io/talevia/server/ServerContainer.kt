@@ -23,15 +23,18 @@ import io.talevia.core.platform.InMemorySecretStore
 import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.SecretStore
+import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.provider.LlmProvider
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.provider.openai.OpenAiImageGenEngine
+import io.talevia.core.provider.openai.OpenAiTtsEngine
 import io.talevia.core.provider.openai.OpenAiWhisperEngine
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
+import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
 import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
@@ -132,6 +135,15 @@ class ServerContainer(
         ?.takeIf { it.isNotBlank() }
         ?.let { OpenAiWhisperEngine(httpClient, it) }
 
+    /**
+     * TTS engine for the AIGC audio lane. Same conditional pattern as [imageGen]
+     * and [asr] — present only when `OPENAI_API_KEY` is set, so headless
+     * deployments without it simply don't expose `synthesize_speech`.
+     */
+    val tts: TtsEngine? = env["OPENAI_API_KEY"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { OpenAiTtsEngine(httpClient, it) }
+
     /** JVM blob writer backing AIGC tools. */
     val blobWriter: MediaBlobWriter = FileBlobWriter(mediaRootDir)
 
@@ -154,6 +166,7 @@ class ServerContainer(
         register(ListSourceNodesTool(projects))
         register(RemoveSourceNodeTool(projects))
         imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
+        tts?.let { register(SynthesizeSpeechTool(it, media, blobWriter, projects)) }
         asr?.let { register(TranscribeAssetTool(it, media)) }
     }
 
