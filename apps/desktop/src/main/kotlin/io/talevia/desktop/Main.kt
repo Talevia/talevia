@@ -51,6 +51,7 @@ import io.talevia.core.domain.Timeline
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
 import io.talevia.core.session.Session
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
@@ -136,6 +137,7 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
     val log = remember { mutableStateListOf<String>() }
     val assets = remember { mutableStateListOf<String>() }
     var renderProgress by remember { mutableStateOf<Float?>(null) }
+    var renderMessage by remember { mutableStateOf<String?>(null) }
     var importPath by remember { mutableStateOf("") }
     var exportPath by remember { mutableStateOf(System.getProperty("user.home") + "/talevia-export.mp4") }
     // Resolution override for the Export button. "Project" means "fall through to the
@@ -187,7 +189,15 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
             when (val p = ev.part) {
                 is Part.RenderProgress -> {
                     renderProgress = p.ratio
+                    renderMessage = p.message
                     if (p.message != null) log += "render · ${"%.0f".format(p.ratio * 100)}% ${p.message}"
+                    if (p.ratio >= 1f) {
+                        scope.launch {
+                            delay(1_200)
+                            renderProgress = null
+                            renderMessage = null
+                        }
+                    }
                 }
                 is Part.Tool -> {
                     val state = p.state
@@ -398,7 +408,30 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Export  (⌘E)") }
                 Spacer(Modifier.height(6.dp))
-                renderProgress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+                renderProgress?.let { ratio ->
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                text = "${"%.0f".format(ratio * 100)}%",
+                                fontFamily = FontFamily.Monospace,
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                            renderMessage?.let { msg ->
+                                Text(
+                                    text = "  ·  $msg",
+                                    fontFamily = FontFamily.Monospace,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color(0xFF555555),
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                        LinearProgressIndicator(progress = { ratio }, modifier = Modifier.fillMaxWidth())
+                    }
+                }
 
                 Spacer(Modifier.height(12.dp))
                 VideoPreviewPanel(
