@@ -26,6 +26,8 @@ class TaleviaSystemPromptTest {
         // is told to pass — the prompt-fold logic is dead without these tools.
         "define_character_ref",
         "list_source_nodes",
+        // parentIds — cross-refs in the source DAG (VISION §3.3 / §5.1).
+        "parentIds",
         // Project lifecycle — the agent must know it can bootstrap projects itself.
         "create_project",
         "list_projects",

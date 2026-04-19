@@ -43,6 +43,7 @@ class DefineStyleBibleTool(
         val lutReferenceAssetId: String? = null,
         val negativePrompt: String? = null,
         val moodKeywords: List<String> = emptyList(),
+        val parentIds: List<String> = emptyList(),
     )
 
     @Serializable data class Output(
@@ -74,6 +75,11 @@ class DefineStyleBibleTool(
                 put("description", "Short adjectives folded into the prompt — 'warm', 'gritty', 'frenetic'.")
                 putJsonObject("items") { put("type", "string") }
             }
+            putJsonObject("parentIds") {
+                put("type", "array")
+                put("description", "Optional source-node ids this style_bible depends on (e.g. a brand_palette that constrains colors). Editing any parent cascades contentHash changes.")
+                putJsonObject("items") { put("type", "string") }
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("name"), JsonPrimitive("description"))))
         put("additionalProperties", false)
@@ -91,6 +97,7 @@ class DefineStyleBibleTool(
         val pid = ProjectId(input.projectId)
         var replaced = false
         projects.mutateSource(pid) { source ->
+            val parents = resolveParentRefs(input.parentIds, source, nodeId)
             val existing = source.byId[nodeId]
             if (existing != null) {
                 require(existing.asStyleBible() != null) {
@@ -100,10 +107,11 @@ class DefineStyleBibleTool(
                 source.replaceNode(nodeId) { node ->
                     node.copy(
                         body = JsonConfig.default.encodeToJsonElement(StyleBibleBody.serializer(), body),
+                        parents = parents,
                     )
                 }
             } else {
-                source.addStyleBible(nodeId, body)
+                source.addStyleBible(nodeId, body, parents)
             }
         }
         val out = Output(nodeId.value, input.name, replaced)

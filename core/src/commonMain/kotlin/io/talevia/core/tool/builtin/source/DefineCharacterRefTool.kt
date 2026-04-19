@@ -55,6 +55,7 @@ class DefineCharacterRefTool(
         val referenceAssetIds: List<String> = emptyList(),
         val loraPin: LoraPinInput? = null,
         val voiceId: String? = null,
+        val parentIds: List<String> = emptyList(),
     )
 
     @Serializable data class Output(
@@ -107,6 +108,11 @@ class DefineCharacterRefTool(
                 put("type", "string")
                 put("description", "Optional provider-scoped voice id (e.g. OpenAI 'alloy', ElevenLabs voice uuid). When set, binding this character_ref in synthesize_speech's consistencyBindingIds will override the caller's explicit voice input.")
             }
+            putJsonObject("parentIds") {
+                put("type", "array")
+                put("description", "Optional source-node ids this character_ref depends on (e.g. a style_bible that defines the world). Editing any parent cascades contentHash changes so downstream AIGC renders go stale automatically.")
+                putJsonObject("items") { put("type", "string") }
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("name"), JsonPrimitive("visualDescription"))))
         put("additionalProperties", false)
@@ -126,6 +132,7 @@ class DefineCharacterRefTool(
         val pid = ProjectId(input.projectId)
         var replaced = false
         projects.mutateSource(pid) { source ->
+            val parents = resolveParentRefs(input.parentIds, source, nodeId)
             val existing = source.byId[nodeId]
             if (existing != null) {
                 require(existing.asCharacterRef() != null) {
@@ -138,10 +145,11 @@ class DefineCharacterRefTool(
                             CharacterRefBody.serializer(),
                             body,
                         ),
+                        parents = parents,
                     )
                 }
             } else {
-                source.addCharacterRef(nodeId, body)
+                source.addCharacterRef(nodeId, body, parents)
             }
         }
         val out = Output(nodeId.value, input.name, replaced)

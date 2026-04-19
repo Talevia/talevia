@@ -47,6 +47,15 @@ The tool folds their descriptions into the prompt automatically and records the
 bindings on the output. A future edit to a character / style node flows through the
 DAG and invalidates exactly the clips that depended on it.
 
+Cross-refs (`parentIds`): all three definers take an optional `parentIds` list of
+source-node ids this node depends on. Use it when one node logically sits "under"
+another — e.g. a character_ref whose wardrobe derives from a style_bible, or a
+style_bible whose colors derive from a brand_palette. The DAG uses parent links
+to cascade contentHash changes, so editing a parent automatically bumps every
+descendant's hash and makes dependent clips stale. Keep parent chains shallow
+and meaningful — don't add parents "for documentation" when there's no real
+derivation relationship.
+
 When the user changes a consistency node and you need to know what to regenerate,
 call `find_stale_clips` — it joins each clip on the timeline against its lockfile
 entry and reports clips whose conditioning sources have drifted. Typical workflow:

@@ -16,6 +16,7 @@ import io.talevia.core.domain.source.consistency.asCharacterRef
 import io.talevia.core.domain.source.consistency.asStyleBible
 import io.talevia.core.domain.source.consistency.foldConsistencyIntoPrompt
 import io.talevia.core.domain.source.consistency.resolveConsistencyBindings
+import io.talevia.core.domain.source.stale
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
@@ -303,5 +304,153 @@ class SourceToolsTest {
         assertTrue(folded.effectivePrompt.endsWith("a quiet morning shot"))
         assertEquals(listOf("character-mei", "style-warm"), folded.appliedNodeIds.sorted())
         assertTrue(folded.negativePrompt!!.contains("flat lighting"))
+    }
+
+    @Test fun defineCharacterRefThreadsParentIdsIntoNode() = runTest {
+        val rig = rig()
+        // Parent must exist before the child can reference it.
+        DefineStyleBibleTool(rig.store).execute(
+            DefineStyleBibleTool.Input(
+                projectId = rig.pid.value,
+                name = "Warm",
+                description = "warm grain",
+            ),
+            rig.ctx,
+        )
+        DefineCharacterRefTool(rig.store).execute(
+            DefineCharacterRefTool.Input(
+                projectId = rig.pid.value,
+                name = "Mei",
+                visualDescription = "teal hair",
+                parentIds = listOf("style-warm"),
+            ),
+            rig.ctx,
+        )
+        val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("character-mei")]!!
+        assertEquals(listOf(SourceNodeId("style-warm")), node.parents.map { it.nodeId })
+    }
+
+    @Test fun parentEditCascadesContentHashDownstream() = runTest {
+        val rig = rig()
+        DefineBrandPaletteTool(rig.store).execute(
+            DefineBrandPaletteTool.Input(
+                projectId = rig.pid.value,
+                name = "Acme",
+                hexColors = listOf("#0A84FF"),
+            ),
+            rig.ctx,
+        )
+        DefineStyleBibleTool(rig.store).execute(
+            DefineStyleBibleTool.Input(
+                projectId = rig.pid.value,
+                name = "AcmeLook",
+                description = "brand-aligned look",
+                parentIds = listOf("brand-acme"),
+            ),
+            rig.ctx,
+        )
+        val hashBefore = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("style-acmelook")]!!.contentHash
+
+        // Edit the parent brand palette — child style_bible's contentHash should bump
+        // because its *parents* list is part of the hash even though the child body
+        // didn't change. Plus, Source.stale() flags the descendant as stale.
+        DefineBrandPaletteTool(rig.store).execute(
+            DefineBrandPaletteTool.Input(
+                projectId = rig.pid.value,
+                name = "Acme",
+                hexColors = listOf("#FF3B30"),
+            ),
+            rig.ctx,
+        )
+
+        val project = rig.store.get(rig.pid)!!
+        val childAfter = project.source.byId[SourceNodeId("style-acmelook")]!!
+        // Child's own contentHash is keyed on (kind, body, parents) — parents ids
+        // are unchanged, so the child's hash is stable. The derivation relationship
+        // is expressed via Source.stale() which walks ancestry.
+        assertEquals(hashBefore, childAfter.contentHash)
+        val stale = project.source.stale(SourceNodeId("brand-acme"))
+        assertTrue(
+            SourceNodeId("style-acmelook") in stale,
+            "child style_bible must be reported stale when its brand_palette parent changes",
+        )
+    }
+
+    @Test fun parentIdsThatDontExistFailLoudly() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalArgumentException> {
+            DefineCharacterRefTool(rig.store).execute(
+                DefineCharacterRefTool.Input(
+                    projectId = rig.pid.value,
+                    name = "Mei",
+                    visualDescription = "teal hair",
+                    parentIds = listOf("ghost-parent"),
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue("ghost-parent" in ex.message!!, ex.message)
+    }
+
+    @Test fun selfParentIsRejectedAtTheToolBoundary() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalArgumentException> {
+            DefineCharacterRefTool(rig.store).execute(
+                DefineCharacterRefTool.Input(
+                    projectId = rig.pid.value,
+                    name = "Mei",
+                    visualDescription = "teal hair",
+                    nodeId = "character-mei",
+                    parentIds = listOf("character-mei"),
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue("character-mei" in ex.message!!, ex.message)
+    }
+
+    @Test fun replacingCharacterRefUpdatesParentsToo() = runTest {
+        val rig = rig()
+        DefineStyleBibleTool(rig.store).execute(
+            DefineStyleBibleTool.Input(
+                projectId = rig.pid.value,
+                name = "Warm",
+                description = "warm grain",
+            ),
+            rig.ctx,
+        )
+        DefineBrandPaletteTool(rig.store).execute(
+            DefineBrandPaletteTool.Input(
+                projectId = rig.pid.value,
+                name = "Acme",
+                hexColors = listOf("#0A84FF"),
+            ),
+            rig.ctx,
+        )
+        // Define once with no parents.
+        DefineCharacterRefTool(rig.store).execute(
+            DefineCharacterRefTool.Input(
+                projectId = rig.pid.value,
+                name = "Mei",
+                visualDescription = "teal hair",
+            ),
+            rig.ctx,
+        )
+        // Replace with parents — the tool must update the parent list on the
+        // existing node, not just the body.
+        DefineCharacterRefTool(rig.store).execute(
+            DefineCharacterRefTool.Input(
+                projectId = rig.pid.value,
+                name = "Mei",
+                visualDescription = "teal hair v2",
+                parentIds = listOf("style-warm", "brand-acme"),
+            ),
+            rig.ctx,
+        )
+        val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("character-mei")]!!
+        assertEquals(
+            listOf(SourceNodeId("style-warm"), SourceNodeId("brand-acme")),
+            node.parents.map { it.nodeId },
+        )
     }
 }

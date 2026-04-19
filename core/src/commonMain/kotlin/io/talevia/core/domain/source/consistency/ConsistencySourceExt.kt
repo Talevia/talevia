@@ -4,6 +4,7 @@ import io.talevia.core.JsonConfig
 import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.source.Source
 import io.talevia.core.domain.source.SourceNode
+import io.talevia.core.domain.source.SourceRef
 import io.talevia.core.domain.source.addNode
 import kotlinx.serialization.json.Json
 
@@ -17,30 +18,45 @@ private val json: Json = JsonConfig.default
 
 // region — writers
 
-fun Source.addCharacterRef(id: SourceNodeId, body: CharacterRefBody): Source =
+fun Source.addCharacterRef(
+    id: SourceNodeId,
+    body: CharacterRefBody,
+    parents: List<SourceRef> = emptyList(),
+): Source =
     addNode(
         SourceNode(
             id = id,
             kind = ConsistencyKinds.CHARACTER_REF,
             body = json.encodeToJsonElement(CharacterRefBody.serializer(), body),
+            parents = parents,
         ),
     )
 
-fun Source.addStyleBible(id: SourceNodeId, body: StyleBibleBody): Source =
+fun Source.addStyleBible(
+    id: SourceNodeId,
+    body: StyleBibleBody,
+    parents: List<SourceRef> = emptyList(),
+): Source =
     addNode(
         SourceNode(
             id = id,
             kind = ConsistencyKinds.STYLE_BIBLE,
             body = json.encodeToJsonElement(StyleBibleBody.serializer(), body),
+            parents = parents,
         ),
     )
 
-fun Source.addBrandPalette(id: SourceNodeId, body: BrandPaletteBody): Source =
+fun Source.addBrandPalette(
+    id: SourceNodeId,
+    body: BrandPaletteBody,
+    parents: List<SourceRef> = emptyList(),
+): Source =
     addNode(
         SourceNode(
             id = id,
             kind = ConsistencyKinds.BRAND_PALETTE,
             body = json.encodeToJsonElement(BrandPaletteBody.serializer(), body),
+            parents = parents,
         ),
     )
 

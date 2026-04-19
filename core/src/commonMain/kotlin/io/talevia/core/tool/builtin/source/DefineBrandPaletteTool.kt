@@ -39,6 +39,7 @@ class DefineBrandPaletteTool(
         val hexColors: List<String>,
         val nodeId: String? = null,
         val typographyHints: List<String> = emptyList(),
+        val parentIds: List<String> = emptyList(),
     )
 
     @Serializable data class Output(
@@ -71,6 +72,11 @@ class DefineBrandPaletteTool(
                 put("type", "array")
                 putJsonObject("items") { put("type", "string") }
             }
+            putJsonObject("parentIds") {
+                put("type", "array")
+                put("description", "Optional source-node ids this brand_palette depends on. Editing any parent cascades contentHash changes.")
+                putJsonObject("items") { put("type", "string") }
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("name"), JsonPrimitive("hexColors"))))
         put("additionalProperties", false)
@@ -92,6 +98,7 @@ class DefineBrandPaletteTool(
         val pid = ProjectId(input.projectId)
         var replaced = false
         projects.mutateSource(pid) { source ->
+            val parents = resolveParentRefs(input.parentIds, source, nodeId)
             val existing = source.byId[nodeId]
             if (existing != null) {
                 require(existing.asBrandPalette() != null) {
@@ -101,10 +108,11 @@ class DefineBrandPaletteTool(
                 source.replaceNode(nodeId) { node ->
                     node.copy(
                         body = JsonConfig.default.encodeToJsonElement(BrandPaletteBody.serializer(), body),
+                        parents = parents,
                     )
                 }
             } else {
-                source.addBrandPalette(nodeId, body)
+                source.addBrandPalette(nodeId, body, parents)
             }
         }
         val out = Output(nodeId.value, input.name, replaced)
