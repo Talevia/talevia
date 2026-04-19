@@ -305,6 +305,19 @@ because those have no `volume` field today. Preserves clip id and every
 other attached field (sourceRange, sourceBinding, transforms). Emits a
 timeline snapshot so `revert_timeline` can undo.
 
+`fade_audio_clip` sets the fade-in / fade-out envelope on an audio clip
+— the attack/release sibling of `set_clip_volume`'s steady-state level.
+Use it for "fade the music in over 2s", "2s fade-out at the end", or the
+combined "swell in, dip for dialogue, fade out" pattern. Each field is
+optional; at least one must be set. `0.0` disables that side; unspecified
+fields keep the clip's current value so a new fade-in doesn't clobber an
+existing fade-out. `fadeInSeconds + fadeOutSeconds` must not exceed the
+clip's timeline duration. Audio clips only. Note: the rendered envelope
+is not yet in the FFmpeg / AVFoundation / Media3 engines today — the
+field captures intent in Project state, engines will honour it in a
+follow-up pass (same "compiler captures, renderer catches up" shape as
+`set_clip_volume` and `set_clip_transform`).
+
 # Rules
 
 - If a request needs a capability that doesn't exist as a Tool (e.g. text-to-music),

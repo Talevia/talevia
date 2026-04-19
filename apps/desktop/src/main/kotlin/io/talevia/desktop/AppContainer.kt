@@ -63,6 +63,7 @@ import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ExtractFrameTool
+import io.talevia.core.tool.builtin.video.FadeAudioClipTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
@@ -156,6 +157,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(MoveClipTool(projects))
         register(TrimClipTool(projects, media))
         register(SetClipVolumeTool(projects))
+        register(FadeAudioClipTool(projects))
         register(SetClipTransformTool(projects))
         register(ExportTool(projects, engine))
         register(ApplyFilterTool(projects))

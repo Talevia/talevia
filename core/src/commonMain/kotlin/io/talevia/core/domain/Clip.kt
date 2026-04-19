@@ -45,6 +45,20 @@ sealed class Clip {
         override val transforms: List<Transform> = emptyList(),
         val assetId: AssetId,
         val volume: Float = 1.0f,
+        /**
+         * Fade-in ramp length at the clip's head, in seconds. `0.0` disables.
+         * Must be `<= timeRange.duration`; the engine applies a linear-to-[volume]
+         * envelope over the first [fadeInSeconds] of playback. Complements [volume]:
+         * set the steady-state level with `volume`, shape attack/release with the
+         * fade fields.
+         */
+        val fadeInSeconds: Float = 0.0f,
+        /**
+         * Fade-out ramp length at the clip's tail, in seconds. `0.0` disables.
+         * `fadeInSeconds + fadeOutSeconds` must not exceed `timeRange.duration`
+         * (otherwise the fades would overlap, which has no well-defined envelope).
+         */
+        val fadeOutSeconds: Float = 0.0f,
         override val sourceBinding: Set<SourceNodeId> = emptySet(),
     ) : Clip()
 
