@@ -210,6 +210,117 @@ class RegenerateStaleClipsToolTest {
         assertEquals(1, engine.calls, "engine must have been invoked exactly once for the single stale clip")
     }
 
+    @Test fun clipIdsFilterRegeneratesOnlyListedClips() = runTest {
+        val tmpDir = createTempDirectory("regen-filter").toFile()
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val storage = InMemoryMediaStorage()
+        val engine = CountingImageEngine()
+        val writer = FakeBlobWriter(tmpDir)
+        val pid = ProjectId("p-filter")
+
+        val registry = ToolRegistry()
+        registry.register(GenerateImageTool(engine, storage, writer, store))
+        registry.register(RegenerateStaleClipsTool(store, registry))
+
+        // Two clips, both stale, both bound to "mei" via lockfile snapshots.
+        val clips = listOf(
+            Clip.Video(
+                id = ClipId("c-keep"),
+                timeRange = TimeRange(0.seconds, 1.seconds),
+                sourceRange = TimeRange(0.seconds, 1.seconds),
+                assetId = AssetId("a-keep"),
+                sourceBinding = setOf(SourceNodeId("mei")),
+            ),
+            Clip.Video(
+                id = ClipId("c-skip"),
+                timeRange = TimeRange(1.seconds, 1.seconds),
+                sourceRange = TimeRange(0.seconds, 1.seconds),
+                assetId = AssetId("a-skip"),
+                sourceBinding = setOf(SourceNodeId("mei")),
+            ),
+        )
+        store.upsert(
+            "demo",
+            Project(
+                id = pid,
+                timeline = Timeline(
+                    tracks = listOf(Track.Video(id = TrackId("v"), clips = clips)),
+                    duration = 2.seconds,
+                ),
+            ),
+        )
+        store.mutateSource(pid) {
+            it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Mei", visualDescription = "teal"))
+        }
+        val originalHash = store.get(pid)!!.source.byId[SourceNodeId("mei")]!!.contentHash
+        val originalInputs = buildJsonObject {
+            put("prompt", "portrait of Mei")
+            put("model", "gpt-image-1")
+            put("width", 512)
+            put("height", 512)
+            put("seed", 42L)
+            put("projectId", pid.value)
+            put("consistencyBindingIds", JsonConfig.default.parseToJsonElement("""["mei"]"""))
+        }
+        for (clip in clips) {
+            store.mutate(pid) { p ->
+                p.copy(
+                    lockfile = p.lockfile.append(
+                        LockfileEntry(
+                            inputHash = "h-${clip.id.value}",
+                            toolId = "generate_image",
+                            assetId = clip.assetId,
+                            provenance = GenerationProvenance(
+                                providerId = "fake",
+                                modelId = "gpt-image-1",
+                                modelVersion = null,
+                                seed = 42L,
+                                parameters = JsonObject(emptyMap()),
+                                createdAtEpochMs = 0L,
+                            ),
+                            sourceBinding = setOf(SourceNodeId("mei")),
+                            sourceContentHashes = mapOf(SourceNodeId("mei") to originalHash),
+                            baseInputs = originalInputs,
+                        ),
+                    ),
+                )
+            }
+        }
+        // Edit → both clips become stale.
+        store.mutateSource(pid) { source ->
+            source.replaceNode(SourceNodeId("mei")) { node ->
+                node.copy(
+                    body = JsonConfig.default.encodeToJsonElement(
+                        CharacterRefBody.serializer(),
+                        CharacterRefBody(name = "Mei", visualDescription = "red"),
+                    ),
+                )
+            }
+        }
+
+        val tool = RegenerateStaleClipsTool(store, registry)
+        val out = tool.execute(
+            RegenerateStaleClipsTool.Input(projectId = pid.value, clipIds = listOf("c-keep")),
+            ctx(),
+        ).data
+
+        // Only c-keep in the reported `totalStale` because the filter narrows the
+        // intake, but the semantics are "of the clips you asked about, how many
+        // were stale?" — 1 here. c-skip remains stale on the project but was
+        // not touched.
+        assertEquals(1, out.totalStale)
+        assertEquals(1, out.regenerated.size)
+        assertEquals("c-keep", out.regenerated.single().clipId)
+        assertEquals(1, engine.calls, "only one AIGC call despite two stale clips")
+
+        val project = store.get(pid)!!
+        val clipMap = project.timeline.tracks.first().clips.associateBy { it.id.value }
+        assertEquals("a-skip", (clipMap["c-skip"] as Clip.Video).assetId.value, "unlisted clip must be untouched")
+        assertTrue((clipMap["c-keep"] as Clip.Video).assetId.value != "a-keep")
+    }
+
     @Test fun skipsLegacyEntriesWithoutBaseInputs() = runTest {
         val tmpDir = createTempDirectory("regen-legacy").toFile()
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)

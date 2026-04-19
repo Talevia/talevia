@@ -61,7 +61,17 @@ class RegenerateStaleClipsTool(
     private val tools: ToolRegistry,
 ) : Tool<RegenerateStaleClipsTool.Input, RegenerateStaleClipsTool.Output> {
 
-    @Serializable data class Input(val projectId: String)
+    @Serializable data class Input(
+        val projectId: String,
+        /**
+         * Optional filter: when non-empty, only regenerate clips whose ids appear
+         * here *and* that are currently stale. Empty (default) means "every stale
+         * clip" — the original batch semantics. Ids passed that aren't stale are
+         * silently ignored (they return no report; they're already fresh), so
+         * callers can use this field as a "regenerate these if needed" hint.
+         */
+        val clipIds: List<String> = emptyList(),
+    )
 
     @Serializable data class Regenerated(
         val clipId: String,
@@ -99,6 +109,14 @@ class RegenerateStaleClipsTool(
         put("type", "object")
         putJsonObject("properties") {
             putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("clipIds") {
+                put("type", "array")
+                put(
+                    "description",
+                    "Optional: regenerate only these clip ids (if stale). Omit to regenerate every stale clip.",
+                )
+                putJsonObject("items") { put("type", "string") }
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("projectId"))))
         put("additionalProperties", false)
@@ -107,7 +125,13 @@ class RegenerateStaleClipsTool(
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         val pid = ProjectId(input.projectId)
         val initialProject = projects.get(pid) ?: error("Project ${input.projectId} not found")
-        val reports = initialProject.staleClipsFromLockfile()
+        val allReports = initialProject.staleClipsFromLockfile()
+        val reports = if (input.clipIds.isEmpty()) {
+            allReports
+        } else {
+            val filter = input.clipIds.toSet()
+            allReports.filter { it.clipId.value in filter }
+        }
         if (reports.isEmpty()) {
             return ToolResult(
                 title = "regenerate stale clips (none)",

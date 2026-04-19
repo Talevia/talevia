@@ -42,8 +42,10 @@ import io.talevia.core.domain.staleClipsFromLockfile
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 
 /**
  * Rich timeline inspector for the desktop editor — replaces the earlier
@@ -151,6 +153,16 @@ fun TimelinePanel(
                                 "remove clip ${clip.id.value.take(6)}",
                             )
                         },
+                        onRegenerate = {
+                            dispatch(
+                                "regenerate_stale_clips",
+                                buildJsonObject {
+                                    put("projectId", projectId.value)
+                                    putJsonArray("clipIds") { add(clip.id.value) }
+                                },
+                                "regenerate clip ${clip.id.value.take(6)}",
+                            )
+                        },
                     )
                 }
             }
@@ -183,6 +195,7 @@ private fun ClipRow(
     expanded: Boolean,
     onToggle: () -> Unit,
     onRemove: () -> Unit,
+    onRegenerate: () -> Unit,
 ) {
     val bg = when {
         expanded -> Color(0xFFF1F4FB)
@@ -205,7 +218,10 @@ private fun ClipRow(
                     modifier = Modifier.weight(1f),
                 )
                 clipChips(clip).forEach { Chip(it) }
-                if (stale) Chip("stale", color = Color(0xFFD97706))
+                if (stale) {
+                    Chip("stale", color = Color(0xFFD97706))
+                    TextButton(onClick = onRegenerate) { Text("Regenerate") }
+                }
                 TextButton(onClick = onRemove) { Text("Remove") }
             }
             if (expanded) {
