@@ -103,6 +103,20 @@ data class IosVideoClipPlan(
     val sourceDurationSeconds: Double,
     val timelineStartSeconds: Double,
     val timelineDurationSeconds: Double,
+    val filters: List<IosFilterSpec> = emptyList(),
+)
+
+/**
+ * Flat DTO for [io.talevia.core.domain.Filter] exposed to the Swift engine.
+ *
+ * [params] is surfaced as `Map<String, Double>` instead of the domain's
+ * `Map<String, Float>` so the Swift side can reach the values without the
+ * `KotlinFloat` unwrap dance and can hand Doubles straight to `CIFilter`
+ * (Core Image wants CGFloat / Double).
+ */
+data class IosFilterSpec(
+    val name: String,
+    val params: Map<String, Double>,
 )
 
 /**
@@ -127,6 +141,12 @@ fun Timeline.toIosVideoPlan(): List<IosVideoClipPlan> =
                         sourceDurationSeconds = clip.sourceRange.duration.toDouble(DurationUnit.SECONDS),
                         timelineStartSeconds = clip.timeRange.start.toDouble(DurationUnit.SECONDS),
                         timelineDurationSeconds = clip.timeRange.duration.toDouble(DurationUnit.SECONDS),
+                        filters = clip.filters.map { f ->
+                            IosFilterSpec(
+                                name = f.name,
+                                params = f.params.mapValues { (_, v) -> v.toDouble() },
+                            )
+                        },
                     )
                 }
         }

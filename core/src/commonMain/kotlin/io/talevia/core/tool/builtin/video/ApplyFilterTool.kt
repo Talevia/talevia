@@ -26,7 +26,10 @@ import kotlinx.serialization.serializer
  * Note: the FFmpeg engine honours all the filters below at render time.
  * The Media3 engine now bakes `brightness` / `saturation` / `blur`; `vignette`
  * and `lut` still fall through as no-ops there (Media3 has no built-in
- * Vignette and needs a `.cube` parser for LUT). AVFoundation has none yet.
+ * Vignette and needs a `.cube` parser for LUT). AVFoundation (iOS) bakes
+ * `brightness` / `saturation` / `blur` / `vignette` via CIFilter chains
+ * keyed on composition time; `lut` still no-ops there pending the same
+ * `.cube` loader.
  */
 class ApplyFilterTool(
     private val store: ProjectStore,

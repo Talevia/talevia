@@ -1,9 +1,107 @@
 import AVFoundation
+import CoreImage
 import CoreMedia
 import Foundation
 import ImageIO
 import TaleviaCore
 import UniformTypeIdentifiers
+
+/// Flat, Sendable snapshot of the filter chain for a single clip range on the
+/// timeline. Built from [IosVideoClipPlan] at composition-build time and
+/// captured by the `applyingCIFiltersWithHandler` closure — SKIE-bridged
+/// Kotlin types aren't Sendable, so we copy into pure-Swift structs before
+/// crossing into the concurrent image-filter handler.
+private struct ClipFilterRange: Sendable {
+    let start: Double
+    let end: Double
+    let filters: [FilterSpec]
+}
+
+private struct FilterSpec: Sendable {
+    let name: String
+    let params: [String: Double]
+}
+
+/// Map a Core [Filter] (by name + params) onto a [CIImage], returning the
+/// filtered image. Unknown filters pass through unchanged. This mirrors the
+/// Android `Media3VideoEngine.mapFilterToEffect` parity goal — what the
+/// FFmpeg engine accepts, the native engines should also render when the
+/// platform has a reasonable primitive.
+///
+/// Supported today:
+///  - `brightness` → `CIColorControls.inputBrightness` (Core's `-1..1` maps
+///    1:1 onto CI's brightness delta, centered at 0 = no change).
+///  - `saturation` → `CIColorControls.inputSaturation` (Core's `0..1`
+///    intensity with `0.5 = neutral` → CI's `0..2` multiplicative scale
+///    centered at 1.0. Linear remap: `intensity * 2`).
+///  - `blur`       → `CIGaussianBlur.inputRadius` (matches FFmpeg shape:
+///    `sigma` verbatim, else `radius` on `0..1` mapped to `0..10` radius).
+///  - `vignette`   → `CIVignette.inputIntensity` + `inputRadius`. iOS has a
+///    built-in primitive here, so we render it even though Media3 still
+///    no-ops vignette.
+///
+/// Not yet supported:
+///  - `lut` — same `.cube` parser gap as Media3; `CIColorCube` takes a raw
+///    cube data blob (not a .cube file), so a loader is still needed.
+///    Intentional pass-through for now so export succeeds instead of
+///    crashing.
+private func applyCoreFilter(_ spec: FilterSpec, to image: CIImage) -> CIImage {
+    switch spec.name.lowercased() {
+    case "brightness":
+        let raw = spec.params["intensity"] ?? spec.params["value"] ?? 0
+        let v = max(-1.0, min(1.0, raw))
+        let f = CIFilter(name: "CIColorControls")
+        f?.setValue(image, forKey: kCIInputImageKey)
+        f?.setValue(v, forKey: kCIInputBrightnessKey)
+        return f?.outputImage ?? image
+    case "saturation":
+        let raw = spec.params["intensity"] ?? spec.params["value"]
+        // Core's apply_filter semantics: 0.5 ≈ unchanged (matches FFmpeg's
+        // 0..1 → 0..2 mapping). Remap to CI's multiplicative scale where
+        // 1.0 = identity. intensity 0.5 → 1.0, 1.0 → 2.0, 0.0 → 0.0.
+        let saturation: Double
+        if let raw, spec.params["intensity"] != nil {
+            saturation = max(0.0, min(2.0, raw * 2.0))
+        } else {
+            saturation = 1.0
+        }
+        let f = CIFilter(name: "CIColorControls")
+        f?.setValue(image, forKey: kCIInputImageKey)
+        f?.setValue(saturation, forKey: kCIInputSaturationKey)
+        return f?.outputImage ?? image
+    case "blur":
+        // Match the FFmpeg engine's two-knob shape.
+        let radius: Double
+        if let sigma = spec.params["sigma"] {
+            radius = max(0.0, min(50.0, sigma))
+        } else if let r01 = spec.params["radius"] {
+            radius = max(0.0, min(50.0, r01 * 10.0))
+        } else {
+            radius = 5.0
+        }
+        let f = CIFilter(name: "CIGaussianBlur")
+        f?.setValue(image, forKey: kCIInputImageKey)
+        f?.setValue(radius, forKey: kCIInputRadiusKey)
+        // CIGaussianBlur grows the extent; clamp back to the source so the
+        // compositor doesn't crop the edges inward on downstream composites.
+        guard let blurred = f?.outputImage else { return image }
+        return blurred.cropped(to: image.extent)
+    case "vignette":
+        let intensity = max(0.0, min(2.0, spec.params["intensity"] ?? 1.0))
+        let radius = max(0.0, min(10.0, spec.params["radius"] ?? 1.0))
+        let f = CIFilter(name: "CIVignette")
+        f?.setValue(image, forKey: kCIInputImageKey)
+        f?.setValue(intensity, forKey: kCIInputIntensityKey)
+        f?.setValue(radius, forKey: kCIInputRadiusKey)
+        return f?.outputImage ?? image
+    case "lut":
+        // TODO: parse .cube → CIColorCube's raw data. Drop for now so the
+        // export succeeds; matches Media3's current LUT behavior.
+        return image
+    default:
+        return image
+    }
+}
 
 /// One-line helper for the `NSError` shape the Kotlin side sees on failed
 /// suspend calls. Keeps the concrete engine methods readable.
@@ -91,10 +189,50 @@ private func runExport(
         }
     }
 
-    // TODO: mirrors Media3 gap — see CLAUDE.md Known incomplete. Filter
-    // and transition passes would set up an AVVideoComposition + instructions
-    // here; subtitle/text passes would either bake text into the video layer
-    // via Core Animation or ship a sidecar track. Not in this cut.
+    // Filter pass. If any clip carries filters, build an
+    // AVMutableVideoComposition with a CIFilter-chain handler keyed on
+    // composition time → owning clip. Subtitle/text and transition passes
+    // still no-op here; they remain in the "Known incomplete" bucket.
+    let filterRanges: [ClipFilterRange] = plans
+        .filter { !$0.filters.isEmpty }
+        .map { plan in
+            ClipFilterRange(
+                start: plan.timelineStartSeconds,
+                end: plan.timelineStartSeconds + plan.timelineDurationSeconds,
+                filters: plan.filters.map { spec in
+                    FilterSpec(
+                        name: spec.name,
+                        params: spec.params.reduce(into: [String: Double]()) { acc, kv in
+                            acc[kv.key] = kv.value.doubleValue
+                        }
+                    )
+                }
+            )
+        }
+
+    var videoComposition: AVMutableVideoComposition?
+    if !filterRanges.isEmpty {
+        videoComposition = try await AVMutableVideoComposition.videoComposition(
+            with: composition,
+            applyingCIFiltersWithHandler: { request in
+                let source = request.sourceImage.clampedToExtent()
+                let t = CMTimeGetSeconds(request.compositionTime)
+                var out = source
+                // First clip whose [start, end) brackets the current time
+                // owns this frame. Clips don't overlap on a single video
+                // track so the first match is unambiguous.
+                if let range = filterRanges.first(where: { t >= $0.start && t < $0.end }) {
+                    for spec in range.filters {
+                        out = applyCoreFilter(spec, to: out)
+                    }
+                }
+                // The compositor expects the output image's extent to match
+                // the request's render size. Cropping keeps CIGaussianBlur's
+                // grown extent from bleeding into the final frame.
+                request.finish(with: out.cropped(to: source.extent), context: nil)
+            }
+        )
+    }
 
     // Prepare output file — AVAssetExportSession refuses to overwrite.
     let outURL = URL(fileURLWithPath: output.targetPath)
@@ -113,6 +251,9 @@ private func runExport(
     session.outputURL = outURL
     session.outputFileType = .mp4
     session.shouldOptimizeForNetworkUse = true
+    if let videoComposition {
+        session.videoComposition = videoComposition
+    }
 
     // Progress polling. AVAssetExportSession doesn't push; we poll `.progress`
     // while the session is exporting. 100ms matches the Android Transformer

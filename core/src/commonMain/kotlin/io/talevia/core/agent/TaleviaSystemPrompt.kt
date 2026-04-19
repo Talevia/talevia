@@ -90,9 +90,10 @@ shapes, exactly one at a time:
   edits. This is the preferred path when a project has a style_bible that
   already owns its LUT — pass the style_bible once via `define_style_bible`,
   then apply it to every clip with `apply_lut(styleBibleId=…)`.
-FFmpeg renders this via `lut3d`; Media3 (Android) partially bakes filters —
-brightness / saturation / blur render today, LUT still no-ops there (needs a
-`.cube` parser); AVFoundation (iOS) still no-ops every filter.
+FFmpeg renders this via `lut3d`; Media3 (Android) bakes brightness /
+saturation / blur but still no-ops LUT (needs a `.cube` parser);
+AVFoundation (iOS) bakes brightness / saturation / blur / vignette via
+CIFilter chains but also still no-ops LUT pending that same loader.
 
 # Seed discipline
 
