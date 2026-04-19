@@ -2,15 +2,150 @@ import AVFoundation
 import CoreMedia
 import Foundation
 import ImageIO
-import MobileCoreServices
 import TaleviaCore
-import UIKit
 import UniformTypeIdentifiers
 
 /// One-line helper for the `NSError` shape the Kotlin side sees on failed
 /// suspend calls. Keeps the concrete engine methods readable.
 private func avfError(_ message: String) -> NSError {
     NSError(domain: "AVFoundationVideoEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
+}
+
+/// Pick an export preset from the requested output height. Mirrors the way
+/// the FFmpeg engine picks h264 profiles by resolution — AVFoundation doesn't
+/// let us specify codec + bitrate on `AVAssetExportSession` directly, so
+/// preset is the only knob.
+private func exportPreset(for height: Int32) -> String {
+    switch height {
+    case 2160...: return AVAssetExportPresetHighestQuality
+    case 1080...: return AVAssetExportPreset1920x1080
+    case 720...:  return AVAssetExportPreset1280x720
+    default:      return AVAssetExportPreset640x480
+    }
+}
+
+/// Run the full export pipeline. Kept as a free function so it can be
+/// dispatched onto a detached `Task` without capturing the engine actor.
+///
+/// Flow: resolve each clip's asset path → build an `AVMutableComposition` with
+/// one video + one audio track → insert each clip's source-range slice at its
+/// timeline-start offset → export the composition through
+/// `AVAssetExportSession`. Filter / transition / subtitle passes are no-ops in
+/// this first cut, matching the Media3 engine's scope (see CLAUDE.md "Known
+/// incomplete").
+private func runExport(
+    timeline: Timeline,
+    output: OutputSpec,
+    jobId: String,
+    resolver: any MediaPathResolver,
+    adapter: SwiftRenderFlowAdapter
+) async throws {
+    let plans: [IosVideoClipPlan] = timeline.toIosVideoPlan()
+    if plans.isEmpty {
+        _ = adapter.tryEmit(event: RenderProgressFailed(jobId: jobId, message: "no video clips to render"))
+        adapter.close()
+        return
+    }
+
+    let composition = AVMutableComposition()
+    let videoTrack = composition.addMutableTrack(
+        withMediaType: .video,
+        preferredTrackID: kCMPersistentTrackID_Invalid
+    )
+    let audioTrack = composition.addMutableTrack(
+        withMediaType: .audio,
+        preferredTrackID: kCMPersistentTrackID_Invalid
+    )
+
+    for plan in plans {
+        // Route every asset path through MediaPathResolver (architecture
+        // rule #4). The resolver is suspend on the Kotlin side — SKIE
+        // bridges it to async throws.
+        let assetId = IosBridgesKt.assetId(value: plan.assetIdRaw)
+        let path = try await resolver.resolve(assetId: assetId)
+        let url = URL(fileURLWithPath: path)
+        let sourceAsset = AVURLAsset(url: url)
+
+        // Timescale of 600 is AVFoundation's canonical choice — it's divisible
+        // by 24/25/30/60 fps so frame-accurate edits don't drift.
+        let insertRange = CMTimeRange(
+            start: CMTime(seconds: plan.sourceStartSeconds, preferredTimescale: 600),
+            duration: CMTime(seconds: plan.sourceDurationSeconds, preferredTimescale: 600)
+        )
+        let timelineStart = CMTime(seconds: plan.timelineStartSeconds, preferredTimescale: 600)
+
+        let tracks = try await sourceAsset.load(.tracks)
+        if let srcVideo = tracks.first(where: { $0.mediaType == .video }) {
+            try videoTrack?.insertTimeRange(insertRange, of: srcVideo, at: timelineStart)
+        }
+        if let srcAudio = tracks.first(where: { $0.mediaType == .audio }) {
+            try audioTrack?.insertTimeRange(insertRange, of: srcAudio, at: timelineStart)
+        }
+    }
+
+    // TODO: mirrors Media3 gap — see CLAUDE.md Known incomplete. Filter
+    // and transition passes would set up an AVVideoComposition + instructions
+    // here; subtitle/text passes would either bake text into the video layer
+    // via Core Animation or ship a sidecar track. Not in this cut.
+
+    // Prepare output file — AVAssetExportSession refuses to overwrite.
+    let outURL = URL(fileURLWithPath: output.targetPath)
+    try? FileManager.default.removeItem(at: outURL)
+    try? FileManager.default.createDirectory(
+        at: outURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+
+    let preset = exportPreset(for: output.resolution.height)
+    guard let session = AVAssetExportSession(asset: composition, presetName: preset) else {
+        _ = adapter.tryEmit(event: RenderProgressFailed(jobId: jobId, message: "AVAssetExportSession init failed (preset=\(preset))"))
+        adapter.close()
+        return
+    }
+    session.outputURL = outURL
+    session.outputFileType = .mp4
+    session.shouldOptimizeForNetworkUse = true
+
+    // Progress polling. AVAssetExportSession doesn't push; we poll `.progress`
+    // while the session is exporting. 100ms matches the Android Transformer
+    // polling cadence.
+    let progressTask = Task.detached {
+        while !Task.isCancelled {
+            let status = session.status
+            if status != .exporting && status != .waiting {
+                break
+            }
+            _ = adapter.tryEmit(event: RenderProgressFrames(
+                jobId: jobId,
+                ratio: session.progress,
+                message: nil
+            ))
+            try? await Task.sleep(nanoseconds: 100_000_000)
+        }
+    }
+
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        session.exportAsynchronously {
+            continuation.resume(returning: ())
+        }
+    }
+    progressTask.cancel()
+
+    switch session.status {
+    case .completed:
+        _ = adapter.tryEmit(event: RenderProgressCompleted(jobId: jobId, outputPath: output.targetPath))
+    case .cancelled:
+        _ = adapter.tryEmit(event: RenderProgressFailed(jobId: jobId, message: "export cancelled"))
+    case .failed:
+        let err = session.error?.localizedDescription ?? "unknown export failure"
+        _ = adapter.tryEmit(event: RenderProgressFailed(jobId: jobId, message: err))
+    default:
+        _ = adapter.tryEmit(event: RenderProgressFailed(
+            jobId: jobId,
+            message: "unexpected export session status: \(session.status.rawValue)"
+        ))
+    }
+    adapter.close()
 }
 
 /// iOS native `VideoEngine` backed by AVFoundation. This commit is the wiring
@@ -207,16 +342,32 @@ final class AVFoundationVideoEngine: NSObject, VideoEngine {
     // swiftlint:enable identifier_name
 
     func render(timeline: Timeline, output: OutputSpec) -> SkieSwiftFlow<any RenderProgress> {
-        // Real implementation lands in commit B4; return a flow that emits a
-        // single Failed event so callers that hit this stub see a graceful
-        // error rather than a crash.
         let jobId = UUID().uuidString
         let adapter = SwiftRenderFlowAdapter()
-        _ = adapter.tryEmit(event: RenderProgressFailed(
-            jobId: jobId,
-            message: "render: not yet implemented — lands in commit B4"
-        ))
-        adapter.close()
+        _ = adapter.tryEmit(event: RenderProgressStarted(jobId: jobId))
+
+        // The Kotlin-side Flow returned by `adapter.asFlow()` is cold and
+        // doesn't hold work on its own — we kick off the export in a detached
+        // Task and push events into the adapter from there.
+        let resolver = self.resolver
+        Task.detached {
+            do {
+                try await runExport(
+                    timeline: timeline,
+                    output: output,
+                    jobId: jobId,
+                    resolver: resolver,
+                    adapter: adapter
+                )
+            } catch {
+                _ = adapter.tryEmit(event: RenderProgressFailed(
+                    jobId: jobId,
+                    message: (error as NSError).localizedDescription
+                ))
+                adapter.close()
+            }
+        }
+
         return adapter.asFlow()
     }
 }
