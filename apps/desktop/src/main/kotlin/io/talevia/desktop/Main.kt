@@ -50,6 +50,8 @@ import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -115,13 +117,30 @@ private fun AppRoot(container: AppContainer) {
         bootstrapped = true
     }
 
-    // Subscribe to render-progress events.
+    // Subscribe to render-progress events + auto-refresh the preview when any
+    // `export` tool call completes (whether from the Export button, a chat
+    // turn, or a future toolbar shortcut). Without this the preview is
+    // frozen at whatever was last loaded via the button — a chat-driven
+    // export would silently succeed but the user would still see the stale
+    // preview.
     LaunchedEffect(Unit) {
         container.bus.subscribe<BusEvent.PartUpdated>().collect { ev ->
             when (val p = ev.part) {
                 is Part.RenderProgress -> {
                     renderProgress = p.ratio
                     if (p.message != null) log += "render · ${"%.0f".format(p.ratio * 100)}% ${p.message}"
+                }
+                is Part.Tool -> {
+                    val state = p.state
+                    if (p.toolId == "export" && state is io.talevia.core.session.ToolState.Completed) {
+                        val path = runCatching {
+                            state.data.jsonObject["outputPath"]?.jsonPrimitive?.content
+                        }.getOrNull()
+                        if (!path.isNullOrBlank() && previewPath != path) {
+                            previewPath = path
+                            log += "preview → ${path.substringAfterLast('/')}"
+                        }
+                    }
                 }
                 else -> {}
             }
