@@ -12,15 +12,20 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.permission.DefaultPermissionService
+import io.talevia.core.platform.FileBlobWriter
 import io.talevia.core.platform.FileMediaStorage
 import io.talevia.core.platform.FilePicker
+import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.InMemoryMediaStorage
+import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.provider.ProviderRegistry
+import io.talevia.core.provider.openai.OpenAiImageGenEngine
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
+import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitleTool
 import io.talevia.core.tool.builtin.video.AddTransitionTool
@@ -49,10 +54,16 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
     val sessions = SqlDelightSessionStore(db, bus)
     val projects: ProjectStore = SqlDelightProjectStore(db)
     /**
-     * When `TALEVIA_MEDIA_DIR` is set the desktop persists its asset catalog
-     * so AssetIds referenced by saved Projects survive app restarts. Unset →
-     * in-memory, matching M2 behaviour.
+     * Media root dir for both the asset catalog and AIGC blob output. When
+     * `TALEVIA_MEDIA_DIR` is set we persist the asset catalog under it (so
+     * AssetIds referenced by saved Projects survive app restarts); otherwise
+     * we fall back to `<java.io.tmpdir>/talevia-media` so AIGC still has
+     * somewhere to write and the catalog stays in-memory (M2 behaviour).
      */
+    val mediaRootDir: File = env["TALEVIA_MEDIA_DIR"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { File(it) }
+        ?: File(System.getProperty("java.io.tmpdir"), "talevia-media")
     val media: MediaStorage = env["TALEVIA_MEDIA_DIR"]
         ?.takeIf { it.isNotBlank() }
         ?.let { FileMediaStorage(File(it)) }
@@ -63,6 +74,20 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
     val filePicker: FilePicker = AwtFilePicker()
     val secrets: SecretStore = FileSecretStore()
 
+    val httpClient: HttpClient = HttpClient(CIO)
+
+    /**
+     * Image-generation engine, only wired when `OPENAI_API_KEY` is set. No
+     * registry yet — one provider doesn't warrant one, and a premature
+     * `GenerativeProviderRegistry` would just be scaffolding.
+     */
+    val imageGen: ImageGenEngine? = env["OPENAI_API_KEY"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { OpenAiImageGenEngine(httpClient, it) }
+
+    /** JVM blob writer backing AIGC tools. Paired with [mediaRootDir]. */
+    val blobWriter: MediaBlobWriter = FileBlobWriter(mediaRootDir)
+
     val tools: ToolRegistry = ToolRegistry().apply {
         register(ImportMediaTool(media, engine))
         register(AddClipTool(projects, media))
@@ -72,9 +97,8 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(AddSubtitleTool(projects))
         register(AddTransitionTool(projects))
         register(RevertTimelineTool(sessions, projects))
+        imageGen?.let { register(GenerateImageTool(it, media, blobWriter)) }
     }
-
-    val httpClient: HttpClient = HttpClient(CIO)
 
     /** Provider registry built from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env. */
     val providers: ProviderRegistry =
