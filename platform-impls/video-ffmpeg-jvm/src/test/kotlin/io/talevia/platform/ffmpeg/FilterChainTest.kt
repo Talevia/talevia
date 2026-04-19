@@ -67,6 +67,46 @@ class FilterChainTest {
         assertTrue(engine.filterChainFor(listOf(Filter("BRIGHTNESS")))!!.startsWith("eq=brightness="))
     }
 
+    @Test
+    fun lutFilterResolvesAssetPathToLut3dFilter() {
+        val lutId = AssetId("lut-warm")
+        val filter = Filter(name = "lut", assetId = lutId)
+        val chain = engine.filterChainFor(
+            filters = listOf(filter),
+            resolvedAssetPaths = mapOf(lutId to "/tmp/warm.cube"),
+        )
+        assertEquals("lut3d=file=/tmp/warm.cube", chain)
+    }
+
+    @Test
+    fun lutFilterWithoutResolvedPathIsDropped() {
+        val filter = Filter(name = "lut", assetId = AssetId("missing"))
+        // No entry in resolvedAssetPaths → the lut filter falls through as unknown.
+        assertNull(engine.filterChainFor(listOf(filter)))
+    }
+
+    @Test
+    fun lutFilterWithoutAssetIdIsDropped() {
+        // Defensive: a "lut" name with no assetId (shouldn't happen in practice because
+        // ApplyLutTool always sets one, but the engine must not NPE on it).
+        assertNull(engine.filterChainFor(listOf(Filter(name = "lut"))))
+    }
+
+    @Test
+    fun lutPathSpecialCharsAreEscapedForFiltergraph() {
+        val lutId = AssetId("lut")
+        val chain = engine.filterChainFor(
+            filters = listOf(Filter(name = "lut", assetId = lutId)),
+            resolvedAssetPaths = mapOf(lutId to "/tmp/with:colon,comma[bracket].cube"),
+        )
+        // Every filtergraph-meta character must be backslash-escaped so ffmpeg
+        // doesn't re-parse the path as filter args.
+        assertEquals(
+            "lut3d=file=/tmp/with\\:colon\\,comma\\[bracket\\].cube",
+            chain,
+        )
+    }
+
     private object NullResolver : MediaPathResolver {
         override suspend fun resolve(assetId: AssetId): String = error("not used")
     }

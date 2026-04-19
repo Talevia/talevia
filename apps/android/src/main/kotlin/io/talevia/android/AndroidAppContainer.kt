@@ -37,8 +37,10 @@ import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitleTool
 import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
+import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
+import io.talevia.core.tool.builtin.video.RemoveClipTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
@@ -69,8 +71,10 @@ class AndroidAppContainer(context: Context) {
         register(AddClipTool(projects, media))
         register(ReplaceClipTool(projects, media))
         register(SplitClipTool(projects))
+        register(RemoveClipTool(projects))
         register(ExportTool(projects, engine))
         register(ApplyFilterTool(projects))
+        register(ApplyLutTool(projects, media))
         register(AddSubtitleTool(projects))
         register(AddTransitionTool(projects))
         register(RevertTimelineTool(sessions, projects))

@@ -71,10 +71,21 @@ data class Transform(
     val opacity: Float = 1f,
 )
 
+/**
+ * A render-time filter attached to a [Clip.Video].
+ *
+ * `name` is the ffmpeg / engine-side identifier ("brightness", "blur", "lut", …) and
+ * `params` is the numeric knob bag for simple scalar filters. Filters that need a
+ * bound project asset — e.g. a 3D LUT `.cube` file the engine loads from disk — set
+ * [assetId] instead of trying to cram a path into [params] (which is `Map<String, Float>`
+ * on purpose: numeric-only). The engine resolves [assetId] through `MediaPathResolver`
+ * at render time; tools never pass absolute paths.
+ */
 @Serializable
 data class Filter(
     val name: String,
     val params: Map<String, Float> = emptyMap(),
+    val assetId: AssetId? = null,
 )
 
 @Serializable

@@ -43,6 +43,8 @@ class TaleviaSystemPromptTest {
         "find_stale_clips",
         // The mutation half of the regenerate-after-stale loop.
         "replace_clip",
+        // The missing scalpel — clip deletion sits alongside split / replace.
+        "remove_clip",
         // Project-level named snapshots (VISION §3.4) — survive across chat sessions.
         "save_project_snapshot",
         "list_project_snapshots",
@@ -53,6 +55,9 @@ class TaleviaSystemPromptTest {
         "diff_projects",
         // Import — closes the VISION §3.4 "可组合" leg (cross-project source-node reuse).
         "import_source_node",
+        // Traditional color grading — LUT enforcement on style_bible.lutReference
+        // (VISION §3.3 traditional lane).
+        "apply_lut",
         // Lockfile observability (VISION §3.1) — enumerate AIGC productions.
         "list_lockfile_entries",
         // Seed / lockfile discipline (VISION §3.1)

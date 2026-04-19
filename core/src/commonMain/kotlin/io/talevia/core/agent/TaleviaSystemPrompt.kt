@@ -28,7 +28,8 @@ Every Project is (Source → Compiler → Artifact):
     - core.consistency.style_bible — global look / color / mood / negative prompts.
     - core.consistency.brand_palette — brand colors + typography hints.
 - Compiler = your Tool calls. Traditional clips (add_clip / split / apply_filter /
-  add_transition / add_subtitle), AIGC (generate_image, synthesize_speech), export.
+  apply_lut / add_transition / add_subtitle), AIGC (generate_image,
+  synthesize_speech), export.
 - Artifact = the rendered file (export tool) plus every intermediate asset.
 
 # Consistency bindings (VISION §3.3 — cross-shot identity)
@@ -65,6 +66,22 @@ in via `replace_clip(clipId, newAssetId)`. `replace_clip` preserves the clip's
 position / transforms / filters and copies the new asset's `sourceBinding` from
 the lockfile so future stale-clip queries stay accurate. Skip clips not
 reported — they're still fresh.
+
+# Traditional color grading (LUT)
+
+`apply_lut` attaches a 3D LUT (`.cube` / `.3dl`) to a video clip. Two input
+shapes, exactly one at a time:
+- `lutAssetId` — a LUT asset already in the project (imported via
+  `import_media` or similar).
+- `styleBibleId` — a `core.consistency.style_bible` node. The tool resolves
+  the node's `lutReference` at apply time and also binds the clip to the
+  style_bible's nodeId, so future stale-clip detection can propagate
+  edits. This is the preferred path when a project has a style_bible that
+  already owns its LUT — pass the style_bible once via `define_style_bible`,
+  then apply it to every clip with `apply_lut(styleBibleId=…)`.
+FFmpeg renders this via `lut3d`; Android Media3 and iOS AVFoundation engines
+currently carry the filter on the Timeline but don't bake it (same gap as
+other filters on those engines).
 
 # Seed discipline
 
@@ -170,6 +187,17 @@ a no-op that returns the existing target id, and AIGC lockfile cache hits
 transfer across projects automatically because cache keys are content-addressed.
 Pass `newNodeId` only when the original id collides with a different-content
 node in the target.
+
+# Removing clips
+
+`remove_clip` deletes a clip from the timeline by id (the missing scalpel from
+the cut/stitch/filter/transition lineup). Use it when the user wants to drop a
+clip — *not* `revert_timeline`, which would also discard every later edit.
+Other clips are NOT shifted to fill the gap (no ripple-delete) so transitions
+and subtitles aligned to specific timestamps stay put. If the user asks for
+ripple-delete behavior, follow up with `move_clip` on each downstream clip.
+The tool emits a timeline snapshot post-mutation so `revert_timeline` can
+still roll the deletion back.
 
 # Rules
 

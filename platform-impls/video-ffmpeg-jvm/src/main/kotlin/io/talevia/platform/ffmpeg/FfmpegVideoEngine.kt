@@ -105,6 +105,13 @@ class FfmpegVideoEngine(
         }
 
         val resolvedPaths = videoClips.map { clip -> pathResolver.resolve(clip.assetId) }
+        // Pre-resolve asset-backed filter references (e.g. LUT files) to absolute
+        // paths. Done here so filterChainFor() stays non-suspend and unit-testable.
+        val filterAssetPaths: Map<AssetId, String> = videoClips
+            .flatMap { it.filters }
+            .mapNotNull { it.assetId }
+            .distinct()
+            .associateWith { pathResolver.resolve(it) }
         val args = mutableListOf(
             ffmpegPath, "-y", "-progress", "pipe:2",
         )
@@ -122,7 +129,7 @@ class FfmpegVideoEngine(
             val videoLabels = mutableListOf<String>()
             for (i in 0 until n) {
                 val clip = videoClips[i]
-                val chain = filterChainFor(clip.filters)
+                val chain = filterChainFor(clip.filters, filterAssetPaths)
                 if (chain != null) {
                     append("[$i:v:0]$chain[v$i];")
                     videoLabels += "[v$i]"
@@ -199,14 +206,23 @@ class FfmpegVideoEngine(
      * Translate core [Filter]s into an ffmpeg filtergraph chain. Returns null
      * when the clip has no supported filters, so the caller can skip allocating
      * labels. Unknown filter names are dropped — the core model accepts any
-     * name, but only the names documented on ApplyFilterTool render here.
+     * name, but only the names documented on ApplyFilterTool / ApplyLutTool
+     * render here.
+     *
+     * `resolvedAssetPaths` is required for asset-backed filters (currently just
+     * `"lut"`): the render loop resolves [AssetId]s to absolute paths through
+     * `MediaPathResolver` and passes the map in so this function can stay
+     * non-suspend and unit-testable.
      */
-    internal fun filterChainFor(filters: List<Filter>): String? {
-        val segments = filters.mapNotNull { renderFilter(it) }
+    internal fun filterChainFor(
+        filters: List<Filter>,
+        resolvedAssetPaths: Map<AssetId, String> = emptyMap(),
+    ): String? {
+        val segments = filters.mapNotNull { renderFilter(it, resolvedAssetPaths) }
         return if (segments.isEmpty()) null else segments.joinToString(",")
     }
 
-    private fun renderFilter(f: Filter): String? = when (f.name.lowercase()) {
+    private fun renderFilter(f: Filter, resolvedAssetPaths: Map<AssetId, String>): String? = when (f.name.lowercase()) {
         // eq brightness range is [-1.0, 1.0]; default 0.
         "brightness" -> {
             val v = f.params["intensity"] ?: f.params["value"] ?: 0f
@@ -224,8 +240,30 @@ class FfmpegVideoEngine(
             "gblur=sigma=${formatFloat(sigma)}"
         }
         "vignette" -> "vignette"
+        // lut3d applies a 3D LUT file (.cube / .3dl). We drop silently when the
+        // path can't be resolved — consistent with "unknown filter names are
+        // dropped" rather than breaking a whole render for one missing asset.
+        "lut" -> f.assetId?.let { resolvedAssetPaths[it] }?.let { path ->
+            "lut3d=file=${escapeFiltergraphArg(path)}"
+        }
         else -> null
     }
+
+    /**
+     * Escape a string so it can appear as a filtergraph argument value. ffmpeg
+     * treats `:` as an option separator, `,` / `;` as filter separators, and `\`
+     * as its own escape, so paths containing those would otherwise get parsed
+     * as filter syntax. Single-character backslash-escape is enough for the
+     * set of chars that actually appear in filesystem paths.
+     */
+    private fun escapeFiltergraphArg(v: String): String =
+        v.replace("\\", "\\\\")
+            .replace(":", "\\:")
+            .replace("'", "\\'")
+            .replace(",", "\\,")
+            .replace(";", "\\;")
+            .replace("[", "\\[")
+            .replace("]", "\\]")
 
     private fun formatFloat(v: Float): String {
         val s = v.toString()
