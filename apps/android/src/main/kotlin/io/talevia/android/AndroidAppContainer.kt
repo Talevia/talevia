@@ -2,18 +2,23 @@ package io.talevia.android
 
 import android.content.Context
 import app.cash.sqldelight.driver.android.AndroidSqliteDriver
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.cio.CIO
+import io.talevia.core.agent.Agent
 import io.talevia.core.bus.EventBus
+import io.talevia.core.compaction.Compactor
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.permission.DefaultPermissionService
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.InMemorySecretStore
 import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
+import io.talevia.core.provider.LlmProvider
+import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
@@ -67,7 +72,9 @@ class AndroidAppContainer(context: Context) {
     val bus = EventBus()
     val sessions: SessionStore = SqlDelightSessionStore(db, bus)
     val projects: ProjectStore = SqlDelightProjectStore(db)
-    val media: MediaStorage = InMemoryMediaStorage()
+    val media: MediaStorage = AndroidPersistentMediaStorage(
+        java.io.File(context.filesDir, "talevia-media"),
+    )
     val engine: VideoEngine = Media3VideoEngine(context, media)
     /**
      * Cache-tier blob writer. Generated frames live under the app cache dir;
@@ -85,6 +92,8 @@ class AndroidAppContainer(context: Context) {
      * composition root can satisfy downstream dependencies today.
      */
     val secrets: SecretStore = InMemorySecretStore()
+    val httpClient: HttpClient = HttpClient(CIO)
+
     val tools: ToolRegistry = ToolRegistry().apply {
         register(ImportMediaTool(media, engine))
         register(ExtractFrameTool(engine, media, blobWriter))
@@ -124,5 +133,35 @@ class AndroidAppContainer(context: Context) {
         register(ListSourceNodesTool(projects))
         register(RemoveSourceNodeTool(projects))
         register(ImportSourceNodeTool(projects))
+    }
+
+    /**
+     * LLM provider registry. Reads `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from
+     * system properties (set via adb shell `setprop` or BuildConfig injection).
+     * Callers should check [providers.default] before calling [agentFor].
+     */
+    val providers: ProviderRegistry = ProviderRegistry.Builder()
+        .addEnv(httpClient, buildMap {
+            System.getProperty("ANTHROPIC_API_KEY")?.takeIf(String::isNotEmpty)?.let { put("ANTHROPIC_API_KEY", it) }
+            System.getProperty("OPENAI_API_KEY")?.takeIf(String::isNotEmpty)?.let { put("OPENAI_API_KEY", it) }
+            System.getenv("ANTHROPIC_API_KEY")?.takeIf(String::isNotEmpty)?.let { put("ANTHROPIC_API_KEY", it) }
+            System.getenv("OPENAI_API_KEY")?.takeIf(String::isNotEmpty)?.let { put("OPENAI_API_KEY", it) }
+        })
+        .build()
+
+    private val agents = mutableMapOf<String, Agent>()
+
+    fun agentFor(providerId: String): Agent? {
+        val provider: LlmProvider = providers.get(providerId) ?: return null
+        return agents.getOrPut(providerId) {
+            Agent(
+                provider = provider,
+                registry = tools,
+                store = sessions,
+                permissions = permissions,
+                bus = bus,
+                compactor = Compactor(provider, sessions, bus),
+            )
+        }
     }
 }
