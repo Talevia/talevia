@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Targets: **iOS · Android · Desktop (macOS/Windows/Linux) · Server**. Agent logic runs primarily on-device; the server is an optional headless deployment.
 
-Read first: `docs/VISION.md` (north star — where we're going and why), `docs/REQUIREMENTS.md` (principles, hard rules — what's forbidden), `docs/ARCHITECTURE.md` (module design + rationale — current shape). For autonomous "find-gap → fill-gap" loops, use the rubric in VISION §5. The requirements doc is the source of truth for constraints — do not override it without the user's direction.
+Read first: `docs/VISION.md` (north star — where we're going and why). This file covers current shape + operational rules (module layout, architecture rules, anti-requirements, build/run). For autonomous "find-gap → fill-gap" loops, use the rubric in VISION §5.
 
 ## Build & run
 
@@ -53,7 +53,20 @@ Inside `core/src/commonMain/kotlin/io/talevia/core/`: `agent/`, `provider/` (Ant
 3. **Tools are typed (`Tool<I, O>`)** with a `KSerializer` for input/output plus a JSON Schema surface for the LLM. `RegisteredTool.dispatch(rawInput, ctx)` is the one cast-boundary; add new tools in `core/tool/builtin/` and register them in each `AppContainer`.
 4. **Asset paths go through `MediaPathResolver`.** Do NOT treat `AssetId.value` as a filesystem path (there used to be a temporary hack doing this; it's gone). `MediaStorage` extends `MediaPathResolver`; engines take a resolver in their constructor.
 5. **Provider abstraction is SDK-agnostic.** Both Anthropic and OpenAI impls emit the same normalised `LlmEvent` stream. If you add a provider, translate its native events into `LlmEvent` — don't leak provider-specific types into Agent / Compactor / Tool code.
-6. **No Effect.js patterns.** Even though OpenCode uses Service/Layer/Context, Kotlin has its own idioms. See `docs/REQUIREMENTS.md` §6.
+6. **No Effect.js patterns.** Even though OpenCode uses Service/Layer/Context, Kotlin has its own idioms. See Anti-requirements below.
+
+## Anti-requirements — don't do these
+
+Operational red lines. If a task seems to require any of these, stop and challenge per VISION §"发现不符":
+
+- ❌ Effect.js-style Service/Layer/Context dependency management — Kotlin has its own idioms
+- ❌ UI code inside the KMP shared module
+- ❌ `core/commonMain` depending on any platform API (AVFoundation, Media3, FFmpeg, AWT, etc.)
+- ❌ Video encoding/decoding inside Agent Core
+- ❌ Electron / WebView for the desktop app (Compose Desktop is the choice)
+- ❌ Forking OpenCode and translating it to Kotlin — treat OpenCode as behavioral spec only
+- ❌ Designing for hypothetical future needs (multi-agent coordinator, IDE bridge, plugin marketplace, etc.) without a concrete driver
+- ❌ Optimising for a single LLM provider at the cost of the provider abstraction
 
 ## OpenCode as a "runnable spec"
 
@@ -92,4 +105,3 @@ If a task touches one of these, expect to wire it up rather than work around it.
 
 - `docs/IOS_INTEGRATION.md` — Xcode wiring, xcodegen, SKIE caveats.
 - `docs/ANDROID_INTEGRATION.md` — SDK prerequisites, Media3 limitations.
-- `docs/ARCHITECTURE.md` — full architecture and milestone roadmap (M0 through M6).

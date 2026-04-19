@@ -18,7 +18,7 @@ apps/
 
 三层分层是硬约束：UI（各端原生，不共享）· Agent Core（跨平台，不依赖任何平台 API）· 领域能力（各端原生实现，经 `core.platform` 接口注入）。
 
-详见 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) 与 [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md)。
+愿景（第一性原理）见 [`docs/VISION.md`](docs/VISION.md)，当前形态与架构规则见 [`CLAUDE.md`](CLAUDE.md)。
 
 ## 前置
 
@@ -65,7 +65,7 @@ LLM provider 通过环境变量读取 key：`ANTHROPIC_API_KEY` / `OPENAI_API_KE
 
 ## 文档
 
-- [`docs/REQUIREMENTS.md`](docs/REQUIREMENTS.md) — 原则与硬规则（源权威）
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — 模块设计与里程碑（M0–M6）
+- [`docs/VISION.md`](docs/VISION.md) — 北极星 / 第一性原理（愿景、工程赌注、gap-finding rubric）
+- [`CLAUDE.md`](CLAUDE.md) — 仓库操作指南（构建命令、模块布局、架构规则、反需求）
 - [`docs/IOS_INTEGRATION.md`](docs/IOS_INTEGRATION.md) — Xcode / xcodegen / SKIE 注意事项
 - [`docs/ANDROID_INTEGRATION.md`](docs/ANDROID_INTEGRATION.md) — Android SDK 与 Media3 限制
