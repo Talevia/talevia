@@ -282,11 +282,16 @@ class Media3VideoEngine(
             GaussianBlur(sigma)
         }
         "vignette" -> {
-            log.warn(
-                "vignette filter not yet rendered on Media3 engine — skipping",
-                "filter" to filter.name,
-            )
-            null
+            // Media3 has no built-in Vignette. Instead of a custom GlShaderProgram
+            // (needs a shader + texture lifecycle + format negotiation), bake a
+            // radial-gradient `BitmapOverlay` at the video frame size — same
+            // trick we use for transition fade-to-black. Multiplicative-style
+            // darkening at the corners, transparent through the center. Matches
+            // the FFmpeg `vignette` filter's visual and the iOS `CIVignette`
+            // rendering closely enough for cross-engine parity (VISION §5.2).
+            val intensity = (filter.params["intensity"] ?: filter.params["value"] ?: 0.5f)
+                .coerceIn(0f, 1f)
+            OverlayEffect(listOf(VignetteOverlay(intensity)))
         }
         "lut" -> {
             val aid = filter.assetId
@@ -530,6 +535,67 @@ class Media3VideoEngine(
             super.release()
             blackBitmap?.recycle()
             blackBitmap = null
+        }
+    }
+
+    /**
+     * Static radial-gradient overlay that bakes a single video-sized bitmap at
+     * `configure` time — transparent at the center, opaque black at the
+     * corners — and returns it on every `getBitmap` call. `getOverlaySettings`
+     * is the default (alphaScale = 1), because the actual darkness ramp is
+     * already in the bitmap's alpha channel. One GL texture upload per clip.
+     *
+     * [intensity] 0..1 drives two knobs simultaneously: corner alpha (0 → no
+     * vignette; 1 → pitch-black corners) and the radial stop where the fade
+     * begins (higher intensity keeps the clear centre smaller, matching how
+     * the FFmpeg `vignette` filter intensifies).
+     */
+    private class VignetteOverlay(private val intensity: Float) : BitmapOverlay() {
+        private var bitmap: android.graphics.Bitmap? = null
+
+        override fun configure(videoSize: Size) {
+            super.configure(videoSize)
+            bitmap?.recycle()
+            val w = videoSize.width
+            val h = videoSize.height
+            val bmp = android.graphics.Bitmap
+                .createBitmap(w, h, android.graphics.Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bmp)
+            val cx = w / 2f
+            val cy = h / 2f
+            val radius = kotlin.math.hypot(cx.toDouble(), cy.toDouble()).toFloat()
+            val edgeAlpha = (255f * intensity).toInt().coerceIn(0, 255)
+            // Clear centre starts at 35%–55% of the radius depending on
+            // intensity: a strong vignette should squeeze the bright region
+            // inward, not just darken the same corners more.
+            val innerStop = (0.55f - 0.2f * intensity).coerceIn(0.1f, 0.9f)
+            val paint = android.graphics.Paint().apply {
+                isAntiAlias = true
+                shader = android.graphics.RadialGradient(
+                    cx,
+                    cy,
+                    radius,
+                    intArrayOf(
+                        AndroidColor.TRANSPARENT,
+                        AndroidColor.argb(edgeAlpha, 0, 0, 0),
+                    ),
+                    floatArrayOf(innerStop, 1f),
+                    android.graphics.Shader.TileMode.CLAMP,
+                )
+            }
+            canvas.drawRect(0f, 0f, w.toFloat(), h.toFloat(), paint)
+            bitmap = bmp
+        }
+
+        override fun getBitmap(presentationTimeUs: Long): android.graphics.Bitmap =
+            bitmap ?: android.graphics.Bitmap
+                .createBitmap(16, 16, android.graphics.Bitmap.Config.ARGB_8888)
+                .also { bitmap = it }
+
+        override fun release() {
+            super.release()
+            bitmap?.recycle()
+            bitmap = null
         }
     }
 }
