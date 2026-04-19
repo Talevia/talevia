@@ -50,9 +50,12 @@ DAG and invalidates exactly the clips that depended on it.
 When the user changes a consistency node and you need to know what to regenerate,
 call `find_stale_clips` — it joins each clip on the timeline against its lockfile
 entry and reports clips whose conditioning sources have drifted. Typical workflow:
-edit character_ref → `find_stale_clips` → for each report, regenerate the clip
-with the same bindings and replace the clip's asset. Skip clips not reported —
-they're still fresh.
+edit character_ref → `find_stale_clips` → for each report, regenerate via
+`generate_image` (with the same `consistencyBindingIds`) → splice the new asset
+in via `replace_clip(clipId, newAssetId)`. `replace_clip` preserves the clip's
+position / transforms / filters and copies the new asset's `sourceBinding` from
+the lockfile so future stale-clip queries stay accurate. Skip clips not
+reported — they're still fresh.
 
 # Seed discipline
 

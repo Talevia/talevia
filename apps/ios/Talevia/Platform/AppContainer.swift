@@ -41,6 +41,7 @@ final class AppContainer {
         let registry = ToolRegistry()
         registry.register(tool: ImportMediaTool(storage: self.media, engine: self.engine))
         registry.register(tool: AddClipTool(store: self.projects, media: self.media))
+        registry.register(tool: ReplaceClipTool(store: self.projects, media: self.media))
         registry.register(tool: SplitClipTool(store: self.projects))
         registry.register(tool: ExportTool(store: self.projects, engine: self.engine, clock: clock))
         registry.register(tool: RevertTimelineTool(sessions: self.sessions, projects: self.projects))

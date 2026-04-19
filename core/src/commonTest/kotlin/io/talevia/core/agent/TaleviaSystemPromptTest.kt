@@ -37,6 +37,8 @@ class TaleviaSystemPromptTest {
         // Stale-clip detection — the lockfile-driven query that closes the
         // edit-character-then-regenerate loop (VISION §3.2).
         "find_stale_clips",
+        // The mutation half of the regenerate-after-stale loop.
+        "replace_clip",
         // Seed / lockfile discipline (VISION §3.1)
         "seed",
         "cacheHit",

@@ -52,6 +52,7 @@ import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
+import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
 import io.talevia.platform.ffmpeg.FfmpegVideoEngine
@@ -151,6 +152,7 @@ class ServerContainer(
     val tools: ToolRegistry = ToolRegistry().apply {
         register(ImportMediaTool(media, engine))
         register(AddClipTool(projects, media))
+        register(ReplaceClipTool(projects, media))
         register(SplitClipTool(projects))
         register(ExportTool(projects, engine))
         register(ApplyFilterTool(projects))
