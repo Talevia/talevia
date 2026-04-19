@@ -4,6 +4,7 @@ import io.talevia.core.domain.MediaSource
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.VideoEngine
+import io.talevia.core.tool.PathGuard
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
@@ -52,6 +53,9 @@ class ImportMediaTool(
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        // Import reads from an arbitrary path on disk — reject traversal before we
+        // pass it to the platform storage layer.
+        PathGuard.validate(input.path, requireAbsolute = true)
         val asset = storage.import(MediaSource.File(input.path)) { source -> engine.probe(source) }
         val out = Output(
             assetId = asset.id.value,

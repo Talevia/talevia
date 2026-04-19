@@ -55,6 +55,16 @@ import kotlin.uuid.Uuid
  * Real agent loop (full LLM streaming) goes here once provider keys are managed
  * server-side; stubbed for now so the SSE wiring can be exercised end-to-end.
  */
+/** Max length for user-supplied text fields (prompts, titles). Anything above this
+ *  is almost certainly an accident or an attack — the largest Anthropic context
+ *  window is 200k tokens ≈ 600k chars, and we never want a single request body to
+ *  approach that. 128KB is the break-point: real prompts stay well under, and
+ *  an adversary can't stuff unbounded JSON into a single field. */
+internal const val MAX_TEXT_FIELD_LENGTH = 128 * 1024
+
+/** Max length for free-form short strings like session titles. */
+internal const val MAX_TITLE_LENGTH = 256
+
 @OptIn(ExperimentalUuidApi::class)
 fun Application.serverModule(container: ServerContainer = ServerContainer()) {
     val json = JsonConfig.default
@@ -62,6 +72,11 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
 
     install(ContentNegotiation) { json(Json { classDiscriminator = "type"; ignoreUnknownKeys = true }) }
     install(StatusPages) {
+        exception<IllegalArgumentException> { call, cause ->
+            // Validation errors map to 400 so clients can distinguish "I sent bad
+            // input" from "server broke". PathGuard raises IllegalArgumentException.
+            call.respond(HttpStatusCode.BadRequest, mapOf("error" to (cause.message ?: "bad request")))
+        }
         exception<Throwable> { call, cause ->
             call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (cause.message ?: "internal error")))
         }
@@ -91,6 +106,8 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
 
         post("/sessions") {
             val req = call.receive<CreateSessionRequest>()
+            requireReasonableId(req.projectId, "projectId")
+            req.title?.let { requireLength(it, MAX_TITLE_LENGTH, "title") }
             val now = Clock.System.now()
             val sid = SessionId(Uuid.random().toString())
             val session = Session(
@@ -114,6 +131,7 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
         post("/sessions/{id}/parts") {
             val sid = SessionId(call.parameters["id"]!!)
             val body = call.receive<AppendTextRequest>()
+            requireLength(body.text, MAX_TEXT_FIELD_LENGTH, "text")
             val now = Clock.System.now()
             val msg = Message.User(
                 id = MessageId(Uuid.random().toString()),
@@ -143,6 +161,7 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
         post("/sessions/{id}/messages") {
             val sid = SessionId(call.parameters["id"]!!)
             val body = call.receive<SubmitMessageRequest>()
+            requireLength(body.text, MAX_TEXT_FIELD_LENGTH, "text")
             val agent = container.agent
             if (agent == null) {
                 call.respond(HttpStatusCode.NotImplemented, mapOf(
@@ -221,6 +240,19 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
                 }
             }
         }
+    }
+}
+
+private fun requireLength(text: String, max: Int, fieldName: String) {
+    require(text.length <= max) { "$fieldName exceeds max length ($max); was ${text.length}" }
+}
+
+/** Project / session IDs are used in URL paths and SQL — reject anything that
+ *  isn't a short, filename-safe string. */
+private fun requireReasonableId(value: String, fieldName: String) {
+    require(value.isNotEmpty() && value.length <= 128) { "$fieldName must be 1..128 chars" }
+    require(value.all { it.isLetterOrDigit() || it == '-' || it == '_' || it == '.' }) {
+        "$fieldName must be alphanumeric plus -_."
     }
 }
 

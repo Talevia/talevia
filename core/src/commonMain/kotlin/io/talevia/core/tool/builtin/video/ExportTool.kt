@@ -10,6 +10,7 @@ import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.session.Part
 import io.talevia.core.tool.MediaAttachment
+import io.talevia.core.tool.PathGuard
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
@@ -73,6 +74,10 @@ class ExportTool(
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        // Reject path-traversal and control-char tricks before we hand the path
+        // to the render engine; export writes to disk so this is a real attack
+        // surface if the LLM is ever fed adversarial input.
+        PathGuard.validate(input.outputPath, requireAbsolute = true)
         val project = store.get(ProjectId(input.projectId)) ?: error("Project ${input.projectId} not found")
         val timeline = project.timeline
         val width = input.width ?: timeline.resolution.width
