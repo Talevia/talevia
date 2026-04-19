@@ -2,6 +2,7 @@ package io.talevia.core.domain
 
 import io.talevia.core.ProjectId
 import io.talevia.core.domain.lockfile.Lockfile
+import io.talevia.core.domain.render.RenderCache
 import io.talevia.core.domain.source.Source
 import kotlinx.serialization.Serializable
 
@@ -19,6 +20,11 @@ data class Project(
      * [Lockfile.findByInputHash] first to short-circuit redundant provider calls.
      */
     val lockfile: Lockfile = Lockfile.EMPTY,
+    /**
+     * Full-timeline export memoization (VISION §3.2). [ExportTool] consults this before
+     * handing the timeline to the engine; identical inputs return without re-rendering.
+     */
+    val renderCache: RenderCache = RenderCache.EMPTY,
 )
 
 @Serializable

@@ -1,9 +1,12 @@
 package io.talevia.core.tool.builtin.video
 
+import io.talevia.core.JsonConfig
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
+import io.talevia.core.domain.Timeline
+import io.talevia.core.domain.render.RenderCacheEntry
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
@@ -14,6 +17,7 @@ import io.talevia.core.tool.PathGuard
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.util.fnv1a64Hex
 import kotlinx.coroutines.flow.collect
 import kotlinx.datetime.Clock
 import kotlinx.serialization.KSerializer
@@ -29,6 +33,20 @@ import kotlin.time.DurationUnit
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
+/**
+ * Render the project's timeline to a file (VISION §2: "Artifact is a reproducible
+ * deterministic product"). Before touching the engine we consult
+ * [io.talevia.core.domain.Project.renderCache]: if the canonical `(timeline, output)`
+ * fingerprint has been rendered before, we skip the render and return the cached
+ * metadata. This is the coarse-grained first cut of incremental compilation — per-clip
+ * re-render (the fine-grained cut) is an engine-layer follow-up.
+ *
+ * Cache key derivation: `fnv1a64Hex` over the canonical JSON of the timeline
+ * concatenated with canonical `OutputSpec` fields. Because `Clip.sourceBinding` is
+ * inside the timeline AND AIGC tools rewrite `assetId` on cache miss, any upstream
+ * source change → distinct timeline JSON → distinct fingerprint. The DAG is respected
+ * without a separate stale check at this layer.
+ */
 @OptIn(ExperimentalUuidApi::class)
 class ExportTool(
     private val store: ProjectStore,
@@ -44,16 +62,23 @@ class ExportTool(
         val frameRate: Int? = null,
         val videoCodec: String = "h264",
         val audioCodec: String = "aac",
+        /** Bypass [io.talevia.core.domain.Project.renderCache]; always re-render. */
+        val forceRender: Boolean = false,
     )
     @Serializable data class Output(
         val outputPath: String,
         val durationSeconds: Double,
         val resolutionWidth: Int,
         val resolutionHeight: Int,
+        /** True when the render was skipped because of a [Project.renderCache] hit. */
+        val cacheHit: Boolean = false,
     )
 
     override val id = "export"
-    override val helpText = "Render the project's timeline to a media file at outputPath. Streams progress as render-progress parts."
+    override val helpText =
+        "Render the project's timeline to a media file at outputPath. Skips rendering when the timeline + " +
+            "output spec hash matches a prior render (lockfile / DAG keeps this honest). " +
+            "Streams progress as render-progress parts."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("media.export.write")
@@ -68,15 +93,13 @@ class ExportTool(
             putJsonObject("frameRate") { put("type", "integer") }
             putJsonObject("videoCodec") { put("type", "string") }
             putJsonObject("audioCodec") { put("type", "string") }
+            putJsonObject("forceRender") { put("type", "boolean"); put("description", "Bypass the render cache and always re-render.") }
         }
         put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("outputPath"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        // Reject path-traversal and control-char tricks before we hand the path
-        // to the render engine; export writes to disk so this is a real attack
-        // surface if the LLM is ever fed adversarial input.
         PathGuard.validate(input.outputPath, requireAbsolute = true)
         val project = store.get(ProjectId(input.projectId)) ?: error("Project ${input.projectId} not found")
         val timeline = project.timeline
@@ -91,6 +114,36 @@ class ExportTool(
             videoCodec = input.videoCodec,
             audioCodec = input.audioCodec,
         )
+
+        val fingerprint = fingerprintOf(timeline, output)
+
+        if (!input.forceRender) {
+            val cached = project.renderCache.findByFingerprint(fingerprint)
+            if (cached != null && cached.outputPath == input.outputPath) {
+                val out = Output(
+                    outputPath = cached.outputPath,
+                    durationSeconds = cached.durationSeconds,
+                    resolutionWidth = cached.resolutionWidth,
+                    resolutionHeight = cached.resolutionHeight,
+                    cacheHit = true,
+                )
+                return ToolResult(
+                    title = "export (cached) → ${input.outputPath.substringAfterLast('/')}",
+                    outputForLlm = "Render cache hit — reusing prior output at ${input.outputPath} " +
+                        "(${cached.durationSeconds}s, ${cached.resolutionWidth}x${cached.resolutionHeight}).",
+                    data = out,
+                    attachments = listOf(
+                        MediaAttachment(
+                            mimeType = mimeTypeFor(input.outputPath),
+                            source = input.outputPath,
+                            widthPx = cached.resolutionWidth,
+                            heightPx = cached.resolutionHeight,
+                            durationMs = (cached.durationSeconds * 1000).toLong(),
+                        ),
+                    ),
+                )
+            }
+        }
 
         val jobId = Uuid.random().toString()
         var failure: String? = null
@@ -117,7 +170,25 @@ class ExportTool(
         if (failure != null) error("export failed: $failure")
 
         val duration = timeline.duration.toDouble(DurationUnit.SECONDS)
-        val out = Output(input.outputPath, duration, width, height)
+
+        // Record the render in the cache BEFORE returning — next call with identical
+        // inputs will hit. Uses ProjectStore.mutate so the append is serialized.
+        store.mutate(ProjectId(input.projectId)) { p ->
+            p.copy(
+                renderCache = p.renderCache.append(
+                    RenderCacheEntry(
+                        fingerprint = fingerprint,
+                        outputPath = input.outputPath,
+                        resolutionWidth = width,
+                        resolutionHeight = height,
+                        durationSeconds = duration,
+                        createdAtEpochMs = clock.now().toEpochMilliseconds(),
+                    ),
+                ),
+            )
+        }
+
+        val out = Output(input.outputPath, duration, width, height, cacheHit = false)
         return ToolResult(
             title = "export → ${input.outputPath.substringAfterLast('/')}",
             outputForLlm = "Exported timeline (${duration}s, ${width}x${height}) to ${input.outputPath}",
@@ -132,6 +203,20 @@ class ExportTool(
                 ),
             ),
         )
+    }
+
+    private fun fingerprintOf(timeline: Timeline, output: OutputSpec): String {
+        val json = JsonConfig.default
+        val canonical = buildString {
+            append(json.encodeToString(Timeline.serializer(), timeline))
+            append('|')
+            append("path=").append(output.targetPath)
+            append("|res=").append(output.resolution.width).append('x').append(output.resolution.height)
+            append("|fps=").append(output.frameRate)
+            append("|vc=").append(output.videoCodec)
+            append("|ac=").append(output.audioCodec)
+        }
+        return fnv1a64Hex(canonical)
     }
 
     /** MIME type from filename extension; falls back to a generic container. */
