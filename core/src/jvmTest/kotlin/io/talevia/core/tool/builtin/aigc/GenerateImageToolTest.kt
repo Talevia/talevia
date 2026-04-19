@@ -1,0 +1,153 @@
+package io.talevia.core.tool.builtin.aigc
+
+import io.talevia.core.AssetId
+import io.talevia.core.CallId
+import io.talevia.core.MessageId
+import io.talevia.core.SessionId
+import io.talevia.core.domain.MediaSource
+import io.talevia.core.permission.PermissionDecision
+import io.talevia.core.platform.GeneratedImage
+import io.talevia.core.platform.GenerationProvenance
+import io.talevia.core.platform.ImageGenEngine
+import io.talevia.core.platform.ImageGenRequest
+import io.talevia.core.platform.ImageGenResult
+import io.talevia.core.platform.InMemoryMediaStorage
+import io.talevia.core.platform.MediaBlobWriter
+import io.talevia.core.tool.ToolContext
+import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import java.io.File
+import java.nio.file.Files
+import kotlin.io.path.createTempDirectory
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+
+class GenerateImageToolTest {
+
+    /** Minimal valid 1x1 PNG — 67 bytes of IHDR + IDAT + IEND. */
+    private val tinyPng = byteArrayOf(
+        0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+        0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15.toByte(), 0xC4.toByte(),
+        0x89.toByte(), 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,
+        0x54, 0x78, 0x9C.toByte(), 0x63, 0x00, 0x01, 0x00, 0x00,
+        0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4.toByte(), 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE.toByte(),
+        0x42, 0x60.toByte(), 0x82.toByte(),
+    )
+
+    private class FakeImageGenEngine(
+        private val bytes: ByteArray,
+        private val fixedSeed: Long? = null,
+        private val fixedModelVersion: String? = null,
+    ) : ImageGenEngine {
+        override val providerId: String = "fake-openai"
+        var lastRequest: ImageGenRequest? = null
+            private set
+
+        override suspend fun generate(request: ImageGenRequest): ImageGenResult {
+            lastRequest = request
+            val image = GeneratedImage(pngBytes = bytes, width = request.width, height = request.height)
+            val params = buildJsonObject {
+                put("prompt", JsonPrimitive(request.prompt))
+                put("seed", JsonPrimitive(request.seed))
+            }
+            return ImageGenResult(
+                images = listOf(image),
+                provenance = GenerationProvenance(
+                    providerId = providerId,
+                    modelId = request.modelId,
+                    modelVersion = fixedModelVersion,
+                    seed = fixedSeed ?: request.seed,
+                    parameters = params,
+                    createdAtEpochMs = 1_700_000_000_000L,
+                ),
+            )
+        }
+    }
+
+    private class FakeBlobWriter(private val rootDir: File) : MediaBlobWriter {
+        val written = mutableListOf<File>()
+        override suspend fun writeBlob(bytes: ByteArray, suggestedExtension: String): MediaSource {
+            val file = File(rootDir, "${Files.list(rootDir.toPath()).count()}.${suggestedExtension}")
+            file.writeBytes(bytes)
+            written += file
+            return MediaSource.File(file.absolutePath)
+        }
+    }
+
+    private fun ctx(): ToolContext = ToolContext(
+        sessionId = SessionId("s"),
+        messageId = MessageId("m"),
+        callId = CallId("c"),
+        askPermission = { PermissionDecision.Once },
+        emitPart = { },
+        messages = emptyList(),
+    )
+
+    @Test fun persistsAssetAndExposesProvenance() = runTest {
+        val tmpDir = createTempDirectory("gen-image-test").toFile()
+        val engine = FakeImageGenEngine(tinyPng, fixedModelVersion = "v1")
+        val storage = InMemoryMediaStorage()
+        val writer = FakeBlobWriter(tmpDir)
+        val tool = GenerateImageTool(engine, storage, writer)
+
+        val result = tool.execute(
+            GenerateImageTool.Input(prompt = "a cat", model = "gpt-image-1", width = 64, height = 48, seed = 42L),
+            ctx(),
+        )
+
+        val out = result.data
+        // Asset is resolvable via the injected storage — we went through import,
+        // never touched AssetId.value as a path.
+        val resolvedPath = storage.resolve(AssetId(out.assetId))
+        assertTrue(File(resolvedPath).exists(), "resolved asset file should exist on disk")
+        assertEquals(tinyPng.toList(), File(resolvedPath).readBytes().toList())
+
+        // Provenance fields all populated from the fake engine's result.
+        assertEquals("fake-openai", out.providerId)
+        assertEquals("gpt-image-1", out.modelId)
+        assertEquals("v1", out.modelVersion)
+        assertEquals(42L, out.seed)
+        assertEquals("a cat", out.parameters["prompt"]?.toString()?.trim('"'))
+    }
+
+    @Test fun picksSeedClientSideWhenInputOmitsIt() = runTest {
+        val tmpDir = createTempDirectory("gen-image-test-2").toFile()
+        val engine = FakeImageGenEngine(tinyPng)
+        val storage = InMemoryMediaStorage()
+        val writer = FakeBlobWriter(tmpDir)
+        val tool = GenerateImageTool(engine, storage, writer)
+
+        val result = tool.execute(
+            GenerateImageTool.Input(prompt = "no seed", width = 32, height = 32, seed = null),
+            ctx(),
+        )
+
+        // Output.seed is a non-nullable Long — just asserting it was populated
+        // (the tool generated one client-side). Also assert it matches what
+        // the engine saw on the request, so provenance == runtime seed.
+        val engineSeed = assertNotNull(engine.lastRequest?.seed)
+        assertEquals(engineSeed, result.data.seed)
+    }
+
+    @Test fun outputDimensionsMatchReturnedImage() = runTest {
+        val tmpDir = createTempDirectory("gen-image-test-3").toFile()
+        val engine = FakeImageGenEngine(tinyPng)
+        val storage = InMemoryMediaStorage()
+        val writer = FakeBlobWriter(tmpDir)
+        val tool = GenerateImageTool(engine, storage, writer)
+
+        val result = tool.execute(
+            GenerateImageTool.Input(prompt = "sizes", width = 128, height = 256, seed = 1L),
+            ctx(),
+        )
+
+        assertEquals(128, result.data.width)
+        assertEquals(256, result.data.height)
+    }
+}

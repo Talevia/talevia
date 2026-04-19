@@ -14,17 +14,22 @@ import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.metrics.EventBusMetricsSink
 import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.permission.DefaultPermissionRuleset
+import io.talevia.core.platform.FileBlobWriter
 import io.talevia.core.platform.FileMediaStorage
+import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.InMemorySecretStore
+import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.provider.LlmProvider
 import io.talevia.core.provider.ProviderRegistry
+import io.talevia.core.provider.openai.OpenAiImageGenEngine
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
+import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitleTool
 import io.talevia.core.tool.builtin.video.AddTransitionTool
@@ -62,6 +67,16 @@ class ServerContainer(
      * directory so AssetIds referenced by saved Projects survive restarts.
      * Unset → keep the M2 in-memory behaviour (dev / tests).
      */
+    /**
+     * Media root dir backing both the asset catalog and AIGC blob output.
+     * `TALEVIA_MEDIA_DIR` persists under that path; unset falls back to
+     * `<java.io.tmpdir>/talevia-media` so AIGC tools still have somewhere
+     * to write even with an in-memory catalog.
+     */
+    val mediaRootDir: File = env["TALEVIA_MEDIA_DIR"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { File(it) }
+        ?: File(System.getProperty("java.io.tmpdir"), "talevia-media")
     val media: MediaStorage = env["TALEVIA_MEDIA_DIR"]
         ?.takeIf { it.isNotBlank() }
         ?.let { FileMediaStorage(File(it)) }
@@ -86,6 +101,20 @@ class ServerContainer(
         },
     )
 
+    val httpClient: HttpClient = HttpClient(CIO)
+
+    /**
+     * Image-generation engine, only wired when `OPENAI_API_KEY` is set. The
+     * tool itself registers unconditionally via [imageGen]?.let so headless
+     * deployments without an OpenAI key simply don't expose it.
+     */
+    val imageGen: ImageGenEngine? = env["OPENAI_API_KEY"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { OpenAiImageGenEngine(httpClient, it) }
+
+    /** JVM blob writer backing AIGC tools. */
+    val blobWriter: MediaBlobWriter = FileBlobWriter(mediaRootDir)
+
     val tools: ToolRegistry = ToolRegistry().apply {
         register(ImportMediaTool(media, engine))
         register(AddClipTool(projects, media))
@@ -95,9 +124,8 @@ class ServerContainer(
         register(AddSubtitleTool(projects))
         register(AddTransitionTool(projects))
         register(RevertTimelineTool(sessions, projects))
+        imageGen?.let { register(GenerateImageTool(it, media, blobWriter)) }
     }
-
-    val httpClient: HttpClient = HttpClient(CIO)
 
     /** Provider registry built from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env vars. */
     val providers: ProviderRegistry =

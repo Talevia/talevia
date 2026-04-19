@@ -160,8 +160,8 @@ class ServerSmokeTest {
         }
         assertEquals(HttpStatusCode.Accepted, resp.status)
 
-        repeat(100) {
-            if (openai.requests.size == 1) return@repeat
+        for (i in 0 until 100) {
+            if (openai.requests.size == 1) break
             delay(10)
         }
 

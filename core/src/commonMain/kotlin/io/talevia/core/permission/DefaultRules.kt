@@ -19,5 +19,7 @@ object DefaultPermissionRuleset {
         PermissionRule(permission = "media.network.fetch", pattern = "*", action = PermissionAction.ASK),
         PermissionRule(permission = "media.network.upload", pattern = "*", action = PermissionAction.ASK),
         PermissionRule(permission = "timeline.destructive", pattern = "*", action = PermissionAction.ASK),
+        // AIGC providers incur external cost + seed-locked artifacts. Ask before running.
+        PermissionRule(permission = "aigc.generate", pattern = "*", action = PermissionAction.ASK),
     )
 }
