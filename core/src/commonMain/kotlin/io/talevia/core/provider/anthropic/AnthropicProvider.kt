@@ -13,6 +13,7 @@ import io.talevia.core.provider.LlmEvent
 import io.talevia.core.provider.LlmProvider
 import io.talevia.core.provider.LlmRequest
 import io.talevia.core.provider.ModelInfo
+import io.talevia.core.provider.ReplayFormatting
 import io.talevia.core.provider.sseEvents
 import io.talevia.core.session.FinishReason
 import io.talevia.core.session.Message
@@ -269,7 +270,15 @@ class AnthropicProvider(
                                 }
                                 else -> { /* pending/failed tool calls aren't replayed as tool_use */ }
                             }
-                            else -> { /* reasoning/snapshots/etc not yet replayed */ }
+                            is Part.Reasoning -> if (p.text.isNotEmpty()) addJsonObject {
+                                put("type", "text")
+                                put("text", ReplayFormatting.formatReasoning(p))
+                            }
+                            is Part.TimelineSnapshot -> addJsonObject {
+                                put("type", "text")
+                                put("text", ReplayFormatting.formatTimelineSnapshot(p))
+                            }
+                            else -> { /* step-start/finish/media/compaction/render-progress not replayed */ }
                         }
                     })
                 }

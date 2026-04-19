@@ -2,9 +2,17 @@ package io.talevia.core.provider.anthropic
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.talevia.core.MessageId
+import io.talevia.core.PartId
+import io.talevia.core.SessionId
+import io.talevia.core.domain.Timeline
 import io.talevia.core.provider.LlmRequest
+import io.talevia.core.session.Message
+import io.talevia.core.session.MessageWithParts
 import io.talevia.core.session.ModelRef
+import io.talevia.core.session.Part
 import io.talevia.core.tool.ToolSpec
+import kotlinx.datetime.Instant
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
@@ -76,6 +84,38 @@ class AnthropicProviderTest {
             LlmRequest(model = ModelRef("anthropic", "claude-opus-4-7"), messages = emptyList()),
         )
         assertNull(body["tools"])
+    }
+
+    @Test
+    fun assistantReasoningAndSnapshotBlocksAreReplayedAsText() {
+        val epoch = Instant.fromEpochMilliseconds(0)
+        val msg = Message.Assistant(
+            id = MessageId("a1"),
+            sessionId = SessionId("s1"),
+            createdAt = epoch,
+            parentId = MessageId("u0"),
+            model = ModelRef("anthropic", "claude-opus-4-7"),
+        )
+        val parts = listOf(
+            Part.Reasoning(PartId("p1"), MessageId("a1"), SessionId("s1"), epoch, text = "think think"),
+            Part.TimelineSnapshot(PartId("p2"), MessageId("a1"), SessionId("s1"), epoch, timeline = Timeline()),
+        )
+        val body = provider().buildRequestBody(
+            LlmRequest(
+                model = ModelRef("anthropic", "claude-opus-4-7"),
+                messages = listOf(MessageWithParts(msg, parts)),
+            ),
+        )
+
+        val messages = body["messages"]!!.jsonArray
+        assertEquals(1, messages.size)
+        val content = messages[0].jsonObject["content"]!!.jsonArray
+        assertEquals(2, content.size, "reasoning + snapshot both replayed as text blocks")
+        content.forEach { block ->
+            assertEquals("text", block.jsonObject["type"]!!.jsonPrimitive.content)
+        }
+        assertTrue(content[0].jsonObject["text"]!!.jsonPrimitive.content.contains("<prior_reasoning>"))
+        assertTrue(content[1].jsonObject["text"]!!.jsonPrimitive.content.contains("<timeline_snapshot"))
     }
 
     @Test

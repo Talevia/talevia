@@ -13,6 +13,7 @@ import io.talevia.core.provider.LlmEvent
 import io.talevia.core.provider.LlmProvider
 import io.talevia.core.provider.LlmRequest
 import io.talevia.core.provider.ModelInfo
+import io.talevia.core.provider.ReplayFormatting
 import io.talevia.core.provider.sseEvents
 import io.talevia.core.session.FinishReason
 import io.talevia.core.session.Message
@@ -197,7 +198,18 @@ class OpenAiProvider(
                 val toolParts = mwp.parts.filterIsInstance<Part.Tool>()
                 addJsonObject {
                     put("role", "assistant")
-                    val text = mwp.parts.filterIsInstance<Part.Text>().joinToString("\n") { it.text }
+                    val text = buildString {
+                        mwp.parts.forEach { p ->
+                            val rendered = when (p) {
+                                is Part.Text -> p.text.takeIf { it.isNotEmpty() }
+                                is Part.Reasoning -> p.text.takeIf { it.isNotEmpty() }?.let { ReplayFormatting.formatReasoning(p) }
+                                is Part.TimelineSnapshot -> ReplayFormatting.formatTimelineSnapshot(p)
+                                else -> null
+                            } ?: return@forEach
+                            if (isNotEmpty()) append('\n')
+                            append(rendered)
+                        }
+                    }
                     if (text.isNotEmpty()) put("content", text)
                     val replayable = toolParts.filter { it.state is ToolState.Running || it.state is ToolState.Completed }
                     if (replayable.isNotEmpty()) putJsonArray("tool_calls") {
