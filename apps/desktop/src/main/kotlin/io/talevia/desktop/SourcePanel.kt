@@ -33,13 +33,18 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import io.talevia.core.ClipId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
+import io.talevia.core.SourceNodeId
 import io.talevia.core.bus.BusEvent
+import io.talevia.core.domain.ClipsForSourceReport
 import io.talevia.core.domain.Project
+import io.talevia.core.domain.clipsBoundTo
 import io.talevia.core.domain.source.Source
 import io.talevia.core.domain.source.SourceNode
 import io.talevia.core.domain.source.consistency.ConsistencyKinds
+import io.talevia.core.domain.staleClipsFromLockfile
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
@@ -133,12 +138,31 @@ fun SourcePanel(
             )
         }
 
+        // Precompute per-node downstream-clip reports + the staleness overlay
+        // once per project change. Each expanded row reads its own slice.
+        // O(nodes × clips) amortized — fine at project scale.
+        val p = project
+        val staleClipIds = remember(p?.timeline, p?.source, p?.lockfile) {
+            p?.staleClipsFromLockfile()?.map { it.clipId }?.toSet().orEmpty()
+        }
+        val reportsByNode = remember(p?.timeline, p?.source) {
+            val map = mutableMapOf<String, List<ClipsForSourceReport>>()
+            if (p != null) {
+                for (node in p.source.nodes) {
+                    map[node.id.value] = p.clipsBoundTo(SourceNodeId(node.id.value))
+                }
+            }
+            map
+        }
+
         LazyColumn(modifier = Modifier.fillMaxWidth().height(260.dp)) {
             groups.forEach { (header, nodes) ->
                 item(key = "header:$header") { SourceGroupHeader(header, nodes.size) }
                 items(nodes, key = { it.id.value }) { node ->
                     SourceNodeRow(
                         node = node,
+                        downstreamClips = reportsByNode[node.id.value].orEmpty(),
+                        staleClipIds = staleClipIds,
                         expanded = expanded[node.id.value] == true,
                         onToggle = { expanded[node.id.value] = expanded[node.id.value] != true },
                         onRemove = {
@@ -234,11 +258,14 @@ private fun SourceGroupHeader(label: String, count: Int) {
 @Composable
 private fun SourceNodeRow(
     node: SourceNode,
+    downstreamClips: List<ClipsForSourceReport>,
+    staleClipIds: Set<ClipId>,
     expanded: Boolean,
     onToggle: () -> Unit,
     onRemove: () -> Unit,
 ) {
     val name = displayName(node)
+    val staleCount = downstreamClips.count { it.clipId in staleClipIds }
     Surface(
         shape = RoundedCornerShape(4.dp),
         color = if (expanded) Color(0xFFF1F4FB) else Color(0xFFFAFAFA),
@@ -254,6 +281,15 @@ private fun SourceNodeRow(
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.weight(1f),
                 )
+                if (downstreamClips.isNotEmpty()) {
+                    val suffix = if (staleCount > 0) "  · $staleCount stale" else ""
+                    Text(
+                        text = "${downstreamClips.size} clip${if (downstreamClips.size == 1) "" else "s"}$suffix",
+                        fontFamily = FontFamily.Monospace,
+                        color = if (staleCount > 0) Color(0xFF8B5A00) else Color(0xFF757575),
+                        modifier = Modifier.padding(horizontal = 6.dp),
+                    )
+                }
                 Text(
                     text = node.contentHash.take(8),
                     fontFamily = FontFamily.Monospace,
@@ -277,6 +313,24 @@ private fun SourceNodeRow(
                         text = "parents: ${node.parents.joinToString(", ") { it.nodeId.value }}",
                         fontFamily = FontFamily.Monospace,
                     )
+                }
+                if (downstreamClips.isNotEmpty()) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = "downstream clips (${downstreamClips.size}):",
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFF555555),
+                    )
+                    for (r in downstreamClips) {
+                        val stale = r.clipId in staleClipIds
+                        val viaNote = if (r.directlyBound) "" else "  via ${r.boundVia.joinToString(",") { it.value }}"
+                        Text(
+                            text = "  ${r.clipId.value.take(8)} on ${r.trackId.value.take(6)}" +
+                                (if (stale) "  [stale]" else "") + viaNote,
+                            fontFamily = FontFamily.Monospace,
+                            color = if (stale) Color(0xFF8B5A00) else Color(0xFF555555),
+                        )
+                    }
                 }
                 Spacer(Modifier.height(4.dp))
                 SelectionContainer {
