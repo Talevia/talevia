@@ -90,6 +90,12 @@ private fun AppRoot(container: AppContainer) {
     var importPath by remember { mutableStateOf("") }
     var exportPath by remember { mutableStateOf(System.getProperty("user.home") + "/talevia-export.mp4") }
     var previewPath by remember { mutableStateOf<String?>(null) }
+    // Seek request plumbing: TimelinePanel (and any future caller) sets
+    // `seekTargetSeconds` and bumps `seekSeq`; VideoPreviewPanel's LaunchedEffect
+    // observes the pair and forwards to the JavaFX controller. Counter is
+    // monotonic so identical-target clicks still fire.
+    var seekTargetSeconds by remember { mutableStateOf(0.0) }
+    var seekSeq by remember { mutableStateOf(0L) }
 
     // Mutable active project id — `ProjectBar` flips this when the user
     // switches / creates / forks / deletes. Defaults to a sentinel until
@@ -243,7 +249,15 @@ private fun AppRoot(container: AppContainer) {
                     modifier = Modifier.fillMaxWidth(),
                 ) { Text("Add last asset to timeline") }
                 Spacer(Modifier.height(6.dp))
-                TimelinePanel(container = container, projectId = projectId, log = log)
+                TimelinePanel(
+                    container = container,
+                    projectId = projectId,
+                    log = log,
+                    onSeekPreview = { seconds ->
+                        seekTargetSeconds = seconds
+                        seekSeq += 1L
+                    },
+                )
 
                 Spacer(Modifier.height(12.dp))
                 SectionTitle("Render")
@@ -279,7 +293,11 @@ private fun AppRoot(container: AppContainer) {
                 renderProgress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
 
                 Spacer(Modifier.height(12.dp))
-                VideoPreviewPanel(filePath = previewPath, modifier = Modifier.fillMaxWidth())
+                VideoPreviewPanel(
+                    filePath = previewPath,
+                    modifier = Modifier.fillMaxWidth(),
+                    seekRequest = if (seekSeq > 0L) seekSeq to seekTargetSeconds else null,
+                )
             }
 
             Divider(modifier = Modifier.fillMaxHeight().width(1.dp))

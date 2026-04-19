@@ -63,6 +63,7 @@ fun TimelinePanel(
     container: AppContainer,
     projectId: ProjectId,
     log: SnapshotStateList<String>,
+    onSeekPreview: (Double) -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     var project by remember(projectId) { mutableStateOf<Project?>(null) }
@@ -143,6 +144,9 @@ fun TimelinePanel(
                         onToggle = {
                             expanded[clip.id.value] = expanded[clip.id.value] != true
                         },
+                        onSeek = {
+                            onSeekPreview(clip.timeRange.start.inWholeMilliseconds / 1000.0)
+                        },
                         onRemove = {
                             dispatch(
                                 "remove_clip",
@@ -194,6 +198,7 @@ private fun ClipRow(
     stale: Boolean,
     expanded: Boolean,
     onToggle: () -> Unit,
+    onSeek: () -> Unit,
     onRemove: () -> Unit,
     onRegenerate: () -> Unit,
 ) {
@@ -222,6 +227,7 @@ private fun ClipRow(
                     Chip("stale", color = Color(0xFFD97706))
                     TextButton(onClick = onRegenerate) { Text("Regenerate") }
                 }
+                TextButton(onClick = onSeek) { Text("Seek") }
                 TextButton(onClick = onRemove) { Text("Remove") }
             }
             if (expanded) {

@@ -46,7 +46,17 @@ import java.io.File
  * JavaFX can't decode, the fallback button still works.
  */
 @Composable
-fun VideoPreviewPanel(filePath: String?, modifier: Modifier = Modifier) {
+fun VideoPreviewPanel(
+    filePath: String?,
+    modifier: Modifier = Modifier,
+    /**
+     * External seek requests. When [seekRequest] changes (new non-null value), the
+     * JavaFX controller seeks to `seekRequest.second` seconds. The first member
+     * is a monotonic counter so identical-timestamp clicks (same clip twice) still
+     * re-fire — `remember`'s structural equality would otherwise swallow them.
+     */
+    seekRequest: Pair<Long, Double>? = null,
+) {
     Column(modifier = modifier) {
         Text(
             text = "Preview",
@@ -65,7 +75,7 @@ fun VideoPreviewPanel(filePath: String?, modifier: Modifier = Modifier) {
 
         val fxAvailable = remember { JavaFxPreviewBackend.isAvailable() }
         if (fxAvailable) {
-            JavaFxPreview(file = file)
+            JavaFxPreview(file = file, seekRequest = seekRequest)
         } else {
             PlaceholderCard("JavaFX runtime not available — preview disabled.")
         }
@@ -96,7 +106,7 @@ private fun PlaceholderCard(text: String) {
 }
 
 @Composable
-private fun JavaFxPreview(file: File) {
+private fun JavaFxPreview(file: File, seekRequest: Pair<Long, Double>?) {
     val controller = remember(file) { JavaFxPreviewBackend.create(file) }
 
     var playing by remember { mutableStateOf(false) }
@@ -120,6 +130,13 @@ private fun JavaFxPreview(file: File) {
             playing = controller.isPlaying()
             kotlinx.coroutines.delay(100)
         }
+    }
+
+    // External seek trigger: observe changes to the (counter, seconds) pair and
+    // forward to the JavaFX controller. Keyed on `file` too so seeks made
+    // immediately after a preview swap still apply.
+    LaunchedEffect(file, seekRequest) {
+        if (seekRequest != null) controller.seekSeconds(seekRequest.second)
     }
 
     Spacer(Modifier.height(6.dp))
