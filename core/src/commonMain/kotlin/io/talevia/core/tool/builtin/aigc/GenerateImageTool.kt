@@ -1,7 +1,12 @@
 package io.talevia.core.tool.builtin.aigc
 
+import io.talevia.core.ProjectId
+import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.MediaMetadata
+import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
+import io.talevia.core.domain.source.consistency.foldConsistencyIntoPrompt
+import io.talevia.core.domain.source.consistency.resolveConsistencyBindings
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.ImageGenRequest
@@ -33,6 +38,15 @@ import kotlin.time.Duration
  * complete. Not doing this would let the provider pick an opaque seed we
  * cannot replay, which is exactly the failure mode VISION §3.1 forbids.
  *
+ * Consistency bindings (VISION §3.3): when [Input.projectId] is present and
+ * [Input.consistencyBindingIds] names source nodes of kind
+ * `core.consistency.*`, the tool folds their textual descriptions into the
+ * effective prompt and records the applied ids on the output (which downstream
+ * tools — add_clip — wire into [io.talevia.core.domain.Clip.sourceBinding]).
+ * This is the primary vehicle by which "same character in 50 shots" works:
+ * changing one `CharacterRefBody` propagates through `Source.stale` to mark
+ * every clip it conditioned as needing re-render.
+ *
  * Permission: `"aigc.generate"` — defaults to ASK via
  * [io.talevia.core.permission.DefaultPermissionRuleset]; the server maps
  * ASK to deny, which is the correct headless default.
@@ -41,6 +55,7 @@ class GenerateImageTool(
     private val engine: ImageGenEngine,
     private val storage: MediaStorage,
     private val blobWriter: MediaBlobWriter,
+    private val projectStore: ProjectStore? = null,
 ) : Tool<GenerateImageTool.Input, GenerateImageTool.Output> {
 
     @Serializable
@@ -50,6 +65,18 @@ class GenerateImageTool(
         val width: Int = 1024,
         val height: Int = 1024,
         val seed: Long? = null,
+        /**
+         * Optional project whose [io.talevia.core.domain.source.Source] holds the
+         * consistency bindings named by [consistencyBindingIds]. Required when
+         * [consistencyBindingIds] is non-empty; otherwise ignored.
+         */
+        val projectId: String? = null,
+        /**
+         * Ids of consistency source nodes to fold into the prompt (VISION §3.3).
+         * Ids that don't resolve (missing node, wrong kind) are silently skipped
+         * and reported via [Output.appliedConsistencyBindingIds].
+         */
+        val consistencyBindingIds: List<String> = emptyList(),
     )
 
     @Serializable
@@ -62,12 +89,25 @@ class GenerateImageTool(
         val modelVersion: String?,
         val seed: Long,
         val parameters: JsonObject,
+        /**
+         * The prompt actually sent to the provider after consistency folding.
+         * Equal to [Input.prompt] when no bindings were applied. Surfaced so the
+         * agent can reason about "did my bindings take effect?".
+         */
+        val effectivePrompt: String,
+        /**
+         * Subset of [Input.consistencyBindingIds] that resolved to real nodes.
+         * Downstream tools wiring this asset into a clip should pass this set
+         * to [io.talevia.core.domain.Clip.sourceBinding].
+         */
+        val appliedConsistencyBindingIds: List<String>,
     )
 
     override val id: String = "generate_image"
     override val helpText: String =
         "Generate an image from a text prompt via an AIGC provider and import it as a project asset. " +
-            "Records seed + model in provenance so the generation can be replayed."
+            "Records seed + model in provenance so the generation can be replayed. " +
+            "Pass consistencyBindingIds to reuse character / style / brand source nodes across shots."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("aigc.generate")
@@ -95,6 +135,15 @@ class GenerateImageTool(
                 put("type", "integer")
                 put("description", "Optional seed for reproducibility. If omitted the tool picks one client-side so provenance is still complete.")
             }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put("description", "Required when consistencyBindingIds is non-empty — tells the tool which project's source to read.")
+            }
+            putJsonObject("consistencyBindingIds") {
+                put("type", "array")
+                put("description", "Source node ids (kind core.consistency.*) to fold into the prompt — characters, style bibles, brand palettes.")
+                putJsonObject("items") { put("type", "string") }
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("prompt"))))
         put("additionalProperties", false)
@@ -104,9 +153,12 @@ class GenerateImageTool(
         // Always have a seed by the time we call the engine — see VISION §3.1.
         val seed = input.seed ?: Random.nextLong()
 
+        val folded = resolveConsistency(input)
+        val finalPrompt = folded.effectivePrompt
+
         val result = engine.generate(
             ImageGenRequest(
-                prompt = input.prompt,
+                prompt = finalPrompt,
                 modelId = input.model,
                 width = input.width,
                 height = input.height,
@@ -139,12 +191,31 @@ class GenerateImageTool(
             modelVersion = prov.modelVersion,
             seed = prov.seed,
             parameters = prov.parameters,
+            effectivePrompt = finalPrompt,
+            appliedConsistencyBindingIds = folded.appliedNodeIds,
         )
+        val bindingTail = if (folded.appliedNodeIds.isEmpty()) ""
+        else " [bindings: ${folded.appliedNodeIds.joinToString(", ")}]"
         return ToolResult(
             title = "generate image",
             outputForLlm = "Generated ${image.width}x${image.height} image (asset ${out.assetId}) " +
-                "via ${prov.providerId}/${prov.modelId} seed=${prov.seed}",
+                "via ${prov.providerId}/${prov.modelId} seed=${prov.seed}$bindingTail",
             data = out,
         )
+    }
+
+    private suspend fun resolveConsistency(input: Input): io.talevia.core.domain.source.consistency.FoldedPrompt {
+        if (input.consistencyBindingIds.isEmpty()) {
+            return foldConsistencyIntoPrompt(input.prompt, emptyList())
+        }
+        val store = projectStore
+            ?: error("consistencyBindingIds supplied but this GenerateImageTool has no ProjectStore wired")
+        val pid = input.projectId
+            ?: error("consistencyBindingIds require projectId to locate the source graph")
+        val project = store.get(ProjectId(pid))
+            ?: error("Project $pid not found when resolving consistency bindings")
+        val ids = input.consistencyBindingIds.map { SourceNodeId(it) }
+        val resolved = project.source.resolveConsistencyBindings(ids)
+        return foldConsistencyIntoPrompt(input.prompt, resolved)
     }
 }

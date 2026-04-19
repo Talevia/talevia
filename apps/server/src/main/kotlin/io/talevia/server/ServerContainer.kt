@@ -124,7 +124,7 @@ class ServerContainer(
         register(AddSubtitleTool(projects))
         register(AddTransitionTool(projects))
         register(RevertTimelineTool(sessions, projects))
-        imageGen?.let { register(GenerateImageTool(it, media, blobWriter)) }
+        imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
     }
 
     /** Provider registry built from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env vars. */

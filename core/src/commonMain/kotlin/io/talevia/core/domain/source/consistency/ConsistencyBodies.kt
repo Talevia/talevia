@@ -1,0 +1,79 @@
+package io.talevia.core.domain.source.consistency
+
+import io.talevia.core.AssetId
+import kotlinx.serialization.Serializable
+
+/**
+ * A named character / subject / performer whose visual identity must stay stable across
+ * shots (VISION §3.3). The body carries every signal a downstream AIGC tool might
+ * consume to keep the same face/body/silhouette between generations.
+ *
+ * @property name Human-readable handle — the LLM references this when reasoning.
+ * @property visualDescription Natural-language description of the character's look,
+ *   age, vibe, costume, etc. Folded into AIGC prompts by
+ *   [io.talevia.core.domain.source.consistency.foldConsistencyIntoPrompt].
+ * @property referenceAssetIds Project assets (image uploads, generated keyframes) that
+ *   can be passed to image-gen models supporting reference images. Ordered; first is
+ *   the canonical reference.
+ * @property loraPin Optional LoRA / DreamBooth / IP-Adapter binding — the single
+ *   strongest mechanism we have for per-character identity lock, when the provider
+ *   supports it. `null` means "rely on prompt + reference images only".
+ */
+@Serializable
+data class CharacterRefBody(
+    val name: String,
+    val visualDescription: String,
+    val referenceAssetIds: List<AssetId> = emptyList(),
+    val loraPin: LoraPin? = null,
+)
+
+/**
+ * A pinned LoRA / adapter weight: which adapter to load and how strongly to apply it.
+ * Provider-specific identifiers live in [adapterId] — we don't try to unify across
+ * providers, because the URI scheme for HuggingFace / Civitai / custom hosts all differ.
+ * The provider-side adapter runs interpret it.
+ */
+@Serializable
+data class LoraPin(
+    val adapterId: String,
+    val weight: Float = 1.0f,
+    val triggerTokens: List<String> = emptyList(),
+)
+
+/**
+ * A coherent visual style shared across a project — look, color grade, negative
+ * prompts, mood keywords. A [StyleBibleBody] tends to apply globally; a character
+ * tends to apply per-shot. Keeping them as separate kinds lets the prompt folder
+ * know the right ordering ("[style] [character] [shot-specific prompt]").
+ *
+ * @property name Short handle ("cinematic warm", "gritty handheld").
+ * @property description Natural-language style description.
+ * @property lutReference Optional project asset id of a LUT file, when the traditional
+ *   color pipeline should apply one. The AIGC layer mostly ignores this; the traditional
+ *   filter pass consumes it.
+ * @property negativePrompt Freeform text the image-gen pass should steer away from.
+ * @property moodKeywords Short adjectives folded into the prompt — "warm", "nostalgic",
+ *   "frenetic".
+ */
+@Serializable
+data class StyleBibleBody(
+    val name: String,
+    val description: String,
+    val lutReference: AssetId? = null,
+    val negativePrompt: String? = null,
+    val moodKeywords: List<String> = emptyList(),
+)
+
+/**
+ * A brand's visual identity: palette, typography hints. Used for ads / marketing
+ * genres and for product-led content. Kept separate from [StyleBibleBody] because
+ * brands have legal / compliance constraints (exact hex matches, typography licensing)
+ * that a free-form style bible doesn't.
+ */
+@Serializable
+data class BrandPaletteBody(
+    val name: String,
+    /** Hex colors, e.g. `["#0A84FF", "#FF3B30"]`. First is the primary. */
+    val hexColors: List<String>,
+    val typographyHints: List<String> = emptyList(),
+)

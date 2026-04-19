@@ -1,10 +1,20 @@
 package io.talevia.core.tool.builtin.aigc
 
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
+import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
+import io.talevia.core.SourceNodeId
+import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.MediaSource
+import io.talevia.core.domain.Project
+import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.Timeline
+import io.talevia.core.domain.source.consistency.CharacterRefBody
+import io.talevia.core.domain.source.consistency.addCharacterRef
+import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.GeneratedImage
 import io.talevia.core.platform.GenerationProvenance
@@ -149,5 +159,74 @@ class GenerateImageToolTest {
 
         assertEquals(128, result.data.width)
         assertEquals(256, result.data.height)
+    }
+
+    @Test fun consistencyBindingFoldsCharacterIntoPrompt() = runTest {
+        val tmpDir = createTempDirectory("gen-image-test-4").toFile()
+        val engine = FakeImageGenEngine(tinyPng)
+        val storage = InMemoryMediaStorage()
+        val writer = FakeBlobWriter(tmpDir)
+
+        // Set up a real SqlDelight project store with a character-ref source node.
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val projectId = ProjectId("p-1")
+        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
+        store.mutateSource(projectId) {
+            it.addCharacterRef(
+                SourceNodeId("mei"),
+                CharacterRefBody(name = "Mei", visualDescription = "teal hair, round glasses"),
+            )
+        }
+
+        val tool = GenerateImageTool(engine, storage, writer, store)
+
+        val result = tool.execute(
+            GenerateImageTool.Input(
+                prompt = "walking in the rain",
+                width = 64,
+                height = 48,
+                seed = 7L,
+                projectId = projectId.value,
+                consistencyBindingIds = listOf("mei"),
+            ),
+            ctx(),
+        )
+
+        val sentPrompt = assertNotNull(engine.lastRequest?.prompt)
+        assertTrue("Mei" in sentPrompt, "folded prompt must carry the character name")
+        assertTrue("teal hair" in sentPrompt, "folded prompt must carry the visual description")
+        assertTrue("walking in the rain" in sentPrompt, "base prompt must still be present")
+        assertEquals(sentPrompt, result.data.effectivePrompt)
+        assertEquals(listOf("mei"), result.data.appliedConsistencyBindingIds)
+    }
+
+    @Test fun consistencyBindingWithUnknownIdIsSkippedWithoutThrowing() = runTest {
+        val tmpDir = createTempDirectory("gen-image-test-5").toFile()
+        val engine = FakeImageGenEngine(tinyPng)
+        val storage = InMemoryMediaStorage()
+        val writer = FakeBlobWriter(tmpDir)
+
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val projectId = ProjectId("p-1")
+        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
+
+        val tool = GenerateImageTool(engine, storage, writer, store)
+
+        val result = tool.execute(
+            GenerateImageTool.Input(
+                prompt = "base",
+                seed = 9L,
+                projectId = projectId.value,
+                consistencyBindingIds = listOf("ghost"),
+            ),
+            ctx(),
+        )
+
+        assertEquals("base", engine.lastRequest?.prompt)
+        assertTrue(result.data.appliedConsistencyBindingIds.isEmpty())
     }
 }

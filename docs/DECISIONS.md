@@ -10,6 +10,73 @@ Ordered reverse-chronological (newest on top).
 
 ---
 
+## 2026-04-19 — Consistency nodes live in Core, not in a genre extension
+
+**Context.** VISION §3.3 demands first-class "character reference / style bible / brand
+palette" source abstractions so AIGC tools have something to condition on for cross-shot
+consistency. The question is: do these live under `core/domain/source/consistency/` or
+inside every genre that needs them (`genre/vlog/`, `genre/narrative/`, …)?
+
+**Decision.** Consistency nodes live in Core under
+`core/domain/source/consistency/` with kinds in the `core.consistency.*` namespace.
+
+- `CharacterRefBody(name, visualDescription, referenceAssetIds, loraPin)`
+- `StyleBibleBody(name, description, lutReference, negativePrompt, moodKeywords)`
+- `BrandPaletteBody(name, hexColors, typographyHints)`
+
+**Why this does *not* violate "no hardcoded genre schemas in Core".** The anti-requirement
+forbids *genre* schemas in Core — narrative, vlog, MV, etc. Consistency nodes are
+*cross-cutting mechanisms* that every genre reuses to solve the same problem (identity
+lock across shots). Defining them per-genre would either duplicate the schema or force
+each genre to reinvent the wheel, neither of which serves VISION §3.3's goal of "a
+single `character_ref` that transits all the way to every AIGC call in the project."
+
+**Alternatives considered.**
+- **One copy per genre.** Rejected: encourages drift (vlog's character looks slightly
+  different from narrative's character), breaks the "change one character → all its
+  references refactor" promise.
+- **A generic `ConstraintNode` with a free-form JSON body.** Rejected: loses the
+  guardrails on field names (every downstream fold function would string-match on
+  keys). Typed bodies make the prompt folder's behavior auditable.
+
+## 2026-04-19 — Consistency-binding injection via tool input, not ToolContext
+
+**Context.** AIGC tools need access to consistency nodes at execution time. We could
+surface them on `ToolContext` (every tool sees them) or on each tool's typed input
+(only tools that want them declare them).
+
+**Decision.** Each AIGC tool declares `projectId: String?` + `consistencyBindingIds:
+List<String>` on its typed input. The tool carries a `ProjectStore?` via its
+constructor and resolves bindings via `Source.resolveConsistencyBindings(ids)` during
+`execute`. Tools without bindings / without a store fall back to prompt-only behavior.
+
+**Why input, not context.**
+- **Discoverability for the LLM.** Input fields appear in the tool's JSON schema, which
+  is what the model reads. A field on `ToolContext` would be invisible to the model.
+- **Narrow blast radius.** `ToolContext` is shared by every tool (timeline edits, echo,
+  etc.); loading the project source eagerly for every dispatch would be wasted work
+  for the vast majority of calls.
+- **Tool-by-tool opt-in.** Some AIGC tools (e.g. future TTS on a named character) want
+  bindings; some (e.g. a generic SFX synth) don't. Input declaration lets each tool
+  own that choice.
+
+## 2026-04-19 — Prompt folding order: style → brand → character → base
+
+**Context.** When multiple consistency nodes apply, what order do they appear in the
+folded prompt?
+
+**Decision.** `foldConsistencyIntoPrompt` emits fragments in the order `[style] [brand]
+[character] + base prompt`. Negative prompts are merged separately (comma-joined) and
+returned to the caller; LoRA pins and reference asset ids are surfaced as separate
+structured fields (they're provider-specific hooks, not prompt text).
+
+**Why this ordering.** Diffusion models weight the tail of the prompt more heavily
+(well-known inference-time behavior). The base prompt is the most specific signal
+("what does this shot look like"), so it goes last. Identity (character) sits right
+before it so the model enters the shot-specific portion already thinking about the
+subject. Global look (style, brand) goes first because it sets the scene before
+identity and content arrive.
+
 ## 2026-04-19 — Content hash for Source DAG: FNV-1a 64-bit hex (upgradable to SHA-256)
 
 **Context.** VISION §3.2 calls for cache keys indexed by `(source_hash, toolchain_version)`.
