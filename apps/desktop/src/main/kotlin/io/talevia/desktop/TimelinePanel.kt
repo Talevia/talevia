@@ -21,6 +21,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -105,6 +106,25 @@ fun TimelinePanel(
         p?.staleClipsFromLockfile()?.map { it.clipId }?.toSet().orEmpty()
     }
 
+    // Multi-select state: Set<clipId>. cmd+click on a ClipRow toggles
+    // membership; the header row shows batch actions when any are selected.
+    val selected = remember(projectId) { mutableStateListOf<String>() }
+
+    fun batchApply(name: String, params: Map<String, Float>) {
+        if (selected.isEmpty()) return
+        val snapshot = selected.toList()
+        dispatch(
+            "apply_filter_to_clips",
+            buildJsonObject {
+                put("projectId", projectId.value)
+                put("filterName", name)
+                putJsonObject("params") { params.forEach { (k, v) -> put(k, v) } }
+                putJsonArray("clipIds") { snapshot.forEach { add(it) } }
+            },
+            "apply $name × ${snapshot.size}",
+        )
+    }
+
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -123,6 +143,20 @@ fun TimelinePanel(
                 fontFamily = FontFamily.Monospace,
                 color = Color(0xFF555555),
             )
+            if (selected.isNotEmpty()) {
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = "${selected.size} selected",
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFFD97706),
+                )
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = { batchApply("brightness", mapOf("amount" to 0.15f)) }) { Text("bright+") }
+                TextButton(onClick = { batchApply("saturation", mapOf("amount" to 0.3f)) }) { Text("sat+") }
+                TextButton(onClick = { batchApply("blur", mapOf("radius" to 4f)) }) { Text("blur") }
+                TextButton(onClick = { batchApply("vignette", mapOf("intensity" to 0.5f)) }) { Text("vignette") }
+                TextButton(onClick = { selected.clear() }) { Text("clear") }
+            }
         }
 
         if (tracks.isEmpty()) {
@@ -137,13 +171,18 @@ fun TimelinePanel(
             tracks.forEach { track ->
                 item(key = "track:${track.id.value}") { TrackHeader(track) }
                 items(track.clips, key = { it.id.value }) { clip ->
+                    val isSelected = clip.id.value in selected
                     ClipRow(
                         track = track,
                         clip = clip,
                         stale = clip.id in staleIds,
                         expanded = expanded[clip.id.value] == true,
+                        selected = isSelected,
                         onToggle = {
                             expanded[clip.id.value] = expanded[clip.id.value] != true
+                        },
+                        onToggleSelected = {
+                            if (isSelected) selected.remove(clip.id.value) else selected.add(clip.id.value)
                         },
                         onSeek = {
                             onSeekPreview(clip.timeRange.start.inWholeMilliseconds / 1000.0)
@@ -257,7 +296,9 @@ private fun ClipRow(
     clip: Clip,
     stale: Boolean,
     expanded: Boolean,
+    selected: Boolean,
     onToggle: () -> Unit,
+    onToggleSelected: () -> Unit,
     onSeek: () -> Unit,
     onRemove: () -> Unit,
     onRegenerate: () -> Unit,
@@ -266,6 +307,7 @@ private fun ClipRow(
     onApplyLut: () -> Unit,
 ) {
     val bg = when {
+        selected -> Color(0xFFE3EFFF) // blue-ish tint for selection
         expanded -> Color(0xFFF1F4FB)
         stale -> Color(0xFFFFF4E5)
         else -> Color(0xFFFAFAFA)
@@ -291,6 +333,9 @@ private fun ClipRow(
                     TextButton(onClick = onRegenerate) { Text("Regenerate") }
                 }
                 TextButton(onClick = onSeek) { Text("Seek") }
+                TextButton(onClick = onToggleSelected) {
+                    Text(if (selected) "✓ Sel" else "Sel")
+                }
                 TextButton(onClick = onRemove) { Text("Remove") }
             }
             if (expanded) {
