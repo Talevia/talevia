@@ -265,6 +265,7 @@ private fun AppRoot(container: AppContainer) {
                 when (tab) {
                     RightTab.Chat -> ChatPanel(container = container, projectId = projectId, log = log)
                     RightTab.Source -> SourcePanel(container = container, projectId = projectId, log = log)
+                    RightTab.Lockfile -> LockfilePanel(container = container, projectId = projectId, log = log)
                 }
                 Spacer(Modifier.height(12.dp))
                 Divider()
@@ -398,7 +399,11 @@ private fun defaultModelFor(providerId: String): String = when (providerId) {
     else -> "default"
 }
 
-private enum class RightTab(val label: String) { Chat("Chat"), Source("Source") }
+private enum class RightTab(val label: String) {
+    Chat("Chat"),
+    Source("Source"),
+    Lockfile("Lockfile"),
+}
 
 /**
  * Real desktop env, plus defaults for anything the user didn't configure.

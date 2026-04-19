@@ -38,7 +38,7 @@ import io.talevia.core.bus.BusEvent
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.Track
-import io.talevia.core.domain.staleClips
+import io.talevia.core.domain.staleClipsFromLockfile
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -91,14 +91,14 @@ fun TimelinePanel(
 
     val p = project
     val tracks = p?.timeline?.tracks ?: emptyList()
-    // Stale set: any clip whose sourceBinding intersects the transitive closure of
-    // "changed" source nodes. For now we don't track "which nodes changed since
-    // the last render" — pass every node id, so the helper reports every clip
-    // with a stale-capable dependency. Good enough for an initial visibility
-    // badge; upgrade when we wire a real stale-since-render signal.
-    val allNodeIds = p?.source?.nodes?.map { it.id }?.toSet().orEmpty()
-    val staleIds = remember(p?.timeline, allNodeIds) {
-        p?.staleClips(allNodeIds).orEmpty()
+    // Stale badge sourced from the lockfile — VISION §3.2 semantics.
+    // A clip is stale iff its backing asset has a lockfile entry whose
+    // `sourceContentHashes` no longer matches the project's current source
+    // hashes. Imported / non-AIGC clips and clips whose lockfile entries
+    // predate `sourceContentHashes` won't flash stale — that's the right
+    // behaviour: we only know what we've actually snapshotted.
+    val staleIds = remember(p?.timeline, p?.source, p?.lockfile) {
+        p?.staleClipsFromLockfile()?.map { it.clipId }?.toSet().orEmpty()
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
