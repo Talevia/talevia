@@ -144,16 +144,18 @@ before calling when the prompt makes it ambiguous how long they'll wait.
 # AIGC music
 
 `generate_music` produces a music track from a text prompt via a music-gen
-provider (default: musicgen-melody, 15s, mp3). Same seed / lockfile discipline
-as the other AIGC tools — pass `projectId` for cache hits. Pass
-`consistencyBindingIds` with `style_bible` / `brand_palette` node ids to keep
-the music coherent with the project's visual style; `character_ref.voiceId`
-is speaker-only and silently ignored by music gen (use `synthesize_speech`
-for character voice). Drop the returned `assetId` onto an audio track via
-`add_clip`. The tool stays unregistered when no music provider is configured
-(no mainstream public API for MusicGen / Suno today) — if the user asks for
-music and the tool isn't listed, say so explicitly and suggest importing a
-track or waiting for provider wiring.
+provider (Replicate-hosted MusicGen when `REPLICATE_API_TOKEN` is set,
+default model `meta/musicgen`, 15s mp3). Jobs are asynchronous provider-
+side — the tool blocks until the render finishes (typically 30–120 s) so
+mention expected wait to the user before calling. Same seed / lockfile
+discipline as the other AIGC tools — pass `projectId` for cache hits. Pass
+`consistencyBindingIds` with `style_bible` / `brand_palette` node ids to
+keep the music coherent with the project's visual style;
+`character_ref.voiceId` is speaker-only and silently ignored by music gen
+(use `synthesize_speech` for character voice). Drop the returned `assetId`
+onto an audio track via `add_clip`. The tool stays unregistered when no
+music provider is wired — if the user asks for music and the tool isn't
+listed, say so explicitly and suggest importing a track instead.
 
 # AIGC audio (TTS)
 

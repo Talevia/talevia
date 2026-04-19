@@ -33,6 +33,7 @@ import io.talevia.core.provider.openai.OpenAiSoraVideoGenEngine
 import io.talevia.core.provider.openai.OpenAiTtsEngine
 import io.talevia.core.provider.openai.OpenAiVisionEngine
 import io.talevia.core.provider.openai.OpenAiWhisperEngine
+import io.talevia.core.provider.replicate.ReplicateMusicGenEngine
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
@@ -157,12 +158,21 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         ?.let { OpenAiVisionEngine(httpClient, it) }
 
     /**
-     * Music-generation engine for the AIGC music lane (VISION §2). No mainstream
-     * public API exposes MusicGen / Suno / Udio today; this slot stays null until
-     * a [MusicGenEngine] implementation is plugged in. The `generate_music` tool
-     * stays unregistered when null — same gating pattern as image / video / TTS.
+     * Music-generation engine for the AIGC music lane (VISION §2). Wired to
+     * Replicate-hosted MusicGen when `REPLICATE_API_TOKEN` is set; otherwise
+     * stays null and `generate_music` stays unregistered. Override
+     * `REPLICATE_MUSICGEN_MODEL` to point at a different model slug
+     * (default `meta/musicgen`).
      */
-    val musicGen: MusicGenEngine? = null
+    val musicGen: MusicGenEngine? = env["REPLICATE_API_TOKEN"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { token ->
+            ReplicateMusicGenEngine(
+                httpClient = httpClient,
+                apiKey = token,
+                modelSlug = env["REPLICATE_MUSICGEN_MODEL"]?.takeIf { it.isNotBlank() } ?: "meta/musicgen",
+            )
+        }
 
     /**
      * Super-resolution engine (VISION §2 "ML 加工: 超分"). No bundled provider —
