@@ -8,6 +8,8 @@ import io.talevia.core.agent.SessionTitler
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.metrics.EventBusMetricsSink
+import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.permission.DefaultPermissionRuleset
@@ -86,6 +88,10 @@ class ServerContainer(env: Map<String, String> = System.getenv()) {
     val providers: ProviderRegistry =
         ProviderRegistry.Builder().addEnv(httpClient, env).build()
 
+    /** Counter registry scraped by GET /metrics. See [EventBusMetricsSink]. */
+    val metrics: MetricsRegistry = MetricsRegistry()
+    val metricsSink: EventBusMetricsSink = EventBusMetricsSink(bus, metrics)
+
     /**
      * Shared [Agent] singleton. A single instance is required so /cancel endpoints
      * observe in-flight runs started by earlier requests — [Agent.cancel] relies on
@@ -107,7 +113,4 @@ class ServerContainer(env: Map<String, String> = System.getenv()) {
             titler = SessionTitler(provider = provider, store = sessions),
         )
     }
-
-    @Deprecated("Use `agent` — the shared instance is required for cancellation.", ReplaceWith("agent"))
-    fun newAgent(): Agent? = agent
 }

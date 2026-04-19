@@ -12,6 +12,7 @@ import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.path
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondText
 import io.ktor.server.response.respondTextWriter
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
@@ -69,6 +70,10 @@ internal const val MAX_TITLE_LENGTH = 256
 fun Application.serverModule(container: ServerContainer = ServerContainer()) {
     val json = JsonConfig.default
     val agentScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    // Start the BusEvent -> metrics aggregation. Subscription must be active
+    // before the first publish, otherwise SharedFlow(replay=0) drops it.
+    container.metricsSink.attach(agentScope)
 
     install(ContentNegotiation) { json(Json { classDiscriminator = "type"; ignoreUnknownKeys = true }) }
     install(StatusPages) {
@@ -247,6 +252,24 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
                     flush()
                 }
             }
+        }
+
+        /**
+         * GET /metrics — prometheus-style text dump of the counter registry.
+         * Format: `talevia_<counter_with_underscores> <value>` per line.
+         */
+        get("/metrics") {
+            val snapshot = container.metrics.snapshot().toSortedMap()
+            val body = buildString {
+                snapshot.forEach { (k, v) ->
+                    append("talevia_")
+                    append(k.replace('.', '_'))
+                    append(' ')
+                    append(v)
+                    append('\n')
+                }
+            }
+            call.respondText(body, io.ktor.http.ContentType.Text.Plain)
         }
     }
 }
