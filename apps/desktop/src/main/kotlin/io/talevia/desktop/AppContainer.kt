@@ -23,6 +23,7 @@ import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.MusicGenEngine
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.TtsEngine
+import io.talevia.core.platform.UpscaleEngine
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.platform.VideoGenEngine
 import io.talevia.core.platform.VisionEngine
@@ -38,6 +39,7 @@ import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import io.talevia.core.tool.builtin.aigc.GenerateMusicTool
 import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
 import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
+import io.talevia.core.tool.builtin.aigc.UpscaleAssetTool
 import io.talevia.core.tool.builtin.ml.DescribeAssetTool
 import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
@@ -160,6 +162,14 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
      */
     val musicGen: MusicGenEngine? = null
 
+    /**
+     * Super-resolution engine (VISION §2 "ML 加工: 超分"). No bundled provider —
+     * Real-ESRGAN / GFPGAN / SUPIR are usually hosted on Replicate or run locally
+     * via ONNX, so plugging in a concrete [UpscaleEngine] is environment-specific.
+     * `upscale_asset` stays unregistered when null.
+     */
+    val upscale: UpscaleEngine? = null
+
     /** JVM blob writer backing AIGC tools. Paired with [mediaRootDir]. */
     val blobWriter: MediaBlobWriter = FileBlobWriter(mediaRootDir)
 
@@ -205,6 +215,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
         videoGen?.let { register(GenerateVideoTool(it, media, blobWriter, projects)) }
         musicGen?.let { register(GenerateMusicTool(it, media, blobWriter, projects)) }
+        upscale?.let { register(UpscaleAssetTool(it, media, media, blobWriter, projects)) }
         tts?.let { register(SynthesizeSpeechTool(it, media, blobWriter, projects)) }
         asr?.let {
             register(TranscribeAssetTool(it, media))
