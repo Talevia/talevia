@@ -4,6 +4,7 @@ import io.talevia.core.AssetId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.platform.GenerationProvenance
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
 
 /**
  * Per-project record of every AIGC production. This is the VISION §3.1 "lockfile" —
@@ -63,6 +64,12 @@ data class Lockfile(
  *   the lockfile becomes the audit record of "what hash was the input when we
  *   produced this artifact". Empty for legacy entries written before this field
  *   existed; those are treated as "unknown" by the detector (not stale, not fresh).
+ * @property baseInputs The raw (pre-folding) tool Input JSON that produced this
+ *   entry, captured so `regenerate_stale_clips` can re-dispatch the exact same tool
+ *   call with the *current* source state — consistency folding re-runs against
+ *   today's character_ref / style_bible, yielding a fresh generation. Empty for
+ *   legacy entries written before this field existed; the regenerate tool skips
+ *   those (it can't reconstruct what the agent originally asked for).
  */
 @Serializable
 data class LockfileEntry(
@@ -72,4 +79,5 @@ data class LockfileEntry(
     val provenance: GenerationProvenance,
     val sourceBinding: Set<SourceNodeId> = emptySet(),
     val sourceContentHashes: Map<SourceNodeId, String> = emptyMap(),
+    val baseInputs: JsonObject = JsonObject(emptyMap()),
 )

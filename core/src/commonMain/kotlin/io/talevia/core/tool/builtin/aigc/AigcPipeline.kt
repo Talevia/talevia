@@ -12,6 +12,7 @@ import io.talevia.core.domain.source.consistency.foldConsistencyIntoPrompt
 import io.talevia.core.domain.source.consistency.resolveConsistencyBindings
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.util.fnv1a64Hex
+import kotlinx.serialization.json.JsonObject
 import io.talevia.core.domain.source.consistency.foldVoice as foldVoiceFn
 
 /**
@@ -112,6 +113,7 @@ internal object AigcPipeline {
         assetId: AssetId,
         provenance: GenerationProvenance,
         sourceBinding: Set<SourceNodeId>,
+        baseInputs: JsonObject = JsonObject(emptyMap()),
     ) {
         store.mutate(projectId) { project ->
             val snapshot: Map<SourceNodeId, String> = if (sourceBinding.isEmpty()) emptyMap()
@@ -130,6 +132,7 @@ internal object AigcPipeline {
                         provenance = provenance,
                         sourceBinding = sourceBinding,
                         sourceContentHashes = snapshot,
+                        baseInputs = baseInputs,
                     ),
                 ),
             )

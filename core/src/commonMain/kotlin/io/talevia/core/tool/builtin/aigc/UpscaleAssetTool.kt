@@ -1,6 +1,7 @@
 package io.talevia.core.tool.builtin.aigc
 
 import io.talevia.core.AssetId
+import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.ProjectStore
@@ -21,6 +22,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
@@ -188,6 +190,7 @@ class UpscaleAssetTool(
                 assetId = asset.id,
                 provenance = result.provenance,
                 sourceBinding = emptySet(),
+                baseInputs = JsonConfig.default.encodeToJsonElement(Input.serializer(), input).jsonObject,
             )
         }
 

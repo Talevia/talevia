@@ -1,5 +1,6 @@
 package io.talevia.core.tool.builtin.aigc
 
+import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.MediaMetadata
@@ -20,6 +21,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
@@ -190,6 +192,7 @@ class SynthesizeSpeechTool(
                 assetId = asset.id,
                 provenance = result.provenance,
                 sourceBinding = folded.appliedNodeIds.map(::SourceNodeId).toSet(),
+                baseInputs = JsonConfig.default.encodeToJsonElement(Input.serializer(), input).jsonObject,
             )
         }
 
