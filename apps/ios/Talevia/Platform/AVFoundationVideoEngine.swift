@@ -8,15 +8,25 @@ import TaleviaCore
 import UIKit
 import UniformTypeIdentifiers
 
-/// Flat, Sendable snapshot of the filter chain for a single clip range on the
-/// timeline. Built from [IosVideoClipPlan] at composition-build time and
-/// captured by the `applyingCIFiltersWithHandler` closure — SKIE-bridged
-/// Kotlin types aren't Sendable, so we copy into pure-Swift structs before
-/// crossing into the concurrent image-filter handler.
+/// Flat, Sendable snapshot of the filter chain + transition-fade envelope for
+/// a single clip range on the timeline. Built from [IosVideoClipPlan] at
+/// composition-build time and captured by the `applyingCIFiltersWithHandler`
+/// closure — SKIE-bridged Kotlin types aren't Sendable, so we copy into pure-
+/// Swift structs before crossing into the concurrent image-filter handler.
+///
+/// A clip appears here iff it has at least one filter **or** a non-zero
+/// head/tail fade — either case activates the CIFilter handler path for the
+/// frames that belong to this clip.
 private struct ClipFilterRange: Sendable {
     let start: Double
     let end: Double
     let filters: [FilterSpec]
+    /// Head fade length in seconds (`0` = no fade). Frames in `[start,
+    /// start+headFade]` ramp alpha from 0 to 1 so the clip dips in from black.
+    let headFade: Double
+    /// Tail fade length in seconds (`0` = no fade). Frames in `[end-tailFade,
+    /// end]` ramp alpha from 1 to 0 so the clip dips out to black.
+    let tailFade: Double
 }
 
 private struct FilterSpec: Sendable {
@@ -116,6 +126,46 @@ private func applyCoreFilter(_ spec: FilterSpec, to image: CIImage) -> CIImage {
     default:
         return image
     }
+}
+
+/// Compute the transition alpha at composition time `t` for a given clip's
+/// fade envelope. Returns `1.0` when the frame is outside both fade windows
+/// (so the caller can short-circuit and skip the dim pass). Ramps linearly
+/// from 0 → 1 over the head window and 1 → 0 over the tail window — matches
+/// the FFmpeg engine's `fade=t=in/out:c=black` shape.
+private func transitionAlphaAt(_ t: Double, clip: ClipFilterRange) -> Double {
+    if clip.headFade > 0 {
+        let headEnd = clip.start + clip.headFade
+        if t < headEnd {
+            let progress = (t - clip.start) / clip.headFade
+            return max(0.0, min(1.0, progress))
+        }
+    }
+    if clip.tailFade > 0 {
+        let tailStart = clip.end - clip.tailFade
+        if t >= tailStart {
+            let progress = (clip.end - t) / clip.tailFade
+            return max(0.0, min(1.0, progress))
+        }
+    }
+    return 1.0
+}
+
+/// Dim a CI image's RGB channels toward black by scalar `alpha`. `alpha = 1`
+/// is a no-op (caller short-circuits). `alpha = 0` produces a pure black
+/// frame. Uses `CIColorMatrix` with R/G/B vectors scaled by alpha and no
+/// bias — this preserves the image's own alpha channel and avoids the
+/// gray-wash that `CIColorControls.inputContrast` would introduce.
+private func dimToBlack(_ image: CIImage, alpha: Double) -> CIImage {
+    guard let f = CIFilter(name: "CIColorMatrix") else { return image }
+    f.setValue(image, forKey: kCIInputImageKey)
+    let a = CGFloat(alpha)
+    f.setValue(CIVector(x: a, y: 0, z: 0, w: 0), forKey: "inputRVector")
+    f.setValue(CIVector(x: 0, y: a, z: 0, w: 0), forKey: "inputGVector")
+    f.setValue(CIVector(x: 0, y: 0, z: a, w: 0), forKey: "inputBVector")
+    f.setValue(CIVector(x: 0, y: 0, z: 0, w: 1), forKey: "inputAVector")
+    f.setValue(CIVector(x: 0, y: 0, z: 0, w: 0), forKey: "inputBiasVector")
+    return f.outputImage ?? image
 }
 
 /// One-line helper for the `NSError` shape the Kotlin side sees on failed
@@ -327,17 +377,21 @@ private func runExport(
         }
     }
 
-    // Filter pass. If any clip carries filters, build an
-    // AVMutableVideoComposition with a CIFilter-chain handler keyed on
-    // composition time → owning clip. Subtitle/text and transition passes
-    // still no-op here; they remain in the "Known incomplete" bucket.
+    // Filter + transition pass. If any clip carries filters OR a non-zero
+    // head/tail fade (from AddTransitionTool's synthetic Effect-track clip),
+    // build an AVMutableVideoComposition with a CIFilter-chain handler keyed
+    // on composition time → owning clip. Fades render as a dip-to-black:
+    // after all filters run on the frame, a `CIColorMatrix` scales RGB by the
+    // current alpha so the frame ramps to/from black at the clip boundaries.
     //
     // LUT filters need file I/O + a `.cube` parse before they can render;
     // do that here (outside the handler) and cache by asset id so the same
     // `.cube` isn't parsed once per clip that references it.
     var lutCache: [String: LutPayload] = [:]
     var filterRanges: [ClipFilterRange] = []
-    for plan in plans where !plan.filters.isEmpty {
+    for plan in plans {
+        let hasFades = plan.headFadeSeconds > 0 || plan.tailFadeSeconds > 0
+        if plan.filters.isEmpty && !hasFades { continue }
         var specs: [FilterSpec] = []
         for raw in plan.filters {
             var lut: LutPayload? = nil
@@ -369,7 +423,9 @@ private func runExport(
         filterRanges.append(ClipFilterRange(
             start: plan.timelineStartSeconds,
             end: plan.timelineStartSeconds + plan.timelineDurationSeconds,
-            filters: specs
+            filters: specs,
+            headFade: plan.headFadeSeconds,
+            tailFade: plan.tailFadeSeconds
         ))
     }
 
@@ -387,6 +443,10 @@ private func runExport(
                 if let range = filterRanges.first(where: { t >= $0.start && t < $0.end }) {
                     for spec in range.filters {
                         out = applyCoreFilter(spec, to: out)
+                    }
+                    let alpha = transitionAlphaAt(t, clip: range)
+                    if alpha < 1.0 {
+                        out = dimToBlack(out, alpha: alpha)
                     }
                 }
                 // The compositor expects the output image's extent to match

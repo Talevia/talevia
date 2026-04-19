@@ -112,6 +112,17 @@ data class IosVideoClipPlan(
     val timelineStartSeconds: Double,
     val timelineDurationSeconds: Double,
     val filters: List<IosFilterSpec> = emptyList(),
+    /**
+     * Dip-to-black fade durations derived from adjacent
+     * [io.talevia.core.tool.builtin.video.AddTransitionTool] transitions. `0.0`
+     * means no fade. The head fade runs from the clip's timeline start over
+     * [headFadeSeconds]; the tail fade runs up to the clip's timeline end over
+     * [tailFadeSeconds]. Both together give the cross-engine parity floor for
+     * transition rendering (matches the FFmpeg engine's `fade=t=in/out:c=black`
+     * behavior).
+     */
+    val headFadeSeconds: Double = 0.0,
+    val tailFadeSeconds: Double = 0.0,
 )
 
 /**
@@ -142,14 +153,48 @@ data class IosFilterSpec(
  * Track order is preserved; within each track clips are emitted in
  * timeline-start order.
  */
-fun Timeline.toIosVideoPlan(): List<IosVideoClipPlan> =
-    this.tracks
+fun Timeline.toIosVideoPlan(): List<IosVideoClipPlan> {
+    // Transition fades derive from synthetic Effect-track clips emitted by
+    // AddTransitionTool. Compute a map<clipIdValue, (head, tail)> in seconds
+    // here so the Swift engine doesn't re-implement the boundary math. Every
+    // transitionName collapses to a dip-to-black fade on both neighbours —
+    // the same cross-engine parity floor the FFmpeg engine enforces.
+    val videoClips = this.tracks
+        .filterIsInstance<Track.Video>()
+        .flatMap { it.clips.filterIsInstance<Clip.Video>() }
+    val fadeByClipId: Map<String, Pair<Double, Double>> = run {
+        val transitions = this.tracks
+            .filterIsInstance<Track.Effect>()
+            .flatMap { it.clips.filterIsInstance<Clip.Video>() }
+            .filter { it.assetId.value.startsWith("transition:") }
+        if (transitions.isEmpty()) return@run emptyMap()
+        val acc = HashMap<String, Pair<Double, Double>>()
+        for (trans in transitions) {
+            val half = trans.timeRange.duration / 2
+            val boundary = trans.timeRange.start + half
+            val from = videoClips.firstOrNull { it.timeRange.end == boundary }
+            val to = videoClips.firstOrNull { it.timeRange.start == boundary }
+            val halfSec = half.toDouble(DurationUnit.SECONDS)
+            if (from != null) {
+                val prev = acc[from.id.value] ?: (0.0 to 0.0)
+                acc[from.id.value] = prev.first to halfSec
+            }
+            if (to != null) {
+                val prev = acc[to.id.value] ?: (0.0 to 0.0)
+                acc[to.id.value] = halfSec to prev.second
+            }
+        }
+        acc
+    }
+
+    return this.tracks
         .filterIsInstance<Track.Video>()
         .flatMap { track ->
             track.clips
                 .filterIsInstance<Clip.Video>()
                 .sortedBy { it.timeRange.start }
                 .map { clip ->
+                    val (head, tail) = fadeByClipId[clip.id.value] ?: (0.0 to 0.0)
                     IosVideoClipPlan(
                         assetIdRaw = clip.assetId.value,
                         sourceStartSeconds = clip.sourceRange.start.toDouble(DurationUnit.SECONDS),
@@ -163,9 +208,12 @@ fun Timeline.toIosVideoPlan(): List<IosVideoClipPlan> =
                                 assetIdRaw = f.assetId?.value,
                             )
                         },
+                        headFadeSeconds = head,
+                        tailFadeSeconds = tail,
                     )
                 }
         }
+}
 
 /**
  * Flat DTO for [io.talevia.core.domain.Clip.Text] subtitle clips exposed to
