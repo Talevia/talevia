@@ -21,6 +21,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +49,7 @@ import io.talevia.core.domain.staleClipsFromLockfile
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.add
@@ -177,6 +179,48 @@ fun SourcePanel(
                                 "remove ${displayName(node)}",
                             )
                         },
+                        onSave = when (node.kind) {
+                            ConsistencyKinds.CHARACTER_REF -> { name, secondary ->
+                                dispatch(
+                                    "update_character_ref",
+                                    buildJsonObject {
+                                        put("projectId", projectId.value)
+                                        put("nodeId", node.id.value)
+                                        if (name.isNotBlank()) put("name", name)
+                                        if (secondary.isNotBlank()) put("visualDescription", secondary)
+                                    },
+                                    "edit character ${displayName(node)}",
+                                )
+                            }
+                            ConsistencyKinds.STYLE_BIBLE -> { name, secondary ->
+                                dispatch(
+                                    "update_style_bible",
+                                    buildJsonObject {
+                                        put("projectId", projectId.value)
+                                        put("nodeId", node.id.value)
+                                        if (name.isNotBlank()) put("name", name)
+                                        if (secondary.isNotBlank()) put("description", secondary)
+                                    },
+                                    "edit style ${displayName(node)}",
+                                )
+                            }
+                            ConsistencyKinds.BRAND_PALETTE -> { name, secondary ->
+                                val hexList = secondary.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                                dispatch(
+                                    "update_brand_palette",
+                                    buildJsonObject {
+                                        put("projectId", projectId.value)
+                                        put("nodeId", node.id.value)
+                                        if (name.isNotBlank()) put("name", name)
+                                        if (hexList.isNotEmpty()) {
+                                            put("hexColors", buildJsonArray { hexList.forEach { add(JsonPrimitive(it)) } })
+                                        }
+                                    },
+                                    "edit palette ${displayName(node)}",
+                                )
+                            }
+                            else -> null
+                        },
                         onGenerate = {
                             // character_ref → portrait, style_bible → sample scene.
                             // Each uses the node id as the consistency binding so
@@ -290,12 +334,21 @@ private fun SourceNodeRow(
     onToggle: () -> Unit,
     onRemove: () -> Unit,
     onGenerate: () -> Unit,
+    /** null = kind doesn't support inline editing; non-null = save (name, secondary) */
+    onSave: ((name: String, secondary: String) -> Unit)? = null,
 ) {
     val name = displayName(node)
     val staleCount = downstreamClips.count { it.clipId in staleClipIds }
+    var editing by remember(node.id.value) { mutableStateOf(false) }
+    var editName by remember(node.id.value) { mutableStateOf("") }
+    var editSecondary by remember(node.id.value) { mutableStateOf("") }
+    val editEnabled by remember(editName, editSecondary) {
+        derivedStateOf { editName.isNotBlank() }
+    }
+
     Surface(
         shape = RoundedCornerShape(4.dp),
-        color = if (expanded) Color(0xFFF1F4FB) else Color(0xFFFAFAFA),
+        color = if (editing) Color(0xFFECF3FF) else if (expanded) Color(0xFFF1F4FB) else Color(0xFFFAFAFA),
         modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
     ) {
         Column(modifier = Modifier.padding(6.dp)) {
@@ -329,48 +382,79 @@ private fun SourceNodeRow(
                 ) {
                     TextButton(onClick = onGenerate) { Text("Generate") }
                 }
+                if (onSave != null && !editing) {
+                    TextButton(onClick = {
+                        editName = displayName(node)
+                        editSecondary = nodeSecondaryField(node)
+                        editing = true
+                        if (!expanded) onToggle()
+                    }) { Text("Edit") }
+                }
                 TextButton(onClick = onRemove) { Text("Remove") }
             }
             if (expanded) {
                 Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "kind: ${node.kind}",
-                    fontFamily = FontFamily.Monospace,
-                )
-                Text(
-                    text = "id: ${node.id.value}",
-                    fontFamily = FontFamily.Monospace,
-                )
-                if (node.parents.isNotEmpty()) {
-                    Text(
-                        text = "parents: ${node.parents.joinToString(", ") { it.nodeId.value }}",
-                        fontFamily = FontFamily.Monospace,
+                if (editing && onSave != null) {
+                    // Inline edit form — VISION §5.4 expert path
+                    OutlinedTextField(
+                        value = editName,
+                        onValueChange = { editName = it },
+                        label = { Text("Name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                }
-                if (downstreamClips.isNotEmpty()) {
                     Spacer(Modifier.height(4.dp))
-                    Text(
-                        text = "downstream clips (${downstreamClips.size}):",
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFF555555),
+                    OutlinedTextField(
+                        value = editSecondary,
+                        onValueChange = { editSecondary = it },
+                        label = { Text(nodeSecondaryLabel(node.kind)) },
+                        modifier = Modifier.fillMaxWidth(),
                     )
-                    for (r in downstreamClips) {
-                        val stale = r.clipId in staleClipIds
-                        val viaNote = if (r.directlyBound) "" else "  via ${r.boundVia.joinToString(",") { it.value }}"
+                    Spacer(Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Button(
+                            enabled = editEnabled,
+                            onClick = {
+                                onSave(editName.trim(), editSecondary.trim())
+                                editing = false
+                            },
+                        ) { Text("Save") }
+                        TextButton(onClick = { editing = false }) { Text("Cancel") }
+                    }
+                } else {
+                    Text(text = "kind: ${node.kind}", fontFamily = FontFamily.Monospace)
+                    Text(text = "id: ${node.id.value}", fontFamily = FontFamily.Monospace)
+                    if (node.parents.isNotEmpty()) {
                         Text(
-                            text = "  ${r.clipId.value.take(8)} on ${r.trackId.value.take(6)}" +
-                                (if (stale) "  [stale]" else "") + viaNote,
+                            text = "parents: ${node.parents.joinToString(", ") { it.nodeId.value }}",
                             fontFamily = FontFamily.Monospace,
-                            color = if (stale) Color(0xFF8B5A00) else Color(0xFF555555),
                         )
                     }
-                }
-                Spacer(Modifier.height(4.dp))
-                SelectionContainer {
-                    Text(
-                        text = PrettyJson.encodeToString(JsonObject.serializer(), node.body as JsonObject),
-                        fontFamily = FontFamily.Monospace,
-                    )
+                    if (downstreamClips.isNotEmpty()) {
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = "downstream clips (${downstreamClips.size}):",
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0xFF555555),
+                        )
+                        for (r in downstreamClips) {
+                            val stale = r.clipId in staleClipIds
+                            val viaNote = if (r.directlyBound) "" else "  via ${r.boundVia.joinToString(",") { it.value }}"
+                            Text(
+                                text = "  ${r.clipId.value.take(8)} on ${r.trackId.value.take(6)}" +
+                                    (if (stale) "  [stale]" else "") + viaNote,
+                                fontFamily = FontFamily.Monospace,
+                                color = if (stale) Color(0xFF8B5A00) else Color(0xFF555555),
+                            )
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    SelectionContainer {
+                        Text(
+                            text = PrettyJson.encodeToString(JsonObject.serializer(), node.body as JsonObject),
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
                 }
             }
         }
@@ -440,6 +524,29 @@ private fun displayName(node: SourceNode): String {
     val obj = node.body as? JsonObject
     val name = (obj?.get("name") as? JsonPrimitive)?.content
     return name ?: node.id.value
+}
+
+/**
+ * Primary editable secondary field value for the inline edit form.
+ * Returns a comma-joined string for array fields (brand_palette hexColors).
+ */
+private fun nodeSecondaryField(node: SourceNode): String {
+    val obj = node.body as? JsonObject ?: return ""
+    return when (node.kind) {
+        ConsistencyKinds.CHARACTER_REF -> (obj["visualDescription"] as? JsonPrimitive)?.content.orEmpty()
+        ConsistencyKinds.STYLE_BIBLE -> (obj["description"] as? JsonPrimitive)?.content.orEmpty()
+        ConsistencyKinds.BRAND_PALETTE ->
+            (obj["hexColors"] as? JsonArray)?.joinToString(", ") { (it as? JsonPrimitive)?.content ?: "" }.orEmpty()
+        else -> ""
+    }
+}
+
+/** Label for the secondary TextField in the inline edit form. */
+private fun nodeSecondaryLabel(kind: String): String = when (kind) {
+    ConsistencyKinds.CHARACTER_REF -> "Visual description"
+    ConsistencyKinds.STYLE_BIBLE -> "Description"
+    ConsistencyKinds.BRAND_PALETTE -> "Hex colors (comma-separated)"
+    else -> "Value"
 }
 
 /**
