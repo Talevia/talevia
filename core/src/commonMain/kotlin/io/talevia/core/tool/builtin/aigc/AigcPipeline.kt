@@ -7,10 +7,12 @@ import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.domain.source.consistency.FoldedPrompt
+import io.talevia.core.domain.source.consistency.FoldedVoice
 import io.talevia.core.domain.source.consistency.foldConsistencyIntoPrompt
 import io.talevia.core.domain.source.consistency.resolveConsistencyBindings
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.util.fnv1a64Hex
+import io.talevia.core.domain.source.consistency.foldVoice as foldVoiceFn
 
 /**
  * Shared pipeline for AIGC tools (image-gen, future TTS / music / text-to-video).
@@ -53,6 +55,20 @@ internal object AigcPipeline {
         if (bindingIds.isEmpty()) return foldConsistencyIntoPrompt(basePrompt, emptyList())
         val resolved = project.source.resolveConsistencyBindings(bindingIds)
         return foldConsistencyIntoPrompt(basePrompt, resolved)
+    }
+
+    /**
+     * Resolve consistency bindings into a voice pick for TTS / voice-clone calls.
+     * See [foldVoice] — returns the single bound voice, or `null` when no binding
+     * dictates one, or throws when multiple character_refs have voiceIds.
+     */
+    fun foldVoice(
+        project: Project,
+        bindingIds: List<SourceNodeId>,
+    ): FoldedVoice {
+        if (bindingIds.isEmpty()) return FoldedVoice(voiceId = null, appliedNodeIds = emptyList())
+        val resolved = project.source.resolveConsistencyBindings(bindingIds)
+        return foldVoiceFn(resolved)
     }
 
     /**

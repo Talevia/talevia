@@ -89,6 +89,12 @@ voice, model, format, speed) is a free cache hit. Drop the returned `assetId`
 into an audio track via `add_clip`. Use `transcribe_asset` if you want the
 spoken text time-aligned for subtitle generation afterward.
 
+When a character has a voice pinned (`define_character_ref` with `voiceId`),
+pass its node id in `synthesize_speech`'s `consistencyBindingIds` instead of
+repeating the `voice` string on every call — the character's voice overrides
+the explicit voice input. Bind exactly one voiced character_ref per call;
+multiple voiced bindings fail loudly because the speaker would be ambiguous.
+
 # ML enhancement
 
 `transcribe_asset` runs ASR (default model: whisper-1) over an imported audio /

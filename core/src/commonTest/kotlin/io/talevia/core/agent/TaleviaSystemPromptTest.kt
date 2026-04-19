@@ -34,6 +34,8 @@ class TaleviaSystemPromptTest {
         "transcribe_asset",
         // AIGC audio lane — TTS pairs with ASR for the round-trip.
         "synthesize_speech",
+        // Character-voice pinning (VISION §5.5 audio lane) — overrides explicit voice.
+        "voiceId",
         // Stale-clip detection — the lockfile-driven query that closes the
         // edit-character-then-regenerate loop (VISION §3.2).
         "find_stale_clips",

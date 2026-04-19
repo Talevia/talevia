@@ -4,9 +4,10 @@ import io.talevia.core.AssetId
 import kotlinx.serialization.Serializable
 
 /**
- * A named character / subject / performer whose visual identity must stay stable across
- * shots (VISION §3.3). The body carries every signal a downstream AIGC tool might
- * consume to keep the same face/body/silhouette between generations.
+ * A named character / subject / performer whose visual *and* vocal identity must stay
+ * stable across shots (VISION §3.3, §5.5). The body carries every signal a downstream
+ * AIGC tool might consume to keep the same face/body/silhouette/voice between
+ * generations.
  *
  * @property name Human-readable handle — the LLM references this when reasoning.
  * @property visualDescription Natural-language description of the character's look,
@@ -18,6 +19,10 @@ import kotlinx.serialization.Serializable
  * @property loraPin Optional LoRA / DreamBooth / IP-Adapter binding — the single
  *   strongest mechanism we have for per-character identity lock, when the provider
  *   supports it. `null` means "rely on prompt + reference images only".
+ * @property voiceId Optional provider-scoped voice id (e.g. OpenAI `"alloy"`,
+ *   ElevenLabs voice uuid). Consumed by [foldVoice] so `synthesize_speech` picks up
+ *   this character's voice automatically when the character_ref is bound, instead of
+ *   the caller having to pass the voice string on every call.
  */
 @Serializable
 data class CharacterRefBody(
@@ -25,6 +30,7 @@ data class CharacterRefBody(
     val visualDescription: String,
     val referenceAssetIds: List<AssetId> = emptyList(),
     val loraPin: LoraPin? = null,
+    val voiceId: String? = null,
 )
 
 /**

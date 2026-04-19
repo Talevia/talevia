@@ -104,6 +104,37 @@ class SourceToolsTest {
         assertTrue(node.revision > 0)
     }
 
+    @Test fun defineCharacterRefPersistsOptionalVoiceId() = runTest {
+        val rig = rig()
+        val tool = DefineCharacterRefTool(rig.store)
+
+        val result = tool.execute(
+            DefineCharacterRefTool.Input(
+                projectId = rig.pid.value,
+                name = "Mei",
+                visualDescription = "x",
+                voiceId = "nova",
+            ),
+            rig.ctx,
+        )
+        val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId(result.data.nodeId)]!!
+        assertEquals("nova", node.asCharacterRef()?.voiceId)
+
+        // Re-define with blank voiceId → normalised to null, not retained verbatim.
+        tool.execute(
+            DefineCharacterRefTool.Input(
+                projectId = rig.pid.value,
+                name = "Mei",
+                visualDescription = "x",
+                nodeId = result.data.nodeId,
+                voiceId = "   ",
+            ),
+            rig.ctx,
+        )
+        val after = rig.store.get(rig.pid)!!.source.byId[SourceNodeId(result.data.nodeId)]!!
+        assertEquals(null, after.asCharacterRef()?.voiceId)
+    }
+
     @Test fun explicitNodeIdOverridesSlug() = runTest {
         val rig = rig()
         val tool = DefineStyleBibleTool(rig.store)

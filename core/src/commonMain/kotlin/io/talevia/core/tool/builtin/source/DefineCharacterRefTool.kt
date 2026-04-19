@@ -54,6 +54,7 @@ class DefineCharacterRefTool(
         val nodeId: String? = null,
         val referenceAssetIds: List<String> = emptyList(),
         val loraPin: LoraPinInput? = null,
+        val voiceId: String? = null,
     )
 
     @Serializable data class Output(
@@ -102,6 +103,10 @@ class DefineCharacterRefTool(
                 put("required", JsonArray(listOf(JsonPrimitive("adapterId"))))
                 put("additionalProperties", false)
             }
+            putJsonObject("voiceId") {
+                put("type", "string")
+                put("description", "Optional provider-scoped voice id (e.g. OpenAI 'alloy', ElevenLabs voice uuid). When set, binding this character_ref in synthesize_speech's consistencyBindingIds will override the caller's explicit voice input.")
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("name"), JsonPrimitive("visualDescription"))))
         put("additionalProperties", false)
@@ -116,6 +121,7 @@ class DefineCharacterRefTool(
             loraPin = input.loraPin?.let {
                 LoraPin(adapterId = it.adapterId, weight = it.weight, triggerTokens = it.triggerTokens)
             },
+            voiceId = input.voiceId?.takeIf { it.isNotBlank() },
         )
         val pid = ProjectId(input.projectId)
         var replaced = false
