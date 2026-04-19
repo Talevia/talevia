@@ -12,7 +12,9 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.platform.InMemoryMediaStorage
+import io.talevia.core.platform.InMemorySecretStore
 import io.talevia.core.platform.MediaStorage
+import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.session.SessionStore
@@ -53,6 +55,19 @@ class ServerContainer(env: Map<String, String> = System.getenv()) {
 
     /** Bearer token required on every request when set. Empty = auth disabled. */
     val authToken: String = env["TALEVIA_SERVER_TOKEN"].orEmpty()
+
+    /**
+     * Env-backed secret store. Seeds from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
+     * so tools that look up provider credentials through [SecretStore] see the
+     * same values as [ProviderRegistry]. Writes go to an in-memory map only —
+     * operators are expected to manage server secrets out-of-band.
+     */
+    val secrets: SecretStore = InMemorySecretStore(
+        buildMap {
+            env["ANTHROPIC_API_KEY"]?.takeIf(String::isNotEmpty)?.let { put("anthropic", it) }
+            env["OPENAI_API_KEY"]?.takeIf(String::isNotEmpty)?.let { put("openai", it) }
+        },
+    )
 
     val tools: ToolRegistry = ToolRegistry().apply {
         register(ImportMediaTool(media, engine))

@@ -9,7 +9,9 @@ import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.permission.DefaultPermissionService
 import io.talevia.core.platform.InMemoryMediaStorage
+import io.talevia.core.platform.InMemorySecretStore
 import io.talevia.core.platform.MediaStorage
+import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
@@ -35,6 +37,12 @@ class AndroidAppContainer(context: Context) {
     val engine: VideoEngine = Media3VideoEngine(context, media)
     val permissions = DefaultPermissionService(bus)
     val permissionRules = DefaultPermissionRuleset.rules.toMutableList()
+    /**
+     * In-memory [SecretStore] stub. Android should eventually back this with
+     * EncryptedSharedPreferences or Keystore; in-memory is placeholder so the
+     * composition root can satisfy downstream dependencies today.
+     */
+    val secrets: SecretStore = InMemorySecretStore()
     val tools: ToolRegistry = ToolRegistry().apply {
         register(ImportMediaTool(media, engine))
         register(AddClipTool(projects, media))

@@ -7,8 +7,10 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.permission.DefaultPermissionService
+import io.talevia.core.platform.FilePicker
 import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.MediaStorage
+import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
@@ -37,6 +39,8 @@ class AppContainer {
     val engine: VideoEngine = FfmpegVideoEngine(pathResolver = media)
     val permissions = DefaultPermissionService(bus)
     val permissionRules = DefaultPermissionRuleset.rules.toMutableList()
+    val filePicker: FilePicker = AwtFilePicker()
+    val secrets: SecretStore = FileSecretStore()
 
     val tools: ToolRegistry = ToolRegistry().apply {
         register(ImportMediaTool(media, engine))
