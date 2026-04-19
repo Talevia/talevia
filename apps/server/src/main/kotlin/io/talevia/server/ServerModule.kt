@@ -33,6 +33,7 @@ import io.talevia.core.session.TokenUsage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
@@ -74,6 +75,13 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
     // Start the BusEvent -> metrics aggregation. Subscription must be active
     // before the first publish, otherwise SharedFlow(replay=0) drops it.
     container.metricsSink.attach(agentScope)
+
+    // Tear down owned resources when the Ktor application stops. Without this
+    // the HttpClient's connection pool + SQL driver leak across reloads.
+    monitor.subscribe(io.ktor.server.application.ApplicationStopped) {
+        agentScope.cancel()
+        container.close()
+    }
 
     install(ContentNegotiation) { json(Json { classDiscriminator = "type"; ignoreUnknownKeys = true }) }
     install(StatusPages) {

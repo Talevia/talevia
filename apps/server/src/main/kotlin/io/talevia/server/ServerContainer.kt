@@ -113,4 +113,17 @@ class ServerContainer(env: Map<String, String> = System.getenv()) {
             titler = SessionTitler(provider = provider, store = sessions),
         )
     }
+
+    /**
+     * Release resources owned by the container. Safe to call multiple times.
+     *
+     * Wired into Ktor's `ApplicationStopped` monitor in [serverModule] so
+     * `Application.stop()` or a SIGTERM-driven shutdown closes the underlying
+     * HttpClient connection pool and SQL driver instead of leaking them across
+     * reloads and tests.
+     */
+    fun close() {
+        runCatching { httpClient.close() }
+        runCatching { driver.close() }
+    }
 }

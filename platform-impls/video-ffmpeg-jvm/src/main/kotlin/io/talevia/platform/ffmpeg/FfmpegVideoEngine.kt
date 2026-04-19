@@ -18,6 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.runInterruptible
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
@@ -55,7 +56,7 @@ class FfmpegVideoEngine(
 
     override suspend fun probe(source: MediaSource): MediaMetadata {
         val path = sourceToLocalPath(source)
-        val result = run(
+        val result = runProcess(
             ffprobePath,
             "-v", "error",
             "-print_format", "json",
@@ -151,24 +152,34 @@ class FfmpegVideoEngine(
         val reader = BufferedReader(InputStreamReader(process.errorStream))
 
         try {
-            // ffmpeg writes progress KV pairs (out_time_ms=…, progress=continue|end) to stderr when -progress pipe:2 is set.
-            var line: String?
-            while (reader.readLine().also { line = it } != null) {
-                val l = line ?: continue
-                val (k, v) = l.substringBefore('=', "") to l.substringAfter('=', "")
+            // ffmpeg writes progress KV pairs (out_time_ms=…, progress=continue|end) to
+            // stderr when -progress pipe:2 is set. runInterruptible wraps the blocking
+            // readLine so a cancellation on the collecting coroutine interrupts the
+            // thread instead of stalling until ffmpeg produces its next line.
+            while (true) {
+                val line = runInterruptible(ioDispatcher) { reader.readLine() } ?: break
+                val k = line.substringBefore('=', "")
+                val v = line.substringAfter('=', "")
                 if (k == "out_time_ms" && v.isNotEmpty()) {
-                    val microsec = v.toLongOrNull() ?: continue
-                    val ratio = (microsec / 1_000_000.0 / totalSeconds).coerceIn(0.0, 1.0)
-                    emit(RenderProgress.Frames(jobId, ratio.toFloat()))
+                    val microsec = v.toLongOrNull()
+                    if (microsec != null) {
+                        val ratio = (microsec / 1_000_000.0 / totalSeconds).coerceIn(0.0, 1.0)
+                        emit(RenderProgress.Frames(jobId, ratio.toFloat()))
+                    }
                 }
                 if (k == "progress" && v == "end") break
             }
-            val exit = process.waitFor()
+            val exit = runInterruptible(ioDispatcher) { process.waitFor() }
             if (exit == 0) emit(RenderProgress.Completed(jobId, output.targetPath))
             else emit(RenderProgress.Failed(jobId, "ffmpeg exited $exit"))
         } finally {
+            // Always kill the child and drain the stderr reader — even if the caller
+            // cancelled mid-flight. destroyForcibly is idempotent.
             runCatching { reader.close() }
-            if (process.isAlive) process.destroyForcibly()
+            if (process.isAlive) {
+                process.destroyForcibly()
+                runCatching { process.waitFor() }
+            }
         }
     }.flowOn(ioDispatcher)
 
@@ -176,7 +187,7 @@ class FfmpegVideoEngine(
         val path = sourceToLocalPath(source)
         val tmp = Files.createTempFile("talevia-thumb-", ".png")
         try {
-            val result = run(
+            val result = runProcess(
                 ffmpegPath, "-y", "-ss", "${time.toDouble(kotlin.time.DurationUnit.SECONDS)}",
                 "-i", path, "-vframes", "1", tmp.absolutePathString(),
             )
@@ -245,11 +256,28 @@ class FfmpegVideoEngine(
 
     private data class ProcessResult(val exitCode: Int, val stdout: String, val stderr: String)
 
-    private fun run(vararg args: String): ProcessResult {
+    /**
+     * Shell out and wait for completion. Wrapped in runInterruptible so a
+     * coroutine cancellation (e.g. the agent being aborted) actually stops
+     * waitFor instead of pinning the dispatcher thread on a runaway binary.
+     * On interrupt we destroyForcibly the child before re-raising, which
+     * prevents orphaned ffmpeg/ffprobe processes.
+     */
+    private suspend fun runProcess(vararg args: String): ProcessResult {
         val proc = ProcessBuilder(*args).redirectErrorStream(false).start()
-        val stdout = proc.inputStream.bufferedReader().use { it.readText() }
-        val stderr = proc.errorStream.bufferedReader().use { it.readText() }
-        val exit = proc.waitFor()
-        return ProcessResult(exit, stdout, stderr)
+        try {
+            return runInterruptible(ioDispatcher) {
+                val stdout = proc.inputStream.bufferedReader().use { it.readText() }
+                val stderr = proc.errorStream.bufferedReader().use { it.readText() }
+                val exit = proc.waitFor()
+                ProcessResult(exit, stdout, stderr)
+            }
+        } catch (t: Throwable) {
+            if (proc.isAlive) {
+                proc.destroyForcibly()
+                runCatching { proc.waitFor() }
+            }
+            throw t
+        }
     }
 }
