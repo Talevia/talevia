@@ -45,6 +45,8 @@ class TaleviaSystemPromptTest {
         "restore_project_snapshot",
         // Fork — closes the third VISION §3.4 leg ("可分支").
         "fork_project",
+        // Lockfile observability (VISION §3.1) — enumerate AIGC productions.
+        "list_lockfile_entries",
         // Seed / lockfile discipline (VISION §3.1)
         "seed",
         "cacheHit",
