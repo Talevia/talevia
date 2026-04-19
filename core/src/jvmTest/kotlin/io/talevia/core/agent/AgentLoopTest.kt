@@ -1,7 +1,6 @@
 package io.talevia.core.agent
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
-import io.talevia.core.MessageId
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
@@ -20,7 +19,6 @@ import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.EchoTool
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.test.Test

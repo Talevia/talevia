@@ -1,6 +1,5 @@
 package io.talevia.core.compaction
 
-import io.talevia.core.MessageId
 import io.talevia.core.PartId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.EventBus
@@ -16,7 +15,6 @@ import io.talevia.core.session.SessionStore
 import io.talevia.core.session.ToolState
 import kotlinx.coroutines.flow.collect
 import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 

@@ -13,6 +13,7 @@ agp = "8.8.0"
 androidx-activity-compose = "1.9.3"
 androidx-compose-bom = "2024.12.01"
 media3 = "1.5.1"
+ktlint-plugin = "12.1.2"
 
 [libraries]
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "coroutines" }
@@ -64,3 +65,4 @@ compose = { id = "org.jetbrains.compose", version.ref = "compose" }
 skie = { id = "co.touchlab.skie", version.ref = "skie" }
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint-plugin" }

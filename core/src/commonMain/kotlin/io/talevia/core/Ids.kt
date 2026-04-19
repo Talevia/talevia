@@ -1,7 +1,7 @@
 package io.talevia.core
 
-import kotlin.jvm.JvmInline
 import kotlinx.serialization.Serializable
+import kotlin.jvm.JvmInline
 
 @JvmInline @Serializable value class SessionId(val value: String)
 @JvmInline @Serializable value class MessageId(val value: String)

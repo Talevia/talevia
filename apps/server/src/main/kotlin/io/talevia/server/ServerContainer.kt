@@ -8,10 +8,10 @@ import io.talevia.core.agent.SessionTitler
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
 import io.talevia.core.db.TaleviaDb
-import io.talevia.core.metrics.EventBusMetricsSink
-import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.metrics.EventBusMetricsSink
+import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.platform.FileMediaStorage
 import io.talevia.core.platform.InMemoryMediaStorage
@@ -19,7 +19,6 @@ import io.talevia.core.platform.InMemorySecretStore
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
-import java.io.File
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
@@ -33,6 +32,7 @@ import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
 import io.talevia.platform.ffmpeg.FfmpegVideoEngine
+import java.io.File
 
 /**
  * Composition root for the server, mirrors `apps/desktop/AppContainer.kt`. Single

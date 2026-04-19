@@ -7,7 +7,6 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
-import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.SqlDelightProjectStore

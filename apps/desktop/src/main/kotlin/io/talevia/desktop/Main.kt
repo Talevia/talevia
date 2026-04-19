@@ -1,6 +1,5 @@
 package io.talevia.desktop
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -36,9 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import io.talevia.core.AssetId
 import io.talevia.core.MessageId
-import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.agent.RunInput
@@ -47,7 +44,6 @@ import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.Timeline
-import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
 import io.talevia.core.session.Session
@@ -55,7 +51,6 @@ import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlin.uuid.ExperimentalUuidApi

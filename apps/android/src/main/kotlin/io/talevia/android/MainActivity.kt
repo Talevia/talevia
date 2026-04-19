@@ -23,7 +23,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import io.talevia.core.domain.MediaSource
-import io.talevia.core.AssetId
 import kotlinx.coroutines.launch
 
 /**

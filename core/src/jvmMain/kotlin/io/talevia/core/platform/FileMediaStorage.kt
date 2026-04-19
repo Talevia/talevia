@@ -7,7 +7,6 @@ import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
 import java.nio.file.Files

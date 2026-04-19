@@ -17,7 +17,6 @@ import io.talevia.core.provider.ReplayFormatting
 import io.talevia.core.provider.sseEvents
 import io.talevia.core.session.FinishReason
 import io.talevia.core.session.Message
-import io.talevia.core.session.MessageWithParts
 import io.talevia.core.session.Part
 import io.talevia.core.session.TokenUsage
 import io.talevia.core.session.ToolState

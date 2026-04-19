@@ -1,6 +1,7 @@
 package io.talevia.platform.ffmpeg
 
 import io.talevia.core.AssetId
+import io.talevia.core.domain.Clip
 import io.talevia.core.domain.FrameRate
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
@@ -8,7 +9,6 @@ import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Filter
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
-import io.talevia.core.domain.Clip
 import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
@@ -25,14 +25,11 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.longOrNull
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
 import java.nio.file.Files
-import kotlin.io.path.Path
 import kotlin.io.path.absolutePathString
-import kotlin.io.path.writeText
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.ExperimentalUuidApi
