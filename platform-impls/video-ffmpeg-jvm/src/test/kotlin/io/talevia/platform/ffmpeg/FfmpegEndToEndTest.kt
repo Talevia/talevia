@@ -16,6 +16,7 @@ import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.video.AddClipTool
+import io.talevia.core.tool.builtin.video.AddSubtitleTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import kotlinx.coroutines.test.runTest
@@ -134,8 +135,100 @@ class FfmpegEndToEndTest {
         driver.close()
     }
 
+    /**
+     * Regression: verifies the filtergraph with `drawtext` survives round-trip
+     * through real ffmpeg. Catches escape-quoting bugs that unit tests can
+     * only see statically (colons, single quotes, commas mangling the graph).
+     */
+    @Test
+    fun renderWithSubtitleProducesVideo() = runTest(timeout = kotlin.time.Duration.parse("60s")) {
+        if (!ffmpegOnPath()) return@runTest
+        // drawtext needs libfreetype linked in — some minimal ffmpeg builds
+        // (e.g. homebrew's default bottle on macOS) ship without it and fail
+        // with "No such filter: 'drawtext'". Skip so the rest of the E2E
+        // suite can still catch regressions on those environments.
+        if (!drawtextFilterAvailable()) return@runTest
+
+        generateTestSource(inputA, "testsrc")
+
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
+        val db = TaleviaDb(driver)
+        val media = InMemoryMediaStorage()
+        val engine = FfmpegVideoEngine(pathResolver = media)
+        val projects = SqlDelightProjectStore(db)
+        val perms = AllowAllPermissionService()
+
+        val projectId = ProjectId(Uuid.random().toString())
+        projects.upsert(
+            "subs-smoke",
+            Project(id = projectId, timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P),
+        )
+
+        val registry = ToolRegistry().apply {
+            register(ImportMediaTool(media, engine))
+            register(AddClipTool(projects, media))
+            register(AddSubtitleTool(projects))
+            register(ExportTool(projects, engine))
+        }
+
+        val ctx = ToolContext(
+            sessionId = SessionId("test"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { perms.check(emptyList(), it) },
+            emitPart = { },
+            messages = emptyList(),
+        )
+
+        val import = registry["import_media"]!!.dispatch(buildJsonObject { put("path", inputA.absolutePath) }, ctx)
+        val assetId = (import.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
+        registry["add_clip"]!!.dispatch(
+            buildJsonObject {
+                put("projectId", projectId.value)
+                put("assetId", assetId)
+            },
+            ctx,
+        )
+        // Subtitle text exercises filtergraph escaping: colon, single quote, comma.
+        registry["add_subtitle"]!!.dispatch(
+            buildJsonObject {
+                put("projectId", projectId.value)
+                put("text", "hi: it's, you")
+                put("timelineStartSeconds", 0.2)
+                put("durationSeconds", 1.5)
+                put("fontSize", 36f)
+                put("color", "#FFFF00")
+                put("backgroundColor", "#000000")
+            },
+            ctx,
+        )
+        registry["export"]!!.dispatch(
+            buildJsonObject {
+                put("projectId", projectId.value)
+                put("outputPath", output.absolutePath)
+                put("width", 320)
+                put("height", 240)
+                put("frameRate", 24)
+            },
+            ctx,
+        )
+
+        assertTrue(output.exists(), "output mp4 should exist at ${output.absolutePath}")
+        assertTrue(output.length() > 1024, "output mp4 should be non-trivial (${output.length()} bytes)")
+        driver.close()
+    }
+
     private fun ffmpegOnPath(): Boolean = runCatching {
         ProcessBuilder("ffmpeg", "-version").redirectErrorStream(true).start().waitFor() == 0
+    }.getOrDefault(false)
+
+    private fun drawtextFilterAvailable(): Boolean = runCatching {
+        val proc = ProcessBuilder("ffmpeg", "-hide_banner", "-filters")
+            .redirectErrorStream(true)
+            .start()
+        val output = proc.inputStream.bufferedReader().use { it.readText() }
+        proc.waitFor()
+        output.lineSequence().any { line -> line.trim().startsWith("T") && " drawtext " in line }
     }.getOrDefault(false)
 
     private fun generateTestSource(target: File, pattern: String) {

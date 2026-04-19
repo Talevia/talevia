@@ -121,6 +121,18 @@ class FfmpegVideoEngine(
             args += listOf("-i", path)
         }
         val n = videoClips.size
+        // Collect Text clips from every Subtitle track. These render as
+        // `drawtext` overlays bolted onto [outv] after the concat filter.
+        // Other tracks (Effect, extra Audio) are ignored for now — same
+        // scope as M2's "single video track" rule.
+        val subtitleClips: List<Clip.Text> = timeline.tracks
+            .filterIsInstance<Track.Subtitle>()
+            .flatMap { it.clips.filterIsInstance<Clip.Text>() }
+        val drawtextChain = subtitleDrawtextChain(
+            subtitleClips,
+            output.resolution.width,
+            output.resolution.height,
+        )
         // Build the filtergraph. For clips with per-clip filters, pre-process
         // the video stream through a chain and label it [vN]; clips without
         // filters pass [N:v:0] through unchanged. Audio is always taken from
@@ -141,7 +153,13 @@ class FfmpegVideoEngine(
                 append(videoLabels[i])
                 append("[$i:a:0?]")
             }
-            append("concat=n=$n:v=1:a=1[outv][outa]")
+            append("concat=n=$n:v=1:a=1")
+            if (drawtextChain != null) {
+                // concat emits [cv]/[outa]; drawtext chain consumes [cv] and labels [outv].
+                append("[cv][outa];[cv]$drawtextChain[outv]")
+            } else {
+                append("[outv][outa]")
+            }
         }
         args += listOf("-filter_complex", filter)
         args += listOf("-map", "[outv]", "-map", "[outa]")
@@ -154,6 +172,10 @@ class FfmpegVideoEngine(
         val process = ProcessBuilder(args).redirectErrorStream(false).start()
         val totalSeconds = timeline.duration.toDouble(kotlin.time.DurationUnit.SECONDS).takeIf { it > 0 } ?: 1.0
         val reader = BufferedReader(InputStreamReader(process.errorStream))
+        // Keep a rolling tail of non-progress stderr lines so a failure surfaces
+        // ffmpeg's actual complaint (bad filter graph, missing input, codec
+        // unsupported) instead of just "exited N".
+        val stderrTail = ArrayDeque<String>()
 
         try {
             // ffmpeg writes progress KV pairs (out_time_ms=…, progress=continue|end) to
@@ -164,6 +186,22 @@ class FfmpegVideoEngine(
                 val line = runInterruptible(ioDispatcher) { reader.readLine() } ?: break
                 val k = line.substringBefore('=', "")
                 val v = line.substringAfter('=', "")
+                val isProgressKv = k == "out_time_ms" ||
+                    k == "progress" ||
+                    k == "frame" ||
+                    k == "fps" ||
+                    k == "stream_0_0_q" ||
+                    k == "bitrate" ||
+                    k == "total_size" ||
+                    k == "out_time_us" ||
+                    k == "out_time" ||
+                    k == "dup_frames" ||
+                    k == "drop_frames" ||
+                    k == "speed"
+                if (!isProgressKv && line.isNotBlank()) {
+                    stderrTail.addLast(line)
+                    if (stderrTail.size > 40) stderrTail.removeFirst()
+                }
                 if (k == "out_time_ms" && v.isNotEmpty()) {
                     val microsec = v.toLongOrNull()
                     if (microsec != null) {
@@ -174,8 +212,25 @@ class FfmpegVideoEngine(
                 if (k == "progress" && v == "end") break
             }
             val exit = runInterruptible(ioDispatcher) { process.waitFor() }
-            if (exit == 0) emit(RenderProgress.Completed(jobId, output.targetPath))
-            else emit(RenderProgress.Failed(jobId, "ffmpeg exited $exit"))
+            if (exit == 0) {
+                emit(RenderProgress.Completed(jobId, output.targetPath))
+            } else {
+                // Skip the banner/config preamble (noise) and keep only tail
+                // lines that resemble actual errors — they typically contain
+                // "Error", "No such", or an `[AVFilterGraph…]` prefix.
+                val signal = stderrTail.filter { line ->
+                    "Error" in line ||
+                        "No such" in line ||
+                        line.startsWith("[AV") ||
+                        "Invalid" in line ||
+                        "failed" in line ||
+                        "cannot" in line.lowercase()
+                }
+                val summary = (signal.ifEmpty { stderrTail.toList() })
+                    .joinToString(" | ")
+                    .take(1200)
+                emit(RenderProgress.Failed(jobId, "ffmpeg exited $exit: $summary"))
+            }
         } finally {
             // Always kill the child and drain the stderr reader — even if the caller
             // cancelled mid-flight. destroyForcibly is idempotent.
@@ -248,6 +303,89 @@ class FfmpegVideoEngine(
         }
         else -> null
     }
+
+    /**
+     * Build a comma-joined `drawtext` chain for the timeline's subtitle clips,
+     * or `null` when there are no clips to render. Each clip contributes one
+     * drawtext filter gated by `enable='between(t,start,end)'`, so the overlay
+     * only shows within that clip's timeline range.
+     *
+     * Positioning: the MVP anchors subtitles center-bottom (`x=(w-text_w)/2`,
+     * `y=H-48-text_h` for a 1080p-ish baseline — scales linearly with the
+     * output height to keep the margin visually proportional). Custom
+     * positioning is a later knob on [TextStyle].
+     *
+     * Font: ffmpeg's drawtext needs a font *file* (not a family name). Rather
+     * than hardcoding a platform-specific path, we omit the `fontfile=` option
+     * entirely and let ffmpeg fall back to its built-in default, which works
+     * across Linux/macOS/Windows as long as ffmpeg was built with freetype.
+     * TextStyle.fontFamily is preserved in core but treated as a hint here.
+     */
+    internal fun subtitleDrawtextChain(
+        clips: List<Clip.Text>,
+        outputWidth: Int,
+        outputHeight: Int,
+    ): String? {
+        if (clips.isEmpty()) return null
+        // Bottom margin scales with height so the caption sits ~4.4% from the
+        // bottom edge regardless of resolution (48 / 1080 ≈ 0.044).
+        val bottomMargin = (outputHeight * 48 / 1080).coerceAtLeast(16)
+        val segments = clips.map { clip -> renderDrawtext(clip, bottomMargin) }
+        return segments.joinToString(",")
+    }
+
+    private fun renderDrawtext(clip: Clip.Text, bottomMargin: Int): String {
+        val style = clip.style
+        val start = clip.timeRange.start.toDouble(kotlin.time.DurationUnit.SECONDS)
+        val end = clip.timeRange.end.toDouble(kotlin.time.DurationUnit.SECONDS)
+        val opts = mutableListOf<String>()
+        opts += "text=${escapeDrawtextText(clip.text)}"
+        opts += "fontsize=${formatFloat(style.fontSize)}"
+        opts += "fontcolor=${drawtextColor(style.color)}"
+        val bg = style.backgroundColor
+        if (bg != null) {
+            opts += "box=1"
+            opts += "boxcolor=${drawtextColor(bg)}"
+            opts += "boxborderw=10"
+        }
+        opts += "x=(w-text_w)/2"
+        opts += "y=h-text_h-$bottomMargin"
+        // Gate the overlay to the clip's timeline range. `between` is
+        // inclusive on the start side and exclusive on the end, matching
+        // our TimeRange.end convention.
+        opts += "enable=${escapeFiltergraphArg("between(t,${formatFloat(start.toFloat())},${formatFloat(end.toFloat())})")}"
+        return "drawtext=${opts.joinToString(":")}"
+    }
+
+    /**
+     * Escape a string for drawtext's `text=` value. Two escape layers apply:
+     *
+     * 1. **Filtergraph level** — we wrap the whole value in single quotes, so
+     *    inside the quoted section `:` `,` `;` `[` `]` and `\` are all literal.
+     *    Only `'` can't appear inside the quotes; per ffmpeg's quoting rules
+     *    the standard idiom is to close-then-escape-then-reopen: `foo'\''bar`.
+     *
+     * 2. **Drawtext level** — after graph parsing strips the outer quotes, the
+     *    filter processes `%{…}` expansions. A literal `%` must therefore be
+     *    delivered as `\%` (which reaches drawtext as `\%` since `\` is literal
+     *    inside the outer quotes).
+     */
+    private fun escapeDrawtextText(v: String): String {
+        val escaped = v
+            .replace("%", "\\%")
+            .replace("'", "'\\''")
+        return "'$escaped'"
+    }
+
+    /**
+     * drawtext accepts `#RRGGBB`, `#RRGGBBAA`, or a named color. We strip a
+     * leading `#` — not required by ffmpeg, but safer: `#` isn't a filtergraph
+     * meta character yet but it can confuse shells in ad-hoc testing.
+     * Unknown / malformed strings pass through unchanged; ffmpeg will reject
+     * them at render time with a clear error.
+     */
+    private fun drawtextColor(hexOrName: String): String =
+        if (hexOrName.startsWith("#")) "0x${hexOrName.drop(1)}" else hexOrName
 
     /**
      * Escape a string so it can appear as a filtergraph argument value. ffmpeg

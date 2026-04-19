@@ -97,6 +97,7 @@ Ignore OpenCode's Effect.js Service/Layer/Context organisation, its TUI, Web UI,
 
 These are visible in code but not yet wired end-to-end (expected follow-ups, not bugs):
 - **Android Media3 filter / transition rendering** — `Media3VideoEngine` handles cut/stitch; filter and transition passes still fall back to no-op. The iOS `AVFoundationVideoEngine` has the same gap by design (same scope). FFmpeg JVM got filter rendering; both native engines lag behind.
+- **Android Media3 / iOS AVFoundation subtitle rendering** — `add_subtitle` / `add_subtitles` write `Clip.Text` onto the timeline's Subtitle track on all platforms, but only FFmpeg bakes it into the output (via `drawtext`). Media3 / AVFoundation ignore Subtitle tracks at render time; the caption data survives save / restore, so the follow-up is wiring native renderers, not a Core change. Also: FFmpeg's `drawtext` filter requires `libfreetype`, so ffmpeg builds compiled without it (e.g. some minimal homebrew bottles) silently drop subtitles — the E2E subtitle test auto-skips in that case.
 
 If a task touches one of these, expect to wire it up rather than work around it.
 
