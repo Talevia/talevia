@@ -121,6 +121,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
             store = sessions,
             permissions = permissions,
             bus = bus,
+            systemPrompt = io.talevia.core.agent.taleviaSystemPrompt(),
             compactor = Compactor(
                 provider = provider,
                 store = sessions,

@@ -144,6 +144,12 @@ class ServerContainer(
             store = sessions,
             permissions = permissions,
             bus = bus,
+            systemPrompt = io.talevia.core.agent.taleviaSystemPrompt(
+                // Server runs headless: permission prompts default to deny, so the model
+                // should not plan around interactive approval loops for ASK permissions.
+                extraSuffix = "Runtime: headless server. ASK-scoped permissions resolve to deny; " +
+                    "if a tool needs an ASK permission, surface that to the caller rather than retrying.",
+            ),
             compactor = Compactor(
                 provider = provider,
                 store = sessions,
