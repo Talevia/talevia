@@ -23,6 +23,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
@@ -36,8 +37,11 @@ import io.talevia.core.bus.BusEvent
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.domain.staleClipsFromLockfile
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * Lockfile + stale-clip visibility (VISION §3.1 / §3.2) on the desktop.
@@ -48,21 +52,25 @@ import kotlinx.serialization.json.JsonObject
  *    bound to source nodes) a fresh / stale tag derived from
  *    `Project.staleClipsFromLockfile()`.
  *  - **Stale clips**: the stale-clip report pre-computed by the same
- *    function, each row offering a `Regenerate` button hooked into
- *    `replace_clip` through the shared registry.
+ *    function, with a single `Regenerate N` button at the section
+ *    header that dispatches `regenerate_stale_clips` through the shared
+ *    registry — one click closes the VISION §6 refactor loop
+ *    (edit character → UI shows stale → click → timeline refreshes).
  *
- * Read-only on its own — mutations go through existing tools. This
- * panel is the UI half of what `list_lockfile_entries` and
+ * Mutations go through the existing tool (`regenerate_stale_clips`);
+ * this panel is the UI half of what `list_lockfile_entries` /
  * `find_stale_clips` already expose to the agent.
  */
 @Composable
 fun LockfilePanel(
     container: AppContainer,
     projectId: ProjectId,
-    @Suppress("UNUSED_PARAMETER") log: SnapshotStateList<String>,
+    log: SnapshotStateList<String>,
 ) {
+    val scope = rememberCoroutineScope()
     var project by remember(projectId) { mutableStateOf<Project?>(null) }
     var staleOnly by remember { mutableStateOf(false) }
+    var regenerating by remember { mutableStateOf(false) }
     val expanded = remember { mutableStateMapOf<String, Boolean>() }
 
     LaunchedEffect(projectId) { project = container.projects.get(projectId) }
@@ -75,6 +83,24 @@ fun LockfilePanel(
     val p = project
     val staleReports = remember(p) { p?.staleClipsFromLockfile().orEmpty() }
     val staleAssetIds = remember(staleReports) { staleReports.map { it.assetId }.toSet() }
+
+    fun regenerateStale() {
+        val tool = container.tools["regenerate_stale_clips"]
+        if (tool == null) {
+            log += "regenerate_stale_clips not registered"; return
+        }
+        if (regenerating) return
+        regenerating = true
+        val input = buildJsonObject { put("projectId", projectId.value) }
+        scope.launch {
+            runCatching {
+                val result = tool.dispatch(input, container.uiToolContext(projectId))
+                log += "regenerate_stale_clips → ${result.outputForLlm}"
+                project = container.projects.get(projectId)
+            }.onFailure { log += "regenerate_stale_clips failed: ${it.message}" }
+            regenerating = false
+        }
+    }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -93,11 +119,20 @@ fun LockfilePanel(
 
         if (staleReports.isNotEmpty()) {
             Spacer(Modifier.height(6.dp))
-            Text(
-                "Stale clips",
-                style = MaterialTheme.typography.labelMedium,
-                modifier = Modifier.padding(vertical = 2.dp),
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Stale clips",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(vertical = 2.dp),
+                )
+                Spacer(Modifier.weight(1f))
+                TextButton(
+                    enabled = !regenerating,
+                    onClick = { regenerateStale() },
+                ) {
+                    Text(if (regenerating) "regenerating…" else "regenerate ${staleReports.size}")
+                }
+            }
             LazyColumn(modifier = Modifier.fillMaxWidth().height(160.dp)) {
                 items(staleReports, key = { it.clipId.value }) { report ->
                     StaleClipRow(
