@@ -66,6 +66,7 @@ import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.ExportTool
+import io.talevia.core.tool.builtin.video.ExtractFrameTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
@@ -187,6 +188,7 @@ class ServerContainer(
 
     val tools: ToolRegistry = ToolRegistry().apply {
         register(ImportMediaTool(media, engine))
+        register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))
         register(ReplaceClipTool(projects, media))
         register(SplitClipTool(projects))

@@ -57,6 +57,9 @@ class TaleviaSystemPromptTest {
         "trim_clip",
         // Audio volume control — adjust playback level on an audio clip in place.
         "set_clip_volume",
+        // Frame extraction — video→image helper that unlocks describe_asset on
+        // video assets and reference-image chaining into generate_image/video.
+        "extract_frame",
         // Project-level named snapshots (VISION §3.4) — survive across chat sessions.
         "save_project_snapshot",
         "list_project_snapshots",

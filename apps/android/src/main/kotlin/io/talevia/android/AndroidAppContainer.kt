@@ -10,6 +10,7 @@ import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.permission.DefaultPermissionService
 import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.InMemorySecretStore
+import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
@@ -40,6 +41,7 @@ import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.ExportTool
+import io.talevia.core.tool.builtin.video.ExtractFrameTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
@@ -62,6 +64,14 @@ class AndroidAppContainer(context: Context) {
     val projects: ProjectStore = SqlDelightProjectStore(db)
     val media: MediaStorage = InMemoryMediaStorage()
     val engine: VideoEngine = Media3VideoEngine(context, media)
+    /**
+     * Cache-tier blob writer. Generated frames live under the app cache dir;
+     * Project state holds the canonical asset reference, so OS eviction is
+     * recoverable by re-running the source tool.
+     */
+    val blobWriter: MediaBlobWriter = AndroidFileBlobWriter(
+        java.io.File(context.cacheDir, "talevia-generated"),
+    )
     val permissions = DefaultPermissionService(bus)
     val permissionRules = DefaultPermissionRuleset.rules.toMutableList()
     /**
@@ -72,6 +82,7 @@ class AndroidAppContainer(context: Context) {
     val secrets: SecretStore = InMemorySecretStore()
     val tools: ToolRegistry = ToolRegistry().apply {
         register(ImportMediaTool(media, engine))
+        register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))
         register(ReplaceClipTool(projects, media))
         register(SplitClipTool(projects))

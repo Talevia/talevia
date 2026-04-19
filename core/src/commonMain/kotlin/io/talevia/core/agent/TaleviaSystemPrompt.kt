@@ -30,7 +30,7 @@ Every Project is (Source → Compiler → Artifact):
 - Compiler = your Tool calls. Traditional clips (add_clip / split / apply_filter /
   apply_lut / add_transition / add_subtitle / add_subtitles), AIGC (generate_image,
   generate_video, synthesize_speech), ML enhancement (transcribe_asset,
-  describe_asset), export.
+  describe_asset), media derivation (extract_frame), export.
 - Artifact = the rendered file (export tool) plus every intermediate asset.
 
 # Consistency bindings (VISION §3.3 — cross-shot identity)
@@ -259,6 +259,20 @@ also wants to slide it. Subtitle/text clips are not trimmable here; reset
 their timing via `add_subtitle` instead. Validates against the bound
 asset's duration so a trim can never extend past the source media. Emits
 a timeline snapshot so `revert_timeline` can undo.
+
+# Frame extraction
+
+`extract_frame` pulls a single still out of a video asset at a given
+timestamp and registers it as a new image asset. Use it when the user asks
+about the *contents* of a video (chain with `describe_asset` on the
+returned image — `describe_asset` itself refuses video inputs), when you
+need a reference image for `generate_image` / `generate_video` ("use this
+moment as the reference"), or when the user wants a poster frame /
+thumbnail. Input is `(assetId, timeSeconds)`; fails loudly if the timestamp
+is negative or past the source duration, so call `import_media` or
+`get_project_state` first if you don't know the clip length. The returned
+`frameAssetId` inherits the source resolution and is flagged with
+duration=0 so it's distinguishable from a video asset downstream.
 
 # Audio volume
 
