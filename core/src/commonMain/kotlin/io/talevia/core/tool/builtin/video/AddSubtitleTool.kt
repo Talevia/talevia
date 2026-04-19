@@ -69,7 +69,7 @@ class AddSubtitleTool(
         val clipId = ClipId(Uuid.random().toString())
         var trackId: TrackId? = null
         val updated = store.mutate(ProjectId(input.projectId)) { project ->
-            val (subtitleTrack, others) = pickSubtitleTrack(project.timeline.tracks)
+            val subtitleTrack = pickSubtitleTrack(project.timeline.tracks)
             val tlRange = TimeRange(input.timelineStartSeconds.seconds, input.durationSeconds.seconds)
             val clip = Clip.Text(
                 id = clipId,
@@ -82,9 +82,9 @@ class AddSubtitleTool(
                 ),
             )
             val newClips = (subtitleTrack.clips + clip).sortedBy { it.timeRange.start }
-            val newTrack = (subtitleTrack as Track.Subtitle).copy(clips = newClips)
+            val newTrack = subtitleTrack.copy(clips = newClips)
             trackId = newTrack.id
-            val tracks = others + newTrack
+            val tracks = upsertTrackPreservingOrder(project.timeline.tracks, newTrack)
             val duration = maxOf(project.timeline.duration, tlRange.end)
             project.copy(timeline = project.timeline.copy(tracks = tracks, duration = duration))
         }
@@ -97,9 +97,8 @@ class AddSubtitleTool(
     }
 
     @OptIn(ExperimentalUuidApi::class)
-    private fun pickSubtitleTrack(tracks: List<Track>): Pair<Track, List<Track>> {
+    private fun pickSubtitleTrack(tracks: List<Track>): Track.Subtitle {
         val match = tracks.firstOrNull { it is Track.Subtitle }
-        return if (match != null) match to tracks.filter { it.id != match.id }
-        else Track.Subtitle(TrackId(Uuid.random().toString())) to tracks
+        return match as? Track.Subtitle ?: Track.Subtitle(TrackId(Uuid.random().toString()))
     }
 }

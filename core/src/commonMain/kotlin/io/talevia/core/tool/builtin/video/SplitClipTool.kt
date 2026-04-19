@@ -57,9 +57,11 @@ class SplitClipTool(
         var left: ClipId? = null
         var right: ClipId? = null
         val updated = store.mutate(ProjectId(input.projectId)) { project ->
+            var found = false
             val splitAt = input.atTimelineSeconds.seconds
             val newTracks = project.timeline.tracks.map { track ->
                 val target = track.clips.firstOrNull { it.id.value == input.clipId } ?: return@map track
+                found = true
                 if (splitAt <= target.timeRange.start || splitAt >= target.timeRange.end) {
                     error("Split point ${input.atTimelineSeconds}s is outside clip ${target.timeRange.start}..${target.timeRange.end}")
                 }
@@ -68,6 +70,7 @@ class SplitClipTool(
                 left = l.id; right = r.id
                 rebuildTrack(track, target, listOf(l, r))
             }
+            if (!found) error("clip ${input.clipId} not found in project ${input.projectId}")
             project.copy(timeline = project.timeline.copy(tracks = newTracks))
         }
         val cs = (input.atTimelineSeconds * 100).toLong()

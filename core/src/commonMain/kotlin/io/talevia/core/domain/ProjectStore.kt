@@ -39,11 +39,12 @@ class SqlDelightProjectStore(
 
     override suspend fun upsert(title: String, project: Project) {
         val now = clock.now().toEpochMilliseconds()
+        val existing = db.projectsQueries.selectById(project.id.value).executeAsOneOrNull()
         db.projectsQueries.upsert(
             id = project.id.value,
             title = title,
             data_ = json.encodeToString(Project.serializer(), project),
-            time_created = now,
+            time_created = existing?.time_created ?: now,
             time_updated = now,
         )
     }

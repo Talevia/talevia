@@ -70,31 +70,48 @@ class AddClipTool(
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        require(input.sourceStartSeconds >= 0.0) { "sourceStartSeconds must be >= 0" }
+        input.timelineStartSeconds?.let {
+            require(it >= 0.0) { "timelineStartSeconds must be >= 0" }
+        }
+        input.durationSeconds?.let {
+            require(it > 0.0) { "durationSeconds must be > 0" }
+        }
+
         val asset = media.get(AssetId(input.assetId))
             ?: error("Asset ${input.assetId} not found; import_media first.")
 
         val sourceStart: Duration = input.sourceStartSeconds.seconds
-        val clipDuration: Duration = (input.durationSeconds?.seconds ?: (asset.metadata.duration - sourceStart))
-            .coerceAtMost(asset.metadata.duration - sourceStart)
+        val remaining = asset.metadata.duration - sourceStart
+        require(sourceStart < asset.metadata.duration) {
+            "sourceStartSeconds ${input.sourceStartSeconds} exceeds asset duration ${asset.metadata.duration.inWholeMilliseconds / 1000.0}s"
+        }
+        val clipDuration: Duration = (input.durationSeconds?.seconds ?: remaining).coerceAtMost(remaining)
+        require(clipDuration > Duration.ZERO) { "clip duration must be > 0" }
+        val clipId = ClipId(Uuid.random().toString())
 
         val updated = store.mutate(ProjectId(input.projectId)) { project ->
-            val (videoTrack, otherTracks) = pickVideoTrack(project.timeline.tracks, input.trackId)
+            val videoTrack = pickVideoTrack(project.timeline.tracks, input.trackId)
             val tlStart = input.timelineStartSeconds?.seconds ?: videoTrack.clips.maxOfOrNull { it.timeRange.end } ?: Duration.ZERO
+            require(tlStart >= Duration.ZERO) { "timelineStartSeconds must be >= 0" }
             val newClip = Clip.Video(
-                id = ClipId(Uuid.random().toString()),
+                id = clipId,
                 timeRange = TimeRange(tlStart, clipDuration),
                 sourceRange = TimeRange(sourceStart, clipDuration),
                 assetId = asset.id,
             )
             val newClips = (videoTrack.clips + newClip).sortedBy { it.timeRange.start }
-            val newTrack = (videoTrack as Track.Video).copy(clips = newClips)
-            val tracks = otherTracks + newTrack
+            val newTrack = videoTrack.copy(clips = newClips)
+            val tracks = upsertTrackPreservingOrder(project.timeline.tracks, newTrack)
             val duration = tracks.flatMap { it.clips }.maxOfOrNull { it.timeRange.end } ?: Duration.ZERO
             project.copy(timeline = project.timeline.copy(tracks = tracks, duration = duration))
         }
 
-        val addedTrack = updated.timeline.tracks.first { input.trackId == null || it.id.value == input.trackId } as Track.Video
-        val addedClip = addedTrack.clips.maxBy { it.timeRange.end } as Clip.Video
+        val addedTrack = updated.timeline.tracks.firstOrNull { track ->
+            track is Track.Video && track.clips.any { it.id == clipId }
+        } as? Track.Video ?: error("Added clip $clipId not found after mutation")
+        val addedClip = addedTrack.clips.firstOrNull { it.id == clipId } as? Clip.Video
+            ?: error("Added clip $clipId not found on track ${addedTrack.id.value}")
         val out = Output(
             clipId = addedClip.id.value,
             timelineStartSeconds = addedClip.timeRange.start.toDouble(DurationUnit.SECONDS),
@@ -115,14 +132,17 @@ class AddClipTool(
     }
 
     @OptIn(ExperimentalUuidApi::class)
-    private fun pickVideoTrack(tracks: List<Track>, requestedId: String?): Pair<Track, List<Track>> {
-        val match = if (requestedId != null) tracks.firstOrNull { it.id.value == requestedId && it is Track.Video }
-        else tracks.firstOrNull { it is Track.Video }
-        return if (match != null) {
-            match to tracks.filter { it.id != match.id }
+    private fun pickVideoTrack(tracks: List<Track>, requestedId: String?): Track.Video {
+        val match = if (requestedId != null) {
+            val requested = tracks.firstOrNull { it.id.value == requestedId }
+                ?: error("trackId $requestedId not found")
+            if (requested !is Track.Video) {
+                error("trackId $requestedId is not a video track")
+            }
+            requested
         } else {
-            val newTrack = Track.Video(TrackId(Uuid.random().toString()))
-            newTrack to tracks
+            tracks.firstOrNull { it is Track.Video }
         }
+        return match as? Track.Video ?: Track.Video(TrackId(Uuid.random().toString()))
     }
 }

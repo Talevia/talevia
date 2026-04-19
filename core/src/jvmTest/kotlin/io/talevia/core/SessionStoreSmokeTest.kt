@@ -88,4 +88,42 @@ class SessionStoreSmokeTest {
 
         driver.close()
     }
+
+    @Test
+    fun sessionUpdatedAtMovesForwardWhenMessagesArrive() = runTest {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val db = TaleviaDb(driver)
+        val bus = EventBus()
+        val store = SqlDelightSessionStore(db, bus)
+
+        val t0 = Clock.System.now()
+        val t1 = t0.plus(1.seconds)
+        val t2 = t1.plus(1.seconds)
+
+        val first = Session(SessionId("s-1"), ProjectId("p"), title = "first", createdAt = t0, updatedAt = t0)
+        val second = Session(SessionId("s-2"), ProjectId("p"), title = "second", createdAt = t1, updatedAt = t1)
+        store.createSession(first)
+        store.createSession(second)
+
+        val initialOrder = store.listSessions(ProjectId("p")).map { it.id.value }
+        assertEquals(listOf("s-2", "s-1"), initialOrder)
+
+        store.appendMessage(
+            Message.User(
+                id = MessageId("m-1"),
+                sessionId = SessionId("s-1"),
+                createdAt = t2,
+                agent = "default",
+                model = ModelRef("anthropic", "claude-opus-4-7"),
+            ),
+        )
+
+        val refreshed = store.getSession(SessionId("s-1"))!!
+        assertEquals(t2, refreshed.updatedAt)
+        val reordered = store.listSessions(ProjectId("p")).map { it.id.value }
+        assertEquals(listOf("s-1", "s-2"), reordered)
+
+        driver.close()
+    }
 }

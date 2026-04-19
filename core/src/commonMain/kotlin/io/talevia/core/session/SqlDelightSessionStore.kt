@@ -30,6 +30,7 @@ import kotlin.uuid.Uuid
 class SqlDelightSessionStore(
     private val db: TaleviaDb,
     private val bus: EventBus,
+    private val clock: Clock = Clock.System,
     private val json: Json = JsonConfig.default,
 ) : SessionStore {
 
@@ -82,6 +83,7 @@ class SqlDelightSessionStore(
             data_ = json.encodeToString(Message.serializer(), message),
             time_created = message.createdAt.toEpochMilliseconds(),
         )
+        touchSession(message.sessionId, message.createdAt)
         bus.publish(BusEvent.MessageUpdated(message.sessionId, message.id, message))
     }
 
@@ -90,6 +92,7 @@ class SqlDelightSessionStore(
             data_ = json.encodeToString(Message.serializer(), message),
             id = message.id.value,
         )
+        touchSession(message.sessionId, clock.now())
         bus.publish(BusEvent.MessageUpdated(message.sessionId, message.id, message))
     }
 
@@ -111,11 +114,20 @@ class SqlDelightSessionStore(
             time_created = part.createdAt.toEpochMilliseconds(),
             time_compacted = part.compactedAt?.toEpochMilliseconds(),
         )
+        touchSession(part.sessionId, part.createdAt)
         bus.publish(BusEvent.PartUpdated(part.sessionId, part.messageId, part.id, part))
     }
 
     override suspend fun markPartCompacted(id: PartId, at: Instant) {
         db.partsQueries.markCompacted(time_compacted = at.toEpochMilliseconds(), id = id.value)
+    }
+
+    private suspend fun touchSession(sessionId: SessionId, at: Instant) {
+        val row = db.sessionsQueries.selectById(sessionId.value).executeAsOneOrNull() ?: return
+        val current = json.decodeFromString(Session.serializer(), row.data_)
+        if (at <= current.updatedAt) return
+        writeSession(current.copy(updatedAt = at))
+        bus.publish(BusEvent.SessionUpdated(sessionId))
     }
 
     override suspend fun getPart(id: PartId): Part? =

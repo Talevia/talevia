@@ -70,22 +70,35 @@ class AddTransitionTool(
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        require(input.durationSeconds > 0.0) { "durationSeconds must be > 0" }
         val transitionId = ClipId(Uuid.random().toString())
         var resolvedTrackId: TrackId? = null
 
         val updated = store.mutate(ProjectId(input.projectId)) { project ->
-            val from = project.timeline.tracks.flatMap { it.clips }.firstOrNull { it.id.value == input.fromClipId }
+            val from = project.timeline.tracks.firstNotNullOfOrNull { track ->
+                track.clips.firstOrNull { it.id.value == input.fromClipId }?.let { track to it }
+            }?.let { (track, clip) -> track to clip }
                 ?: error("fromClipId ${input.fromClipId} not found")
-            val to = project.timeline.tracks.flatMap { it.clips }.firstOrNull { it.id.value == input.toClipId }
+            val to = project.timeline.tracks.firstNotNullOfOrNull { track ->
+                track.clips.firstOrNull { it.id.value == input.toClipId }?.let { track to it }
+            }?.let { (track, clip) -> track to clip }
                 ?: error("toClipId ${input.toClipId} not found")
-            if (from.timeRange.end != to.timeRange.start) {
-                error("transition only supported between adjacent clips (from ends ${from.timeRange.end}, to starts ${to.timeRange.start})")
+            val (fromTrack, fromClip) = from
+            val (toTrack, toClip) = to
+            if (fromTrack.id != toTrack.id) {
+                error("transition only supported between clips on the same track")
+            }
+            if (fromClip !is Clip.Video || toClip !is Clip.Video) {
+                error("transition only supports video clips")
+            }
+            if (fromClip.timeRange.end != toClip.timeRange.start) {
+                error("transition only supported between adjacent clips (from ends ${fromClip.timeRange.end}, to starts ${toClip.timeRange.start})")
             }
             val duration = input.durationSeconds.seconds
-            val midpoint = from.timeRange.end - duration / 2
+            val midpoint = fromClip.timeRange.end - duration / 2
             val transitionRange = TimeRange(midpoint, duration)
 
-            val (effectTrack, others) = pickEffectTrack(project.timeline.tracks)
+            val effectTrack = pickEffectTrack(project.timeline.tracks)
             val transitionClip = Clip.Video(
                 // Use a synthetic Video clip on the Effect track to carry the transition spec via filters[0].
                 id = transitionId,
@@ -95,9 +108,9 @@ class AddTransitionTool(
                 filters = listOf(Filter(input.transitionName, mapOf("durationSeconds" to input.durationSeconds.toFloat()))),
             )
             val newClips = (effectTrack.clips + transitionClip).sortedBy { it.timeRange.start }
-            val newTrack = (effectTrack as Track.Effect).copy(clips = newClips)
+            val newTrack = effectTrack.copy(clips = newClips)
             resolvedTrackId = newTrack.id
-            project.copy(timeline = project.timeline.copy(tracks = others + newTrack))
+            project.copy(timeline = project.timeline.copy(tracks = upsertTrackPreservingOrder(project.timeline.tracks, newTrack)))
         }
 
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
@@ -108,9 +121,8 @@ class AddTransitionTool(
         )
     }
 
-    private fun pickEffectTrack(tracks: List<Track>): Pair<Track, List<Track>> {
+    private fun pickEffectTrack(tracks: List<Track>): Track.Effect {
         val match = tracks.firstOrNull { it is Track.Effect }
-        return if (match != null) match to tracks.filter { it.id != match.id }
-        else Track.Effect(TrackId(Uuid.random().toString())) to tracks
+        return match as? Track.Effect ?: Track.Effect(TrackId(Uuid.random().toString()))
     }
 }

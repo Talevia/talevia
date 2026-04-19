@@ -10,6 +10,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -25,6 +27,10 @@ import kotlin.test.assertEquals
  * parallel threads (runTest's single-threaded scheduler would mask races).
  */
 class ProjectStoreConcurrencyTest {
+
+    private class MutableClock(var instant: Instant) : Clock {
+        override fun now(): Instant = instant
+    }
 
     private fun newStore(): Pair<SqlDelightProjectStore, ProjectId> {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
@@ -115,5 +121,24 @@ class ProjectStoreConcurrencyTest {
         // Each iteration must have observed one more track than the previous —
         // i.e. the sizes it saw are a permutation of 0..9, exactly.
         assertEquals((0 until 10).toSet(), readings.toSet())
+    }
+
+    @Test fun upsertPreservesOriginalCreationTimestamp() = runBlocking {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val db = TaleviaDb(driver)
+        val clock = MutableClock(Instant.parse("2026-01-01T00:00:00Z"))
+        val store = SqlDelightProjectStore(db, clock = clock)
+        val id = ProjectId("p-ts")
+
+        store.upsert("demo", Project(id = id, timeline = Timeline()))
+        val created = db.projectsQueries.selectById(id.value).executeAsOne()
+
+        clock.instant = Instant.parse("2026-01-01T00:10:00Z")
+        store.upsert("demo-2", Project(id = id, timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"))))))
+        val updated = db.projectsQueries.selectById(id.value).executeAsOne()
+
+        assertEquals(created.time_created, updated.time_created)
+        assertEquals(clock.instant.toEpochMilliseconds(), updated.time_updated)
     }
 }

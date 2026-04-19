@@ -173,15 +173,19 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
             val sid = SessionId(call.parameters["id"]!!)
             val body = call.receive<SubmitMessageRequest>()
             requireLength(body.text, MAX_TEXT_FIELD_LENGTH, "text")
-            val agent = container.agent
-            if (agent == null) {
+            val providerId = body.providerId ?: container.providers.default?.id
+            if (providerId == null) {
                 call.respond(HttpStatusCode.NotImplemented, mapOf(
                     "error" to "No provider API key set (ANTHROPIC_API_KEY / OPENAI_API_KEY).",
                 ))
                 return@post
             }
+            val agent = container.agentFor(providerId)
+            if (agent == null) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Provider '$providerId' is not configured."))
+                return@post
+            }
 
-            val providerId = body.providerId ?: container.providers.default!!.id
             val modelId = body.modelId ?: defaultModelFor(providerId)
             val correlationId = Uuid.random().toString()
 
@@ -235,14 +239,13 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
          */
         post("/sessions/{id}/cancel") {
             val sid = SessionId(call.parameters["id"]!!)
-            val agent = container.agent
-            if (agent == null) {
+            if (container.providers.default == null) {
                 call.respond(HttpStatusCode.NotImplemented, mapOf(
                     "error" to "No provider API key set (ANTHROPIC_API_KEY / OPENAI_API_KEY).",
                 ))
                 return@post
             }
-            if (agent.cancel(sid)) {
+            if (container.cancel(sid)) {
                 call.respond(HttpStatusCode.OK, mapOf("cancelled" to true))
             } else {
                 call.respond(HttpStatusCode.Conflict, mapOf("cancelled" to false, "reason" to "no in-flight run"))

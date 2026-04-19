@@ -203,20 +203,16 @@ class SplitClipToolTest {
         assertEquals(2, videoTrack.clips.size)
     }
 
-    @Test fun splitMissingClipIsNoOp() = runTest {
-        // No clip matches → the tool currently leaves the timeline untouched
-        // and returns null ids. If that ever changes to throw, this test
-        // pins the current contract so the change is intentional.
+    @Test fun splitMissingClipIsRejected() = runTest {
         val clip = videoClip("c1", start = Duration.ZERO, duration = 5.seconds)
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(clip))))))
-        kotlin.runCatching {
+        val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
                 SplitClipTool.Input(projectId = "p", clipId = "missing", atTimelineSeconds = 1.0),
                 rig.ctx,
             )
         }
-        // Either a clean throw OR a no-op result is acceptable; we just
-        // assert the project's clip count is unchanged afterwards.
+        assertTrue(ex.message!!.contains("not found"), ex.message)
         val refreshed = rig.store.get(rig.projectId)!!
         assertEquals(1, refreshed.timeline.tracks.single().clips.size)
     }

@@ -13,11 +13,38 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.testing.testApplication
+import io.talevia.core.PartId
+import io.talevia.core.provider.LlmEvent
+import io.talevia.core.provider.LlmProvider
+import io.talevia.core.provider.LlmRequest
+import io.talevia.core.provider.ModelInfo
+import io.talevia.core.provider.ProviderRegistry
+import io.talevia.core.session.FinishReason
+import io.talevia.core.session.TokenUsage
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flow
+import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class ServerSmokeTest {
+
+    private class RecordingProvider(override val id: String) : LlmProvider {
+        val requests = CopyOnWriteArrayList<LlmRequest>()
+
+        override suspend fun listModels(): List<ModelInfo> = emptyList()
+
+        override fun stream(request: LlmRequest) = flow {
+            requests += request
+            val partId = PartId("$id-part")
+            emit(LlmEvent.StepStart)
+            emit(LlmEvent.TextStart(partId))
+            emit(LlmEvent.TextDelta(partId, "handled by $id"))
+            emit(LlmEvent.TextEnd(partId, "handled by $id"))
+            emit(LlmEvent.StepFinish(FinishReason.STOP, TokenUsage.ZERO))
+        }
+    }
 
     @Test
     fun createSessionThenPostText() = testApplication {
@@ -108,5 +135,58 @@ class ServerSmokeTest {
             setBody(SubmitMessageRequest(text = "hello"))
         }
         assertEquals(HttpStatusCode.NotImplemented, resp.status)
+    }
+
+    @Test
+    fun submitMessageUsesRequestedProviderInsteadOfDefault() = testApplication {
+        val anthropic = RecordingProvider("anthropic")
+        val openai = RecordingProvider("openai")
+        val providers = ProviderRegistry.Builder()
+            .add(anthropic)
+            .add(openai)
+            .build()
+        val container = ServerContainer(env = emptyMap(), providerRegistryOverride = providers)
+        application { serverModule(container) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val sessionId = client.post("/sessions") {
+            contentType(ContentType.Application.Json)
+            setBody(CreateSessionRequest(projectId = "p-provider"))
+        }.body<CreateSessionResponse>().sessionId
+
+        val resp = client.post("/sessions/$sessionId/messages") {
+            contentType(ContentType.Application.Json)
+            setBody(SubmitMessageRequest(text = "hello", providerId = "openai", modelId = "gpt-4o"))
+        }
+        assertEquals(HttpStatusCode.Accepted, resp.status)
+
+        repeat(100) {
+            if (openai.requests.size == 1) return@repeat
+            delay(10)
+        }
+
+        assertEquals(0, anthropic.requests.size, "default provider should not receive the request")
+        assertEquals(1, openai.requests.size)
+        assertEquals("openai", openai.requests.single().model.providerId)
+    }
+
+    @Test
+    fun submitMessageRejectsUnknownProviderWhenOthersExist() = testApplication {
+        val anthropic = RecordingProvider("anthropic")
+        val providers = ProviderRegistry.Builder().add(anthropic).build()
+        val container = ServerContainer(env = emptyMap(), providerRegistryOverride = providers)
+        application { serverModule(container) }
+        val client = createClient { install(ContentNegotiation) { json() } }
+
+        val sessionId = client.post("/sessions") {
+            contentType(ContentType.Application.Json)
+            setBody(CreateSessionRequest(projectId = "p-provider"))
+        }.body<CreateSessionResponse>().sessionId
+
+        val resp = client.post("/sessions/$sessionId/messages") {
+            contentType(ContentType.Application.Json)
+            setBody(SubmitMessageRequest(text = "hello", providerId = "openai"))
+        }
+        assertEquals(HttpStatusCode.BadRequest, resp.status)
     }
 }

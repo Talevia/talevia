@@ -3,6 +3,7 @@ package io.talevia.server
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.talevia.core.SessionId
 import io.talevia.core.agent.Agent
 import io.talevia.core.agent.SessionTitler
 import io.talevia.core.bus.EventBus
@@ -19,6 +20,7 @@ import io.talevia.core.platform.InMemorySecretStore
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
+import io.talevia.core.provider.LlmProvider
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
@@ -46,7 +48,10 @@ import java.io.File
  * need to ASK the user — callers must grant the right permissions up-front via
  * a session's `permissionRules` or accept the container's default ruleset.
  */
-class ServerContainer(env: Map<String, String> = System.getenv()) {
+class ServerContainer(
+    env: Map<String, String> = System.getenv(),
+    providerRegistryOverride: ProviderRegistry? = null,
+) {
     val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
     val db = TaleviaDb(driver)
     val bus = EventBus(extraBufferCapacity = 1024)
@@ -96,19 +101,15 @@ class ServerContainer(env: Map<String, String> = System.getenv()) {
 
     /** Provider registry built from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env vars. */
     val providers: ProviderRegistry =
-        ProviderRegistry.Builder().addEnv(httpClient, env).build()
+        providerRegistryOverride ?: ProviderRegistry.Builder().addEnv(httpClient, env).build()
 
     /** Counter registry scraped by GET /metrics. See [EventBusMetricsSink]. */
     val metrics: MetricsRegistry = MetricsRegistry()
     val metricsSink: EventBusMetricsSink = EventBusMetricsSink(bus, metrics)
 
-    /**
-     * Shared [Agent] singleton. A single instance is required so /cancel endpoints
-     * observe in-flight runs started by earlier requests — [Agent.cancel] relies on
-     * per-instance state. Null when no provider API key is configured.
-     */
-    val agent: Agent? by lazy {
-        val provider = providers.default ?: return@lazy null
+    private val agentsByProvider = mutableMapOf<String, Agent>()
+
+    private fun buildAgent(provider: LlmProvider): Agent =
         Agent(
             provider = provider,
             registry = tools,
@@ -122,6 +123,21 @@ class ServerContainer(env: Map<String, String> = System.getenv()) {
             ),
             titler = SessionTitler(provider = provider, store = sessions),
         )
+
+    /**
+     * One Agent per provider so callers can choose a backend per request while
+     * `/cancel` still sees long-lived Agent state for already-started runs.
+     */
+    fun agentFor(providerId: String): Agent? {
+        val provider = providers[providerId] ?: return null
+        return agentsByProvider.getOrPut(providerId) { buildAgent(provider) }
+    }
+
+    suspend fun cancel(sessionId: SessionId): Boolean {
+        for (agent in agentsByProvider.values) {
+            if (agent.cancel(sessionId)) return true
+        }
+        return false
     }
 
     /**

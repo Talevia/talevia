@@ -115,6 +115,25 @@ class AddTransitionToolTest {
         assertTrue(ex.message!!.contains("toClipId"), ex.message)
     }
 
+    @Test fun clipsOnDifferentTracksAreRejected() = runTest {
+        val left = videoClip("left", Duration.ZERO, 5.seconds)
+        val right = videoClip("right", 5.seconds, 5.seconds)
+        val rig = newRig(Project(
+            id = ProjectId("p"),
+            timeline = Timeline(tracks = listOf(
+                Track.Video(TrackId("t1"), listOf(left)),
+                Track.Video(TrackId("t2"), listOf(right)),
+            )),
+        ))
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                AddTransitionTool.Input(projectId = "p", fromClipId = "left", toClipId = "right"),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("same track"), ex.message)
+    }
+
     @Test fun reusesExistingEffectTrackAcrossTransitions() = runTest {
         // Two adjacent pairs: v1→v2 and v2→v3. After two add_transition calls
         // we must have exactly ONE Effect track containing both transitions
@@ -168,5 +187,27 @@ class AddTransitionToolTest {
         assertEquals("transition:fade", transition.assetId.value)
         assertNotNull(transition.filters.singleOrNull())
         assertEquals(0.5f, transition.filters.single().params["durationSeconds"])
+    }
+
+    @Test fun preservesExistingEffectTrackPosition() = runTest {
+        val v1 = videoClip("v1", Duration.ZERO, 5.seconds)
+        val v2 = videoClip("v2", 5.seconds, 5.seconds)
+        val existingEffect = Track.Effect(TrackId("fx"))
+        val rig = newRig(Project(
+            id = ProjectId("p"),
+            timeline = Timeline(tracks = listOf(
+                Track.Video(TrackId("vtrack"), listOf(v1, v2)),
+                existingEffect,
+                Track.Audio(TrackId("atrack")),
+            )),
+        ))
+
+        rig.tool.execute(
+            AddTransitionTool.Input(projectId = "p", fromClipId = "v1", toClipId = "v2"),
+            rig.ctx,
+        )
+
+        val refreshed = rig.store.get(rig.projectId)!!
+        assertEquals(listOf("vtrack", "fx", "atrack"), refreshed.timeline.tracks.map { it.id.value })
     }
 }
