@@ -2,10 +2,20 @@ plugins {
     alias(libs.plugins.kotlin.jvm)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.compose)
+    alias(libs.plugins.javafx)
 }
 
 kotlin {
     jvmToolchain(21)
+}
+
+// JavaFX modules needed for the in-app video preview (`PreviewPanel`):
+// - controls + swing for JFXPanel / Scene / Group
+// - media for Media / MediaPlayer / MediaView
+// The javafx plugin auto-selects the current-host native classifier.
+javafx {
+    version = libs.versions.openjfx.get()
+    modules = listOf("javafx.controls", "javafx.media", "javafx.swing")
 }
 
 dependencies {

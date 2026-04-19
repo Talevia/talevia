@@ -91,6 +91,7 @@ private fun AppRoot(container: AppContainer, projectId: ProjectId) {
     var renderProgress by remember { mutableStateOf<Float?>(null) }
     var importPath by remember { mutableStateOf("") }
     var exportPath by remember { mutableStateOf(System.getProperty("user.home") + "/talevia-export.mp4") }
+    var previewPath by remember { mutableStateOf<String?>(null) }
 
     // Bootstrap: create empty project on first composition.
     remember {
@@ -232,6 +233,7 @@ private fun AppRoot(container: AppContainer, projectId: ProjectId) {
                                 container.dummyToolContext(projectId),
                             )
                             log += "render done → $path"
+                            previewPath = path
                         }.onFailure { log += "export failed: ${it.message}"; renderProgress = null }
                     }
                 },
@@ -239,6 +241,9 @@ private fun AppRoot(container: AppContainer, projectId: ProjectId) {
             ) { Text("Export") }
             Spacer(Modifier.height(6.dp))
             renderProgress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+
+            Spacer(Modifier.height(12.dp))
+            VideoPreviewPanel(filePath = previewPath, modifier = Modifier.fillMaxWidth())
         }
 
         Divider(modifier = Modifier.fillMaxHeight().width(1.dp))
