@@ -23,10 +23,11 @@ JDK 21 must be reachable. `brew install openjdk@21`, then either `sudo ln -sfn /
 | Run one test class | `./gradlew :core:jvmTest --tests 'io.talevia.core.agent.AgentLoopTest'` |
 | FFmpeg E2E (real ffmpeg on PATH required) | `./gradlew :platform-impls:video-ffmpeg-jvm:test` |
 | Desktop app | `./gradlew :apps:desktop:run` |
-| Server | `./gradlew :apps:server:run` (port 8080; reads `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from env) |
+| Server | `./gradlew :apps:server:run` (port 8080; reads `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from env; `TALEVIA_MEDIA_DIR=/some/dir` to persist the MediaStorage catalog) |
 | Server tests | `./gradlew :apps:server:test` |
 | Android debug APK | `./gradlew :apps:android:assembleDebug` (requires Android SDK at `~/Library/Android/sdk` via `local.properties`) |
 | iOS app | `cd apps/ios && xcodegen generate && open Talevia.xcodeproj` (⌘R). Pre-build phase runs gradle automatically. |
+| Lint (all modules) | `./gradlew ktlintCheck` (auto-fix: `ktlintFormat`). Rule profile in `.editorconfig`: hygiene-only (unused imports, final newline, import order). |
 | Every target + every test | `./gradlew :core:jvmTest :platform-impls:video-ffmpeg-jvm:test :apps:server:test :apps:desktop:assemble :core:compileKotlinIosSimulatorArm64 :apps:android:assembleDebug` |
 
 FFmpeg + ffprobe must be on PATH for `platform-impls/video-ffmpeg-jvm` tests (`brew install ffmpeg`).
@@ -73,10 +74,17 @@ Ignore OpenCode's Effect.js Service/Layer/Context organisation, its TUI, Web UI,
 - `kotlin.time.Duration` uses the built-in 1.7+ serializer — do not add a custom one (there was a name-collision incident; see git log).
 - SQLDelight rows store the canonical Kotlin model as JSON blobs in a `data` column. Top-level columns duplicate only what indices need.
 
+## Observability
+
+- **Structured logging**: `io.talevia.core.logging.Logger` — platform-agnostic leveled logger; wire a JVM/iOS sink at the composition root.
+- **Metrics**: the EventBus feeds a `CounterRegistry` in `core.metrics`. Server exposes a Prometheus-style scrape at `GET /metrics`.
+- **Media persistence**: JVM apps (server, desktop) honour `TALEVIA_MEDIA_DIR` — when set, `FileMediaStorage` persists the asset catalog to `<dir>/index.json` via atomic move. Unset → in-memory storage.
+
 ## Known incomplete
 
 These are visible in code but not yet wired end-to-end (expected follow-ups, not bugs):
 - **iOS Swift side** — `AVFoundationVideoEngine.swift` is a compile-only stub. SKIE bridging for value classes / `fun interface` / `Duration` needs a small iosMain helper before the real implementation can land. See `docs/IOS_INTEGRATION.md`.
+- **Android Media3 filter / transition rendering** — `Media3VideoEngine` handles cut/stitch; filter and transition passes still fall back to no-op. (FFmpeg got filter rendering; Android/Media3 lags behind.)
 
 If a task touches one of these, expect to wire it up rather than work around it.
 
