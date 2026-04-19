@@ -1,0 +1,96 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Core + server + ffmpeg e2e
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Install ffmpeg (needed by platform-impls/video-ffmpeg-jvm tests)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Validate gradle wrapper
+        uses: gradle/actions/wrapper-validation@v3
+
+      - name: Set up Gradle with cache
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Compile core (JVM)
+        run: ./gradlew :core:compileKotlinJvm
+
+      - name: Run unit tests
+        run: ./gradlew :core:jvmTest :apps:server:test
+
+      - name: FFmpeg end-to-end tests
+        run: ./gradlew :platform-impls:video-ffmpeg-jvm:test
+
+      - name: Assemble desktop app
+        run: ./gradlew :apps:desktop:assemble
+
+      - name: Upload test reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/build/reports/tests/**
+            **/build/test-results/**
+
+  android:
+    name: Android debug APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle with cache
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Assemble debug APK
+        run: ./gradlew :apps:android:assembleDebug
+
+  ios:
+    name: iOS simulator framework
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Set up Gradle with cache
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Compile iOS simulator framework
+        run: ./gradlew :core:compileKotlinIosSimulatorArm64
