@@ -7,6 +7,7 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.render.RenderCacheEntry
+import io.talevia.core.domain.staleClipsFromLockfile
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
@@ -35,17 +36,29 @@ import kotlin.uuid.Uuid
 
 /**
  * Render the project's timeline to a file (VISION §2: "Artifact is a reproducible
- * deterministic product"). Before touching the engine we consult
- * [io.talevia.core.domain.Project.renderCache]: if the canonical `(timeline, output)`
- * fingerprint has been rendered before, we skip the render and return the cached
- * metadata. This is the coarse-grained first cut of incremental compilation — per-clip
- * re-render (the fine-grained cut) is an engine-layer follow-up.
+ * deterministic product").
+ *
+ * Stale-guard (VISION §3.2). Before touching the engine we compute
+ * `staleClipsFromLockfile` — clips whose conditioning source nodes drifted since
+ * the asset was generated. If any are stale the export is refused with an
+ * actionable message pointing at `find_stale_clips` / regeneration, unless the
+ * caller opts in with `allowStale=true`. Without this guard the render cache
+ * would happily hand back output whose visual content no longer matches the
+ * current source graph: the cache is keyed on timeline JSON + output spec, and
+ * a source-only edit doesn't change either (the drift shows up only via
+ * `clip.sourceBinding` → lockfile hash comparison).
+ *
+ * Render cache (VISION §3.2, coarse cut). After the stale-guard clears, we
+ * consult [io.talevia.core.domain.Project.renderCache]: if the canonical
+ * `(timeline, output)` fingerprint has been rendered before, we skip the render
+ * and return the cached metadata. Per-clip re-render (the fine-grained cut) is
+ * an engine-layer follow-up.
  *
  * Cache key derivation: `fnv1a64Hex` over the canonical JSON of the timeline
- * concatenated with canonical `OutputSpec` fields. Because `Clip.sourceBinding` is
- * inside the timeline AND AIGC tools rewrite `assetId` on cache miss, any upstream
- * source change → distinct timeline JSON → distinct fingerprint. The DAG is respected
- * without a separate stale check at this layer.
+ * concatenated with canonical `OutputSpec` fields. AIGC regeneration produces a
+ * new assetId on the timeline, so fresh regenerations invalidate the cache
+ * naturally; the stale-guard above catches the orthogonal case where source
+ * drifted but the agent hasn't regenerated yet.
  */
 @OptIn(ExperimentalUuidApi::class)
 class ExportTool(
@@ -64,6 +77,13 @@ class ExportTool(
         val audioCodec: String = "aac",
         /** Bypass [io.talevia.core.domain.Project.renderCache]; always re-render. */
         val forceRender: Boolean = false,
+        /**
+         * Opt-in override when the project has clips whose conditioning source nodes
+         * have drifted since generation (VISION §3.2). Default: refuse to export so
+         * the user sees stale content explicitly via `find_stale_clips` and decides
+         * whether to regenerate or ship-as-is.
+         */
+        val allowStale: Boolean = false,
     )
     @Serializable data class Output(
         val outputPath: String,
@@ -72,12 +92,18 @@ class ExportTool(
         val resolutionHeight: Int,
         /** True when the render was skipped because of a [Project.renderCache] hit. */
         val cacheHit: Boolean = false,
+        /**
+         * Stale clip ids included in the render because [Input.allowStale] was set.
+         * Empty on the normal fresh path and when the tool refused to render.
+         */
+        val staleClipsIncluded: List<String> = emptyList(),
     )
 
     override val id = "export"
     override val helpText =
         "Render the project's timeline to a media file at outputPath. Skips rendering when the timeline + " +
-            "output spec hash matches a prior render (lockfile / DAG keeps this honest). " +
+            "output spec hash matches a prior render. Refuses to export when any AIGC clip is stale " +
+            "(source nodes drifted since generation) unless allowStale=true. " +
             "Streams progress as render-progress parts."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
@@ -94,6 +120,14 @@ class ExportTool(
             putJsonObject("videoCodec") { put("type", "string") }
             putJsonObject("audioCodec") { put("type", "string") }
             putJsonObject("forceRender") { put("type", "boolean"); put("description", "Bypass the render cache and always re-render.") }
+            putJsonObject("allowStale") {
+                put("type", "boolean")
+                put(
+                    "description",
+                    "Export even if some AIGC clips are stale (their conditioning source nodes drifted since " +
+                        "generation). Default false — call find_stale_clips first and regenerate before exporting.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("outputPath"))))
         put("additionalProperties", false)
@@ -115,6 +149,21 @@ class ExportTool(
             audioCodec = input.audioCodec,
         )
 
+        val staleReports = project.staleClipsFromLockfile()
+        if (staleReports.isNotEmpty() && !input.allowStale) {
+            val head = staleReports.take(5).joinToString("; ") { r ->
+                "${r.clipId.value} (drifted: ${r.changedSourceIds.joinToString(",") { it.value }})"
+            }
+            val tail = if (staleReports.size > 5) "; …" else ""
+            error(
+                "export refused: ${staleReports.size} stale clip(s). " +
+                    "Conditioning source nodes drifted since the asset was generated — " +
+                    "run find_stale_clips, regenerate the affected clips, then retry. " +
+                    "Pass allowStale=true to export as-is. Stale: $head$tail",
+            )
+        }
+
+        val staleClipIds = staleReports.map { it.clipId.value }
         val fingerprint = fingerprintOf(timeline, output)
 
         if (!input.forceRender) {
@@ -126,11 +175,13 @@ class ExportTool(
                     resolutionWidth = cached.resolutionWidth,
                     resolutionHeight = cached.resolutionHeight,
                     cacheHit = true,
+                    staleClipsIncluded = staleClipIds,
                 )
+                val staleSuffix = if (staleClipIds.isEmpty()) "" else " [allowStale: ${staleClipIds.size} stale clip(s)]"
                 return ToolResult(
                     title = "export (cached) → ${input.outputPath.substringAfterLast('/')}",
                     outputForLlm = "Render cache hit — reusing prior output at ${input.outputPath} " +
-                        "(${cached.durationSeconds}s, ${cached.resolutionWidth}x${cached.resolutionHeight}).",
+                        "(${cached.durationSeconds}s, ${cached.resolutionWidth}x${cached.resolutionHeight}).$staleSuffix",
                     data = out,
                     attachments = listOf(
                         MediaAttachment(
@@ -188,10 +239,18 @@ class ExportTool(
             )
         }
 
-        val out = Output(input.outputPath, duration, width, height, cacheHit = false)
+        val out = Output(
+            outputPath = input.outputPath,
+            durationSeconds = duration,
+            resolutionWidth = width,
+            resolutionHeight = height,
+            cacheHit = false,
+            staleClipsIncluded = staleClipIds,
+        )
+        val staleSuffix = if (staleClipIds.isEmpty()) "" else " [allowStale: ${staleClipIds.size} stale clip(s)]"
         return ToolResult(
             title = "export → ${input.outputPath.substringAfterLast('/')}",
-            outputForLlm = "Exported timeline (${duration}s, ${width}x${height}) to ${input.outputPath}",
+            outputForLlm = "Exported timeline (${duration}s, ${width}x${height}) to ${input.outputPath}.$staleSuffix",
             data = out,
             attachments = listOf(
                 MediaAttachment(
