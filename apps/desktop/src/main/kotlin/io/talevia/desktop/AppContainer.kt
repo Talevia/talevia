@@ -12,6 +12,7 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.permission.DefaultPermissionService
+import io.talevia.core.platform.FileMediaStorage
 import io.talevia.core.platform.FilePicker
 import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.MediaStorage
@@ -29,6 +30,7 @@ import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
 import io.talevia.platform.ffmpeg.FfmpegVideoEngine
+import java.io.File
 
 /**
  * Composition root for the desktop app. Holds the full singleton graph: SQLite,
@@ -46,7 +48,15 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
 
     val sessions = SqlDelightSessionStore(db, bus)
     val projects: ProjectStore = SqlDelightProjectStore(db)
-    val media: MediaStorage = InMemoryMediaStorage()
+    /**
+     * When `TALEVIA_MEDIA_DIR` is set the desktop persists its asset catalog
+     * so AssetIds referenced by saved Projects survive app restarts. Unset →
+     * in-memory, matching M2 behaviour.
+     */
+    val media: MediaStorage = env["TALEVIA_MEDIA_DIR"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { FileMediaStorage(File(it)) }
+        ?: InMemoryMediaStorage()
     val engine: VideoEngine = FfmpegVideoEngine(pathResolver = media)
     val permissions = DefaultPermissionService(bus)
     val permissionRules = DefaultPermissionRuleset.rules.toMutableList()

@@ -13,11 +13,13 @@ import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.permission.DefaultPermissionRuleset
+import io.talevia.core.platform.FileMediaStorage
 import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.InMemorySecretStore
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
+import java.io.File
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
@@ -50,7 +52,15 @@ class ServerContainer(env: Map<String, String> = System.getenv()) {
     val bus = EventBus(extraBufferCapacity = 1024)
     val sessions: SessionStore = SqlDelightSessionStore(db, bus)
     val projects: ProjectStore = SqlDelightProjectStore(db)
-    val media: MediaStorage = InMemoryMediaStorage()
+    /**
+     * When `TALEVIA_MEDIA_DIR` is set we persist the asset catalog to that
+     * directory so AssetIds referenced by saved Projects survive restarts.
+     * Unset → keep the M2 in-memory behaviour (dev / tests).
+     */
+    val media: MediaStorage = env["TALEVIA_MEDIA_DIR"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { FileMediaStorage(File(it)) }
+        ?: InMemoryMediaStorage()
     val engine: VideoEngine = FfmpegVideoEngine(pathResolver = media)
     val permissions = ServerPermissionService(bus)
     val permissionRules = DefaultPermissionRuleset.rules
