@@ -35,7 +35,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.agent.RunInput
@@ -47,7 +46,6 @@ import io.talevia.core.domain.Timeline
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
 import io.talevia.core.session.Session
-import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
@@ -175,7 +173,7 @@ private fun AppRoot(container: AppContainer, projectId: ProjectId) {
                                     put("projectId", projectId.value)
                                     put("assetId", nextAssetId)
                                 },
-                                container.dummyToolContext(projectId),
+                                container.uiToolContext(projectId),
                             )
                             val project = container.projects.get(projectId)!!
                             clips.clear()
@@ -230,7 +228,7 @@ private fun AppRoot(container: AppContainer, projectId: ProjectId) {
                                     put("projectId", projectId.value)
                                     put("outputPath", path)
                                 },
-                                container.dummyToolContext(projectId),
+                                container.uiToolContext(projectId),
                             )
                             log += "render done → $path"
                             previewPath = path
@@ -248,9 +246,23 @@ private fun AppRoot(container: AppContainer, projectId: ProjectId) {
 
         Divider(modifier = Modifier.fillMaxHeight().width(1.dp))
 
-        // ── Right: chat (drives the real agent) + activity log ───────────────
-        Column(modifier = Modifier.width(420.dp).fillMaxHeight().padding(start = 12.dp)) {
-            ChatPanel(container = container, projectId = projectId, log = log)
+        // ── Right: tabbed workbench (chat / source) + activity log ───────────
+        Column(modifier = Modifier.width(460.dp).fillMaxHeight().padding(start = 12.dp)) {
+            var tab by remember { mutableStateOf(RightTab.Chat) }
+            androidx.compose.material3.TabRow(selectedTabIndex = tab.ordinal) {
+                RightTab.entries.forEach { entry ->
+                    androidx.compose.material3.Tab(
+                        selected = tab == entry,
+                        onClick = { tab = entry },
+                        text = { Text(entry.label) },
+                    )
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            when (tab) {
+                RightTab.Chat -> ChatPanel(container = container, projectId = projectId, log = log)
+                RightTab.Source -> SourcePanel(container = container, projectId = projectId, log = log)
+            }
             Spacer(Modifier.height(12.dp))
             Divider()
             Spacer(Modifier.height(6.dp))
@@ -384,6 +396,8 @@ private fun defaultModelFor(providerId: String): String = when (providerId) {
 
 private data class ClipRow(val id: String, val startSeconds: Double, val endSeconds: Double)
 
+private enum class RightTab(val label: String) { Chat("Chat"), Source("Source") }
+
 /**
  * Real desktop env, plus defaults for anything the user didn't configure.
  *
@@ -414,20 +428,4 @@ private fun desktopEnvWithDefaults(): Map<String, String> {
 @Composable
 private fun SectionTitle(text: String) {
     Text(text, style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 6.dp))
-}
-
-/** Minimal ToolContext for direct dispatch from the UI (no agent loop yet). */
-@OptIn(ExperimentalUuidApi::class)
-private fun AppContainer.dummyToolContext(projectId: ProjectId): ToolContext {
-    val sid = io.talevia.core.SessionId(projectId.value)
-    val mid = io.talevia.core.MessageId(Uuid.random().toString())
-    val cid = io.talevia.core.CallId(Uuid.random().toString())
-    return ToolContext(
-        sessionId = sid,
-        messageId = mid,
-        callId = cid,
-        askPermission = { permissions.check(permissionRules.toList(), it) },
-        emitPart = { p -> sessions.upsertPart(p) },
-        messages = emptyList(),
-    )
 }
