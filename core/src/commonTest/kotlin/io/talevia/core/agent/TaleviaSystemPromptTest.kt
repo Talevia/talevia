@@ -49,6 +49,8 @@ class TaleviaSystemPromptTest {
         "fork_project",
         // Diff — closes the VISION §3.4 "可 diff" property alongside snapshot + fork.
         "diff_projects",
+        // Import — closes the VISION §3.4 "可组合" leg (cross-project source-node reuse).
+        "import_source_node",
         // Lockfile observability (VISION §3.1) — enumerate AIGC productions.
         "list_lockfile_entries",
         // Seed / lockfile discipline (VISION §3.1)

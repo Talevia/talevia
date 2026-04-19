@@ -64,6 +64,7 @@ final class AppContainer {
         registry.register(tool: DefineBrandPaletteTool(projects: self.projects))
         registry.register(tool: ListSourceNodesTool(projects: self.projects))
         registry.register(tool: RemoveSourceNodeTool(projects: self.projects))
+        registry.register(tool: ImportSourceNodeTool(projects: self.projects))
         self.tools = registry
     }
 }

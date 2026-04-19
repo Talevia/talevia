@@ -46,6 +46,7 @@ import io.talevia.core.tool.builtin.project.SaveProjectSnapshotTool
 import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
 import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
 import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
+import io.talevia.core.tool.builtin.source.ImportSourceNodeTool
 import io.talevia.core.tool.builtin.source.ListSourceNodesTool
 import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
 import io.talevia.core.tool.builtin.video.AddClipTool
@@ -147,6 +148,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(DefineBrandPaletteTool(projects))
         register(ListSourceNodesTool(projects))
         register(RemoveSourceNodeTool(projects))
+        register(ImportSourceNodeTool(projects))
         imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
         tts?.let { register(SynthesizeSpeechTool(it, media, blobWriter, projects)) }
         asr?.let { register(TranscribeAssetTool(it, media)) }

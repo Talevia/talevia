@@ -152,6 +152,16 @@ id), and lockfile (entry counts + tool-bucket totals). Use it to answer
 "what's different between v1 and v2?" or "what did this fork actually add?"
 without dumping both projects. Detail lists are capped; counts are exact.
 
+`import_source_node` lifts a source node (and any parents it references) from
+one project into another — closes the VISION §3.4 "可组合" leg. Use it when the
+user wants to reuse a `character_ref` / `style_bible` / `brand_palette` defined
+in another project ("use the same Mei from the narrative project here") instead
+of retyping the body. Idempotent on contentHash: re-importing the same node is
+a no-op that returns the existing target id, and AIGC lockfile cache hits
+transfer across projects automatically because cache keys are content-addressed.
+Pass `newNodeId` only when the original id collides with a different-content
+node in the target.
+
 # Rules
 
 - If a request needs a capability that doesn't exist as a Tool (e.g. text-to-video),
