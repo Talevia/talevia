@@ -35,6 +35,75 @@ fun Project.staleClips(changed: Set<SourceNodeId>): Set<ClipId> {
 }
 
 /**
+ * Forward-index report — which clips bind a given source node (directly or
+ * through DAG descent)? Used by the `list_clips_for_source` tool and the
+ * desktop SourcePanel downstream-clips view so users can answer "if I edit
+ * this character_ref / style_bible, what will go stale?" *before* making the
+ * edit.
+ *
+ * @property clipId the clip whose `sourceBinding` contains a node in the
+ *   transitive closure of the query node.
+ * @property trackId enclosing track id — handy for UI rendering / locate-on-
+ *   timeline workflows.
+ * @property assetId the asset the clip plays, or `null` for text clips.
+ * @property directlyBound `true` iff the clip's `sourceBinding` contains the
+ *   *queried* node id; `false` when the match came via a descendant.
+ * @property boundVia subset of the clip's `sourceBinding` that lay inside the
+ *   transitive closure of the queried node (includes the queried id itself
+ *   when [directlyBound]). Lets the UI show "why is this clip bound?" with
+ *   the exact mediating descendant(s).
+ */
+data class ClipsForSourceReport(
+    val clipId: ClipId,
+    val trackId: io.talevia.core.TrackId,
+    val assetId: AssetId?,
+    val directlyBound: Boolean,
+    val boundVia: Set<SourceNodeId>,
+)
+
+/**
+ * List every clip on the timeline whose `sourceBinding` intersects the
+ * transitive-downstream closure of [sourceNodeId] in the project's source
+ * DAG. Returns an empty list if the node is absent or no clips bind it.
+ *
+ * The VISION §5.1 rubric asks "改一个 source 节点（比如角色设定），下游哪些
+ * clip / scene / artifact 会被标为 stale?". This is the forward answer to
+ * that — `staleClipsFromLockfile` gives the backward answer ("we just
+ * drifted; what's stale?"). Call this before an edit to preview impact;
+ * call the stale variant after.
+ *
+ * Transitive descent uses [io.talevia.core.domain.source.stale] so the
+ * same graph walk powers both the forward-preview and the backward-stale
+ * lanes — single source of truth for "which nodes reach which other nodes".
+ */
+fun Project.clipsBoundTo(sourceNodeId: SourceNodeId): List<ClipsForSourceReport> {
+    if (sourceNodeId !in source.byId) return emptyList()
+    val closure = source.stale(setOf(sourceNodeId))
+    if (closure.isEmpty()) return emptyList() // node not present (guarded above) or absent graph
+    val out = mutableListOf<ClipsForSourceReport>()
+    for (track in timeline.tracks) {
+        for (clip in track.clips) {
+            if (clip.sourceBinding.isEmpty()) continue
+            val via = clip.sourceBinding intersect closure
+            if (via.isEmpty()) continue
+            val assetId = when (clip) {
+                is Clip.Video -> clip.assetId
+                is Clip.Audio -> clip.assetId
+                is Clip.Text -> null
+            }
+            out += ClipsForSourceReport(
+                clipId = clip.id,
+                trackId = track.id,
+                assetId = assetId,
+                directlyBound = sourceNodeId in clip.sourceBinding,
+                boundVia = via,
+            )
+        }
+    }
+    return out
+}
+
+/**
  * Fresh clips = clips known to still be valid after [changed] propagated.
  *
  * Complement of [staleClips] on the set of clips with a non-empty [Clip.sourceBinding].
