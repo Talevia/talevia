@@ -25,6 +25,13 @@ data class Project(
      * handing the timeline to the engine; identical inputs return without re-rendering.
      */
     val renderCache: RenderCache = RenderCache.EMPTY,
+    /**
+     * Named, restorable points-in-time of the project (VISION §3.4 — "可版本化"). Stored
+     * inline rather than a sibling table so the existing [ProjectStore.mutate] mutex
+     * already gives us atomic save+restore. See [ProjectSnapshot] for restore semantics
+     * (in particular: restoring preserves *this* list, so history isn't a one-way trapdoor).
+     */
+    val snapshots: List<ProjectSnapshot> = emptyList(),
 )
 
 @Serializable

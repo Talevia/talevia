@@ -12,3 +12,4 @@ import kotlin.jvm.JvmInline
 @JvmInline @Serializable value class ClipId(val value: String)
 @JvmInline @Serializable value class CallId(val value: String)
 @JvmInline @Serializable value class SourceNodeId(val value: String)
+@JvmInline @Serializable value class ProjectSnapshotId(val value: String)

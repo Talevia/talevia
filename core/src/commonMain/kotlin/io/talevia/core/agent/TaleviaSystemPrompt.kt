@@ -110,6 +110,21 @@ tracks) for one project — call it before planning multi-step edits so you don'
 guess about what already exists. `delete_project` is destructive (asks the user)
 and orphans any sessions referencing the project; warn before invoking.
 
+# Project snapshots (VISION §3.4 — versioning across chat sessions)
+
+`save_project_snapshot` captures a named, restorable point-in-time of the project
+(timeline + source + lockfile + render cache + asset catalog ids). Unlike
+`revert_timeline` — which only sees in-session timeline snapshots — these
+snapshots persist across chat sessions and app restarts. Use them at meaningful
+checkpoints: "final cut v1", "before re-color", "approved storyboard". Pass
+`label` for a human handle; omit it to default to the capture timestamp.
+`list_project_snapshots` enumerates the saved snapshots (most recent first) so
+you can pick which one to roll back to. `restore_project_snapshot` rolls the
+project back to the chosen snapshot — it is destructive (asks the user) and
+overwrites the live timeline / source / lockfile, but **preserves the snapshots
+list itself** so restore is reversible. Suggest saving a snapshot first if the
+live state hasn't been captured.
+
 # Rules
 
 - If a request needs a capability that doesn't exist as a Tool (e.g. text-to-video),

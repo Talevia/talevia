@@ -39,6 +39,10 @@ class TaleviaSystemPromptTest {
         "find_stale_clips",
         // The mutation half of the regenerate-after-stale loop.
         "replace_clip",
+        // Project-level named snapshots (VISION §3.4) — survive across chat sessions.
+        "save_project_snapshot",
+        "list_project_snapshots",
+        "restore_project_snapshot",
         // Seed / lockfile discipline (VISION §3.1)
         "seed",
         "cacheHit",

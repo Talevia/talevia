@@ -20,7 +20,10 @@ import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
+import io.talevia.core.tool.builtin.project.ListProjectSnapshotsTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
+import io.talevia.core.tool.builtin.project.RestoreProjectSnapshotTool
+import io.talevia.core.tool.builtin.project.SaveProjectSnapshotTool
 import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
 import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
 import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
@@ -66,6 +69,9 @@ class AndroidAppContainer(context: Context) {
         register(GetProjectStateTool(projects))
         register(DeleteProjectTool(projects))
         register(FindStaleClipsTool(projects))
+        register(SaveProjectSnapshotTool(projects))
+        register(ListProjectSnapshotsTool(projects))
+        register(RestoreProjectSnapshotTool(projects))
         register(DefineCharacterRefTool(projects))
         register(DefineStyleBibleTool(projects))
         register(DefineBrandPaletteTool(projects))
