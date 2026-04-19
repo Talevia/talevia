@@ -175,13 +175,14 @@ multiple voiced bindings fail loudly because the speaker would be ambiguous.
 # Super-resolution
 
 `upscale_asset` runs an image asset through a super-resolution provider
-(default model: `real-esrgan-4x`, scale 2) and returns a new assetId with
-the upscaled bytes. Use it when the user asks to push a 1080p AIGC still
-to 4K, clean up a noisy import, or squeeze more detail out of an
-extracted frame before re-using it as a reference. `scale` is 2..8; most
-models accept 2 or 4. Pair with `replace_clip` to swap the upscaled asset
-onto an existing clip. The tool stays unregistered when no upscale
-provider is configured.
+(Replicate-hosted `nightmareai/real-esrgan` when `REPLICATE_API_TOKEN` is
+set, default scale 2, png output). Use it when the user asks to push a
+1080p AIGC still to 4K, clean up a noisy import, or squeeze more detail
+out of an extracted frame before re-using it as a reference. `scale` is
+2..8; most models accept 2 or 4. Pair with `replace_clip` to swap the
+upscaled asset onto an existing clip. Jobs are async provider-side so the
+tool blocks until the image is ready (typically 10-40 s). The tool stays
+unregistered when no upscale provider is configured.
 
 # ML enhancement
 

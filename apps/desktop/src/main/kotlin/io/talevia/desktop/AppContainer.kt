@@ -34,6 +34,7 @@ import io.talevia.core.provider.openai.OpenAiTtsEngine
 import io.talevia.core.provider.openai.OpenAiVisionEngine
 import io.talevia.core.provider.openai.OpenAiWhisperEngine
 import io.talevia.core.provider.replicate.ReplicateMusicGenEngine
+import io.talevia.core.provider.replicate.ReplicateUpscaleEngine
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
@@ -176,12 +177,21 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         }
 
     /**
-     * Super-resolution engine (VISION §2 "ML 加工: 超分"). No bundled provider —
-     * Real-ESRGAN / GFPGAN / SUPIR are usually hosted on Replicate or run locally
-     * via ONNX, so plugging in a concrete [UpscaleEngine] is environment-specific.
-     * `upscale_asset` stays unregistered when null.
+     * Super-resolution engine (VISION §2 "ML 加工: 超分"). Wired to Replicate-
+     * hosted Real-ESRGAN when `REPLICATE_API_TOKEN` is set; otherwise stays
+     * null and `upscale_asset` stays unregistered. `REPLICATE_UPSCALE_MODEL`
+     * overrides the default `nightmareai/real-esrgan` slug (SUPIR, CodeFormer,
+     * etc.).
      */
-    val upscale: UpscaleEngine? = null
+    val upscale: UpscaleEngine? = env["REPLICATE_API_TOKEN"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { token ->
+            ReplicateUpscaleEngine(
+                httpClient = httpClient,
+                apiKey = token,
+                modelSlug = env["REPLICATE_UPSCALE_MODEL"]?.takeIf { it.isNotBlank() } ?: "nightmareai/real-esrgan",
+            )
+        }
 
     /** JVM blob writer backing AIGC tools. Paired with [mediaRootDir]. */
     val blobWriter: MediaBlobWriter = FileBlobWriter(mediaRootDir)
