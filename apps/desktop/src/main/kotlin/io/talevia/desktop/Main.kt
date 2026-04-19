@@ -30,6 +30,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
@@ -66,23 +71,67 @@ import kotlin.uuid.Uuid
 @OptIn(ExperimentalUuidApi::class)
 fun main() = application {
     val container = remember { AppContainer(desktopEnvWithDefaults()) }
+    // Holder for window-level keyboard shortcuts. AppRoot mutates the action
+    // fields from its composition scope (where the export / snapshot state is
+    // in scope); the Window's onKeyEvent consults the holder on every key.
+    val shortcuts = remember { DesktopShortcutHolder() }
 
     Window(
         onCloseRequest = ::exitApplication,
         title = "Talevia",
         state = rememberWindowState(width = 1260.dp, height = 820.dp),
+        onKeyEvent = { shortcuts.handle(it) },
     ) {
         MaterialTheme {
             Surface(modifier = Modifier.fillMaxSize()) {
-                AppRoot(container = container)
+                AppRoot(container = container, shortcuts = shortcuts)
             }
+        }
+    }
+}
+
+/**
+ * Window-level keyboard shortcut holder. AppRoot registers callbacks via
+ * `install(...)`; Window's `onKeyEvent` invokes `handle(event)` which
+ * dispatches to the current callback when the binding matches. Keep the
+ * surface small — adding a shortcut = one field + one case in `handle`.
+ *
+ * Bindings:
+ *   cmd+E / ctrl+E — Export
+ *   cmd+S / ctrl+S — Save snapshot
+ *   cmd+R / ctrl+R — Regenerate stale clips for the active project
+ */
+private class DesktopShortcutHolder {
+    var export: () -> Unit = {}
+    var saveSnapshot: () -> Unit = {}
+    var regenerateStale: () -> Unit = {}
+
+    fun install(
+        export: () -> Unit,
+        saveSnapshot: () -> Unit,
+        regenerateStale: () -> Unit,
+    ) {
+        this.export = export
+        this.saveSnapshot = saveSnapshot
+        this.regenerateStale = regenerateStale
+    }
+
+    fun handle(event: androidx.compose.ui.input.key.KeyEvent): Boolean {
+        if (event.type != KeyEventType.KeyDown) return false
+        val cmdOrCtrl = event.isMetaPressed || event.isCtrlPressed
+        if (!cmdOrCtrl) return false
+        return when (event.key) {
+            androidx.compose.ui.input.key.Key.E -> { export(); true }
+            androidx.compose.ui.input.key.Key.S -> { saveSnapshot(); true }
+            androidx.compose.ui.input.key.Key.R -> { regenerateStale(); true }
+            else -> false
         }
     }
 }
 
 @OptIn(ExperimentalUuidApi::class)
 @Composable
-private fun AppRoot(container: AppContainer) {
+private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
     val scope = rememberCoroutineScope()
     val log = remember { mutableStateListOf<String>() }
     val assets = remember { mutableStateListOf<String>() }
@@ -150,6 +199,62 @@ private fun AppRoot(container: AppContainer) {
                 }
                 else -> {}
             }
+        }
+    }
+
+    // Named lambdas for the major actions so both buttons + keyboard shortcuts
+    // reach the same dispatch path (no drift between click and shortcut).
+    val runExport: () -> Unit = {
+        val path = exportPath
+        if (path.isNotBlank()) {
+            scope.launch {
+                runCatching {
+                    renderProgress = 0f
+                    container.tools["export"]!!.dispatch(
+                        buildJsonObject {
+                            put("projectId", projectId.value)
+                            put("outputPath", path)
+                        },
+                        container.uiToolContext(projectId),
+                    )
+                    log += "render done → $path"
+                    previewPath = path
+                }.onFailure { log += "export failed: ${it.message}"; renderProgress = null }
+            }
+        }
+    }
+    val runSaveSnapshot: () -> Unit = {
+        scope.launch {
+            runCatching {
+                container.tools["save_project_snapshot"]!!.dispatch(
+                    buildJsonObject { put("projectId", projectId.value) },
+                    container.uiToolContext(projectId),
+                )
+                log += "saved snapshot"
+            }.onFailure { log += "save snapshot failed: ${it.message}" }
+        }
+    }
+    val runRegenerateStale: () -> Unit = {
+        scope.launch {
+            runCatching {
+                val result = container.tools["regenerate_stale_clips"]!!.dispatch(
+                    buildJsonObject { put("projectId", projectId.value) },
+                    container.uiToolContext(projectId),
+                )
+                log += "regenerate → ${result.outputForLlm}"
+            }.onFailure { log += "regenerate failed: ${it.message}" }
+        }
+    }
+
+    // Keep the shortcut holder in sync with the current bootstrapped state —
+    // shortcuts are no-ops until the project is loaded.
+    LaunchedEffect(projectId, bootstrapped) {
+        if (bootstrapped) {
+            shortcuts.install(
+                export = runExport,
+                saveSnapshot = runSaveSnapshot,
+                regenerateStale = runRegenerateStale,
+            )
         }
     }
 
@@ -270,25 +375,9 @@ private fun AppRoot(container: AppContainer) {
                 )
                 Spacer(Modifier.height(6.dp))
                 Button(
-                    onClick = {
-                        val path = exportPath
-                        scope.launch {
-                            runCatching {
-                                renderProgress = 0f
-                                container.tools["export"]!!.dispatch(
-                                    buildJsonObject {
-                                        put("projectId", projectId.value)
-                                        put("outputPath", path)
-                                    },
-                                    container.uiToolContext(projectId),
-                                )
-                                log += "render done → $path"
-                                previewPath = path
-                            }.onFailure { log += "export failed: ${it.message}"; renderProgress = null }
-                        }
-                    },
+                    onClick = runExport,
                     modifier = Modifier.fillMaxWidth(),
-                ) { Text("Export") }
+                ) { Text("Export  (⌘E)") }
                 Spacer(Modifier.height(6.dp))
                 renderProgress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
 
