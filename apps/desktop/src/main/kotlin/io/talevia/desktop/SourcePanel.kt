@@ -50,9 +50,11 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -175,6 +177,30 @@ fun SourcePanel(
                                 "remove ${displayName(node)}",
                             )
                         },
+                        onGenerate = {
+                            // character_ref → portrait, style_bible → sample scene.
+                            // Each uses the node id as the consistency binding so
+                            // the generated asset inherits the source → clip →
+                            // regenerate lane for free.
+                            val prompt = when (node.kind) {
+                                ConsistencyKinds.CHARACTER_REF ->
+                                    "portrait of ${displayName(node)} — ${nodeDescription(node)}"
+                                ConsistencyKinds.STYLE_BIBLE ->
+                                    "a sample scene in the style of ${displayName(node)} — ${nodeDescription(node)}"
+                                ConsistencyKinds.BRAND_PALETTE ->
+                                    "a brand sample for ${displayName(node)}"
+                                else -> "a sample artefact for ${displayName(node)}"
+                            }
+                            dispatch(
+                                "generate_image",
+                                buildJsonObject {
+                                    put("prompt", prompt)
+                                    put("projectId", projectId.value)
+                                    putJsonArray("consistencyBindingIds") { add(node.id.value) }
+                                },
+                                "generate from ${displayName(node)}",
+                            )
+                        },
                     )
                 }
             }
@@ -263,6 +289,7 @@ private fun SourceNodeRow(
     expanded: Boolean,
     onToggle: () -> Unit,
     onRemove: () -> Unit,
+    onGenerate: () -> Unit,
 ) {
     val name = displayName(node)
     val staleCount = downstreamClips.count { it.clipId in staleClipIds }
@@ -296,6 +323,12 @@ private fun SourceNodeRow(
                     color = Color(0xFF757575),
                     modifier = Modifier.padding(horizontal = 6.dp),
                 )
+                if (node.kind == ConsistencyKinds.CHARACTER_REF ||
+                    node.kind == ConsistencyKinds.STYLE_BIBLE ||
+                    node.kind == ConsistencyKinds.BRAND_PALETTE
+                ) {
+                    TextButton(onClick = onGenerate) { Text("Generate") }
+                }
                 TextButton(onClick = onRemove) { Text("Remove") }
             }
             if (expanded) {
@@ -407,6 +440,23 @@ private fun displayName(node: SourceNode): String {
     val obj = node.body as? JsonObject
     val name = (obj?.get("name") as? JsonPrimitive)?.content
     return name ?: node.id.value
+}
+
+/**
+ * Short descriptive blurb pulled from a node body — used as the tail of
+ * "Generate" button prompts. Different kinds keep the relevant field
+ * under different keys (character_ref: visualDescription; style_bible:
+ * description; brand_palette: name only). Fall back to "" when the body
+ * doesn't fit any expected shape.
+ */
+private fun nodeDescription(node: SourceNode): String {
+    val obj = node.body as? JsonObject ?: return ""
+    val candidates = listOf("visualDescription", "description")
+    for (key in candidates) {
+        val v = (obj[key] as? JsonPrimitive)?.content?.takeIf { it.isNotBlank() }
+        if (v != null) return v
+    }
+    return ""
 }
 
 /**
