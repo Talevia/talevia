@@ -135,8 +135,9 @@ data class IosFilterSpec(
 
 /**
  * Project a [Timeline] into the flat primitive list the Swift engine wants.
- * Only video clips on video tracks are included — audio/subtitle/effect tracks
- * are ignored in the first cut, matching the Media3 scope.
+ * Only video clips on video tracks are included; subtitle clips come through a
+ * separate projection ([toIosSubtitlePlan]) because AVFoundation renders them
+ * via `AVVideoCompositionCoreAnimationTool`, not the video composition path.
  *
  * Track order is preserved; within each track clips are emitted in
  * timeline-start order.
@@ -162,6 +163,54 @@ fun Timeline.toIosVideoPlan(): List<IosVideoClipPlan> =
                                 assetIdRaw = f.assetId?.value,
                             )
                         },
+                    )
+                }
+        }
+
+/**
+ * Flat DTO for [io.talevia.core.domain.Clip.Text] subtitle clips exposed to
+ * the Swift AVFoundation engine.
+ *
+ * Times are in timeline seconds (matching [IosVideoClipPlan]). Style fields
+ * are primitives so the Swift side can feed them straight into `UIFont` /
+ * `UIColor` / `CATextLayer` without crossing the SKIE sealed-class boundary
+ * for the [io.talevia.core.domain.TextStyle] data class.
+ */
+data class IosSubtitlePlan(
+    val text: String,
+    val startSeconds: Double,
+    val endSeconds: Double,
+    val fontSize: Double,
+    val colorHex: String,
+    val backgroundHex: String?,
+    val bold: Boolean,
+    val italic: Boolean,
+    val fontFamily: String,
+)
+
+/**
+ * Project the timeline's subtitle clips into a Swift-friendly flat list.
+ * Every [io.talevia.core.domain.Track.Subtitle]-track [io.talevia.core.domain.Clip.Text]
+ * becomes one entry, sorted by timeline start.
+ */
+fun Timeline.toIosSubtitlePlan(): List<IosSubtitlePlan> =
+    this.tracks
+        .filterIsInstance<Track.Subtitle>()
+        .flatMap { track ->
+            track.clips
+                .filterIsInstance<Clip.Text>()
+                .sortedBy { it.timeRange.start }
+                .map { clip ->
+                    IosSubtitlePlan(
+                        text = clip.text,
+                        startSeconds = clip.timeRange.start.toDouble(DurationUnit.SECONDS),
+                        endSeconds = clip.timeRange.end.toDouble(DurationUnit.SECONDS),
+                        fontSize = clip.style.fontSize.toDouble(),
+                        colorHex = clip.style.color,
+                        backgroundHex = clip.style.backgroundColor,
+                        bold = clip.style.bold,
+                        italic = clip.style.italic,
+                        fontFamily = clip.style.fontFamily,
                     )
                 }
         }

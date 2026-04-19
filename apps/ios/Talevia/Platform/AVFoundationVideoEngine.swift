@@ -3,7 +3,9 @@ import CoreImage
 import CoreMedia
 import Foundation
 import ImageIO
+import QuartzCore
 import TaleviaCore
+import UIKit
 import UniformTypeIdentifiers
 
 /// Flat, Sendable snapshot of the filter chain for a single clip range on the
@@ -120,6 +122,129 @@ private func applyCoreFilter(_ spec: FilterSpec, to image: CIImage) -> CIImage {
 /// suspend calls. Keeps the concrete engine methods readable.
 private func avfError(_ message: String) -> NSError {
     NSError(domain: "AVFoundationVideoEngine", code: -1, userInfo: [NSLocalizedDescriptionKey: message])
+}
+
+/// Parse a `#RRGGBB` or `#RRGGBBAA` hex color into a `UIColor`. Returns `nil`
+/// for malformed inputs so the caller can fall back without crashing.
+private func parseHexColor(_ hex: String) -> UIColor? {
+    var s = hex.trimmingCharacters(in: .whitespacesAndNewlines)
+    if s.hasPrefix("#") { s.removeFirst() }
+    guard s.count == 6 || s.count == 8 else { return nil }
+    var v: UInt64 = 0
+    guard Scanner(string: s).scanHexInt64(&v) else { return nil }
+    let r, g, b, a: CGFloat
+    if s.count == 8 {
+        r = CGFloat((v >> 24) & 0xFF) / 255.0
+        g = CGFloat((v >> 16) & 0xFF) / 255.0
+        b = CGFloat((v >> 8) & 0xFF) / 255.0
+        a = CGFloat(v & 0xFF) / 255.0
+    } else {
+        r = CGFloat((v >> 16) & 0xFF) / 255.0
+        g = CGFloat((v >> 8) & 0xFF) / 255.0
+        b = CGFloat(v & 0xFF) / 255.0
+        a = 1.0
+    }
+    return UIColor(red: r, green: g, blue: b, alpha: a)
+}
+
+/// Resolve a [TextStyle] family + bold/italic combo into a `UIFont`. Unknown
+/// families fall back to the system font with the requested traits.
+private func makeSubtitleFont(family: String, size: CGFloat, bold: Bool, italic: Bool) -> UIFont {
+    if family.lowercased() != "system", let custom = UIFont(name: family, size: size) {
+        var traits: UIFontDescriptor.SymbolicTraits = []
+        if bold { traits.insert(.traitBold) }
+        if italic { traits.insert(.traitItalic) }
+        if !traits.isEmpty, let descriptor = custom.fontDescriptor.withSymbolicTraits(traits) {
+            return UIFont(descriptor: descriptor, size: size)
+        }
+        return custom
+    }
+    let base = UIFont.systemFont(ofSize: size, weight: bold ? .bold : .regular)
+    if italic, let descriptor = base.fontDescriptor.withSymbolicTraits(.traitItalic) {
+        return UIFont(descriptor: descriptor, size: size)
+    }
+    return base
+}
+
+/// Build the `(parentLayer, videoLayer)` pair that `AVVideoCompositionCoreAnimationTool`
+/// needs to composite subtitle text over the exported video frames.
+///
+/// - `parentLayer` has `isGeometryFlipped = true` so a child's `y` is measured
+///   from the **bottom** of the frame (matching the FFmpeg engine's
+///   `y = h - text_h - margin` convention and Apple's recommended setup for
+///   animation tools on iOS).
+/// - `videoLayer` occupies the full frame and is what the animation tool
+///   uses as the source for post-processing.
+/// - Each subtitle becomes a `CATextLayer` at bottom-center, gated by a
+///   `CABasicAnimation` on `opacity` that runs from `startSeconds` to
+///   `endSeconds` — the layer's model opacity stays at `0`, so the text is
+///   only visible while the animation is active.
+private func buildSubtitleLayers(
+    subtitles: [IosSubtitlePlan],
+    renderSize: CGSize
+) -> (parent: CALayer, video: CALayer) {
+    let parent = CALayer()
+    parent.frame = CGRect(origin: .zero, size: renderSize)
+    parent.isGeometryFlipped = true
+
+    let video = CALayer()
+    video.frame = CGRect(origin: .zero, size: renderSize)
+    parent.addSublayer(video)
+
+    // Bottom-margin scales with height (48 / 1080 ≈ 4.4%). Matches the FFmpeg
+    // engine's MVP so captions land in the same spot across engines.
+    let margin = max(16.0, Double(renderSize.height) * 48.0 / 1080.0)
+
+    for (index, sub) in subtitles.enumerated() {
+        let font = makeSubtitleFont(
+            family: sub.fontFamily,
+            size: CGFloat(sub.fontSize),
+            bold: sub.bold,
+            italic: sub.italic
+        )
+        var attrs: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: (parseHexColor(sub.colorHex) ?? .white).cgColor,
+        ]
+        if let bgHex = sub.backgroundHex, let bg = parseHexColor(bgHex) {
+            attrs[.backgroundColor] = bg.cgColor
+        }
+        let attributed = NSAttributedString(string: sub.text, attributes: attrs)
+
+        let textLayer = CATextLayer()
+        textLayer.string = attributed
+        textLayer.alignmentMode = .center
+        textLayer.isWrapped = true
+        textLayer.truncationMode = .end
+        textLayer.contentsScale = 2.0
+        // Height = font size * ~1.5 (line height + descender). Width spans the
+        // full frame so .center alignment resolves relative to the frame.
+        let textHeight = CGFloat(sub.fontSize) * 1.5
+        textLayer.frame = CGRect(
+            x: 0,
+            y: CGFloat(margin),
+            width: renderSize.width,
+            height: textHeight
+        )
+        // Keep the layer invisible by default; the opacity animation below
+        // reveals it only during the subtitle's timeline window.
+        textLayer.opacity = 0
+
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.fromValue = 1
+        anim.toValue = 1
+        // `AVCoreAnimationBeginTimeAtZero` is the iOS sentinel for "start at
+        // the very first frame" — a literal 0 is treated as "start time not
+        // set" and the animation never fires.
+        anim.beginTime = sub.startSeconds > 0 ? CFTimeInterval(sub.startSeconds) : AVCoreAnimationBeginTimeAtZero
+        anim.duration = max(0.01, CFTimeInterval(sub.endSeconds - sub.startSeconds))
+        anim.isRemovedOnCompletion = true
+        anim.fillMode = .removed
+        textLayer.add(anim, forKey: "subtitleOpacity_\(index)")
+
+        parent.addSublayer(textLayer)
+    }
+    return (parent, video)
 }
 
 /// Pick an export preset from the requested output height. Mirrors the way
@@ -269,6 +394,34 @@ private func runExport(
                 // grown extent from bleeding into the final frame.
                 request.finish(with: out.cropped(to: source.extent), context: nil)
             }
+        )
+    }
+
+    // Subtitle pass. `Track.Subtitle` clips are burned in via
+    // `AVVideoCompositionCoreAnimationTool` — a CATextLayer per subtitle is
+    // anchored bottom-center and gated to its timeline window by an opacity
+    // animation. When there are subtitles but no filter pass, we still need
+    // an AVMutableVideoComposition so the animation tool has somewhere to
+    // attach; `videoComposition(withPropertiesOf:)` builds one with the
+    // default per-track instructions.
+    let subtitles = timeline.toIosSubtitlePlan()
+    if !subtitles.isEmpty {
+        if videoComposition == nil {
+            videoComposition = try await AVMutableVideoComposition.videoComposition(withPropertiesOf: composition)
+        }
+        guard let vc = videoComposition else {
+            // Defensive — the two branches above guarantee vc is non-nil.
+            _ = adapter.tryEmit(event: RenderProgressFailed(jobId: jobId, message: "failed to build video composition for subtitles"))
+            adapter.close()
+            return
+        }
+        let renderSize = vc.renderSize != .zero
+            ? vc.renderSize
+            : CGSize(width: Int(output.resolution.width), height: Int(output.resolution.height))
+        let (parent, video) = buildSubtitleLayers(subtitles: subtitles, renderSize: renderSize)
+        vc.animationTool = AVVideoCompositionCoreAnimationTool(
+            postProcessingAsVideoLayer: video,
+            in: parent
         )
     }
 
