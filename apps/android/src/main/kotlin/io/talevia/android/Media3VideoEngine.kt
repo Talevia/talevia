@@ -3,22 +3,30 @@ package io.talevia.android
 import android.content.Context
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import androidx.media3.common.Effect
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
+import androidx.media3.effect.Brightness
+import androidx.media3.effect.GaussianBlur
+import androidx.media3.effect.HslAdjustment
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
+import androidx.media3.transformer.Effects
 import androidx.media3.transformer.ExportException
 import androidx.media3.transformer.ExportResult
 import androidx.media3.transformer.Transformer
 import io.talevia.core.AssetId
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.Filter
 import io.talevia.core.domain.FrameRate
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
+import io.talevia.core.logging.Loggers
+import io.talevia.core.logging.warn
 import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
@@ -91,10 +99,15 @@ class Media3VideoEngine(
                     MediaItem.ClippingConfiguration.Builder()
                         .setStartPositionMs((c.sourceRange.start.inWholeMilliseconds))
                         .setEndPositionMs((c.sourceRange.start + c.sourceRange.duration).inWholeMilliseconds)
-                        .build()
+                        .build(),
                 )
                 .build()
-            EditedMediaItem.Builder(mediaItem).build()
+            val builder = EditedMediaItem.Builder(mediaItem)
+            val videoEffects = c.filters.mapNotNull { mapFilterToEffect(it) }
+            if (videoEffects.isNotEmpty()) {
+                builder.setEffects(Effects(emptyList(), videoEffects))
+            }
+            builder.build()
         }
         val sequence = EditedMediaItemSequence(items)
         val composition = Composition.Builder(listOf(sequence)).build()
@@ -170,4 +183,79 @@ class Media3VideoEngine(
     private fun videoClips(t: Timeline): List<Clip.Video> = t.tracks.filterIsInstance<Track.Video>()
         .flatMap { it.clips.filterIsInstance<Clip.Video>() }
         .sortedBy { it.timeRange.start }
+
+    /**
+     * Map a core [Filter] to a Media3 [Effect]. Returns `null` for filters we
+     * don't yet support; the caller skips them (the Project state still
+     * carries the filter so future Media3 upgrades can pick it up). Parity
+     * goal is "FFmpeg filters that land on video clips should also land on
+     * Media3" — matches what the FFmpeg JVM engine exposes via `apply_filter`
+     * and `apply_lut`.
+     *
+     * Supported today:
+     * - `brightness` → [Brightness] (intensity clamped to [-1, 1])
+     * - `saturation` → [HslAdjustment] (Core's 0..1 intensity → Media3 -100..+100)
+     * - `blur`       → [GaussianBlur] sigma
+     *
+     * Not yet supported:
+     * - `vignette`  — Media3 has no built-in Vignette effect; needs a custom
+     *   `GlShaderProgram`. Intentional no-op for now.
+     * - `lut`       — Media3's `SingleColorLut` only takes an `int[][][]`
+     *   cube; loading a `.cube` file needs a parser we haven't written. Skip
+     *   here so the render succeeds (vs. throwing) — a follow-up will wire
+     *   a `.cube` → int cube loader.
+     */
+    private fun mapFilterToEffect(filter: Filter): Effect? = when (filter.name.lowercase()) {
+        "brightness" -> {
+            val v = (filter.params["intensity"] ?: filter.params["value"] ?: 0f)
+                .coerceIn(-1f, 1f)
+            Brightness(v)
+        }
+        "saturation" -> {
+            // Core's apply_filter semantics for saturation: `intensity` is a 0..1
+            // knob where 0.5 ≈ unchanged (matches the FFmpeg engine's 0..1 → 0..2
+            // mapping). Remap to Media3's [-100, 100] "saturation delta" scale
+            // centered at 0 = no change: intensity 0.5 → 0, 1.0 → +100, 0.0 → -100.
+            val raw = filter.params["intensity"] ?: filter.params["value"]
+            val delta = if (raw != null && filter.params.containsKey("intensity")) {
+                ((raw - 0.5f) * 200f).coerceIn(-100f, 100f)
+            } else {
+                // No intensity given → neutral (no-op rather than dropping).
+                0f
+            }
+            HslAdjustment.Builder().adjustSaturation(delta).build()
+        }
+        "blur" -> {
+            // Match the FFmpeg engine's two-knob shape: `sigma` verbatim, else
+            // `radius` on 0..1 mapped to 0..10 sigma.
+            val sigma = filter.params["sigma"]
+                ?: filter.params["radius"]?.let { (it * 10f).coerceIn(0f, 50f) }
+                ?: 5f
+            GaussianBlur(sigma)
+        }
+        "vignette" -> {
+            log.warn(
+                "vignette filter not yet rendered on Media3 engine — skipping",
+                "filter" to filter.name,
+            )
+            null
+        }
+        "lut" -> {
+            log.warn(
+                "lut filter not yet rendered on Media3 engine — skipping",
+                "filter" to filter.name,
+                "assetId" to filter.assetId?.value,
+            )
+            null
+        }
+        else -> {
+            log.warn(
+                "unknown filter on Media3 engine — skipping",
+                "filter" to filter.name,
+            )
+            null
+        }
+    }
+
+    private val log = Loggers.get("Media3VideoEngine")
 }
