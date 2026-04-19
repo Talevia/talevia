@@ -2,6 +2,9 @@ package io.talevia.core
 
 import app.cash.sqldelight.driver.native.NativeSqliteDriver
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.Clip
+import io.talevia.core.domain.Timeline
+import io.talevia.core.domain.Track
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
@@ -73,3 +76,51 @@ fun durationOfSeconds(seconds: Double): Duration = seconds.seconds
 fun durationToSeconds(d: Duration): Double = d.toDouble(DurationUnit.SECONDS)
 
 fun durationToMillis(d: Duration): Long = d.inWholeMilliseconds
+
+// =============================================================================
+// Timeline → flat DTO projection for the Swift AVFoundation engine
+// =============================================================================
+//
+// The `Clip` sealed hierarchy is painful for Swift consumers (SKIE cannot
+// exhaustively match sealed classes without a `when`-like helper, and value
+// classes on the embedded IDs double the pain). For the render path the engine
+// only needs the primitives — asset id string + source/timeline seconds — so
+// we derive a flat DTO at call time.
+//
+// This is intentionally NOT a replacement for the canonical `Timeline` (that
+// stays in Core per architecture rule #2); it's a per-render-call projection,
+// thrown away once the `AVMutableComposition` is built.
+
+data class IosVideoClipPlan(
+    val assetIdRaw: String,
+    val sourceStartSeconds: Double,
+    val sourceDurationSeconds: Double,
+    val timelineStartSeconds: Double,
+    val timelineDurationSeconds: Double,
+)
+
+/**
+ * Project a [Timeline] into the flat primitive list the Swift engine wants.
+ * Only video clips on video tracks are included — audio/subtitle/effect tracks
+ * are ignored in the first cut, matching the Media3 scope.
+ *
+ * Track order is preserved; within each track clips are emitted in
+ * timeline-start order.
+ */
+fun Timeline.toIosVideoPlan(): List<IosVideoClipPlan> =
+    this.tracks
+        .filterIsInstance<Track.Video>()
+        .flatMap { track ->
+            track.clips
+                .filterIsInstance<Clip.Video>()
+                .sortedBy { it.timeRange.start }
+                .map { clip ->
+                    IosVideoClipPlan(
+                        assetIdRaw = clip.assetId.value,
+                        sourceStartSeconds = clip.sourceRange.start.toDouble(DurationUnit.SECONDS),
+                        sourceDurationSeconds = clip.sourceRange.duration.toDouble(DurationUnit.SECONDS),
+                        timelineStartSeconds = clip.timeRange.start.toDouble(DurationUnit.SECONDS),
+                        timelineDurationSeconds = clip.timeRange.duration.toDouble(DurationUnit.SECONDS),
+                    )
+                }
+        }
