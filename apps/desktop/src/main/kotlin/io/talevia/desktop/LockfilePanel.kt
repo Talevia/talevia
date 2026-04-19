@@ -97,7 +97,7 @@ fun LockfilePanel(
                 val result = tool.dispatch(input, container.uiToolContext(projectId))
                 log += "regenerate_stale_clips → ${result.outputForLlm}"
                 project = container.projects.get(projectId)
-            }.onFailure { log += "regenerate_stale_clips failed: ${it.message}" }
+            }.onFailure { log += "regenerate_stale_clips failed: ${friendly(it)}" }
             regenerating = false
         }
     }

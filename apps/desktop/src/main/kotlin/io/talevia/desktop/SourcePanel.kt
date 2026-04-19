@@ -106,7 +106,7 @@ fun SourcePanel(
                 tool.dispatch(input, container.uiToolContext(projectId))
                 refresh()
                 log += "$label ✓"
-            }.onFailure { log += "$label failed: ${it.message}" }
+            }.onFailure { log += "$label failed: ${friendly(it)}" }
         }
     }
 

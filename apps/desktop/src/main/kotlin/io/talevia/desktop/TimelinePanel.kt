@@ -89,7 +89,7 @@ fun TimelinePanel(
                 tool.dispatch(input, container.uiToolContext(projectId))
                 project = container.projects.get(projectId)
                 log += "$label ✓"
-            }.onFailure { log += "$label failed: ${it.message}" }
+            }.onFailure { log += "$label failed: ${friendly(it)}" }
         }
     }
 
@@ -213,7 +213,7 @@ fun TimelinePanel(
                                 val asset = runCatching {
                                     container.media.import(picked) { container.engine.probe(it) }
                                 }.getOrElse {
-                                    log += "LUT import failed: ${it.message}"
+                                    log += "LUT import failed: ${friendly(it)}"
                                     return@launch
                                 }
                                 dispatch(

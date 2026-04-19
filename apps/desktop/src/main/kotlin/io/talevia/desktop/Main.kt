@@ -219,7 +219,7 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
                     )
                     log += "render done → $path"
                     previewPath = path
-                }.onFailure { log += "export failed: ${it.message}"; renderProgress = null }
+                }.onFailure { log += "export failed: ${friendly(it)}"; renderProgress = null }
             }
         }
     }
@@ -231,7 +231,7 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
                     container.uiToolContext(projectId),
                 )
                 log += "saved snapshot"
-            }.onFailure { log += "save snapshot failed: ${it.message}" }
+            }.onFailure { log += "save snapshot failed: ${friendly(it)}" }
         }
     }
     val runRegenerateStale: () -> Unit = {
@@ -242,7 +242,7 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
                     container.uiToolContext(projectId),
                 )
                 log += "regenerate → ${result.outputForLlm}"
-            }.onFailure { log += "regenerate failed: ${it.message}" }
+            }.onFailure { log += "regenerate failed: ${friendly(it)}" }
         }
     }
 
@@ -297,7 +297,7 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
                                         title = "Choose a file to import",
                                     )
                                     if (picked is MediaSource.File) importPath = picked.path
-                                }.onFailure { log += "browse failed: ${it.message}" }
+                                }.onFailure { log += "browse failed: ${friendly(it)}" }
                             }
                         },
                     ) { Text("Browse…") }
@@ -313,7 +313,7 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
                                 assets += "${asset.id.value}  ·  ${"%.1f".format(asset.metadata.duration.inWholeMilliseconds / 1000.0)}s"
                                 log += "imported ${asset.id.value}"
                                 importPath = ""
-                            }.onFailure { log += "import failed: ${it.message}" }
+                            }.onFailure { log += "import failed: ${friendly(it)}" }
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -348,7 +348,7 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
                                     container.uiToolContext(projectId),
                                 )
                                 log += "added clip"
-                            }.onFailure { log += "add_clip failed: ${it.message}" }
+                            }.onFailure { log += "add_clip failed: ${friendly(it)}" }
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),
@@ -590,7 +590,7 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
                             permissionRules = container.permissionRules.toList(),
                         ),
                     )
-                }.onFailure { t -> log += "agent failed: ${t.message}" }
+                }.onFailure { t -> log += "agent failed: ${friendly(t)}" }
                 busy = false
             }
         },

@@ -91,7 +91,7 @@ fun ProjectBar(
                 refresh()
                 after?.invoke()
                 log += "$label ✓"
-            }.onFailure { log += "$label failed: ${it.message}" }
+            }.onFailure { log += "$label failed: ${friendly(it)}" }
         }
     }
 
