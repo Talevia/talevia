@@ -14,6 +14,7 @@ import io.talevia.core.provider.LlmProvider
 import io.talevia.core.provider.LlmRequest
 import io.talevia.core.provider.ModelInfo
 import io.talevia.core.provider.ReplayFormatting
+import io.talevia.core.provider.logMalformedSse
 import io.talevia.core.provider.sseEvents
 import io.talevia.core.session.FinishReason
 import io.talevia.core.session.Message
@@ -94,7 +95,13 @@ class AnthropicProvider(
 
         response.execute { http ->
             http.sseEvents().collect { sse ->
-                val payload = runCatching { json.parseToJsonElement(sse.data).jsonObject }.getOrNull() ?: return@collect
+                val payload = runCatching { json.parseToJsonElement(sse.data).jsonObject }.getOrElse { cause ->
+                    // Don't abort the whole stream on a single malformed event — the server may
+                    // still send `message_stop`. But make it visible: silent drops used to leave
+                    // operators with no explanation for partially-rendered turns.
+                    logMalformedSse("anthropic", sse.event, sse.data, cause)
+                    return@collect
+                }
                 when (sse.event) {
                     "message_start" -> {
                         val usage = payload["message"]?.jsonObject?.get("usage")?.jsonObject

@@ -88,7 +88,10 @@ class OpenAiProvider(
         response.execute { http ->
             http.sseEvents().collect { sse ->
                 if (sse.data == "[DONE]") return@collect
-                val payload = runCatching { json.parseToJsonElement(sse.data).jsonObject }.getOrNull() ?: return@collect
+                val payload = runCatching { json.parseToJsonElement(sse.data).jsonObject }.getOrElse { cause ->
+                    io.talevia.core.provider.logMalformedSse("openai", sse.event, sse.data, cause)
+                    return@collect
+                }
 
                 payload["usage"]?.jsonObject?.let { usage ->
                     promptTokens = usage["prompt_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: promptTokens

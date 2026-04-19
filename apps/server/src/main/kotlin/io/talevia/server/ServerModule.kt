@@ -162,13 +162,27 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
             val rules = (session?.permissionRules.orEmpty()) + container.permissionRules
 
             agentScope.launch {
-                runCatching {
+                try {
                     agent.run(
                         RunInput(
                             sessionId = sid,
                             text = body.text,
                             model = ModelRef(providerId, modelId),
                             permissionRules = rules,
+                        ),
+                    )
+                } catch (t: Throwable) {
+                    // Surface the failure to SSE subscribers; stderr keeps a full trace
+                    // for operators. Rethrow CancellationException so coroutine cancel
+                    // still propagates normally.
+                    if (t is kotlinx.coroutines.CancellationException) throw t
+                    System.err.println("[agent.run] session=${sid.value} correlationId=$correlationId failed: ${t.message}")
+                    t.printStackTrace(System.err)
+                    container.bus.publish(
+                        BusEvent.AgentRunFailed(
+                            sessionId = sid,
+                            correlationId = correlationId,
+                            message = t.message ?: t::class.simpleName ?: "agent run failed",
                         ),
                     )
                 }
@@ -220,6 +234,7 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.PartDelta -> "message.part.delta"
     is BusEvent.PermissionAsked -> "permission.asked"
     is BusEvent.PermissionReplied -> "permission.replied"
+    is BusEvent.AgentRunFailed -> "agent.run.failed"
 }
 
 @Serializable data class CreateSessionRequest(
@@ -290,6 +305,8 @@ data class BusEventDto(
     val patterns: List<String>? = null,
     val accepted: Boolean? = null,
     val remembered: Boolean? = null,
+    val correlationId: String? = null,
+    val message: String? = null,
 ) {
     companion object {
         fun from(e: BusEvent): BusEventDto = when (e) {
@@ -310,6 +327,10 @@ data class BusEventDto(
             is BusEvent.PermissionReplied -> BusEventDto(
                 "permission.replied", e.sessionId.value,
                 requestId = e.requestId, accepted = e.accepted, remembered = e.remembered,
+            )
+            is BusEvent.AgentRunFailed -> BusEventDto(
+                "agent.run.failed", e.sessionId.value,
+                correlationId = e.correlationId, message = e.message,
             )
         }
     }

@@ -61,4 +61,16 @@ sealed interface BusEvent {
 
     /** An in-flight Agent.run for this session was cancelled via [io.talevia.core.agent.Agent.cancel]. */
     data class SessionCancelled(override val sessionId: SessionId) : SessionEvent
+
+    /**
+     * Background agent runs (e.g. the server's fire-and-forget `agent.run` launch)
+     * historically swallowed failures, leaving clients stuck on a 202 with no signal
+     * that the run died. Publish this event instead so SSE subscribers see the
+     * failure and the client can recover.
+     */
+    data class AgentRunFailed(
+        override val sessionId: SessionId,
+        val correlationId: String,
+        val message: String,
+    ) : SessionEvent
 }

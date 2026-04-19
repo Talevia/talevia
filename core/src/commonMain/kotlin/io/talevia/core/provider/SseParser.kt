@@ -40,3 +40,18 @@ fun HttpResponse.sseEvents(): Flow<SseEvent> = flow {
         emit(SseEvent(event, data.toString()))
     }
 }
+
+/**
+ * Emits a single-line warning for an SSE event that failed to parse. We truncate
+ * the payload so a runaway malformed stream doesn't flood logs. Written to stderr
+ * so it is captured by the same sink as other platform logs on JVM; native
+ * platforms will route it through their own stderr equivalent.
+ */
+fun logMalformedSse(providerId: String, event: String?, data: String, cause: Throwable) {
+    val preview = data.take(MALFORMED_SSE_PREVIEW_LIMIT).replace("\n", "\\n")
+    val truncated = if (data.length > MALFORMED_SSE_PREVIEW_LIMIT) "…(+${data.length - MALFORMED_SSE_PREVIEW_LIMIT} chars)" else ""
+    val message = cause.message ?: cause::class.simpleName ?: "parse error"
+    println("[provider:$providerId] dropped malformed SSE event=${event ?: "-"} reason=$message data=\"$preview$truncated\"")
+}
+
+private const val MALFORMED_SSE_PREVIEW_LIMIT = 200
