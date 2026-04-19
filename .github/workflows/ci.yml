@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   build:
-    name: Core + server + ffmpeg e2e
+    name: Core + server + ffmpeg e2e + lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +44,9 @@ jobs:
       - name: Assemble desktop app
         run: ./gradlew :apps:desktop:assemble
 
+      - name: Lint (ktlintCheck)
+        run: ./gradlew ktlintCheck
+
       - name: Upload test reports on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -55,6 +58,7 @@ jobs:
 
   android:
     name: Android debug APK
+    needs: [build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -76,6 +80,7 @@ jobs:
 
   ios:
     name: iOS simulator framework
+    needs: [build]
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
