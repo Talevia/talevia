@@ -1,5 +1,6 @@
 package io.talevia.core.platform
 
+import io.talevia.core.domain.source.consistency.LoraPin
 import kotlinx.serialization.Serializable
 
 /**
@@ -31,6 +32,14 @@ interface ImageGenEngine {
  * [parameters] is reserved for provider-specific extras the common fields
  * do not cover (e.g. `style`, `quality`, `guidance`). Engines must merge it
  * into the final request body verbatim.
+ *
+ * [negativePrompt], [referenceAssetIds], and [loraPins] are populated by the
+ * Tool layer from a folded consistency binding (VISION §3.3). Engines that
+ * don't support a given hook (e.g. DALL-E has no LoRA) MUST still record
+ * the incoming value in [GenerationProvenance.parameters] — dropping it on
+ * the floor breaks replay / audit and makes the lockfile cache key ambiguous.
+ * Engines that DO support a hook should translate it into the native wire
+ * shape.
  */
 @Serializable
 data class ImageGenRequest(
@@ -41,6 +50,9 @@ data class ImageGenRequest(
     val seed: Long,
     val n: Int = 1,
     val parameters: Map<String, String> = emptyMap(),
+    val negativePrompt: String? = null,
+    val referenceAssetPaths: List<String> = emptyList(),
+    val loraPins: List<LoraPin> = emptyList(),
 )
 
 @Serializable

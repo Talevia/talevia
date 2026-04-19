@@ -60,11 +60,11 @@ class OpenAiImageGenEngine(
     override val providerId: String = "openai"
 
     override suspend fun generate(request: ImageGenRequest): ImageGenResult {
-        val body = buildRequestBody(request)
+        val wireBody = buildWireBody(request)
         val response: HttpResponse = httpClient.post("$baseUrl/v1/images/generations") {
             bearerAuth(apiKey)
             contentType(ContentType.Application.Json)
-            setBody(json.encodeToString(JsonElement.serializer(), body))
+            setBody(json.encodeToString(JsonElement.serializer(), wireBody))
         }
         if (response.status != HttpStatusCode.OK) {
             val errBody = runCatching { response.bodyAsText() }.getOrNull().orEmpty()
@@ -91,13 +91,13 @@ class OpenAiImageGenEngine(
             modelId = request.modelId,
             modelVersion = null,
             seed = request.seed,
-            parameters = body,
+            parameters = provenanceParameters(request, wireBody),
             createdAtEpochMs = createdSeconds * 1000L,
         )
         return ImageGenResult(images = images, provenance = provenance)
     }
 
-    private fun buildRequestBody(request: ImageGenRequest): JsonObject = buildJsonObject {
+    private fun buildWireBody(request: ImageGenRequest): JsonObject = buildJsonObject {
         put("model", JsonPrimitive(request.modelId))
         put("prompt", JsonPrimitive(request.prompt))
         put("size", JsonPrimitive("${request.width}x${request.height}"))
@@ -109,4 +109,35 @@ class OpenAiImageGenEngine(
         // to what the user asked for.
         for ((k, v) in request.parameters) put(k, JsonPrimitive(v))
     }
+
+    /**
+     * Provenance is a superset of the wire body. OpenAI's
+     * `/v1/images/generations` endpoint doesn't accept negative prompts,
+     * reference images, or LoRA pins (those go through `/v1/images/edits`
+     * via multipart, and LoRA isn't supported at all), but the audit log
+     * must still capture what the caller *asked* for — dropping these on the
+     * floor would make the lockfile hash look like a cache hit even when
+     * the semantic input had changed.
+     */
+    private fun provenanceParameters(request: ImageGenRequest, wireBody: JsonObject): JsonObject =
+        buildJsonObject {
+            for ((k, v) in wireBody) put(k, v)
+            request.negativePrompt?.takeIf { it.isNotBlank() }?.let {
+                put("_talevia_negative_prompt", JsonPrimitive(it))
+            }
+            if (request.referenceAssetPaths.isNotEmpty()) {
+                put(
+                    "_talevia_reference_asset_paths",
+                    JsonPrimitive(request.referenceAssetPaths.joinToString(",")),
+                )
+            }
+            if (request.loraPins.isNotEmpty()) {
+                put(
+                    "_talevia_lora_pins",
+                    JsonPrimitive(
+                        request.loraPins.joinToString(",") { "${it.adapterId}@${it.weight}" },
+                    ),
+                )
+            }
+        }
 }

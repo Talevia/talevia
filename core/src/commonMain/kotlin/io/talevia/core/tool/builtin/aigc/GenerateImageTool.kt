@@ -36,10 +36,12 @@ import kotlin.time.Duration
  * record the full generation parameters."
  *
  * Lockfile cache (VISION §3.1 "产物可 pin"): before calling the engine the tool
- * hashes `(tool id, effective prompt, model, modelVersion, seed, dimensions, bindings)`
- * and looks the hash up in [Project.lockfile]. On a hit it returns the cached asset
- * without re-calling the provider — bit-identical reuse for the common "same inputs,
- * different turn" case. On a miss it generates, persists, and appends a new entry.
+ * hashes `(tool id, effective prompt, model, seed, dimensions, bindings, negative,
+ * referenceAssetIds, loraPins)` and looks the hash up in [Project.lockfile]. On a
+ * hit it returns the cached asset without re-calling the provider — bit-identical
+ * reuse for the common "same inputs, different turn" case. On a miss it generates,
+ * persists, and appends a new entry. Every axis the engine *could* vary on must
+ * be hashed, otherwise semantically distinct generations would collide on the key.
  *
  * Consistency bindings (VISION §3.3): see [AigcPipeline.foldPrompt] — identical
  * behavior to the previous implementation.
@@ -78,6 +80,12 @@ class GenerateImageTool(
         val parameters: JsonObject,
         val effectivePrompt: String,
         val appliedConsistencyBindingIds: List<String>,
+        /** Merged negative prompt from bound style_bibles (null when no negatives were folded). */
+        val negativePrompt: String? = null,
+        /** Asset ids of reference images passed to the engine (empty when no character_ref supplied any). */
+        val referenceAssetIds: List<String> = emptyList(),
+        /** LoRA adapter ids that were pinned via bound character_refs (empty when none supplied one). */
+        val loraAdapterIds: List<String> = emptyList(),
         /** True when this asset came from [Project.lockfile] rather than a fresh engine call. */
         val cacheHit: Boolean = false,
     )
@@ -132,6 +140,9 @@ class GenerateImageTool(
         val seed = AigcPipeline.ensureSeed(input.seed)
         val folded = resolveConsistency(input)
 
+        val referenceAssetPaths = folded.referenceAssetIds.map { resolveAssetPath(it) }
+        val loraKey = folded.loraPins.joinToString(",") { "${it.adapterId}@${it.weight}" }
+
         val inputHash = AigcPipeline.inputHash(
             listOf(
                 "tool" to id,
@@ -141,6 +152,9 @@ class GenerateImageTool(
                 "seed" to seed.toString(),
                 "prompt" to folded.effectivePrompt,
                 "bindings" to folded.appliedNodeIds.joinToString(","),
+                "neg" to (folded.negativePrompt ?: ""),
+                "refs" to folded.referenceAssetIds.joinToString(","),
+                "lora" to loraKey,
             ),
         )
 
@@ -161,6 +175,9 @@ class GenerateImageTool(
                 height = input.height,
                 seed = seed,
                 n = 1,
+                negativePrompt = folded.negativePrompt,
+                referenceAssetPaths = referenceAssetPaths,
+                loraPins = folded.loraPins,
             ),
         )
         val image = result.images.firstOrNull()
@@ -199,6 +216,9 @@ class GenerateImageTool(
             parameters = prov.parameters,
             effectivePrompt = folded.effectivePrompt,
             appliedConsistencyBindingIds = folded.appliedNodeIds,
+            negativePrompt = folded.negativePrompt,
+            referenceAssetIds = folded.referenceAssetIds,
+            loraAdapterIds = folded.loraPins.map { it.adapterId },
             cacheHit = false,
         )
         val bindingTail = if (folded.appliedNodeIds.isEmpty()) ""
@@ -228,6 +248,9 @@ class GenerateImageTool(
             parameters = prov.parameters,
             effectivePrompt = folded.effectivePrompt,
             appliedConsistencyBindingIds = folded.appliedNodeIds,
+            negativePrompt = folded.negativePrompt,
+            referenceAssetIds = folded.referenceAssetIds,
+            loraAdapterIds = folded.loraPins.map { it.adapterId },
             cacheHit = true,
         )
         return ToolResult(
@@ -236,6 +259,9 @@ class GenerateImageTool(
             data = out,
         )
     }
+
+    private suspend fun resolveAssetPath(assetId: String): String =
+        storage.resolve(AssetId(assetId))
 
     private suspend fun resolveConsistency(input: Input): FoldedPrompt {
         if (input.consistencyBindingIds.isEmpty()) {

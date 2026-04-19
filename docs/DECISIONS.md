@@ -10,6 +10,79 @@ Ordered reverse-chronological (newest on top).
 
 ---
 
+## 2026-04-19 — `import_source_node` (VISION §3.4 — closes "可组合")
+
+**Context.** §3.4 names four codebase properties for Project / Timeline:
+可读, 可 diff, 可版本化, 可组合. After snapshot / fork / diff landed, the
+first three were covered. "可组合 (片段 / 模板 / 特效 / 角色可跨 project
+复用)" was the only unfilled leg — the agent had no way to lift a `character_ref`
+defined in a narrative project into a vlog project without retyping the body.
+`fork_project` copies a whole project, which is the wrong tool for "share
+one character".
+
+**Decision.** New `core.tool.builtin.source.ImportSourceNodeTool` (id
+`import_source_node`, permission `source.write`). Inputs: `(fromProjectId,
+fromNodeId, toProjectId, newNodeId?)`. Walks the source node + its parent
+chain in topological order, inserts each one into the target project, returns
+`(originalId, importedId, kind, skippedDuplicate)` per node. Wired into all
+four composition roots (server / desktop / Android / iOS).
+
+**Why content-addressed dedup, not id-addressed.** `SourceNode.contentHash`
+is a deterministic fingerprint over `(kind, body, parents)`. The AIGC
+lockfile keys cache entries on bound nodes' content hashes (not their ids).
+So when an imported node lands with the *same* contentHash as the source,
+every previous AIGC generation that referenced that node is automatically a
+cache hit on the target side too — without the agent doing anything special.
+The alternative — keying on id — would force the user to use the same id on
+both sides, and would still miss when ids legitimately differ ("Mei" vs
+"character-mei-v2") even though the bodies are identical.
+
+**Why reuse + remap parent refs when a parent is deduped to an existing
+target node under a *different* id.** Real example: the source's `style-warm`
+parent matches the target's pre-existing `style-vibe-1` by contentHash. We
+reuse the existing node (no insertion) and remap the leaf's `SourceRef` to
+point at `style-vibe-1`. The alternative — refusing to remap and inserting a
+duplicate `style-warm` — would create two source nodes with identical content
+but different ids in the same project, defeating the dedup discipline that
+makes lockfile cache transfer work.
+
+**Why fail loudly on same-id-different-content collision instead of auto-rename.**
+If the target already has `character-mei` with different content, we throw
+with a hint to pass `newNodeId` or `remove_source_node` first. The
+alternative (silent suffix-rename to `character-mei-2`) would create
+unobvious id divergence — a future binding referencing `character-mei` would
+quietly resolve to the *original* version, not the just-imported one. Forcing
+the agent to make the conflict explicit is worth one extra round-trip.
+
+**Why `newNodeId` only renames the leaf, not parents.** The common case is
+"I want to import the Mei character into the vlog project but the vlog
+already has a `character-mei` for someone else". The leaf is what the user
+named; parents are derived. Per-parent renaming would multiply the input
+surface for a case the agent will rarely hit (today's consistency nodes are
+leaves). When richer source schemas land and parent collisions become real,
+the caller can break the import into two: `import_source_node(parent, ...,
+newNodeId=...)` then `import_source_node(leaf, ...)` lets the parent-dedup
+path remap the leaf's refs.
+
+**Why reject self-import (`from == to`).** Nearly always a mistake. The
+agent that wants a within-project copy already has `define_character_ref` /
+`define_style_bible` / `define_brand_palette` with a fresh id. Failing
+loudly costs one corrected round-trip and prevents the silent no-op that
+content-addressed dedup would otherwise produce.
+
+**Why permission `source.write`, not `project.write`.** This tool only
+mutates `Project.source`; it does not touch the timeline, lockfile, render
+cache, or asset catalog. Aligning with `define_*` / `remove_source_node`
+keeps the permission ruleset clean — the user can grant blanket source
+edits without authorising broader project mutations.
+
+**Tests.** 9 cases in `ImportSourceNodeToolTest`: leaf import, idempotent
+re-import, topological parent walk, parent-dedup remapping, same-id-
+different-content failure, `newNodeId` rename, self-import rejection, missing
+source/target project, missing source node.
+
+---
+
 ## 2026-04-19 — Timeline tool parity on Android + iOS
 
 **Context.** Desktop and server containers register `ApplyFilterTool`,
@@ -1040,3 +1113,100 @@ first 20)". If the agent needs the full list it can refine with
   in-context.** Rejected — doubles the per-call cost (two state pulls), and
   the model isn't especially good at diffing large JSON blobs by eye. A
   typed diff tool is strictly cheaper and more reliable.
+
+## 2026-04-19 — Thread LoRA + reference assets through `GenerateImageTool` output and lockfile hash
+
+**Context.** `GenerateImageTool` already folded `CharacterRefBody.loraPin` and
+`CharacterRefBody.referenceAssetIds` into a `FoldedPrompt` via
+`AigcPipeline.foldPrompt`, but the returned folded object was *dropped on the
+floor* at two critical boundaries:
+
+1. The fields never reached the `ImageGenEngine` — `ImageGenRequest` only
+   carried `prompt / modelId / width / height / seed / n / parameters`. Engines
+   that could translate LoRA or reference images into their native wire shape
+   had no surface to receive them through.
+2. The AIGC lockfile hash did not include LoRA or reference-asset axes. Two
+   identical prompts with different LoRA weights collided on the same cache
+   key; the second call would return the first asset despite being a
+   semantically distinct generation. That is an end-to-end correctness bug
+   for VISION §3.1 "产物可 pin".
+
+`GenerateImageTool.Output` also lacked the visibility fields the LLM needs to
+reason about *what got bound* — it saw `appliedConsistencyBindingIds` but not
+which LoRA adapters or reference images those bindings resolved to.
+
+**Decision.**
+
+1. **Extend `ImageGenRequest` with the three provider-specific hooks.** Added
+   `negativePrompt: String?`, `referenceAssetPaths: List<String>`, and
+   `loraPins: List<LoraPin>`. Engines that cannot natively consume a given
+   hook (OpenAI DALL-E / GPT-Image-1 has no LoRA; text-only endpoints take no
+   references) are *still required* to record the incoming value in
+   `GenerationProvenance.parameters`. Silently dropping them would make the
+   audit log lie about what the caller asked for and — worse — make the
+   provenance superset look indistinguishable between two runs that had
+   different LoRA intent, which then corrupts downstream replay.
+
+2. **OpenAI engine: wire body vs provenance parameters split.** OpenAI's
+   `/v1/images/generations` endpoint rejects unknown fields with HTTP 400, so
+   we cannot attach `negativePrompt` / `referenceAssetPaths` / `loraPins` to
+   the request JSON. The engine now maintains two JSON objects:
+   - **Wire body** — strictly the fields the OpenAI API accepts.
+   - **Provenance parameters** — a *superset* of the wire body plus
+     `_talevia_negative_prompt`, `_talevia_reference_asset_paths`,
+     `_talevia_lora_pins`. The `_talevia_` prefix namespaces extensions that
+     are our concern only.
+
+   Separating the two surfaces is the correct shape for the platform contract:
+   "engine impls translate what they can; the rest still shows up in the
+   audit log." Providers that *do* support LoRA (Stable Diffusion backends,
+   custom image-gen endpoints) will translate the common-typed input into
+   their native shape and add zero `_talevia_` keys.
+
+3. **Hash all three axes into the lockfile input.** `GenerateImageTool.inputHash`
+   now includes `neg`, `refs`, `lora` alongside the existing axes. A change to
+   any of them busts the cache. `contentHash` on the bound source node already
+   changes when `CharacterRefBody.loraPin.weight` shifts — so the existing
+   stale-clip detection path *also* flags it — but we want the hash itself to
+   be unambiguous as a standalone key, because `list_lockfile_entries` and
+   `find_stale_clips` reason about the hash directly, not the node graph.
+
+4. **Expose the resolved pins on `Output`.** Added `negativePrompt`,
+   `referenceAssetIds`, `loraAdapterIds` to `GenerateImageTool.Output`. The
+   agent can read back that a bound character injected `hf://mei-lora` without
+   re-querying the source graph. Keeps the tool's output self-describing.
+
+5. **Resolve asset ids → paths at the tool boundary.** `MediaPathResolver`
+   takes `AssetId → String` asynchronously; `GenerateImageTool` resolves
+   `folded.referenceAssetIds` via the injected `MediaStorage` (which is a
+   `MediaPathResolver`) before calling the engine. Engines must never see
+   `AssetId.value` as a path — that violates the M2 architectural rule.
+
+**Why not make the engine fetch paths itself.** Rejected. The engine layer is
+already "translate common → native"; giving it a second responsibility
+("resolve project-scoped asset ids") would couple it to the
+`MediaPathResolver` contract and make stateless engine impls harder to write.
+The tool owns the project context, so path resolution happens there.
+
+**Why `_talevia_` prefixed provenance keys.** Provenance parameters are a
+`JsonObject` shared with "what was on the wire." Mixing user-visible fields
+(`prompt`, `size`) with implementation-only extensions in the same namespace
+would later confuse a replay tool or a human reading the audit log. A
+namespace prefix keeps the two concerns visibly distinct.
+
+**Why require engines without a given hook to still record it.** Provenance
+is load-bearing for two jobs: audit ("what did you ask the provider?") and
+cache-key reconstruction ("would this run hit the same entry?"). If
+`OpenAiImageGenEngine` silently dropped the negative prompt, two lockfile
+entries with distinct caller intent would have identical provenance — the
+same hash collision concern as before, pushed one layer down. Making the
+contract explicit ("MUST record") at the `ImageGenEngine` KDoc forces future
+providers to inherit the discipline.
+
+**Coverage.** Added two tests to `GenerateImageToolTest`:
+- `loraAndReferenceAssetsFlowToEngineAndOutput` — defines a character_ref
+  with a `LoraPin` and a reference image, binds it, asserts the engine saw
+  both as resolved paths + pins AND that `Output.referenceAssetIds` /
+  `Output.loraAdapterIds` surfaced them.
+- `loraWeightChangeBustsTheLockfileCache` — generates once with weight 1.0,
+  flips to 0.4, asserts second call is a miss.

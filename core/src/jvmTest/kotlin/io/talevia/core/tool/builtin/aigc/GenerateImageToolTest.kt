@@ -8,13 +8,17 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
+import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.source.consistency.CharacterRefBody
+import io.talevia.core.domain.source.consistency.LoraPin
 import io.talevia.core.domain.source.consistency.addCharacterRef
 import io.talevia.core.domain.source.mutateSource
+import io.talevia.core.domain.source.removeNode
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.GeneratedImage
 import io.talevia.core.platform.GenerationProvenance
@@ -34,6 +38,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration
 
 class GenerateImageToolTest {
 
@@ -311,5 +316,111 @@ class GenerateImageToolTest {
 
         assertEquals("base", engine.lastRequest?.prompt)
         assertTrue(result.data.appliedConsistencyBindingIds.isEmpty())
+    }
+
+    @Test fun loraAndReferenceAssetsFlowToEngineAndOutput() = runTest {
+        val tmpDir = createTempDirectory("gen-image-lora").toFile()
+        val engine = FakeImageGenEngine(tinyPng)
+        val storage = InMemoryMediaStorage()
+        val writer = FakeBlobWriter(tmpDir)
+
+        // A reference image already exists on disk (e.g. a user-uploaded portrait
+        // the character_ref pins). The tool must resolve the AssetId to its real
+        // filesystem path before handing it to the engine.
+        val refFile = File(tmpDir, "ref.png").also { it.writeBytes(tinyPng) }
+        val refAsset = storage.import(MediaSource.File(refFile.absolutePath)) { _ ->
+            MediaMetadata(duration = Duration.ZERO, resolution = Resolution(1, 1), frameRate = null)
+        }
+
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val projectId = ProjectId("p-lora")
+        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
+        store.mutateSource(projectId) {
+            it.addCharacterRef(
+                SourceNodeId("mei"),
+                CharacterRefBody(
+                    name = "Mei",
+                    visualDescription = "teal hair",
+                    referenceAssetIds = listOf(refAsset.id),
+                    loraPin = LoraPin(adapterId = "hf://mei-lora", weight = 0.8f),
+                ),
+            )
+        }
+
+        val tool = GenerateImageTool(engine, storage, writer, store)
+        val result = tool.execute(
+            GenerateImageTool.Input(
+                prompt = "portrait",
+                width = 64,
+                height = 48,
+                seed = 1L,
+                projectId = projectId.value,
+                consistencyBindingIds = listOf("mei"),
+            ),
+            ctx(),
+        )
+
+        val sent = assertNotNull(engine.lastRequest)
+        assertEquals(listOf(refFile.absolutePath), sent.referenceAssetPaths)
+        assertEquals(1, sent.loraPins.size)
+        assertEquals("hf://mei-lora", sent.loraPins.single().adapterId)
+        assertEquals(0.8f, sent.loraPins.single().weight)
+
+        assertEquals(listOf(refAsset.id.value), result.data.referenceAssetIds)
+        assertEquals(listOf("hf://mei-lora"), result.data.loraAdapterIds)
+    }
+
+    @Test fun loraWeightChangeBustsTheLockfileCache() = runTest {
+        val tmpDir = createTempDirectory("gen-image-lora-cache").toFile()
+        val engine = FakeImageGenEngine(tinyPng)
+        val storage = InMemoryMediaStorage()
+        val writer = FakeBlobWriter(tmpDir)
+
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val projectId = ProjectId("p-lora-cache")
+        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
+        store.mutateSource(projectId) {
+            it.addCharacterRef(
+                SourceNodeId("mei"),
+                CharacterRefBody(
+                    name = "Mei",
+                    visualDescription = "teal hair",
+                    loraPin = LoraPin(adapterId = "hf://mei-lora", weight = 1.0f),
+                ),
+            )
+        }
+
+        val tool = GenerateImageTool(engine, storage, writer, store)
+        val input = GenerateImageTool.Input(
+            prompt = "portrait",
+            seed = 42L,
+            projectId = projectId.value,
+            consistencyBindingIds = listOf("mei"),
+        )
+
+        val first = tool.execute(input, ctx())
+        assertEquals(false, first.data.cacheHit)
+
+        // Flip the LoRA weight on the bound character. sourceBinding content hash
+        // also changes — but the hash input independently carries the lora key,
+        // so either mechanism alone would already cause a miss. We want both.
+        store.mutateSource(projectId) { graph ->
+            graph.removeNode(SourceNodeId("mei"))
+                .addCharacterRef(
+                    SourceNodeId("mei"),
+                    CharacterRefBody(
+                        name = "Mei",
+                        visualDescription = "teal hair",
+                        loraPin = LoraPin(adapterId = "hf://mei-lora", weight = 0.4f),
+                    ),
+                )
+        }
+
+        val second = tool.execute(input, ctx())
+        assertEquals(false, second.data.cacheHit, "changing LoRA weight must bust the cache")
     }
 }
