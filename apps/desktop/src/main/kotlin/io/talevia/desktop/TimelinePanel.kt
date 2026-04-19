@@ -192,6 +192,37 @@ fun TimelinePanel(
             }
         }
 
+        // Stale-summary banner: visible as soon as any source node edit bumps
+        // a contentHash that a lockfile entry was keyed on. Gives the expert a
+        // single-glance view of cascade stale count after inline source edits
+        // (VISION §3.2 "refactor propagation").
+        if (staleIds.isNotEmpty()) {
+            Surface(
+                color = Color(0xFFFFF4E5),
+                shape = RoundedCornerShape(4.dp),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "${staleIds.size} clip${if (staleIds.size == 1) "" else "s"} stale — source changed",
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFF8B5A00),
+                        modifier = Modifier.weight(1f),
+                    )
+                    TextButton(onClick = {
+                        dispatch(
+                            "regenerate_stale_clips",
+                            buildJsonObject { put("projectId", projectId.value) },
+                            "regenerate all ${staleIds.size} stale",
+                        )
+                    }) { Text("Regenerate All") }
+                }
+            }
+        }
+
         if (tracks.isEmpty()) {
             Text(
                 "No tracks yet. Add a clip from the Assets panel, or ask the agent.",
