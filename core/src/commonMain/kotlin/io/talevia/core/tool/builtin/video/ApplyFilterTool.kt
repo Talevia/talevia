@@ -23,10 +23,9 @@ import kotlinx.serialization.serializer
  * Attach a named filter to an existing video clip. The filter list is appended;
  * remove and replace are out of scope for v0 (a future tool can take an index).
  *
- * Note: at M6 the FFmpeg/Media3/AVFoundation engines do not yet honour filters
- * during render — the filter stays on the Timeline and round-trips through
- * compaction summaries. Wiring filters into the actual render pipelines is the
- * obvious follow-up; the data model is the prerequisite.
+ * Note: the FFmpeg engine now honours filters during render. Media3 and
+ * AVFoundation engines still carry filters on the Timeline only — wiring them
+ * into those pipelines is the remaining follow-up.
  */
 class ApplyFilterTool(
     private val store: ProjectStore,

@@ -5,6 +5,7 @@ import io.talevia.core.domain.FrameRate
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Resolution
+import io.talevia.core.domain.Filter
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.domain.Clip
@@ -115,8 +116,26 @@ class FfmpegVideoEngine(
             args += listOf("-i", path)
         }
         val n = videoClips.size
+        // Build the filtergraph. For clips with per-clip filters, pre-process
+        // the video stream through a chain and label it [vN]; clips without
+        // filters pass [N:v:0] through unchanged. Audio is always taken from
+        // [N:a:0?] without filters (apply_filter only supports video in core).
         val filter = buildString {
-            for (i in 0 until n) append("[$i:v:0][$i:a:0?]")
+            val videoLabels = mutableListOf<String>()
+            for (i in 0 until n) {
+                val clip = videoClips[i]
+                val chain = filterChainFor(clip.filters)
+                if (chain != null) {
+                    append("[$i:v:0]$chain[v$i];")
+                    videoLabels += "[v$i]"
+                } else {
+                    videoLabels += "[$i:v:0]"
+                }
+            }
+            for (i in 0 until n) {
+                append(videoLabels[i])
+                append("[$i:a:0?]")
+            }
             append("concat=n=$n:v=1:a=1[outv][outa]")
         }
         args += listOf("-filter_complex", filter)
@@ -166,6 +185,43 @@ class FfmpegVideoEngine(
         } finally {
             runCatching { Files.deleteIfExists(tmp) }
         }
+    }
+
+    /**
+     * Translate core [Filter]s into an ffmpeg filtergraph chain. Returns null
+     * when the clip has no supported filters, so the caller can skip allocating
+     * labels. Unknown filter names are dropped — the core model accepts any
+     * name, but only the names documented on ApplyFilterTool render here.
+     */
+    internal fun filterChainFor(filters: List<Filter>): String? {
+        val segments = filters.mapNotNull { renderFilter(it) }
+        return if (segments.isEmpty()) null else segments.joinToString(",")
+    }
+
+    private fun renderFilter(f: Filter): String? = when (f.name.lowercase()) {
+        // eq brightness range is [-1.0, 1.0]; default 0.
+        "brightness" -> {
+            val v = f.params["intensity"] ?: f.params["value"] ?: 0f
+            "eq=brightness=${formatFloat(v.coerceIn(-1f, 1f))}"
+        }
+        // eq saturation range is [0, 3]; default 1. Accept intensity as 0..1 mapping to 0..2.
+        "saturation" -> {
+            val raw = f.params["intensity"] ?: f.params["value"] ?: 1f
+            val v = if (f.params.containsKey("intensity")) (raw * 2f).coerceIn(0f, 3f) else raw.coerceIn(0f, 3f)
+            "eq=saturation=${formatFloat(v)}"
+        }
+        // gblur sigma; default 0.5. A friendlier knob called radius/intensity maps 0..1 to 0..10.
+        "blur" -> {
+            val sigma = f.params["sigma"] ?: f.params["radius"]?.let { (it * 10f).coerceIn(0f, 50f) } ?: 5f
+            "gblur=sigma=${formatFloat(sigma)}"
+        }
+        "vignette" -> "vignette"
+        else -> null
+    }
+
+    private fun formatFloat(v: Float): String {
+        val s = v.toString()
+        return if (s.endsWith(".0")) s.dropLast(2) else s
     }
 
     private fun parseFrameRate(raw: String): FrameRate? {
