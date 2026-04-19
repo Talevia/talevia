@@ -22,6 +22,7 @@ final class AppContainer {
     /// (all asset paths route through a resolver) on iOS.
     let media: InMemoryMediaStorage
     let engine: AVFoundationVideoEngine
+    let blobWriter: IosFileBlobWriter
     let permissions: DefaultPermissionService
     let tools: ToolRegistry
 
@@ -36,10 +37,12 @@ final class AppContainer {
         self.projects = SqlDelightProjectStore(db: self.db, clock: clock, json: json)
         self.media = InMemoryMediaStorage()
         self.engine = AVFoundationVideoEngine(resolver: self.media)
+        self.blobWriter = IosFileBlobWriter(rootDir: IosFileBlobWriter.defaultRoot())
         self.permissions = DefaultPermissionService(bus: self.bus)
 
         let registry = ToolRegistry()
         registry.register(tool: ImportMediaTool(storage: self.media, engine: self.engine))
+        registry.register(tool: ExtractFrameTool(engine: self.engine, storage: self.media, blobWriter: self.blobWriter))
         registry.register(tool: AddClipTool(store: self.projects, media: self.media))
         registry.register(tool: ReplaceClipTool(store: self.projects, media: self.media))
         registry.register(tool: SplitClipTool(store: self.projects))
@@ -47,6 +50,7 @@ final class AppContainer {
         registry.register(tool: MoveClipTool(store: self.projects))
         registry.register(tool: TrimClipTool(store: self.projects, media: self.media))
         registry.register(tool: SetClipVolumeTool(store: self.projects))
+        registry.register(tool: SetClipTransformTool(store: self.projects))
         registry.register(tool: ExportTool(store: self.projects, engine: self.engine, clock: clock))
         registry.register(tool: ApplyFilterTool(store: self.projects))
         registry.register(tool: ApplyLutTool(store: self.projects, media: self.media))

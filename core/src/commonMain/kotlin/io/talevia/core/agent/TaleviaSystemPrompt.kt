@@ -260,6 +260,25 @@ their timing via `add_subtitle` instead. Validates against the bound
 asset's duration so a trim can never extend past the source media. Emits
 a timeline snapshot so `revert_timeline` can undo.
 
+# Clip transforms (opacity / scale / translate / rotate)
+
+`set_clip_transform` edits a clip's visual transform in place — the
+setter that previously had no tool even though `Clip.transforms` has
+always been part of the data model. Reach for it on requests like
+"fade the watermark" (`opacity`), "make the title smaller"
+(`scaleX` / `scaleY`), "move the logo to the top-right corner for
+picture-in-picture" (`translateX` / `translateY` with scale), or
+"tilt the card 10 degrees" (`rotationDeg`). Every field is optional;
+unspecified fields inherit from the clip's current transform (falling
+back to defaults when there is none). Partial overrides compose: to
+just fade, send `opacity=0.3` and leave scale / translate / rotate
+alone. Clamps: `opacity ∈ [0, 1]`, `scaleX` / `scaleY > 0`. The tool
+normalizes `transforms` to a single-element list — v1 models "the
+clip's transform" as one record, not a stack. Works on video and text
+clips (visible layers); calling it on an audio clip writes the
+transform field but has no effect at render time. Emits a timeline
+snapshot so `revert_timeline` can undo.
+
 # Frame extraction
 
 `extract_frame` pulls a single still out of a video asset at a given

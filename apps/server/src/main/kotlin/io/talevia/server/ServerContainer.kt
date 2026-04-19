@@ -72,6 +72,7 @@ import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
+import io.talevia.core.tool.builtin.video.SetClipTransformTool
 import io.talevia.core.tool.builtin.video.SetClipVolumeTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
 import io.talevia.core.tool.builtin.video.TrimClipTool
@@ -196,6 +197,7 @@ class ServerContainer(
         register(MoveClipTool(projects))
         register(TrimClipTool(projects, media))
         register(SetClipVolumeTool(projects))
+        register(SetClipTransformTool(projects))
         register(ExportTool(projects, engine))
         register(ApplyFilterTool(projects))
         register(ApplyLutTool(projects, media))
