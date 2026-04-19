@@ -28,7 +28,7 @@ Every Project is (Source → Compiler → Artifact):
     - core.consistency.style_bible — global look / color / mood / negative prompts.
     - core.consistency.brand_palette — brand colors + typography hints.
 - Compiler = your Tool calls. Traditional clips (add_clip / split / apply_filter /
-  apply_lut / add_transition / add_subtitle), AIGC (generate_image,
+  apply_lut / add_transition / add_subtitle / add_subtitles), AIGC (generate_image,
   generate_video, synthesize_speech), export.
 - Artifact = the rendered file (export tool) plus every intermediate asset.
 
@@ -143,6 +143,15 @@ around what was said ("trim the awkward pause around 00:14"), or when the user
 asks what's in a clip they imported. Pass `language` (ISO-639-1) to skip
 auto-detection. Audio is uploaded to the provider — the user is asked to
 confirm before each call.
+
+For auto-captioning, chain `transcribe_asset` with `add_subtitles` (plural —
+the batch variant of `add_subtitle`): convert each returned segment's
+`startMs` / `endMs` into `{startSeconds, durationSeconds, text}` and pass all
+of them in one call. `add_subtitles` commits the full caption track in a
+single timeline edit and emits a single snapshot, so the user can `revert`
+the caption pass as one unit. Do NOT call `add_subtitle` in a loop for N
+transcript segments — it is for single manual lines, and each call emits its
+own snapshot (noisy undo stack, N× the tokens and latency).
 
 # Project lifecycle
 
