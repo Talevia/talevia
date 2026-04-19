@@ -1,6 +1,5 @@
 package io.talevia.server
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.talevia.core.SessionId
@@ -9,6 +8,7 @@ import io.talevia.core.agent.SessionTitler
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.db.TaleviaDbFactory
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.metrics.EventBusMetricsSink
@@ -99,8 +99,12 @@ class ServerContainer(
     env: Map<String, String> = System.getenv(),
     providerRegistryOverride: ProviderRegistry? = null,
 ) {
-    val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
-    val db = TaleviaDb(driver)
+    private val opened = TaleviaDbFactory.open(env)
+    val driver = opened.driver
+    val db: TaleviaDb = opened.db
+
+    /** Resolved DB location — `":memory:"` or an absolute filesystem path. Logged at startup. */
+    val dbPath: String = opened.path
     val bus = EventBus(extraBufferCapacity = 1024)
     val sessions: SessionStore = SqlDelightSessionStore(db, bus)
     val projects: ProjectStore = SqlDelightProjectStore(db)

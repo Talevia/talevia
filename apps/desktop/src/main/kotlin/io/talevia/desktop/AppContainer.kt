@@ -1,6 +1,5 @@
 package io.talevia.desktop
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.talevia.core.agent.Agent
@@ -8,6 +7,7 @@ import io.talevia.core.agent.SessionTitler
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.db.TaleviaDbFactory
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.permission.DefaultPermissionRuleset
@@ -87,10 +87,12 @@ import java.io.File
  * UI consumes this via a single instance constructed at App startup.
  */
 class AppContainer(env: Map<String, String> = System.getenv()) {
-    val driver: JdbcSqliteDriver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also {
-        TaleviaDb.Schema.create(it)
-    }
-    val db: TaleviaDb = TaleviaDb(driver)
+    private val opened = TaleviaDbFactory.open(env)
+    val driver = opened.driver
+    val db: TaleviaDb = opened.db
+
+    /** Resolved DB location — `":memory:"` or an absolute filesystem path. Useful for logs. */
+    val dbPath: String = opened.path
     val bus: EventBus = EventBus()
 
     val sessions = SqlDelightSessionStore(db, bus)

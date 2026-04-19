@@ -65,7 +65,7 @@ import kotlin.uuid.Uuid
  */
 @OptIn(ExperimentalUuidApi::class)
 fun main() = application {
-    val container = remember { AppContainer() }
+    val container = remember { AppContainer(desktopEnvWithDefaults()) }
     val projectId = remember { ProjectId(Uuid.random().toString()) }
 
     Window(
@@ -378,6 +378,33 @@ private fun defaultModelFor(providerId: String): String = when (providerId) {
 }
 
 private data class ClipRow(val id: String, val startSeconds: Double, val endSeconds: Double)
+
+/**
+ * Real desktop env, plus defaults for anything the user didn't configure.
+ *
+ * - `TALEVIA_DB_PATH` defaults to `~/.talevia/talevia.db` so projects /
+ *   sessions / source DAGs / snapshots survive app restarts out-of-box.
+ *   Set `TALEVIA_DB_PATH=:memory:` to opt back into ephemeral mode.
+ * - `TALEVIA_MEDIA_DIR` defaults to `~/.talevia/media` so AIGC blobs and
+ *   the asset catalog land in a predictable, persistent spot — without
+ *   this the catalog was in-memory and AssetIds referenced by saved
+ *   projects broke on restart.
+ *
+ * Only fills in defaults the user didn't already set. Anything the user
+ * passed via the environment wins.
+ */
+private fun desktopEnvWithDefaults(): Map<String, String> {
+    val env = System.getenv().toMutableMap()
+    val home = System.getProperty("user.home")
+    val defaultRoot = java.io.File(home, ".talevia")
+    if (env["TALEVIA_DB_PATH"].isNullOrBlank()) {
+        env["TALEVIA_DB_PATH"] = java.io.File(defaultRoot, "talevia.db").absolutePath
+    }
+    if (env["TALEVIA_MEDIA_DIR"].isNullOrBlank()) {
+        env["TALEVIA_MEDIA_DIR"] = java.io.File(defaultRoot, "media").absolutePath
+    }
+    return env
+}
 
 @Composable
 private fun SectionTitle(text: String) {

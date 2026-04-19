@@ -101,6 +101,7 @@ Ignore OpenCode's Effect.js Service/Layer/Context organisation, its TUI, Web UI,
 - **Structured logging**: `io.talevia.core.logging.Logger` — platform-agnostic leveled logger; wire a JVM/iOS sink at the composition root.
 - **Metrics**: the EventBus feeds a `CounterRegistry` in `core.metrics`. Server exposes a Prometheus-style scrape at `GET /metrics`.
 - **Media persistence**: JVM apps (server, desktop) honour `TALEVIA_MEDIA_DIR` — when set, `FileMediaStorage` persists the asset catalog to `<dir>/index.json` via atomic move. Unset → in-memory storage.
+- **DB persistence**: JVM apps open SQLite through `core.db.TaleviaDbFactory`, which honours `TALEVIA_DB_PATH` (absolute path, or `":memory:"` / `"memory"` to force ephemeral). Unset + `TALEVIA_MEDIA_DIR` set → `<TALEVIA_MEDIA_DIR>/talevia.db`. Unset + no media dir → in-memory. The desktop `Main.kt` additionally seeds `TALEVIA_DB_PATH=~/.talevia/talevia.db` and `TALEVIA_MEDIA_DIR=~/.talevia/media` when unset, so projects / sessions / snapshots survive restarts without configuration. Schema versioning uses `PRAGMA user_version`; downgrades are refused.
 
 ## Known incomplete
 
