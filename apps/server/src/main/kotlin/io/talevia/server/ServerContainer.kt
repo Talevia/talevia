@@ -4,6 +4,7 @@ import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.talevia.core.agent.Agent
+import io.talevia.core.agent.SessionTitler
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
 import io.talevia.core.db.TaleviaDb
@@ -82,6 +83,7 @@ class ServerContainer(env: Map<String, String> = System.getenv()) {
                 store = sessions,
                 bus = bus,
             ),
+            titler = SessionTitler(provider = provider, store = sessions),
         )
     }
 

@@ -28,10 +28,14 @@ import io.talevia.core.tool.RegisteredTool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -73,6 +77,20 @@ class Agent(
      */
     private val compactor: Compactor? = null,
     private val compactionTokenThreshold: Int = 120_000,
+    /**
+     * Optional session titler. When set, the Agent fires title generation on the
+     * [backgroundScope] the first time a session receives user input. A placeholder
+     * title (`"Untitled"`, `"New session"`, blank) is required — caller-provided
+     * titles are never overwritten.
+     */
+    private val titler: SessionTitler? = null,
+    /**
+     * Scope used for fire-and-forget work that must outlive a single [run] but
+     * can be cancelled when the owning Agent is thrown away. Defaults to an
+     * independent supervisor scope; composition roots that already manage a
+     * long-lived scope may wire their own.
+     */
+    private val backgroundScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) {
 
     /**
@@ -143,6 +161,10 @@ class Agent(
     private suspend fun runLoop(input: RunInput, handle: RunHandle): Message.Assistant {
         val now = clock.now()
 
+        // First-turn check has to read the store BEFORE we append this turn's user
+        // message so "no prior user messages" really means "session is empty".
+        val isFirstTurn = store.listMessages(input.sessionId).none { it is Message.User }
+
         // Append user message + a single text part to record the prompt.
         val userMsg = Message.User(
             id = MessageId(Uuid.random().toString()),
@@ -161,6 +183,12 @@ class Agent(
                 text = input.text,
             ),
         )
+
+        if (isFirstTurn && titler != null) {
+            backgroundScope.launch {
+                runCatching { titler.generate(input.sessionId, input.text) }
+            }
+        }
 
         var latestAssistant: Message.Assistant? = null
         var step = 0
