@@ -5,6 +5,12 @@ import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
+import io.talevia.core.platform.RenderProgress
+import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.takeWhile
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
@@ -124,3 +130,50 @@ fun Timeline.toIosVideoPlan(): List<IosVideoClipPlan> =
                     )
                 }
         }
+
+// =============================================================================
+// SKIE bridging: Swift-driven render Flow adapter
+// =============================================================================
+//
+// `AVFoundationVideoEngine.render(...)` runs on the Swift side but must return
+// a Kotlin `Flow<RenderProgress>` (the shape the Core agent loop and Compose
+// UIs depend on). SKIE can auto-bridge a Kotlin `Flow` into a
+// `SkieSwiftFlow<…>` and back, but Swift can't easily *construct* a Kotlin
+// Flow on its own — there's no public constructor for `SkieSwiftFlow`.
+//
+// [SwiftRenderFlowAdapter] closes the loop: the Swift code creates one, pushes
+// progress events via [tryEmit], and calls [close] when the export session
+// reports a terminal state. The adapter exposes a cold `Flow` that completes
+// when `close()` is called (via `takeWhile`) so downstream collectors finish
+// naturally — no manual cancellation dance required.
+//
+// Buffered capacity of 32 is ample for the 10 Hz progress poll in B4 — frames
+// aren't load-bearing (the terminal Completed/Failed event is what matters),
+// and `DROP_OLDEST` means a slow consumer can't block the exporter.
+class SwiftRenderFlowAdapter {
+    private val sentinelCompleted = RenderProgress.Completed(jobId = "__swift_adapter_eof__", outputPath = "")
+    private val flow = MutableSharedFlow<RenderProgress>(
+        replay = 0,
+        extraBufferCapacity = 32,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+
+    /** Push an event into the flow. Returns true if the event was buffered. */
+    fun tryEmit(event: RenderProgress): Boolean = flow.tryEmit(event)
+
+    /**
+     * Terminate the flow. Downstream collectors exit after this (the flow's
+     * own `takeWhile` drops a sentinel Completed/"__swift_adapter_eof__").
+     */
+    fun close() {
+        flow.tryEmit(sentinelCompleted)
+    }
+
+    /**
+     * The cold Flow Swift returns from `render`. Ends when [close] is called.
+     * The terminating sentinel is filtered out so callers only see the events
+     * the Swift side explicitly emitted.
+     */
+    fun asFlow(): Flow<RenderProgress> =
+        flow.asSharedFlow().takeWhile { it !== sentinelCompleted }
+}
