@@ -426,6 +426,7 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
                 when (tab) {
                     RightTab.Chat -> ChatPanel(container = container, projectId = projectId, log = log)
                     RightTab.Source -> SourcePanel(container = container, projectId = projectId, log = log)
+                    RightTab.Snapshots -> SnapshotPanel(container = container, projectId = projectId, log = log)
                     RightTab.Lockfile -> LockfilePanel(container = container, projectId = projectId, log = log)
                 }
                 Spacer(Modifier.height(12.dp))
@@ -821,6 +822,7 @@ private fun openExternallyIfExists(path: String) {
 private enum class RightTab(val label: String) {
     Chat("Chat"),
     Source("Source"),
+    Snapshots("Snapshots"),
     Lockfile("Lockfile"),
 }
 
