@@ -2,6 +2,7 @@ package io.talevia.core.session
 
 import io.talevia.core.MessageId
 import io.talevia.core.PartId
+import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import kotlinx.coroutines.flow.Flow
 
@@ -16,6 +17,13 @@ interface SessionStore {
     suspend fun updateSession(session: Session)
     suspend fun getSession(id: SessionId): Session?
     suspend fun deleteSession(id: SessionId)
+
+    /**
+     * List non-archived sessions, newest first. Optionally filter to a single
+     * project. Returning the full [Session] model is cheap because rows are small
+     * and fit in memory; paginate once we actually hit a performance ceiling.
+     */
+    suspend fun listSessions(projectId: ProjectId? = null): List<Session>
 
     suspend fun appendMessage(message: Message)
     suspend fun updateMessage(message: Message)

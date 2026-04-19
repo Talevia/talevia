@@ -46,11 +46,25 @@ class ServerSmokeTest {
     }
 
     @Test
-    fun listingSessionsRespondsOk() = testApplication {
+    fun listingSessionsReturnsCreatedSessions() = testApplication {
         application { serverModule(ServerContainer()) }
         val client = createClient { install(ContentNegotiation) { json() } }
-        val resp = client.get("/sessions")
-        assertEquals(HttpStatusCode.OK, resp.status)
+
+        client.post("/sessions") {
+            contentType(ContentType.Application.Json)
+            setBody(CreateSessionRequest(projectId = "p-1", title = "alpha"))
+        }
+        client.post("/sessions") {
+            contentType(ContentType.Application.Json)
+            setBody(CreateSessionRequest(projectId = "p-2", title = "beta"))
+        }
+
+        val all = client.get("/sessions").body<List<SessionSummary>>()
+        assertEquals(2, all.size)
+
+        val filtered = client.get("/sessions?projectId=p-1").body<List<SessionSummary>>()
+        assertEquals(1, filtered.size)
+        assertEquals("alpha", filtered.single().title)
     }
 
     @Test

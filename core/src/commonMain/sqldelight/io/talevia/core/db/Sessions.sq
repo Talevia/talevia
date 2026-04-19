@@ -21,6 +21,9 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 selectById:
 SELECT * FROM Sessions WHERE id = ?;
 
+selectAll:
+SELECT * FROM Sessions WHERE archived = 0 ORDER BY time_updated DESC;
+
 selectByProject:
 SELECT * FROM Sessions WHERE project_id = ? AND archived = 0 ORDER BY time_updated DESC;
 

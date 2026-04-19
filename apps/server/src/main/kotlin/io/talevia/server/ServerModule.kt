@@ -106,8 +106,9 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
         }
 
         get("/sessions") {
-            // No listAll on store yet (later milestone); empty placeholder.
-            call.respond(emptyList<String>())
+            val projectId = call.request.queryParameters["projectId"]?.let(::ProjectId)
+            val sessions = container.sessions.listSessions(projectId)
+            call.respond(sessions.map(SessionSummary::from))
         }
 
         post("/sessions/{id}/parts") {
@@ -226,6 +227,26 @@ private fun eventName(e: BusEvent): String = when (e) {
     val title: String? = null,
     val permissionRules: List<PermissionRule>? = null,
 )
+
+@Serializable data class SessionSummary(
+    val id: String,
+    val projectId: String,
+    val title: String,
+    val parentId: String? = null,
+    val createdAt: Long,
+    val updatedAt: Long,
+) {
+    companion object {
+        fun from(s: Session): SessionSummary = SessionSummary(
+            id = s.id.value,
+            projectId = s.projectId.value,
+            title = s.title,
+            parentId = s.parentId?.value,
+            createdAt = s.createdAt.toEpochMilliseconds(),
+            updatedAt = s.updatedAt.toEpochMilliseconds(),
+        )
+    }
+}
 @Serializable data class CreateSessionResponse(val sessionId: String)
 @Serializable data class AppendTextRequest(
     val text: String,

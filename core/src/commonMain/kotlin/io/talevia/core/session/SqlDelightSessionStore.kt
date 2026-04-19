@@ -3,6 +3,7 @@ package io.talevia.core.session
 import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.PartId
+import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
@@ -62,6 +63,12 @@ class SqlDelightSessionStore(
     override suspend fun deleteSession(id: SessionId) {
         db.sessionsQueries.delete(id.value)
         bus.publish(BusEvent.SessionDeleted(id))
+    }
+
+    override suspend fun listSessions(projectId: ProjectId?): List<Session> {
+        val rows = if (projectId == null) db.sessionsQueries.selectAll().executeAsList()
+        else db.sessionsQueries.selectByProject(projectId.value).executeAsList()
+        return rows.map { json.decodeFromString(Session.serializer(), it.data_) }
     }
 
     override suspend fun appendMessage(message: Message) {
