@@ -25,15 +25,18 @@ import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.VideoEngine
+import io.talevia.core.platform.VideoGenEngine
 import io.talevia.core.provider.LlmProvider
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.provider.openai.OpenAiImageGenEngine
+import io.talevia.core.provider.openai.OpenAiSoraVideoGenEngine
 import io.talevia.core.provider.openai.OpenAiTtsEngine
 import io.talevia.core.provider.openai.OpenAiWhisperEngine
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
+import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
 import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
 import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
@@ -60,6 +63,7 @@ import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
+import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
@@ -155,6 +159,15 @@ class ServerContainer(
         ?.takeIf { it.isNotBlank() }
         ?.let { OpenAiTtsEngine(httpClient, it) }
 
+    /**
+     * Sora-backed text-to-video engine. Same conditional pattern — present only
+     * when `OPENAI_API_KEY` is set; deployments without it don't expose
+     * `generate_video`.
+     */
+    val videoGen: VideoGenEngine? = env["OPENAI_API_KEY"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { OpenAiSoraVideoGenEngine(httpClient, it) }
+
     /** JVM blob writer backing AIGC tools. */
     val blobWriter: MediaBlobWriter = FileBlobWriter(mediaRootDir)
 
@@ -164,6 +177,7 @@ class ServerContainer(
         register(ReplaceClipTool(projects, media))
         register(SplitClipTool(projects))
         register(RemoveClipTool(projects))
+        register(MoveClipTool(projects))
         register(ExportTool(projects, engine))
         register(ApplyFilterTool(projects))
         register(ApplyLutTool(projects, media))
@@ -188,6 +202,7 @@ class ServerContainer(
         register(RemoveSourceNodeTool(projects))
         register(ImportSourceNodeTool(projects))
         imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
+        videoGen?.let { register(GenerateVideoTool(it, media, blobWriter, projects)) }
         tts?.let { register(SynthesizeSpeechTool(it, media, blobWriter, projects)) }
         asr?.let { register(TranscribeAssetTool(it, media)) }
     }

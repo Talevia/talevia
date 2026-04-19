@@ -36,6 +36,8 @@ class TaleviaSystemPromptTest {
         "transcribe_asset",
         // AIGC audio lane — TTS pairs with ASR for the round-trip.
         "synthesize_speech",
+        // AIGC video lane (VISION §2 "文生视频") — Sora-backed text-to-video.
+        "generate_video",
         // Character-voice pinning (VISION §5.5 audio lane) — overrides explicit voice.
         "voiceId",
         // Stale-clip detection — the lockfile-driven query that closes the
@@ -45,6 +47,8 @@ class TaleviaSystemPromptTest {
         "replace_clip",
         // The missing scalpel — clip deletion sits alongside split / replace.
         "remove_clip",
+        // The ripple-delete chain partner — same-track reposition by id.
+        "move_clip",
         // Project-level named snapshots (VISION §3.4) — survive across chat sessions.
         "save_project_snapshot",
         "list_project_snapshots",
