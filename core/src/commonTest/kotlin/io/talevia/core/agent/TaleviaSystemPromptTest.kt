@@ -22,6 +22,10 @@ class TaleviaSystemPromptTest {
         "character_ref",
         "style_bible",
         "brand_palette",
+        // Source-mutation tooling teaches the model how to *create* the bindings it
+        // is told to pass — the prompt-fold logic is dead without these tools.
+        "define_character_ref",
+        "list_source_nodes",
         // Seed / lockfile discipline (VISION §3.1)
         "seed",
         "cacheHit",

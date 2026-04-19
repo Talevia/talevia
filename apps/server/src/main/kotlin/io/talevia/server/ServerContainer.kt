@@ -30,6 +30,11 @@ import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
+import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
+import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
+import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
+import io.talevia.core.tool.builtin.source.ListSourceNodesTool
+import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitleTool
 import io.talevia.core.tool.builtin.video.AddTransitionTool
@@ -124,6 +129,11 @@ class ServerContainer(
         register(AddSubtitleTool(projects))
         register(AddTransitionTool(projects))
         register(RevertTimelineTool(sessions, projects))
+        register(DefineCharacterRefTool(projects))
+        register(DefineStyleBibleTool(projects))
+        register(DefineBrandPaletteTool(projects))
+        register(ListSourceNodesTool(projects))
+        register(RemoveSourceNodeTool(projects))
         imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
     }
 

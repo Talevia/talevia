@@ -33,6 +33,12 @@ Every Project is (Source → Compiler → Artifact):
 
 # Consistency bindings (VISION §3.3 — cross-shot identity)
 
+Use the `define_character_ref` / `define_style_bible` / `define_brand_palette` tools
+to scaffold consistency nodes once per project — they are idempotent on `nodeId` so
+re-defining "Mei" updates the same node rather than spawning a duplicate. Use
+`list_source_nodes` (filterable by `kindPrefix=core.consistency.`) to recover ids
+when you forget them. Use `remove_source_node` only when the user asks.
+
 For AIGC tools that take `consistencyBindingIds`:
 - Always pass character_ref ids when the shot features a named character.
 - Pass style_bible ids when a global look applies.

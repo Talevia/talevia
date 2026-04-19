@@ -160,14 +160,19 @@ class ServerSmokeTest {
         }
         assertEquals(HttpStatusCode.Accepted, resp.status)
 
+        // The agent fires a request through the requested provider; the SessionTitler
+        // (also wired to the same provider in ServerContainer) may fire a second one
+        // shortly after for the placeholder-titled session. Both are valid traffic to
+        // openai — the test's job is to prove anthropic (the default) saw nothing and
+        // openai's first request matches the requested model.
         for (i in 0 until 100) {
-            if (openai.requests.size == 1) break
+            if (openai.requests.isNotEmpty()) break
             delay(10)
         }
 
         assertEquals(0, anthropic.requests.size, "default provider should not receive the request")
-        assertEquals(1, openai.requests.size)
-        assertEquals("openai", openai.requests.single().model.providerId)
+        assertTrue(openai.requests.size >= 1, "openai should have received at least one request")
+        assertEquals("openai", openai.requests.first().model.providerId)
     }
 
     @Test

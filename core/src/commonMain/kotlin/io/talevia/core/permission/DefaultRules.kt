@@ -13,6 +13,10 @@ object DefaultPermissionRuleset {
         PermissionRule(permission = "echo", pattern = "*", action = PermissionAction.ALLOW),
         PermissionRule(permission = "media.import", pattern = "*", action = PermissionAction.ALLOW),
         PermissionRule(permission = "timeline.write", pattern = "*", action = PermissionAction.ALLOW),
+        // Source-graph reads/writes are local-only state mutations (no I/O, no cost) — silent
+        // by default so the agent can scaffold consistency bindings without prompting.
+        PermissionRule(permission = "source.read", pattern = "*", action = PermissionAction.ALLOW),
+        PermissionRule(permission = "source.write", pattern = "*", action = PermissionAction.ALLOW),
 
         // Side-effectful — always confirm
         PermissionRule(permission = "media.export.write", pattern = "*", action = PermissionAction.ASK),
