@@ -96,8 +96,7 @@ Ignore OpenCode's Effect.js Service/Layer/Context organisation, its TUI, Web UI,
 ## Known incomplete
 
 These are visible in code but not yet wired end-to-end (expected follow-ups, not bugs):
-- **iOS Swift side** — `AVFoundationVideoEngine.swift` is a compile-only stub. SKIE bridging for value classes / `fun interface` / `Duration` needs a small iosMain helper before the real implementation can land. See `docs/IOS_INTEGRATION.md`.
-- **Android Media3 filter / transition rendering** — `Media3VideoEngine` handles cut/stitch; filter and transition passes still fall back to no-op. (FFmpeg got filter rendering; Android/Media3 lags behind.)
+- **Android Media3 filter / transition rendering** — `Media3VideoEngine` handles cut/stitch; filter and transition passes still fall back to no-op. The iOS `AVFoundationVideoEngine` has the same gap by design (same scope). FFmpeg JVM got filter rendering; both native engines lag behind.
 
 If a task touches one of these, expect to wire it up rather than work around it.
 

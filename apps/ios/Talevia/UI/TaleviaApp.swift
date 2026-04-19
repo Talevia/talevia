@@ -10,27 +10,32 @@ struct TaleviaApp: App {
     }
 }
 
-/// **Status (M3 / workaround pass):** compile-verification scaffold. The app
-/// links against `TaleviaCore`; full composition root (SQLDelight driver
-/// wrapping, tool registry wiring) needs iOS-side iteration — the value-class
-/// branded ID types (`SessionId`, `ProjectId`, `AssetId`, ...) don't export
-/// cleanly through ObjC so Swift needs a small typealias shim before it can
-/// construct them. See `docs/IOS_INTEGRATION.md` §5.
+/// Minimal status-screen scaffold. The composition root (`AppContainer.shared`)
+/// builds the Kotlin graph — SQLDelight driver, stores, `ToolRegistry`, and the
+/// AVFoundation-backed `VideoEngine` — so exercising it here also serves as a
+/// symbol-reachability smoke check for the Kotlin/Native framework.
+///
+/// A real editor UI lands later; this screen intentionally stays one-view so
+/// the framework link can be verified at launch without a full UX surface.
 struct ContentView: View {
     @State private var coreStatus: String = "loading..."
 
     var body: some View {
         VStack(spacing: 16) {
             Text("Talevia").font(.largeTitle).bold()
-            Text("M3 iOS scaffold — framework linked").font(.caption)
+            Text("iOS scaffold — framework linked").font(.caption)
             Divider()
             Text(coreStatus).font(.system(.caption, design: .monospaced))
         }
         .padding()
-        .onAppear {
-            // Exercise one core symbol that DOES round-trip cleanly (no value classes).
+        .task { @MainActor in
+            let container = AppContainer.shared
             let ruleCount = DefaultPermissionRuleset.shared.rules.count
-            coreStatus = "core reachable · default permission rules: \(ruleCount)"
+            let toolCount = container.tools.all().count
+            // Reference the concrete engine type so the linker keeps the
+            // symbol live in Debug builds with dead-code stripping.
+            let engineType = String(describing: type(of: container.engine))
+            coreStatus = "core ok · rules=\(ruleCount) · tools=\(toolCount) · engine=\(engineType)"
         }
     }
 }
