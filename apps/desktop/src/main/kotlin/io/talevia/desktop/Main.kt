@@ -48,6 +48,7 @@ import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.Timeline
+import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
 import io.talevia.core.session.Session
@@ -507,6 +508,9 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
     val chatLines = remember(projectId) { mutableStateListOf<ChatLine>() }
     var prompt by remember(projectId) { mutableStateOf("") }
     var busy by remember(projectId) { mutableStateOf(false) }
+    var sessionUsageIn by remember(projectId) { mutableStateOf(0L) }
+    var sessionUsageOut by remember(projectId) { mutableStateOf(0L) }
+    var sessionCostUsd by remember(projectId) { mutableStateOf(0.0) }
 
     // Bootstrap: prefer the most-recent persisted session for this project;
     // otherwise mint a fresh one and persist it so Agent.run has a row to
@@ -609,6 +613,23 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
             val loaded = runCatching { container.sessions.listSessions(projectId).filter { !it.archived } }
                 .getOrElse { emptyList() }
             projectSessions.clear(); projectSessions.addAll(loaded.sortedByDescending { it.updatedAt })
+        }
+    }
+
+    // Recompute session token/cost totals whenever the active session or any of its
+    // messages change. Keyed on sessionId.value so switching sessions resets the counters.
+    LaunchedEffect(sessionId.value) {
+        fun recompute(msgs: List<Message>) {
+            val asstMsgs = msgs.filterIsInstance<Message.Assistant>()
+            sessionUsageIn = asstMsgs.sumOf { it.tokens.input }
+            sessionUsageOut = asstMsgs.sumOf { it.tokens.output }
+            sessionCostUsd = asstMsgs.sumOf { it.cost.usd }
+        }
+        runCatching { recompute(container.sessions.listMessages(sessionId.value)) }
+        container.bus.subscribe<BusEvent.MessageUpdated>().collect { ev ->
+            if (ev.sessionId == sessionId.value) {
+                runCatching { recompute(container.sessions.listMessages(sessionId.value)) }
+            }
         }
     }
 
@@ -746,6 +767,20 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
         },
         modifier = Modifier.fillMaxWidth(),
     ) { Text(if (busy) "Thinking…" else "Send") }
+    Spacer(Modifier.height(4.dp))
+    val costLabel = if (sessionUsageIn == 0L && sessionUsageOut == 0L) "" else {
+        val costStr = if (sessionCostUsd == 0.0) "" else " · \$${"%.5f".format(sessionCostUsd)}"
+        "${sessionUsageIn} in · ${sessionUsageOut} out$costStr"
+    }
+    if (costLabel.isNotEmpty()) {
+        Text(
+            costLabel,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.Gray,
+            fontFamily = FontFamily.Monospace,
+            modifier = Modifier.fillMaxWidth(),
+        )
+    }
 }
 
 private data class ChatLine(
