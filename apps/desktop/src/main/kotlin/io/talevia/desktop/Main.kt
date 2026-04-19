@@ -343,15 +343,31 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
     }
 
     // Subscribe to part updates for this session and render them as chat lines.
+    // For tool completions we also try to extract an openable file path so
+    // the user can jump straight to the artefact (export / generate_image /
+    // extract_frame / upscale_asset / auto_subtitle_clip — anything that
+    // produces an assetId or an outputPath).
     remember {
         scope.launch {
             container.bus.subscribe<BusEvent.PartUpdated>()
                 .filterIsInstance<BusEvent.PartUpdated>()
                 .collect { ev ->
                     if (ev.sessionId != sessionId) return@collect
-                    val line = when (val p = ev.part) {
+                    val line: ChatLine? = when (val p = ev.part) {
                         is Part.Text -> ChatLine("assistant", p.text.take(400))
-                        is Part.Tool -> ChatLine("tool/${p.toolId}", "→ ${p.state::class.simpleName}")
+                        is Part.Tool -> {
+                            val state = p.state
+                            val path = if (state is io.talevia.core.session.ToolState.Completed) {
+                                runCatching { resolveOpenablePath(container, state.data) }.getOrNull()
+                            } else {
+                                null
+                            }
+                            ChatLine(
+                                role = "tool/${p.toolId}",
+                                text = "→ ${p.state::class.simpleName}" + (path?.let { " · $it" } ?: ""),
+                                openPath = path,
+                            )
+                        }
                         is Part.RenderProgress -> null  // already surfaced in centre panel
                         is Part.TimelineSnapshot -> null
                         else -> null
@@ -364,9 +380,17 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
     SectionTitle("Chat")
     LazyColumn(modifier = Modifier.fillMaxWidth().height(220.dp)) {
         items(chatLines) { line ->
-            Row(modifier = Modifier.padding(vertical = 2.dp)) {
+            Row(
+                modifier = Modifier.padding(vertical = 2.dp),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
                 Text("${line.role}: ", fontFamily = FontFamily.Monospace, color = Color(0xFF3B5BA9))
-                Text(line.text, fontFamily = FontFamily.Monospace)
+                Text(line.text, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
+                if (line.openPath != null) {
+                    androidx.compose.material3.TextButton(
+                        onClick = { openExternallyIfExists(line.openPath) },
+                    ) { Text("Open") }
+                }
             }
         }
     }
@@ -410,12 +434,53 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
     ) { Text(if (busy) "Thinking…" else "Send") }
 }
 
-private data class ChatLine(val role: String, val text: String)
+private data class ChatLine(
+    val role: String,
+    val text: String,
+    /** Optional absolute filesystem path to an artefact the user can open from the row. */
+    val openPath: String? = null,
+)
 
 private fun defaultModelFor(providerId: String): String = when (providerId) {
     "anthropic" -> "claude-opus-4-7"
     "openai" -> "gpt-4o"
     else -> "default"
+}
+
+/**
+ * Best-effort extraction of an openable filesystem path from a tool's result
+ * JSON. Looks first for `outputPath` (ExportTool produces this), then for
+ * asset-id fields (generate_image / _video / _music / extract_frame /
+ * upscale_asset / synthesize_speech) and resolves them via MediaStorage.
+ * Returns null when the tool output has no natural file artefact (e.g.
+ * `apply_filter`, `add_clip`, `define_character_ref`).
+ */
+private suspend fun resolveOpenablePath(
+    container: AppContainer,
+    data: kotlinx.serialization.json.JsonElement,
+): String? {
+    val obj = (data as? kotlinx.serialization.json.JsonObject) ?: return null
+    obj["outputPath"]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull()?.let { p -> return p } }
+    val assetKeys = listOf("upscaledAssetId", "frameAssetId", "assetId", "newAssetId")
+    for (key in assetKeys) {
+        val idStr = (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull() ?: continue
+        runCatching {
+            return container.media.resolve(io.talevia.core.AssetId(idStr))
+        }
+    }
+    return null
+}
+
+private fun kotlinx.serialization.json.JsonPrimitive.contentOrNull(): String? =
+    if (isString || !content.contains('"')) content.takeIf { it.isNotBlank() } else null
+
+private fun openExternallyIfExists(path: String) {
+    runCatching {
+        val file = java.io.File(path)
+        if (file.exists() && java.awt.Desktop.isDesktopSupported()) {
+            java.awt.Desktop.getDesktop().open(file)
+        }
+    }
 }
 
 private enum class RightTab(val label: String) {
