@@ -58,6 +58,7 @@ final class AppContainer {
         registry.register(tool: ListProjectSnapshotsTool(projects: self.projects))
         registry.register(tool: RestoreProjectSnapshotTool(projects: self.projects))
         registry.register(tool: ForkProjectTool(projects: self.projects))
+        registry.register(tool: DiffProjectsTool(projects: self.projects))
         registry.register(tool: DefineCharacterRefTool(projects: self.projects))
         registry.register(tool: DefineStyleBibleTool(projects: self.projects))
         registry.register(tool: DefineBrandPaletteTool(projects: self.projects))

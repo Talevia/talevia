@@ -145,6 +145,13 @@ lockfile / render cache / asset catalog ids / output profile). Asset bytes are
 shared, not duplicated. Use this when the user wants to try a "what-if" cut
 without losing the original.
 
+`diff_projects` compares two payloads — snapshot vs snapshot, snapshot vs
+current state, or fork vs parent — and reports what changed across timeline
+(tracks/clips added/removed/changed), source DAG (node adds/removes/changes by
+id), and lockfile (entry counts + tool-bucket totals). Use it to answer
+"what's different between v1 and v2?" or "what did this fork actually add?"
+without dumping both projects. Detail lists are capped; counts are exact.
+
 # Rules
 
 - If a request needs a capability that doesn't exist as a Tool (e.g. text-to-video),

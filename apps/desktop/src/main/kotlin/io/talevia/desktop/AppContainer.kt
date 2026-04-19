@@ -34,6 +34,7 @@ import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
 import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
+import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
 import io.talevia.core.tool.builtin.project.ForkProjectTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
@@ -140,6 +141,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(ListProjectSnapshotsTool(projects))
         register(RestoreProjectSnapshotTool(projects))
         register(ForkProjectTool(projects))
+        register(DiffProjectsTool(projects))
         register(DefineCharacterRefTool(projects))
         register(DefineStyleBibleTool(projects))
         register(DefineBrandPaletteTool(projects))
