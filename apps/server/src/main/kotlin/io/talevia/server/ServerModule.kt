@@ -360,18 +360,24 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
         }
 
         /**
-         * GET /metrics — prometheus-style text dump of the counter registry.
-         * Format: `talevia_<counter_with_underscores> <value>` per line.
+         * GET /metrics — prometheus-style text dump of counters and latency histograms.
+         *
+         * Counters: `talevia_<name_with_underscores> <value>`
+         * Histograms: `talevia_<name>_p50/p95/p99 <ms>` (agent.run.ms, tool.*.ms)
          */
         get("/metrics") {
-            val snapshot = container.metrics.snapshot().toSortedMap()
+            val counters = container.metrics.snapshot().toSortedMap()
+            val histograms = container.metrics.histogramSnapshot().toSortedMap()
             val body = buildString {
-                snapshot.forEach { (k, v) ->
-                    append("talevia_")
-                    append(k.replace('.', '_'))
-                    append(' ')
-                    append(v)
-                    append('\n')
+                counters.forEach { (k, v) ->
+                    append("talevia_"); append(k.replace('.', '_')); append(' '); append(v); append('\n')
+                }
+                histograms.forEach { (k, stats) ->
+                    val base = "talevia_${k.replace('.', '_')}"
+                    append("${base}_count ${stats.count}\n")
+                    append("${base}_p50 ${stats.p50}\n")
+                    append("${base}_p95 ${stats.p95}\n")
+                    append("${base}_p99 ${stats.p99}\n")
                 }
             }
             call.respondText(body, io.ktor.http.ContentType.Text.Plain)

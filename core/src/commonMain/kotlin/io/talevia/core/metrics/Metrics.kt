@@ -24,20 +24,54 @@ class MetricsRegistry {
     private val mutex = Mutex()
     private val counters = mutableMapOf<String, Long>()
 
+    // Histograms: store all raw observations (ms) and sort lazily for percentile queries.
+    private val histograms = mutableMapOf<String, MutableList<Long>>()
+
     suspend fun increment(name: String, by: Long = 1L) {
         mutex.withLock { counters[name] = (counters[name] ?: 0L) + by }
+    }
+
+    /** Record a latency observation (in milliseconds) for the named histogram. */
+    suspend fun observe(name: String, ms: Long) {
+        mutex.withLock { histograms.getOrPut(name) { mutableListOf() }.add(ms) }
     }
 
     suspend fun snapshot(): Map<String, Long> =
         mutex.withLock { counters.toMap() }
 
+    /** Return P50/P95/P99 for every histogram that has at least one observation. */
+    suspend fun histogramSnapshot(): Map<String, HistogramStats> = mutex.withLock {
+        histograms.mapValues { (_, obs) ->
+            val sorted = obs.sorted()
+            HistogramStats(
+                count = sorted.size.toLong(),
+                p50 = sorted.percentile(50),
+                p95 = sorted.percentile(95),
+                p99 = sorted.percentile(99),
+            )
+        }
+    }
+
     suspend fun get(name: String): Long =
         mutex.withLock { counters[name] ?: 0L }
 
     suspend fun reset() {
-        mutex.withLock { counters.clear() }
+        mutex.withLock { counters.clear(); histograms.clear() }
+    }
+
+    private fun List<Long>.percentile(pct: Int): Long {
+        if (isEmpty()) return 0L
+        val idx = ((pct / 100.0) * (size - 1)).toInt().coerceIn(0, size - 1)
+        return this[idx]
     }
 }
+
+data class HistogramStats(
+    val count: Long,
+    val p50: Long,
+    val p95: Long,
+    val p99: Long,
+)
 
 /**
  * Translate [BusEvent]s into counter increments. Listens forever on the given

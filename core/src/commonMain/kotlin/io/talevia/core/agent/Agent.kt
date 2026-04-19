@@ -8,6 +8,7 @@ import io.talevia.core.SessionId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
+import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.compaction.TokenEstimator
 import io.talevia.core.permission.PermissionRequest
 import io.talevia.core.permission.PermissionRule
@@ -92,6 +93,11 @@ class Agent(
      * long-lived scope may wire their own.
      */
     private val backgroundScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    /**
+     * Optional latency registry. When provided, [run] records total agent-run latency
+     * under `agent.run.ms` and each tool dispatch under `tool.<id>.ms`.
+     */
+    private val metrics: MetricsRegistry? = null,
 ) {
 
     /**
@@ -133,6 +139,7 @@ class Agent(
             inflight[input.sessionId] = handle
         }
 
+        val runStart = clock.now()
         try {
             return runLoop(input, handle)
         } catch (e: CancellationException) {
@@ -142,6 +149,7 @@ class Agent(
             }
             throw e
         } finally {
+            metrics?.observe("agent.run.ms", (clock.now() - runStart).inWholeMilliseconds)
             inflightMutex.withLock { inflight.remove(input.sessionId) }
         }
     }
@@ -390,7 +398,9 @@ class Agent(
             messages = history,
         )
 
+        val toolStart = clock.now()
         val outcome = runCatching { tool.dispatch(event.input, ctx) }
+        metrics?.observe("tool.${event.toolId}.ms", (clock.now() - toolStart).inWholeMilliseconds)
         outcome.fold(
             onSuccess = { result ->
                 val data = tool.encodeOutput(result)
