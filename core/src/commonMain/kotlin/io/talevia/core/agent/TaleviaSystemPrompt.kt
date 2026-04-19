@@ -41,6 +41,16 @@ re-defining "Mei" updates the same node rather than spawning a duplicate. Use
 `list_source_nodes` (filterable by `kindPrefix=core.consistency.`) to recover ids
 when you forget them. Use `remove_source_node` only when the user asks.
 
+For surgical edits on an existing node ("change Mei's hair to red", "swap the LUT
+on the style bible", "set red as primary in the palette") prefer the
+`update_character_ref` / `update_style_bible` / `update_brand_palette` tools over
+re-defining. Update tools take `nodeId` plus only the fields you want to patch;
+unspecified fields inherit from the current node. Use `""` on optional string
+fields to clear them, `[]` on list fields to clear. `update_character_ref` has
+`clearLoraPin=true` to drop a LoRA pin. All update tools bump `contentHash` the
+same way a redefinition does, so downstream clips go stale and `find_stale_clips`
+will surface them for regeneration.
+
 For AIGC tools that take `consistencyBindingIds`:
 - Always pass character_ref ids when the shot features a named character.
 - Pass style_bible ids when a global look applies.

@@ -59,6 +59,9 @@ import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
 import io.talevia.core.tool.builtin.source.ImportSourceNodeTool
 import io.talevia.core.tool.builtin.source.ListSourceNodesTool
 import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
+import io.talevia.core.tool.builtin.source.UpdateBrandPaletteTool
+import io.talevia.core.tool.builtin.source.UpdateCharacterRefTool
+import io.talevia.core.tool.builtin.source.UpdateStyleBibleTool
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitleTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
@@ -219,8 +222,11 @@ class ServerContainer(
         register(ForkProjectTool(projects))
         register(DiffProjectsTool(projects))
         register(DefineCharacterRefTool(projects))
+        register(UpdateCharacterRefTool(projects))
         register(DefineStyleBibleTool(projects))
+        register(UpdateStyleBibleTool(projects))
         register(DefineBrandPaletteTool(projects))
+        register(UpdateBrandPaletteTool(projects))
         register(ListSourceNodesTool(projects))
         register(RemoveSourceNodeTool(projects))
         register(ImportSourceNodeTool(projects))
