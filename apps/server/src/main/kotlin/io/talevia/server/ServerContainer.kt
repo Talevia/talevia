@@ -22,6 +22,7 @@ import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.InMemorySecretStore
 import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.MediaStorage
+import io.talevia.core.platform.MusicGenEngine
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.VideoEngine
@@ -38,6 +39,7 @@ import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
+import io.talevia.core.tool.builtin.aigc.GenerateMusicTool
 import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
 import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
 import io.talevia.core.tool.builtin.ml.DescribeAssetTool
@@ -192,6 +194,14 @@ class ServerContainer(
         ?.takeIf { it.isNotBlank() }
         ?.let { OpenAiVisionEngine(httpClient, it) }
 
+    /**
+     * Music-generation engine (VISION §2). No mainstream public API exposes
+     * MusicGen / Suno / Udio today, so this slot stays null until a concrete
+     * [MusicGenEngine] is plugged in. The `generate_music` tool stays
+     * unregistered when null — same gating pattern as the other AIGC lanes.
+     */
+    val musicGen: MusicGenEngine? = null
+
     /** JVM blob writer backing AIGC tools. */
     val blobWriter: MediaBlobWriter = FileBlobWriter(mediaRootDir)
 
@@ -236,6 +246,7 @@ class ServerContainer(
         register(ImportSourceNodeTool(projects))
         imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
         videoGen?.let { register(GenerateVideoTool(it, media, blobWriter, projects)) }
+        musicGen?.let { register(GenerateMusicTool(it, media, blobWriter, projects)) }
         tts?.let { register(SynthesizeSpeechTool(it, media, blobWriter, projects)) }
         asr?.let { register(TranscribeAssetTool(it, media)) }
         vision?.let { register(DescribeAssetTool(it, media)) }
