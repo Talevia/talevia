@@ -37,14 +37,20 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import io.talevia.core.AssetId
+import io.talevia.core.MessageId
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
+import io.talevia.core.SessionId
+import io.talevia.core.agent.RunInput
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.Timeline
+import io.talevia.core.session.Message
+import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
+import io.talevia.core.session.Session
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.launch
@@ -242,16 +248,138 @@ private fun AppRoot(container: AppContainer, projectId: ProjectId) {
 
         Divider(modifier = Modifier.fillMaxHeight().width(1.dp))
 
-        // ── Right: log (stand-in for chat) ───────────────────────────────────
-        Column(modifier = Modifier.width(380.dp).fillMaxHeight().padding(start = 12.dp)) {
+        // ── Right: chat (drives the real agent) + activity log ───────────────
+        Column(modifier = Modifier.width(420.dp).fillMaxHeight().padding(start = 12.dp)) {
+            ChatPanel(container = container, projectId = projectId, log = log)
+            Spacer(Modifier.height(12.dp))
+            Divider()
+            Spacer(Modifier.height(6.dp))
             SectionTitle("Activity")
-            LazyColumn(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
+            LazyColumn(modifier = Modifier.fillMaxWidth().height(180.dp)) {
                 items(log) { line ->
                     Text(line, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(vertical = 1.dp))
                 }
             }
         }
     }
+}
+
+/**
+ * The real chat pane — drives `Agent.run` against the user-typed prompt, then
+ * streams message/part updates from the bus so the user sees tool calls and
+ * text deltas as they happen. Falls back to a helpful placeholder when no
+ * provider API key is set in the environment.
+ */
+@OptIn(ExperimentalUuidApi::class)
+@Composable
+private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androidx.compose.runtime.snapshots.SnapshotStateList<String>) {
+    val scope = rememberCoroutineScope()
+    val hasProvider = remember { container.providers.default != null }
+    if (!hasProvider) {
+        SectionTitle("Chat")
+        Text(
+            "No provider API key set. Export ANTHROPIC_API_KEY or OPENAI_API_KEY and relaunch to enable the agent loop.",
+            modifier = Modifier.padding(vertical = 6.dp),
+        )
+        return
+    }
+
+    val sessionId = remember { SessionId(Uuid.random().toString()) }
+    val sessionBootstrapped = remember { androidx.compose.runtime.mutableStateOf(false) }
+    val chatLines = remember { mutableStateListOf<ChatLine>() }
+    var prompt by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+
+    // Bootstrap: persist an empty Session so Agent.run has a row to append to.
+    remember {
+        scope.launch {
+            container.sessions.createSession(
+                Session(
+                    id = sessionId,
+                    projectId = projectId,
+                    title = "Chat",
+                    createdAt = Clock.System.now(),
+                    updatedAt = Clock.System.now(),
+                ),
+            )
+            sessionBootstrapped.value = true
+        }
+    }
+
+    // Subscribe to part updates for this session and render them as chat lines.
+    remember {
+        scope.launch {
+            container.bus.subscribe<BusEvent.PartUpdated>()
+                .filterIsInstance<BusEvent.PartUpdated>()
+                .collect { ev ->
+                    if (ev.sessionId != sessionId) return@collect
+                    val line = when (val p = ev.part) {
+                        is Part.Text -> ChatLine("assistant", p.text.take(400))
+                        is Part.Tool -> ChatLine("tool/${p.toolId}", "→ ${p.state::class.simpleName}")
+                        is Part.RenderProgress -> null  // already surfaced in centre panel
+                        is Part.TimelineSnapshot -> null
+                        else -> null
+                    }
+                    if (line != null) chatLines += line
+                }
+        }
+    }
+
+    SectionTitle("Chat")
+    LazyColumn(modifier = Modifier.fillMaxWidth().height(220.dp)) {
+        items(chatLines) { line ->
+            Row(modifier = Modifier.padding(vertical = 2.dp)) {
+                Text("${line.role}: ", fontFamily = FontFamily.Monospace, color = Color(0xFF3B5BA9))
+                Text(line.text, fontFamily = FontFamily.Monospace)
+            }
+        }
+    }
+    Spacer(Modifier.height(6.dp))
+    OutlinedTextField(
+        value = prompt,
+        onValueChange = { prompt = it },
+        label = { Text("Ask the agent") },
+        modifier = Modifier.fillMaxWidth(),
+        enabled = sessionBootstrapped.value && !busy,
+    )
+    Spacer(Modifier.height(6.dp))
+    Button(
+        enabled = sessionBootstrapped.value && !busy && prompt.isNotBlank(),
+        onClick = {
+            val text = prompt
+            prompt = ""
+            chatLines += ChatLine("you", text)
+            val agent = container.newAgent()
+            if (agent == null) {
+                log += "chat: no provider configured"
+                return@Button
+            }
+            busy = true
+            scope.launch {
+                val provider = container.providers.default!!
+                runCatching {
+                    agent.run(
+                        RunInput(
+                            sessionId = sessionId,
+                            text = text,
+                            model = ModelRef(provider.id, defaultModelFor(provider.id)),
+                            permissionRules = container.permissionRules.toList(),
+                        ),
+                    )
+                }.onFailure { t -> log += "agent failed: ${t.message}" }
+                busy = false
+            }
+        },
+        modifier = Modifier.fillMaxWidth(),
+    ) { Text(if (busy) "Thinking…" else "Send") }
+}
+
+private data class ChatLine(val role: String, val text: String)
+
+private fun defaultModelFor(providerId: String): String = when (providerId) {
+    "anthropic" -> "claude-opus-4-7"
+    "openai" -> "gpt-4o"
+    else -> "default"
 }
 
 private data class ClipRow(val id: String, val startSeconds: Double, val endSeconds: Double)

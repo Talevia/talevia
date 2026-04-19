@@ -16,6 +16,8 @@ dependencies {
     implementation(libs.kotlinx.datetime)
     implementation(libs.sqldelight.driver.sqlite)
     implementation(libs.kermit)
+    implementation(libs.ktor.client.core)
+    implementation(libs.ktor.client.cio)
 
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
