@@ -70,6 +70,7 @@ import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
+import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ExtractFrameTool
 import io.talevia.core.tool.builtin.video.FadeAudioClipTool
@@ -248,7 +249,10 @@ class ServerContainer(
         videoGen?.let { register(GenerateVideoTool(it, media, blobWriter, projects)) }
         musicGen?.let { register(GenerateMusicTool(it, media, blobWriter, projects)) }
         tts?.let { register(SynthesizeSpeechTool(it, media, blobWriter, projects)) }
-        asr?.let { register(TranscribeAssetTool(it, media)) }
+        asr?.let {
+            register(TranscribeAssetTool(it, media))
+            register(AutoSubtitleClipTool(it, media, projects))
+        }
         vision?.let { register(DescribeAssetTool(it, media)) }
     }
 
