@@ -67,7 +67,7 @@ class GenerateImageTool(
         val height: Int = 1024,
         val seed: Long? = null,
         val projectId: String? = null,
-        val consistencyBindingIds: List<String> = emptyList(),
+        val consistencyBindingIds: List<String>? = null,
     )
 
     @Serializable
@@ -130,7 +130,12 @@ class GenerateImageTool(
             }
             putJsonObject("consistencyBindingIds") {
                 put("type", "array")
-                put("description", "Source node ids (kind core.consistency.*) to fold into the prompt — characters, style bibles, brand palettes.")
+                put(
+                    "description",
+                    "Source node ids (kind core.consistency.*) to fold into the prompt. " +
+                        "null (default) = auto-fold all project consistency nodes; [] = explicitly no binding; " +
+                        "non-empty = fold only the listed nodes.",
+                )
                 putJsonObject("items") { put("type", "string") }
             }
         }
@@ -267,20 +272,25 @@ class GenerateImageTool(
         storage.resolve(AssetId(assetId))
 
     private suspend fun resolveConsistency(input: Input): FoldedPrompt {
-        if (input.consistencyBindingIds.isEmpty()) {
+        val bindingIds = input.consistencyBindingIds
+        if (bindingIds != null && bindingIds.isEmpty()) {
             return io.talevia.core.domain.source.consistency
                 .foldConsistencyIntoPrompt(input.prompt, emptyList())
         }
-        val store = projectStore
-            ?: error("consistencyBindingIds supplied but this GenerateImageTool has no ProjectStore wired")
-        val pid = input.projectId
-            ?: error("consistencyBindingIds require projectId to locate the source graph")
+        val store = projectStore ?: run {
+            if (bindingIds != null) error("consistencyBindingIds supplied but this GenerateImageTool has no ProjectStore wired")
+            return io.talevia.core.domain.source.consistency.foldConsistencyIntoPrompt(input.prompt, emptyList())
+        }
+        val pid = input.projectId ?: run {
+            if (bindingIds != null) error("consistencyBindingIds require projectId to locate the source graph")
+            return io.talevia.core.domain.source.consistency.foldConsistencyIntoPrompt(input.prompt, emptyList())
+        }
         val project = store.get(ProjectId(pid))
             ?: error("Project $pid not found when resolving consistency bindings")
         return AigcPipeline.foldPrompt(
             project = project,
             basePrompt = input.prompt,
-            bindingIds = input.consistencyBindingIds.map { SourceNodeId(it) },
+            bindingIds = bindingIds?.map { SourceNodeId(it) },
         )
     }
 }

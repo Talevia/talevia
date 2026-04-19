@@ -8,6 +8,7 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.domain.source.consistency.FoldedPrompt
 import io.talevia.core.domain.source.consistency.FoldedVoice
+import io.talevia.core.domain.source.consistency.consistencyNodes
 import io.talevia.core.domain.source.consistency.foldConsistencyIntoPrompt
 import io.talevia.core.domain.source.consistency.resolveConsistencyBindings
 import io.talevia.core.platform.GenerationProvenance
@@ -45,31 +46,46 @@ internal object AigcPipeline {
 
     /**
      * Fold consistency bindings into [basePrompt] using [project]'s source graph.
-     * Returns a [FoldedPrompt] whose [FoldedPrompt.effectivePrompt] should be passed
-     * to the engine and hashed into the input.
+     *
+     * [bindingIds] semantics:
+     *  - `null`  — auto-fold: pick up all consistency nodes from the project source
+     *              (VISION §5.5 "cross-shot consistency without explicit wiring").
+     *  - `[]`    — explicitly no binding: skip folding even if nodes exist.
+     *  - non-empty — fold only the listed nodes.
      */
     fun foldPrompt(
         project: Project,
         basePrompt: String,
-        bindingIds: List<SourceNodeId>,
+        bindingIds: List<SourceNodeId>?,
     ): FoldedPrompt {
-        if (bindingIds.isEmpty()) return foldConsistencyIntoPrompt(basePrompt, emptyList())
-        val resolved = project.source.resolveConsistencyBindings(bindingIds)
-        return foldConsistencyIntoPrompt(basePrompt, resolved)
+        if (bindingIds != null && bindingIds.isEmpty()) return foldConsistencyIntoPrompt(basePrompt, emptyList())
+        val nodes = if (bindingIds == null) {
+            project.source.consistencyNodes()
+        } else {
+            project.source.resolveConsistencyBindings(bindingIds)
+        }
+        return foldConsistencyIntoPrompt(basePrompt, nodes)
     }
 
     /**
      * Resolve consistency bindings into a voice pick for TTS / voice-clone calls.
-     * See [foldVoice] — returns the single bound voice, or `null` when no binding
-     * dictates one, or throws when multiple character_refs have voiceIds.
+     *
+     * [bindingIds] semantics match [foldPrompt]: null = auto (all character_refs),
+     * `[]` = explicitly no binding. Ambiguous auto (multiple characters with
+     * voiceIds) returns no-voice rather than throwing — the caller can fall back to
+     * the user's explicit `voice` input.
      */
     fun foldVoice(
         project: Project,
-        bindingIds: List<SourceNodeId>,
+        bindingIds: List<SourceNodeId>?,
     ): FoldedVoice {
-        if (bindingIds.isEmpty()) return FoldedVoice(voiceId = null, appliedNodeIds = emptyList())
-        val resolved = project.source.resolveConsistencyBindings(bindingIds)
-        return foldVoiceFn(resolved)
+        if (bindingIds != null && bindingIds.isEmpty()) return FoldedVoice(voiceId = null, appliedNodeIds = emptyList())
+        val nodes = if (bindingIds == null) {
+            project.source.consistencyNodes()
+        } else {
+            project.source.resolveConsistencyBindings(bindingIds)
+        }
+        return foldVoiceFn(nodes)
     }
 
     /**

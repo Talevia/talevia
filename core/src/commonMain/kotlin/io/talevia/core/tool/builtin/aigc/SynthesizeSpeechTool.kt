@@ -69,7 +69,7 @@ class SynthesizeSpeechTool(
         val format: String = "mp3",
         val speed: Double = 1.0,
         val projectId: String? = null,
-        val consistencyBindingIds: List<String> = emptyList(),
+        val consistencyBindingIds: List<String>? = null,
     )
 
     @Serializable
@@ -128,7 +128,12 @@ class SynthesizeSpeechTool(
             }
             putJsonObject("consistencyBindingIds") {
                 put("type", "array")
-                put("description", "Character_ref node ids whose voiceId should drive voice selection. A bound character with a voiceId overrides the explicit voice input. Multiple characters with voiceIds is a loud failure — bind only the speaker.")
+                put(
+                    "description",
+                    "Character_ref node ids whose voiceId should drive voice selection. " +
+                        "null (default) = auto-pick all character_refs; [] = explicitly no binding; non-empty = use only listed nodes. " +
+                        "Ambiguous auto (multiple characters with voiceIds) silently falls back to the explicit voice input.",
+                )
                 putJsonObject("items") { put("type", "string") }
             }
         }
@@ -219,19 +224,27 @@ class SynthesizeSpeechTool(
     }
 
     private suspend fun resolveVoice(input: Input): io.talevia.core.domain.source.consistency.FoldedVoice {
-        if (input.consistencyBindingIds.isEmpty()) {
+        val bindingIds = input.consistencyBindingIds
+        if (bindingIds != null && bindingIds.isEmpty()) {
             return io.talevia.core.domain.source.consistency.FoldedVoice(voiceId = null, appliedNodeIds = emptyList())
         }
-        val store = projectStore
-            ?: error("consistencyBindingIds supplied but this SynthesizeSpeechTool has no ProjectStore wired")
-        val pid = input.projectId
-            ?: error("consistencyBindingIds require projectId to locate the source graph")
+        val store = projectStore ?: run {
+            if (bindingIds != null) error("consistencyBindingIds supplied but this SynthesizeSpeechTool has no ProjectStore wired")
+            return io.talevia.core.domain.source.consistency.FoldedVoice(voiceId = null, appliedNodeIds = emptyList())
+        }
+        val pid = input.projectId ?: run {
+            if (bindingIds != null) error("consistencyBindingIds require projectId to locate the source graph")
+            return io.talevia.core.domain.source.consistency.FoldedVoice(voiceId = null, appliedNodeIds = emptyList())
+        }
         val project = store.get(ProjectId(pid))
             ?: error("Project $pid not found when resolving consistency bindings")
-        return AigcPipeline.foldVoice(
-            project = project,
-            bindingIds = input.consistencyBindingIds.map(::SourceNodeId),
-        )
+        return if (bindingIds == null) {
+            // Auto: soft-fail on ambiguous voices rather than crashing the generation.
+            runCatching { AigcPipeline.foldVoice(project, null) }
+                .getOrElse { io.talevia.core.domain.source.consistency.FoldedVoice(voiceId = null, appliedNodeIds = emptyList()) }
+        } else {
+            AigcPipeline.foldVoice(project, bindingIds.map(::SourceNodeId))
+        }
     }
 
     private fun hit(entry: LockfileEntry, input: Input, voice: String, appliedBindings: List<String>): ToolResult<Output> {
