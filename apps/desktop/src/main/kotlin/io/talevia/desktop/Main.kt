@@ -138,6 +138,10 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
     var renderProgress by remember { mutableStateOf<Float?>(null) }
     var importPath by remember { mutableStateOf("") }
     var exportPath by remember { mutableStateOf(System.getProperty("user.home") + "/talevia-export.mp4") }
+    // Resolution override for the Export button. "Project" means "fall through to the
+    // project's OutputProfile", otherwise we pass explicit width/height to ExportTool.
+    var exportResolution by remember { mutableStateOf(ResolutionPreset.Project) }
+    var exportFps by remember { mutableStateOf(FpsPreset.Project) }
     var previewPath by remember { mutableStateOf<String?>(null) }
     // Seek request plumbing: TimelinePanel (and any future caller) sets
     // `seekTargetSeconds` and bumps `seekSeq`; VideoPreviewPanel's LaunchedEffect
@@ -214,6 +218,9 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
                         buildJsonObject {
                             put("projectId", projectId.value)
                             put("outputPath", path)
+                            exportResolution.width?.let { put("width", it) }
+                            exportResolution.height?.let { put("height", it) }
+                            exportFps.value?.let { put("frameRate", it) }
                         },
                         container.uiToolContext(projectId),
                     )
@@ -373,6 +380,18 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Spacer(Modifier.height(6.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ResolutionDropdown(
+                        selected = exportResolution,
+                        onSelect = { exportResolution = it },
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    FpsDropdown(
+                        selected = exportFps,
+                        onSelect = { exportFps = it },
+                    )
+                }
                 Spacer(Modifier.height(6.dp))
                 Button(
                     onClick = runExport,
@@ -609,6 +628,61 @@ private fun defaultModelFor(providerId: String): String = when (providerId) {
     "anthropic" -> "claude-opus-4-7"
     "openai" -> "gpt-4o"
     else -> "default"
+}
+
+/**
+ * Export resolution preset. `Project` means "use the project's OutputProfile"
+ * (no override); concrete presets force width/height on the Export tool
+ * input. `HD720` intentionally names the resolution, not a vendor label.
+ */
+private enum class ResolutionPreset(val label: String, val width: Int?, val height: Int?) {
+    Project("Project", null, null),
+    HD720("720p", 1280, 720),
+    FullHD("1080p", 1920, 1080),
+    UHD4K("4K", 3840, 2160),
+}
+
+private enum class FpsPreset(val label: String, val value: Int?) {
+    Project("Project fps", null),
+    Fps24("24", 24),
+    Fps30("30", 30),
+    Fps60("60", 60),
+}
+
+@Composable
+private fun ResolutionDropdown(selected: ResolutionPreset, onSelect: (ResolutionPreset) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    androidx.compose.foundation.layout.Box {
+        androidx.compose.material3.TextButton(onClick = { open = true }) {
+            Text("${selected.label} ▾", fontFamily = FontFamily.Monospace)
+        }
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            ResolutionPreset.entries.forEach { p ->
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(p.label) },
+                    onClick = { onSelect(p); open = false },
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FpsDropdown(selected: FpsPreset, onSelect: (FpsPreset) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    androidx.compose.foundation.layout.Box {
+        androidx.compose.material3.TextButton(onClick = { open = true }) {
+            Text("${selected.label} ▾", fontFamily = FontFamily.Monospace)
+        }
+        androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            FpsPreset.entries.forEach { p ->
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text(p.label) },
+                    onClick = { onSelect(p); open = false },
+                )
+            }
+        }
+    }
 }
 
 /**
