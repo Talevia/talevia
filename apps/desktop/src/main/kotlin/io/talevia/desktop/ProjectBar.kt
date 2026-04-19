@@ -127,7 +127,7 @@ fun ProjectBar(
             TextButton(onClick = { menuExpanded = true }) { Text("Actions ▾") }
             DropdownMenu(expanded = menuExpanded, onDismissRequest = { menuExpanded = false }) {
                 DropdownMenuItem(
-                    text = { Text("New project") },
+                    text = { Text("New project (blank)") },
                     onClick = {
                         menuExpanded = false
                         val title = "Untitled ${kotlinx.datetime.Clock.System.now()}".take(40)
@@ -135,6 +135,44 @@ fun ProjectBar(
                             "create_project",
                             buildJsonObject { put("title", title) },
                             "create project",
+                            after = {
+                                val latest = container.projects.listSummaries().maxByOrNull { it.createdAtEpochMs }
+                                latest?.let { onProjectChange(ProjectId(it.id)) }
+                            },
+                        )
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("New narrative project…") },
+                    onClick = {
+                        menuExpanded = false
+                        val title = "Narrative ${kotlinx.datetime.Clock.System.now()}".take(40)
+                        dispatch(
+                            "create_project_from_template",
+                            buildJsonObject {
+                                put("title", title)
+                                put("template", "narrative")
+                            },
+                            "create narrative project",
+                            after = {
+                                val latest = container.projects.listSummaries().maxByOrNull { it.createdAtEpochMs }
+                                latest?.let { onProjectChange(ProjectId(it.id)) }
+                            },
+                        )
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("New vlog project…") },
+                    onClick = {
+                        menuExpanded = false
+                        val title = "Vlog ${kotlinx.datetime.Clock.System.now()}".take(40)
+                        dispatch(
+                            "create_project_from_template",
+                            buildJsonObject {
+                                put("title", title)
+                                put("template", "vlog")
+                            },
+                            "create vlog project",
                             after = {
                                 val latest = container.projects.listSummaries().maxByOrNull { it.createdAtEpochMs }
                                 latest?.let { onProjectChange(ProjectId(it.id)) }
