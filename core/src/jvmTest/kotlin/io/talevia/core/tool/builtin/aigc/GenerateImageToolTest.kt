@@ -246,6 +246,45 @@ class GenerateImageToolTest {
         assertEquals(2, lockfile.entries.size)
     }
 
+    @Test fun lockfileEntrySnapshotsBoundSourceContentHashes() = runTest {
+        val tmpDir = createTempDirectory("gen-image-snapshot").toFile()
+        val engine = FakeImageGenEngine(tinyPng)
+        val storage = InMemoryMediaStorage()
+        val writer = FakeBlobWriter(tmpDir)
+
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val projectId = ProjectId("p-snap")
+        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
+        store.mutateSource(projectId) {
+            it.addCharacterRef(
+                SourceNodeId("mei"),
+                CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
+            )
+        }
+        val expectedHash = store.get(projectId)!!.source.byId[SourceNodeId("mei")]!!.contentHash
+
+        val tool = GenerateImageTool(engine, storage, writer, store)
+        tool.execute(
+            GenerateImageTool.Input(
+                prompt = "portrait",
+                seed = 7L,
+                projectId = projectId.value,
+                consistencyBindingIds = listOf("mei"),
+            ),
+            ctx(),
+        )
+
+        val entry = store.get(projectId)!!.lockfile.entries.single()
+        assertEquals(setOf(SourceNodeId("mei")), entry.sourceBinding)
+        assertEquals(
+            mapOf(SourceNodeId("mei") to expectedHash),
+            entry.sourceContentHashes,
+            "lockfile must snapshot the bound source's contentHash for stale-clip detection",
+        )
+    }
+
     @Test fun consistencyBindingWithUnknownIdIsSkippedWithoutThrowing() = runTest {
         val tmpDir = createTempDirectory("gen-image-test-5").toFile()
         val engine = FakeImageGenEngine(tinyPng)

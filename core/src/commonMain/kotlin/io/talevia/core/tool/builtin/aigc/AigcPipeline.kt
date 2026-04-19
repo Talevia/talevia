@@ -81,6 +81,12 @@ internal object AigcPipeline {
     /**
      * Persist a new lockfile entry. Uses [ProjectStore.mutate] so the append goes
      * through the store's mutex and can't race with concurrent tool dispatches.
+     *
+     * As a side effect, snapshots the current `SourceNode.contentHash` for every
+     * id in [sourceBinding]. The snapshot lives on
+     * [LockfileEntry.sourceContentHashes] and powers stale-clip detection
+     * (`Project.staleClipsFromLockfile`) — without it the detector has no anchor
+     * to compare today's hash against.
      */
     suspend fun record(
         store: ProjectStore,
@@ -92,6 +98,13 @@ internal object AigcPipeline {
         sourceBinding: Set<SourceNodeId>,
     ) {
         store.mutate(projectId) { project ->
+            val snapshot: Map<SourceNodeId, String> = if (sourceBinding.isEmpty()) emptyMap()
+            else buildMap {
+                for (id in sourceBinding) {
+                    val node = project.source.byId[id] ?: continue
+                    put(id, node.contentHash)
+                }
+            }
             project.copy(
                 lockfile = project.lockfile.append(
                     LockfileEntry(
@@ -100,6 +113,7 @@ internal object AigcPipeline {
                         assetId = assetId,
                         provenance = provenance,
                         sourceBinding = sourceBinding,
+                        sourceContentHashes = snapshot,
                     ),
                 ),
             )

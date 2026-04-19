@@ -28,6 +28,13 @@ data class Lockfile(
 ) {
     fun findByInputHash(hash: String): LockfileEntry? = entries.lastOrNull { it.inputHash == hash }
 
+    /**
+     * Look up the most recent entry that produced [assetId]. Used by stale-clip
+     * detection to walk Clip → Asset → conditioning source nodes without
+     * requiring `Clip.sourceBinding` to be threaded through `add_clip`.
+     */
+    fun findByAssetId(assetId: AssetId): LockfileEntry? = entries.lastOrNull { it.assetId == assetId }
+
     fun append(entry: LockfileEntry): Lockfile = copy(entries = entries + entry)
 
     companion object {
@@ -50,6 +57,12 @@ data class Lockfile(
  *   what [io.talevia.core.domain.Clip.sourceBinding] should copy from when the asset
  *   becomes a clip, so the stale-propagation lane (VISION §3.2) can mark it stale
  *   when any of these nodes changes.
+ * @property sourceContentHashes Snapshot of `SourceNode.contentHash` for every id in
+ *   [sourceBinding] at the time this entry was written. Lets the stale-clip detector
+ *   compare today's source hash against the value the generation actually consumed —
+ *   the lockfile becomes the audit record of "what hash was the input when we
+ *   produced this artifact". Empty for legacy entries written before this field
+ *   existed; those are treated as "unknown" by the detector (not stale, not fresh).
  */
 @Serializable
 data class LockfileEntry(
@@ -58,4 +71,5 @@ data class LockfileEntry(
     val assetId: AssetId,
     val provenance: GenerationProvenance,
     val sourceBinding: Set<SourceNodeId> = emptySet(),
+    val sourceContentHashes: Map<SourceNodeId, String> = emptyMap(),
 )

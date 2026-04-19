@@ -48,6 +48,7 @@ final class AppContainer {
         registry.register(tool: ListProjectsTool(projects: self.projects))
         registry.register(tool: GetProjectStateTool(projects: self.projects))
         registry.register(tool: DeleteProjectTool(projects: self.projects))
+        registry.register(tool: FindStaleClipsTool(projects: self.projects))
         registry.register(tool: DefineCharacterRefTool(projects: self.projects))
         registry.register(tool: DefineStyleBibleTool(projects: self.projects))
         registry.register(tool: DefineBrandPaletteTool(projects: self.projects))

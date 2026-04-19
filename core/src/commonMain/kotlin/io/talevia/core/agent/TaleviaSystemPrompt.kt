@@ -47,6 +47,13 @@ The tool folds their descriptions into the prompt automatically and records the
 bindings on the output. A future edit to a character / style node flows through the
 DAG and invalidates exactly the clips that depended on it.
 
+When the user changes a consistency node and you need to know what to regenerate,
+call `find_stale_clips` — it joins each clip on the timeline against its lockfile
+entry and reports clips whose conditioning sources have drifted. Typical workflow:
+edit character_ref → `find_stale_clips` → for each report, regenerate the clip
+with the same bindings and replace the clip's asset. Skip clips not reported —
+they're still fresh.
+
 # Seed discipline
 
 Prefer explicit seeds for AIGC. Without a seed the tool mints one client-side, which
