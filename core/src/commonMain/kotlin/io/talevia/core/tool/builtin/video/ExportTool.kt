@@ -9,6 +9,7 @@ import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.session.Part
+import io.talevia.core.tool.MediaAttachment
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
@@ -116,6 +117,30 @@ class ExportTool(
             title = "export → ${input.outputPath.substringAfterLast('/')}",
             outputForLlm = "Exported timeline (${duration}s, ${width}x${height}) to ${input.outputPath}",
             data = out,
+            attachments = listOf(
+                MediaAttachment(
+                    mimeType = mimeTypeFor(input.outputPath),
+                    source = input.outputPath,
+                    widthPx = width,
+                    heightPx = height,
+                    durationMs = timeline.duration.toLong(DurationUnit.MILLISECONDS),
+                ),
+            ),
         )
     }
+
+    /** MIME type from filename extension; falls back to a generic container. */
+    internal fun mimeTypeFor(path: String): String =
+        when (path.substringAfterLast('.', "").lowercase()) {
+            "mp4", "m4v" -> "video/mp4"
+            "mov" -> "video/quicktime"
+            "webm" -> "video/webm"
+            "mkv" -> "video/x-matroska"
+            "avi" -> "video/x-msvideo"
+            "gif" -> "image/gif"
+            "mp3" -> "audio/mpeg"
+            "m4a" -> "audio/mp4"
+            "wav" -> "audio/wav"
+            else -> "application/octet-stream"
+        }
 }

@@ -50,8 +50,19 @@ data class ToolResult<O>(
     val metadata: JsonObject? = null,
 )
 
-/** Placeholder for tool-attached media (e.g. an exported video). Filled out in M2. */
+/**
+ * Typed reference to a media artifact produced by a tool — e.g. the mp4 an
+ * ExportTool writes. Consumers (UI previewers, subsequent tools, telemetry)
+ * can act on it without re-probing the file.
+ *
+ * `source` is typically a filesystem path or platform URI; `widthPx`/`heightPx`/
+ * `durationMs`/`sizeBytes` are best-effort and may be null when unknown.
+ */
 data class MediaAttachment(
     val mimeType: String,
     val source: String,
+    val widthPx: Int? = null,
+    val heightPx: Int? = null,
+    val durationMs: Long? = null,
+    val sizeBytes: Long? = null,
 )
