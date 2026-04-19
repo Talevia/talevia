@@ -90,10 +90,11 @@ shapes, exactly one at a time:
   edits. This is the preferred path when a project has a style_bible that
   already owns its LUT — pass the style_bible once via `define_style_bible`,
   then apply it to every clip with `apply_lut(styleBibleId=…)`.
-FFmpeg renders this via `lut3d`; Media3 (Android) bakes brightness /
-saturation / blur but still no-ops LUT (needs a `.cube` parser);
-AVFoundation (iOS) bakes brightness / saturation / blur / vignette via
-CIFilter chains but also still no-ops LUT pending that same loader.
+FFmpeg renders this via `lut3d`; Media3 (Android) bakes it via
+`SingleColorLut`; AVFoundation (iOS) bakes it via `CIColorCube`. All
+three engines share the `.cube` v1.0 parser in `core.platform.lut`.
+Non-default `DOMAIN_MIN/MAX` and 1D LUTs are rejected in v1 — feed
+standard `.cube` 3D LUTs.
 
 # Seed discipline
 

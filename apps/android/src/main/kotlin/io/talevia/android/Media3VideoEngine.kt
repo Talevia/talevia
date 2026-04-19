@@ -9,6 +9,7 @@ import androidx.media3.common.MimeTypes
 import androidx.media3.effect.Brightness
 import androidx.media3.effect.GaussianBlur
 import androidx.media3.effect.HslAdjustment
+import androidx.media3.effect.SingleColorLut
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
 import androidx.media3.transformer.EditedMediaItemSequence
@@ -31,6 +32,8 @@ import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
+import io.talevia.core.platform.lut.CubeLutParser
+import io.talevia.core.platform.lut.toMedia3Cube
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -91,6 +94,20 @@ class Media3VideoEngine(
             return@callbackFlow
         }
 
+        // Pre-resolve every asset-bound filter (today: only `lut`). Media3's
+        // effect builders are synchronous so we cannot call the suspend
+        // resolver inside `mapFilterToEffect`. Resolving here also lets us
+        // parse each `.cube` once per render even if multiple clips share
+        // the same LUT asset.
+        val filterAssetPaths = mutableMapOf<String, String>()
+        videoClips.forEach { c ->
+            c.filters.forEach { f ->
+                val aid = f.assetId
+                if (aid != null) filterAssetPaths.getOrPut(aid.value) { pathResolver.resolve(aid) }
+            }
+        }
+        val lutCache = mutableMapOf<String, SingleColorLut>()
+
         val items = videoClips.map { c ->
             val resolvedPath = pathResolver.resolve(c.assetId)
             val mediaItem = MediaItem.Builder()
@@ -103,7 +120,7 @@ class Media3VideoEngine(
                 )
                 .build()
             val builder = EditedMediaItem.Builder(mediaItem)
-            val videoEffects = c.filters.mapNotNull { mapFilterToEffect(it) }
+            val videoEffects = c.filters.mapNotNull { mapFilterToEffect(it, filterAssetPaths, lutCache) }
             if (videoEffects.isNotEmpty()) {
                 builder.setEffects(Effects(emptyList(), videoEffects))
             }
@@ -196,16 +213,18 @@ class Media3VideoEngine(
      * - `brightness` → [Brightness] (intensity clamped to [-1, 1])
      * - `saturation` → [HslAdjustment] (Core's 0..1 intensity → Media3 -100..+100)
      * - `blur`       → [GaussianBlur] sigma
+     * - `lut`        → [SingleColorLut] (`.cube` file parsed via
+     *   `CubeLutParser`; cached by asset id within one render call).
      *
      * Not yet supported:
      * - `vignette`  — Media3 has no built-in Vignette effect; needs a custom
      *   `GlShaderProgram`. Intentional no-op for now.
-     * - `lut`       — Media3's `SingleColorLut` only takes an `int[][][]`
-     *   cube; loading a `.cube` file needs a parser we haven't written. Skip
-     *   here so the render succeeds (vs. throwing) — a follow-up will wire
-     *   a `.cube` → int cube loader.
      */
-    private fun mapFilterToEffect(filter: Filter): Effect? = when (filter.name.lowercase()) {
+    private fun mapFilterToEffect(
+        filter: Filter,
+        filterAssetPaths: Map<String, String>,
+        lutCache: MutableMap<String, SingleColorLut>,
+    ): Effect? = when (filter.name.lowercase()) {
         "brightness" -> {
             val v = (filter.params["intensity"] ?: filter.params["value"] ?: 0f)
                 .coerceIn(-1f, 1f)
@@ -241,12 +260,23 @@ class Media3VideoEngine(
             null
         }
         "lut" -> {
-            log.warn(
-                "lut filter not yet rendered on Media3 engine — skipping",
-                "filter" to filter.name,
-                "assetId" to filter.assetId?.value,
-            )
-            null
+            val aid = filter.assetId
+            val path = aid?.value?.let { filterAssetPaths[it] }
+            if (aid == null || path == null) {
+                log.warn(
+                    "lut filter missing resolvable assetId — skipping",
+                    "filter" to filter.name,
+                    "assetId" to aid?.value,
+                )
+                null
+            } else {
+                // Parse + cache per asset id so the `.cube` hits disk once
+                // even when many clips share the same LUT.
+                lutCache.getOrPut(aid.value) {
+                    val cube = CubeLutParser.parse(File(path).readText()).toMedia3Cube()
+                    SingleColorLut.createFromCube(cube)
+                }
+            }
         }
         else -> {
             log.warn(

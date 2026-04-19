@@ -20,6 +20,16 @@ private struct ClipFilterRange: Sendable {
 private struct FilterSpec: Sendable {
     let name: String
     let params: [String: Double]
+    /// Pre-resolved `CIColorCube` payload for `lut` filters. `nil` for
+    /// every other filter. Pre-resolved on the setup path (outside the
+    /// filter handler) so frame rendering doesn't block on disk I/O or
+    /// the `.cube` parser.
+    let lut: LutPayload?
+}
+
+private struct LutPayload: Sendable {
+    let dimension: Int
+    let data: Data
 }
 
 /// Map a Core [Filter] (by name + params) onto a [CIImage], returning the
@@ -95,9 +105,12 @@ private func applyCoreFilter(_ spec: FilterSpec, to image: CIImage) -> CIImage {
         f?.setValue(radius, forKey: kCIInputRadiusKey)
         return f?.outputImage ?? image
     case "lut":
-        // TODO: parse .cube → CIColorCube's raw data. Drop for now so the
-        // export succeeds; matches Media3's current LUT behavior.
-        return image
+        guard let lut = spec.lut else { return image }
+        let f = CIFilter(name: "CIColorCube")
+        f?.setValue(image, forKey: kCIInputImageKey)
+        f?.setValue(NSNumber(value: lut.dimension), forKey: "inputCubeDimension")
+        f?.setValue(lut.data, forKey: "inputCubeData")
+        return f?.outputImage ?? image
     default:
         return image
     }
@@ -193,22 +206,47 @@ private func runExport(
     // AVMutableVideoComposition with a CIFilter-chain handler keyed on
     // composition time → owning clip. Subtitle/text and transition passes
     // still no-op here; they remain in the "Known incomplete" bucket.
-    let filterRanges: [ClipFilterRange] = plans
-        .filter { !$0.filters.isEmpty }
-        .map { plan in
-            ClipFilterRange(
-                start: plan.timelineStartSeconds,
-                end: plan.timelineStartSeconds + plan.timelineDurationSeconds,
-                filters: plan.filters.map { spec in
-                    FilterSpec(
-                        name: spec.name,
-                        params: spec.params.reduce(into: [String: Double]()) { acc, kv in
-                            acc[kv.key] = kv.value.doubleValue
-                        }
+    //
+    // LUT filters need file I/O + a `.cube` parse before they can render;
+    // do that here (outside the handler) and cache by asset id so the same
+    // `.cube` isn't parsed once per clip that references it.
+    var lutCache: [String: LutPayload] = [:]
+    var filterRanges: [ClipFilterRange] = []
+    for plan in plans where !plan.filters.isEmpty {
+        var specs: [FilterSpec] = []
+        for raw in plan.filters {
+            var lut: LutPayload? = nil
+            if raw.name.lowercased() == "lut", let aidRaw = raw.assetIdRaw {
+                if let cached = lutCache[aidRaw] {
+                    lut = cached
+                } else {
+                    let aid = IosBridgesKt.assetId(value: aidRaw)
+                    let lutPath = try await resolver.resolve(assetId: aid)
+                    let url = URL(fileURLWithPath: lutPath)
+                    let text = try String(contentsOf: url, encoding: .utf8)
+                    let bridged = IosBridgesKt.parseCubeLutForCoreImage(text: text)
+                    let payload = LutPayload(
+                        dimension: Int(bridged.size),
+                        data: bridged.data as Data
                     )
+                    lutCache[aidRaw] = payload
+                    lut = payload
                 }
-            )
+            }
+            specs.append(FilterSpec(
+                name: raw.name,
+                params: raw.params.reduce(into: [String: Double]()) { acc, kv in
+                    acc[kv.key] = kv.value.doubleValue
+                },
+                lut: lut
+            ))
         }
+        filterRanges.append(ClipFilterRange(
+            start: plan.timelineStartSeconds,
+            end: plan.timelineStartSeconds + plan.timelineDurationSeconds,
+            filters: specs
+        ))
+    }
 
     var videoComposition: AVMutableVideoComposition?
     if !filterRanges.isEmpty {

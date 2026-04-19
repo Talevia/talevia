@@ -6,11 +6,19 @@ import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.platform.RenderProgress
+import io.talevia.core.platform.lut.CubeLutParser
+import io.talevia.core.platform.lut.toCoreImageRgbaFloats
+import kotlinx.cinterop.BetaInteropApi
+import kotlinx.cinterop.ExperimentalForeignApi
+import kotlinx.cinterop.addressOf
+import kotlinx.cinterop.usePinned
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.takeWhile
+import platform.Foundation.NSData
+import platform.Foundation.create
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 import kotlin.time.DurationUnit
@@ -113,10 +121,16 @@ data class IosVideoClipPlan(
  * `Map<String, Float>` so the Swift side can reach the values without the
  * `KotlinFloat` unwrap dance and can hand Doubles straight to `CIFilter`
  * (Core Image wants CGFloat / Double).
+ *
+ * [assetIdRaw] is the filter's bound asset id (used by `lut` — the `.cube`
+ * file the engine must resolve + parse). Swift-side path resolution goes
+ * through the same `MediaPathResolver` as the clip's video asset, then
+ * into [CubeLutParser] (shared with Media3).
  */
 data class IosFilterSpec(
     val name: String,
     val params: Map<String, Double>,
+    val assetIdRaw: String?,
 )
 
 /**
@@ -145,11 +159,52 @@ fun Timeline.toIosVideoPlan(): List<IosVideoClipPlan> =
                             IosFilterSpec(
                                 name = f.name,
                                 params = f.params.mapValues { (_, v) -> v.toDouble() },
+                                assetIdRaw = f.assetId?.value,
                             )
                         },
                     )
                 }
         }
+
+// =============================================================================
+// SKIE bridging: `.cube` 3D LUT → Core Image
+// =============================================================================
+//
+// The AVFoundation engine renders `lut` filters by setting a `CIColorCube`
+// filter with native-endian float32 RGBA cube data. Reading the `.cube`
+// file + parsing it is shared with Media3 (`CubeLutParser` lives in
+// commonMain); this bridge turns the parsed result into an `NSData` the
+// Swift side can hand straight to `kCIInputCubeDataKey` without looping
+// over individual floats (a 32-cube would be 131k Objective-C calls).
+
+/**
+ * Flat, Swift-friendly payload returned by [parseCubeLutForCoreImage]:
+ * the cube's edge length and the packed float32 RGBA bytes ready for
+ * `CIColorCube.inputCubeData`.
+ */
+data class CubeLutForCoreImage(
+    val size: Int,
+    val data: NSData,
+)
+
+@OptIn(ExperimentalForeignApi::class, BetaInteropApi::class)
+fun parseCubeLutForCoreImage(text: String): CubeLutForCoreImage {
+    val lut = CubeLutParser.parse(text)
+    val floats = lut.toCoreImageRgbaFloats()
+    val byteLen = floats.size * 4
+    val bytes = ByteArray(byteLen)
+    for (i in floats.indices) {
+        val bits = floats[i].toRawBits()
+        bytes[i * 4] = (bits and 0xFF).toByte()
+        bytes[i * 4 + 1] = ((bits shr 8) and 0xFF).toByte()
+        bytes[i * 4 + 2] = ((bits shr 16) and 0xFF).toByte()
+        bytes[i * 4 + 3] = ((bits shr 24) and 0xFF).toByte()
+    }
+    val nsdata = bytes.usePinned { pinned ->
+        NSData.create(bytes = pinned.addressOf(0), length = byteLen.toULong())
+    }
+    return CubeLutForCoreImage(size = lut.size, data = nsdata)
+}
 
 // =============================================================================
 // SKIE bridging: Swift-driven render Flow adapter
