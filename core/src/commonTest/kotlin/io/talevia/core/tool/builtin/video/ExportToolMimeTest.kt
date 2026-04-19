@@ -6,6 +6,7 @@ import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStore
+import io.talevia.core.domain.ProjectSummary
 import io.talevia.core.domain.Timeline
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
@@ -24,6 +25,8 @@ class ExportToolMimeTest {
         override suspend fun upsert(title: String, project: Project) = error("not used")
         override suspend fun list(): List<Project> = error("not used")
         override suspend fun delete(id: ProjectId) = error("not used")
+        override suspend fun summary(id: ProjectId): ProjectSummary? = error("not used")
+        override suspend fun listSummaries(): List<ProjectSummary> = error("not used")
         override suspend fun mutate(id: ProjectId, block: suspend (Project) -> Project): Project = error("not used")
     }
 

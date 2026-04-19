@@ -30,6 +30,10 @@ import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
+import io.talevia.core.tool.builtin.project.CreateProjectTool
+import io.talevia.core.tool.builtin.project.DeleteProjectTool
+import io.talevia.core.tool.builtin.project.GetProjectStateTool
+import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
 import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
 import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
@@ -129,6 +133,10 @@ class ServerContainer(
         register(AddSubtitleTool(projects))
         register(AddTransitionTool(projects))
         register(RevertTimelineTool(sessions, projects))
+        register(CreateProjectTool(projects))
+        register(ListProjectsTool(projects))
+        register(GetProjectStateTool(projects))
+        register(DeleteProjectTool(projects))
         register(DefineCharacterRefTool(projects))
         register(DefineStyleBibleTool(projects))
         register(DefineBrandPaletteTool(projects))

@@ -16,6 +16,10 @@ import io.talevia.core.platform.VideoEngine
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
+import io.talevia.core.tool.builtin.project.CreateProjectTool
+import io.talevia.core.tool.builtin.project.DeleteProjectTool
+import io.talevia.core.tool.builtin.project.GetProjectStateTool
+import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
 import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
 import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
@@ -54,6 +58,10 @@ class AndroidAppContainer(context: Context) {
         register(SplitClipTool(projects))
         register(ExportTool(projects, engine))
         register(RevertTimelineTool(sessions, projects))
+        register(CreateProjectTool(projects))
+        register(ListProjectsTool(projects))
+        register(GetProjectStateTool(projects))
+        register(DeleteProjectTool(projects))
         register(DefineCharacterRefTool(projects))
         register(DefineStyleBibleTool(projects))
         register(DefineBrandPaletteTool(projects))

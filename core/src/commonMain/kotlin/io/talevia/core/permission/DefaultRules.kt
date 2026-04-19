@@ -17,12 +17,17 @@ object DefaultPermissionRuleset {
         // by default so the agent can scaffold consistency bindings without prompting.
         PermissionRule(permission = "source.read", pattern = "*", action = PermissionAction.ALLOW),
         PermissionRule(permission = "source.write", pattern = "*", action = PermissionAction.ALLOW),
+        // Project lifecycle: catalog reads + create are local-only. Delete is irreversible
+        // (loses Source DAG / Timeline / Lockfile / RenderCache) — always confirm.
+        PermissionRule(permission = "project.read", pattern = "*", action = PermissionAction.ALLOW),
+        PermissionRule(permission = "project.write", pattern = "*", action = PermissionAction.ALLOW),
 
         // Side-effectful — always confirm
         PermissionRule(permission = "media.export.write", pattern = "*", action = PermissionAction.ASK),
         PermissionRule(permission = "media.network.fetch", pattern = "*", action = PermissionAction.ASK),
         PermissionRule(permission = "media.network.upload", pattern = "*", action = PermissionAction.ASK),
         PermissionRule(permission = "timeline.destructive", pattern = "*", action = PermissionAction.ASK),
+        PermissionRule(permission = "project.destructive", pattern = "*", action = PermissionAction.ASK),
         // AIGC providers incur external cost + seed-locked artifacts. Ask before running.
         PermissionRule(permission = "aigc.generate", pattern = "*", action = PermissionAction.ASK),
     )

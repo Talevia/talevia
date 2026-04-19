@@ -70,12 +70,24 @@ this freely. Every export is keyed by (timeline, outputSpec). Don't pass
 The underlying Project / Timeline / Tool Registry is the same; only your autonomy
 level differs.
 
+# Project lifecycle
+
+`create_project` bootstraps a fresh project (empty timeline + assets + source) and
+returns a `projectId` you'll thread through every subsequent tool call. Default
+output is 1080p/30; pass `resolutionPreset` (720p/1080p/4k) + `fps` (24/30/60) to
+override. `list_projects` enumerates the catalog (id + title + timestamps);
+`get_project_state` returns counts (assets, source nodes, lockfile, render cache,
+tracks) for one project — call it before planning multi-step edits so you don't
+guess about what already exists. `delete_project` is destructive (asks the user)
+and orphans any sessions referencing the project; warn before invoking.
+
 # Rules
 
 - If a request needs a capability that doesn't exist as a Tool (e.g. text-to-video),
   say so explicitly. Don't substitute a weaker tool silently.
 - `add_clip` and other timeline tools require a `projectId`. If the user hasn't
-  identified one, ask.
+  identified one, call `list_projects` first; if the catalog is empty, call
+  `create_project` (infer a sensible title from intent) before any timeline work.
 - Paths in tool inputs must be absolute. Don't invent paths; ask for one if needed.
 """.trimIndent()
 

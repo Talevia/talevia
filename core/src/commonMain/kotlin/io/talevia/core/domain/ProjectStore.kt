@@ -6,7 +6,22 @@ import io.talevia.core.db.TaleviaDb
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+
+/**
+ * Lightweight catalog row for a [Project] — title + timestamps without forcing the
+ * caller to decode the full project JSON. Used by `list_projects` and the project
+ * lifecycle tools so an orientation call doesn't deserialize every Source DAG and
+ * Timeline in storage.
+ */
+@Serializable
+data class ProjectSummary(
+    val id: String,
+    val title: String,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+)
 
 /**
  * Tools mutate the canonical [Project] (its [Timeline] in particular). The store
@@ -18,6 +33,12 @@ interface ProjectStore {
     suspend fun upsert(title: String, project: Project)
     suspend fun list(): List<Project>
     suspend fun delete(id: ProjectId)
+
+    /** Catalog metadata for a single project, or null if no row exists. */
+    suspend fun summary(id: ProjectId): ProjectSummary?
+
+    /** Catalog metadata for every project — cheaper than [list] for orientation. */
+    suspend fun listSummaries(): List<ProjectSummary>
 
     /**
      * Atomic read-mutate-write. Callers return the new [Project]; the store persists
@@ -52,6 +73,16 @@ class SqlDelightProjectStore(
     override suspend fun list(): List<Project> =
         db.projectsQueries.selectAll().executeAsList()
             .map { json.decodeFromString(Project.serializer(), it.data_) }
+
+    override suspend fun summary(id: ProjectId): ProjectSummary? =
+        db.projectsQueries.selectById(id.value).executeAsOneOrNull()?.let {
+            ProjectSummary(it.id, it.title, it.time_created, it.time_updated)
+        }
+
+    override suspend fun listSummaries(): List<ProjectSummary> =
+        db.projectsQueries.selectAll().executeAsList().map {
+            ProjectSummary(it.id, it.title, it.time_created, it.time_updated)
+        }
 
     override suspend fun delete(id: ProjectId) {
         db.projectsQueries.delete(id.value)

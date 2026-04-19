@@ -26,6 +26,10 @@ class TaleviaSystemPromptTest {
         // is told to pass — the prompt-fold logic is dead without these tools.
         "define_character_ref",
         "list_source_nodes",
+        // Project lifecycle — the agent must know it can bootstrap projects itself.
+        "create_project",
+        "list_projects",
+        "get_project_state",
         // Seed / lockfile discipline (VISION §3.1)
         "seed",
         "cacheHit",
