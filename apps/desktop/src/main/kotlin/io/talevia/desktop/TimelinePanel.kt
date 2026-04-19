@@ -232,6 +232,16 @@ fun TimelinePanel(
                                 "volume ${"%.2f".format(v)} on ${clip.id.value.take(6)}",
                             )
                         },
+                        onCaption = {
+                            dispatch(
+                                "auto_subtitle_clip",
+                                buildJsonObject {
+                                    put("projectId", projectId.value)
+                                    put("clipId", clip.id.value)
+                                },
+                                "caption ${clip.id.value.take(6)}",
+                            )
+                        },
                         onApplyLut = {
                             // Picker → import → apply_lut, all inside one scope.launch so
                             // the dialog blocking doesn't freeze recomposition.
@@ -305,6 +315,7 @@ private fun ClipRow(
     onApplyFilter: (name: String, params: Map<String, Float>) -> Unit,
     onSetVolume: (Float) -> Unit,
     onApplyLut: () -> Unit,
+    onCaption: () -> Unit,
 ) {
     val bg = when {
         selected -> Color(0xFFE3EFFF) // blue-ish tint for selection
@@ -354,6 +365,7 @@ private fun ClipRow(
                     onApplyFilter = onApplyFilter,
                     onSetVolume = onSetVolume,
                     onApplyLut = onApplyLut,
+                    onCaption = onCaption,
                 )
                 Spacer(Modifier.height(4.dp))
                 SelectionContainer {
@@ -438,6 +450,7 @@ private fun InlineClipActions(
     onApplyFilter: (name: String, params: Map<String, Float>) -> Unit,
     onSetVolume: (Float) -> Unit,
     onApplyLut: () -> Unit,
+    onCaption: () -> Unit,
 ) {
     when (clip) {
         is Clip.Video -> {
@@ -457,6 +470,7 @@ private fun InlineClipActions(
                 FilterPresetButton("blur") { onApplyFilter("blur", mapOf("radius" to 4f)) }
                 FilterPresetButton("vignette") { onApplyFilter("vignette", mapOf("intensity" to 0.5f)) }
                 FilterPresetButton("LUT…") { onApplyLut() }
+                FilterPresetButton("Caption") { onCaption() }
             }
         }
         is Clip.Audio -> {
@@ -477,6 +491,9 @@ private fun InlineClipActions(
                     onValueChangeFinished = { onSetVolume(pending) },
                     modifier = Modifier.fillMaxWidth(),
                 )
+                Row {
+                    FilterPresetButton("Caption") { onCaption() }
+                }
             }
         }
         is Clip.Text -> {}
