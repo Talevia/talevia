@@ -560,7 +560,104 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
         }
     }
 
-    SectionTitle("Chat")
+    // Session switcher state: mirrors sessions.listSessions(projectId) with a
+    // live reload on bus events so a new agent run (which upserts a title)
+    // shows up in the menu without a manual refresh.
+    val projectSessions = remember(projectId) { mutableStateListOf<io.talevia.core.session.Session>() }
+    var sessionMenuOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(projectId) {
+        val loaded = runCatching { container.sessions.listSessions(projectId).filter { !it.archived } }
+            .getOrElse { emptyList() }
+        projectSessions.clear(); projectSessions.addAll(loaded.sortedByDescending { it.updatedAt })
+    }
+    LaunchedEffect(projectId) {
+        container.bus.subscribe<BusEvent.PartUpdated>().collect {
+            val loaded = runCatching { container.sessions.listSessions(projectId).filter { !it.archived } }
+                .getOrElse { emptyList() }
+            projectSessions.clear(); projectSessions.addAll(loaded.sortedByDescending { it.updatedAt })
+        }
+    }
+
+    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+        SectionTitle("Chat")
+        Spacer(Modifier.weight(1f))
+        androidx.compose.foundation.layout.Box {
+            val active = projectSessions.firstOrNull { it.id == sessionId.value }
+            androidx.compose.material3.TextButton(onClick = { sessionMenuOpen = true }) {
+                val label = active?.title?.take(30) ?: sessionId.value.value.take(8)
+                Text("$label ▾", fontFamily = FontFamily.Monospace)
+            }
+            androidx.compose.material3.DropdownMenu(
+                expanded = sessionMenuOpen,
+                onDismissRequest = { sessionMenuOpen = false },
+            ) {
+                androidx.compose.material3.DropdownMenuItem(
+                    text = { Text("+ New chat") },
+                    onClick = {
+                        sessionMenuOpen = false
+                        scope.launch {
+                            val fresh = SessionId(Uuid.random().toString())
+                            container.sessions.createSession(
+                                Session(
+                                    id = fresh,
+                                    projectId = projectId,
+                                    title = "Chat",
+                                    createdAt = Clock.System.now(),
+                                    updatedAt = Clock.System.now(),
+                                ),
+                            )
+                            sessionId.value = fresh
+                            chatLines.clear()
+                            log += "new chat ${fresh.value.take(8)}"
+                        }
+                    },
+                )
+                if (projectSessions.isNotEmpty()) {
+                    androidx.compose.material3.HorizontalDivider()
+                    projectSessions.forEach { s ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = {
+                                val mark = if (s.id == sessionId.value) "• " else "  "
+                                Text("$mark${s.title.take(32)}", fontFamily = FontFamily.Monospace)
+                            },
+                            onClick = {
+                                sessionMenuOpen = false
+                                if (s.id != sessionId.value) {
+                                    sessionId.value = s.id
+                                    chatLines.clear()
+                                    scope.launch {
+                                        runCatching {
+                                            container.sessions.listSessionParts(s.id, includeCompacted = false)
+                                                .forEach { p ->
+                                                    when (p) {
+                                                        is Part.Text -> chatLines += ChatLine("assistant", p.text.take(400))
+                                                        is Part.Tool -> {
+                                                            val st = p.state
+                                                            val path = if (st is io.talevia.core.session.ToolState.Completed) {
+                                                                runCatching { resolveOpenablePath(container, st.data) }.getOrNull()
+                                                            } else {
+                                                                null
+                                                            }
+                                                            chatLines += ChatLine(
+                                                                role = "tool/${p.toolId}",
+                                                                text = "→ ${p.state::class.simpleName}" + (path?.let { " · $it" } ?: ""),
+                                                                openPath = path,
+                                                            )
+                                                        }
+                                                        else -> {}
+                                                    }
+                                                }
+                                        }
+                                        log += "resumed session ${s.id.value.take(8)} · ${chatLines.size} line(s)"
+                                    }
+                                }
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
     LazyColumn(modifier = Modifier.fillMaxWidth().height(220.dp)) {
         items(chatLines) { line ->
             Row(
