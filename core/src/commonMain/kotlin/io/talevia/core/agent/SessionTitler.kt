@@ -101,8 +101,15 @@ class SessionTitler(
             // (e.g. "Short recap"! needs the ! stripped, then the "), so strip
             // both classes in one predicate.
             val stripped = raw.trim().trim {
-                it == '"' || it == '\'' || it == '`' || it == '.' ||
-                    it == '!' || it == '?' || it == ',' || it == ';' || it == ':'
+                it == '"' ||
+                    it == '\'' ||
+                    it == '`' ||
+                    it == '.' ||
+                    it == '!' ||
+                    it == '?' ||
+                    it == ',' ||
+                    it == ';' ||
+                    it == ':'
             }
             return stripped.take(60)
         }

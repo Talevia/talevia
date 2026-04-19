@@ -1,7 +1,6 @@
 package io.talevia.core.tool
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
-import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.PartId
@@ -23,8 +22,6 @@ import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue

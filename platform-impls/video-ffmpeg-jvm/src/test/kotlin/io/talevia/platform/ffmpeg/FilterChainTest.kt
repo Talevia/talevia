@@ -1,8 +1,8 @@
 package io.talevia.platform.ffmpeg
 
+import io.talevia.core.AssetId
 import io.talevia.core.domain.Filter
 import io.talevia.core.platform.MediaPathResolver
-import io.talevia.core.AssetId
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull

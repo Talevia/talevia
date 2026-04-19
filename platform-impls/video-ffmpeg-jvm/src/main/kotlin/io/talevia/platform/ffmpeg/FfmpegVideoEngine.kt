@@ -2,11 +2,11 @@ package io.talevia.platform.ffmpeg
 
 import io.talevia.core.AssetId
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.Filter
 import io.talevia.core.domain.FrameRate
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Resolution
-import io.talevia.core.domain.Filter
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.platform.MediaPathResolver
