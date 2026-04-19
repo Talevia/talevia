@@ -46,6 +46,7 @@ import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 
 /**
  * Rich timeline inspector for the desktop editor — replaces the earlier
@@ -167,6 +168,31 @@ fun TimelinePanel(
                                 "regenerate clip ${clip.id.value.take(6)}",
                             )
                         },
+                        onApplyFilter = { name, params ->
+                            dispatch(
+                                "apply_filter",
+                                buildJsonObject {
+                                    put("projectId", projectId.value)
+                                    put("clipId", clip.id.value)
+                                    put("filterName", name)
+                                    putJsonObject("params") {
+                                        params.forEach { (k, v) -> put(k, v) }
+                                    }
+                                },
+                                "apply $name to ${clip.id.value.take(6)}",
+                            )
+                        },
+                        onSetVolume = { v ->
+                            dispatch(
+                                "set_clip_volume",
+                                buildJsonObject {
+                                    put("projectId", projectId.value)
+                                    put("clipId", clip.id.value)
+                                    put("volume", v)
+                                },
+                                "volume ${"%.2f".format(v)} on ${clip.id.value.take(6)}",
+                            )
+                        },
                     )
                 }
             }
@@ -201,6 +227,8 @@ private fun ClipRow(
     onSeek: () -> Unit,
     onRemove: () -> Unit,
     onRegenerate: () -> Unit,
+    onApplyFilter: (name: String, params: Map<String, Float>) -> Unit,
+    onSetVolume: (Float) -> Unit,
 ) {
     val bg = when {
         expanded -> Color(0xFFF1F4FB)
@@ -240,6 +268,8 @@ private fun ClipRow(
                         fontFamily = FontFamily.Monospace,
                     )
                 }
+                Spacer(Modifier.height(4.dp))
+                InlineClipActions(clip = clip, onApplyFilter = onApplyFilter, onSetVolume = onSetVolume)
                 Spacer(Modifier.height(4.dp))
                 SelectionContainer {
                     Text(
@@ -305,4 +335,71 @@ private fun formatSeconds(s: Double): String =
 private val PrettyJson = Json(JsonConfig.default) {
     prettyPrint = true
     prettyPrintIndent = "  "
+}
+
+/**
+ * Inline quick-action row shown on expanded clip inspector:
+ *  - Video clips: filter preset buttons (apply_filter with pre-set params).
+ *  - Audio clips: a volume slider (set_clip_volume on release).
+ *
+ * Intentionally minimal — the full `apply_filter` parameter space is better
+ * authored via chat when the user wants to tweak knobs. These buttons cover
+ * the "give me the preset I probably want" ergonomic case without forcing
+ * experts to drop into a JSON editor.
+ */
+@Composable
+private fun InlineClipActions(
+    clip: Clip,
+    onApplyFilter: (name: String, params: Map<String, Float>) -> Unit,
+    onSetVolume: (Float) -> Unit,
+) {
+    when (clip) {
+        is Clip.Video -> {
+            Text(
+                "filters:",
+                fontFamily = FontFamily.Monospace,
+                color = Color(0xFF555555),
+            )
+            Row(
+                modifier = Modifier.padding(vertical = 2.dp),
+                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(4.dp),
+            ) {
+                FilterPresetButton("bright +") { onApplyFilter("brightness", mapOf("amount" to 0.15f)) }
+                FilterPresetButton("bright -") { onApplyFilter("brightness", mapOf("amount" to -0.15f)) }
+                FilterPresetButton("sat +") { onApplyFilter("saturation", mapOf("amount" to 0.3f)) }
+                FilterPresetButton("sat -") { onApplyFilter("saturation", mapOf("amount" to -0.3f)) }
+                FilterPresetButton("blur") { onApplyFilter("blur", mapOf("radius" to 4f)) }
+                FilterPresetButton("vignette") { onApplyFilter("vignette", mapOf("intensity" to 0.5f)) }
+            }
+        }
+        is Clip.Audio -> {
+            // Local slider state so dragging is smooth; only commit the tool
+            // call on release (onValueChangeFinished) to avoid N permission
+            // prompts per drag.
+            var pending by remember(clip.id.value) { mutableStateOf(clip.volume) }
+            Column {
+                Text(
+                    "volume: ${"%.2f".format(pending)}",
+                    fontFamily = FontFamily.Monospace,
+                    color = Color(0xFF555555),
+                )
+                androidx.compose.material3.Slider(
+                    value = pending,
+                    onValueChange = { pending = it },
+                    valueRange = 0f..4f,
+                    onValueChangeFinished = { onSetVolume(pending) },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+        is Clip.Text -> {}
+    }
+}
+
+@Composable
+private fun FilterPresetButton(label: String, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+    ) { Text(label) }
 }
