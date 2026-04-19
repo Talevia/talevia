@@ -2,6 +2,10 @@ package io.talevia.server
 
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.PartData
+import io.ktor.http.content.forEachPart
+import io.ktor.utils.io.readRemaining
+import kotlinx.io.readByteArray
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.createApplicationPlugin
@@ -11,9 +15,11 @@ import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.path
 import io.ktor.server.request.receive
+import io.ktor.server.request.receiveMultipart
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondText
 import io.ktor.server.response.respondTextWriter
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
@@ -24,7 +30,10 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.agent.RunInput
 import io.talevia.core.bus.BusEvent
+import io.talevia.core.domain.Project
+import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.PermissionRule
+import io.talevia.core.domain.MediaSource
 import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
@@ -38,6 +47,7 @@ import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.io.File
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -263,6 +273,92 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
             }
         }
 
+        // ---- Project CRUD -------------------------------------------------------
+
+        /**
+         * GET /projects — list every project (lightweight summary rows).
+         */
+        get("/projects") {
+            val summaries = container.projects.listSummaries()
+            call.respond(summaries.map {
+                ProjectSummaryDto(it.id, it.title, it.createdAtEpochMs, it.updatedAtEpochMs)
+            })
+        }
+
+        /**
+         * POST /projects — create a new blank project and return its id.
+         */
+        post("/projects") {
+            val req = call.receive<CreateProjectRequest>()
+            requireLength(req.title, MAX_TITLE_LENGTH, "title")
+            val project = Project(
+                id = ProjectId(Uuid.random().toString()),
+                timeline = Timeline(),
+            )
+            container.projects.upsert(req.title, project)
+            call.respond(HttpStatusCode.Created, CreateProjectResponse(project.id.value))
+        }
+
+        /**
+         * GET /projects/{id}/state — full project JSON (timeline, sources, lockfile, …).
+         */
+        get("/projects/{id}/state") {
+            val id = ProjectId(call.parameters["id"]!!)
+            requireReasonableId(id.value, "id")
+            val project = container.projects.get(id)
+            if (project == null) {
+                call.respond(HttpStatusCode.NotFound, mapOf("error" to "project not found"))
+            } else {
+                call.respond(project)
+            }
+        }
+
+        /**
+         * DELETE /projects/{id} — permanently remove a project and its snapshots.
+         */
+        delete("/projects/{id}") {
+            val id = ProjectId(call.parameters["id"]!!)
+            requireReasonableId(id.value, "id")
+            container.projects.delete(id)
+            call.respond(HttpStatusCode.NoContent)
+        }
+
+        // ---- Media upload -------------------------------------------------------
+
+        /**
+         * POST /media — accept a `multipart/form-data` body with a single file part.
+         * Writes the bytes to a temp file, imports via [MediaStorage.import], and
+         * returns `{ "assetId": "<uuid>" }`. The temp file is deleted immediately after
+         * import regardless of success/failure.
+         */
+        post("/media") {
+            val multipart = call.receiveMultipart()
+            var assetId: String? = null
+            multipart.forEachPart { part ->
+                if (part is PartData.FileItem && assetId == null) {
+                    val fileName = part.originalFileName?.ifBlank { null } ?: "upload"
+                    val bytes = part.provider().readRemaining().readByteArray()
+                    val tmp = File.createTempFile("talevia-upload-", "-$fileName")
+                    try {
+                        tmp.writeBytes(bytes)
+                        val asset = container.media.import(
+                            source = MediaSource.File(tmp.absolutePath),
+                            probe = { src -> container.engine.probe(src) },
+                        )
+                        assetId = asset.id.value
+                    } finally {
+                        tmp.delete()
+                    }
+                }
+                part.dispose()
+            }
+            if (assetId == null) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "no file part found in multipart body"))
+            } else {
+                call.respond(HttpStatusCode.Created, mapOf("assetId" to assetId!!))
+            }
+        }
+
         /**
          * GET /metrics — prometheus-style text dump of the counter registry.
          * Format: `talevia_<counter_with_underscores> <value>` per line.
@@ -308,6 +404,15 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.PermissionReplied -> "permission.replied"
     is BusEvent.AgentRunFailed -> "agent.run.failed"
 }
+
+@Serializable data class CreateProjectRequest(val title: String)
+@Serializable data class CreateProjectResponse(val projectId: String)
+@Serializable data class ProjectSummaryDto(
+    val id: String,
+    val title: String,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+)
 
 @Serializable data class CreateSessionRequest(
     val projectId: String,
