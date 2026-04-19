@@ -168,13 +168,29 @@ private fun AppRoot(container: AppContainer) {
             // ── Left: assets + actions ────────────────────────────────────────────
             Column(modifier = Modifier.width(360.dp).fillMaxHeight()) {
                 SectionTitle("Assets")
-                OutlinedTextField(
-                    value = importPath,
-                    onValueChange = { importPath = it },
-                    label = { Text("Import path") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        value = importPath,
+                        onValueChange = { importPath = it },
+                        label = { Text("Import path") },
+                        singleLine = true,
+                        modifier = Modifier.weight(1f),
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Button(
+                        onClick = {
+                            scope.launch {
+                                runCatching {
+                                    val picked = container.filePicker.pick(
+                                        filter = io.talevia.core.platform.FileFilter.Any,
+                                        title = "Choose a file to import",
+                                    )
+                                    if (picked is MediaSource.File) importPath = picked.path
+                                }.onFailure { log += "browse failed: ${it.message}" }
+                            }
+                        },
+                    ) { Text("Browse…") }
+                }
                 Spacer(Modifier.height(6.dp))
                 Button(
                     onClick = {
