@@ -193,6 +193,40 @@ fun TimelinePanel(
                                 "volume ${"%.2f".format(v)} on ${clip.id.value.take(6)}",
                             )
                         },
+                        onApplyLut = {
+                            // Picker → import → apply_lut, all inside one scope.launch so
+                            // the dialog blocking doesn't freeze recomposition.
+                            scope.launch {
+                                val picked = runCatching {
+                                    container.filePicker.pick(
+                                        filter = io.talevia.core.platform.FileFilter.Any,
+                                        title = "Choose a .cube LUT",
+                                    )
+                                }.getOrNull() ?: run {
+                                    log += "LUT picker cancelled"
+                                    return@launch
+                                }
+                                if (picked !is io.talevia.core.domain.MediaSource.File) {
+                                    log += "LUT picker: unsupported source"
+                                    return@launch
+                                }
+                                val asset = runCatching {
+                                    container.media.import(picked) { container.engine.probe(it) }
+                                }.getOrElse {
+                                    log += "LUT import failed: ${it.message}"
+                                    return@launch
+                                }
+                                dispatch(
+                                    "apply_lut",
+                                    buildJsonObject {
+                                        put("projectId", projectId.value)
+                                        put("clipId", clip.id.value)
+                                        put("lutAssetId", asset.id.value)
+                                    },
+                                    "apply LUT ${picked.path.substringAfterLast('/')} to ${clip.id.value.take(6)}",
+                                )
+                            }
+                        },
                     )
                 }
             }
@@ -229,6 +263,7 @@ private fun ClipRow(
     onRegenerate: () -> Unit,
     onApplyFilter: (name: String, params: Map<String, Float>) -> Unit,
     onSetVolume: (Float) -> Unit,
+    onApplyLut: () -> Unit,
 ) {
     val bg = when {
         expanded -> Color(0xFFF1F4FB)
@@ -269,7 +304,12 @@ private fun ClipRow(
                     )
                 }
                 Spacer(Modifier.height(4.dp))
-                InlineClipActions(clip = clip, onApplyFilter = onApplyFilter, onSetVolume = onSetVolume)
+                InlineClipActions(
+                    clip = clip,
+                    onApplyFilter = onApplyFilter,
+                    onSetVolume = onSetVolume,
+                    onApplyLut = onApplyLut,
+                )
                 Spacer(Modifier.height(4.dp))
                 SelectionContainer {
                     Text(
@@ -352,6 +392,7 @@ private fun InlineClipActions(
     clip: Clip,
     onApplyFilter: (name: String, params: Map<String, Float>) -> Unit,
     onSetVolume: (Float) -> Unit,
+    onApplyLut: () -> Unit,
 ) {
     when (clip) {
         is Clip.Video -> {
@@ -370,6 +411,7 @@ private fun InlineClipActions(
                 FilterPresetButton("sat -") { onApplyFilter("saturation", mapOf("amount" to -0.3f)) }
                 FilterPresetButton("blur") { onApplyFilter("blur", mapOf("radius" to 4f)) }
                 FilterPresetButton("vignette") { onApplyFilter("vignette", mapOf("intensity" to 0.5f)) }
+                FilterPresetButton("LUT…") { onApplyLut() }
             }
         }
         is Clip.Audio -> {
