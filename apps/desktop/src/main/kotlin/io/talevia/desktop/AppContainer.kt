@@ -35,6 +35,7 @@ import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
+import io.talevia.core.tool.builtin.project.ForkProjectTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
 import io.talevia.core.tool.builtin.project.ListProjectSnapshotsTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
@@ -136,6 +137,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(SaveProjectSnapshotTool(projects))
         register(ListProjectSnapshotsTool(projects))
         register(RestoreProjectSnapshotTool(projects))
+        register(ForkProjectTool(projects))
         register(DefineCharacterRefTool(projects))
         register(DefineStyleBibleTool(projects))
         register(DefineBrandPaletteTool(projects))

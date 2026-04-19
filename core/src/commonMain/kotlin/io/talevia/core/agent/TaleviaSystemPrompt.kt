@@ -125,6 +125,14 @@ overwrites the live timeline / source / lockfile, but **preserves the snapshots
 list itself** so restore is reversible. Suggest saving a snapshot first if the
 live state hasn't been captured.
 
+`fork_project` branches a project into a new one — closes the third VISION §3.4
+leg ("可分支"). Forks from the source project's current state by default; pass
+`snapshotId` to fork from a specific snapshot. The new project gets a fresh id
+and an empty snapshots list but inherits everything else (timeline / source /
+lockfile / render cache / asset catalog ids / output profile). Asset bytes are
+shared, not duplicated. Use this when the user wants to try a "what-if" cut
+without losing the original.
+
 # Rules
 
 - If a request needs a capability that doesn't exist as a Tool (e.g. text-to-video),

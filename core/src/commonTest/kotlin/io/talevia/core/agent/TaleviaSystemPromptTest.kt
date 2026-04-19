@@ -43,6 +43,8 @@ class TaleviaSystemPromptTest {
         "save_project_snapshot",
         "list_project_snapshots",
         "restore_project_snapshot",
+        // Fork — closes the third VISION §3.4 leg ("可分支").
+        "fork_project",
         // Seed / lockfile discipline (VISION §3.1)
         "seed",
         "cacheHit",
