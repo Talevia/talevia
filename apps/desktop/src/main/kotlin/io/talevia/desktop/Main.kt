@@ -1,5 +1,6 @@
 package io.talevia.desktop
 
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,12 +20,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -61,16 +64,15 @@ import kotlin.uuid.Uuid
 @OptIn(ExperimentalUuidApi::class)
 fun main() = application {
     val container = remember { AppContainer(desktopEnvWithDefaults()) }
-    val projectId = remember { ProjectId(Uuid.random().toString()) }
 
     Window(
         onCloseRequest = ::exitApplication,
-        title = "Talevia (M2 scaffold)",
-        state = rememberWindowState(width = 1200.dp, height = 760.dp),
+        title = "Talevia",
+        state = rememberWindowState(width = 1260.dp, height = 820.dp),
     ) {
         MaterialTheme {
             Surface(modifier = Modifier.fillMaxSize()) {
-                AppRoot(container = container, projectId = projectId)
+                AppRoot(container = container)
             }
         }
     }
@@ -78,7 +80,7 @@ fun main() = application {
 
 @OptIn(ExperimentalUuidApi::class)
 @Composable
-private fun AppRoot(container: AppContainer, projectId: ProjectId) {
+private fun AppRoot(container: AppContainer) {
     val scope = rememberCoroutineScope()
     val log = remember { mutableStateListOf<String>() }
     val assets = remember { mutableStateListOf<String>() }
@@ -87,162 +89,191 @@ private fun AppRoot(container: AppContainer, projectId: ProjectId) {
     var exportPath by remember { mutableStateOf(System.getProperty("user.home") + "/talevia-export.mp4") }
     var previewPath by remember { mutableStateOf<String?>(null) }
 
-    // Bootstrap: create empty project on first composition.
-    remember {
-        scope.launch {
+    // Mutable active project id — `ProjectBar` flips this when the user
+    // switches / creates / forks / deletes. Defaults to a sentinel until
+    // the bootstrap coroutine decides (existing project or new one).
+    var projectId by remember { mutableStateOf(ProjectId("")) }
+    var bootstrapped by remember { mutableStateOf(false) }
+
+    // Bootstrap: prefer most-recently-updated existing project; otherwise
+    // create one. Persistent SQLite (task 1) means this picks up the
+    // user's previous session on relaunch.
+    LaunchedEffect(Unit) {
+        val summaries = container.projects.listSummaries()
+        val picked = summaries.maxByOrNull { it.updatedAtEpochMs }
+        projectId = if (picked != null) {
+            ProjectId(picked.id)
+        } else {
+            val fresh = ProjectId(Uuid.random().toString())
             container.projects.upsert(
                 "Untitled",
-                Project(id = projectId, timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P),
+                Project(id = fresh, timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P),
             )
-            log += "ready · project=$projectId"
+            fresh
         }
+        log += "ready · project=${projectId.value}"
+        bootstrapped = true
     }
 
     // Subscribe to render-progress events.
-    remember {
-        scope.launch {
-            container.bus.subscribe<BusEvent.PartUpdated>().collect { ev ->
-                when (val p = ev.part) {
-                    is Part.RenderProgress -> {
-                        renderProgress = p.ratio
-                        if (p.message != null) log += "render · ${"%.0f".format(p.ratio * 100)}% ${p.message}"
-                    }
-                    else -> {}
+    LaunchedEffect(Unit) {
+        container.bus.subscribe<BusEvent.PartUpdated>().collect { ev ->
+            when (val p = ev.part) {
+                is Part.RenderProgress -> {
+                    renderProgress = p.ratio
+                    if (p.message != null) log += "render · ${"%.0f".format(p.ratio * 100)}% ${p.message}"
                 }
+                else -> {}
             }
         }
     }
 
     PermissionDialog(container = container) { log += it }
 
-    Row(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-        // ── Left: assets + actions ────────────────────────────────────────────
-        Column(modifier = Modifier.width(360.dp).fillMaxHeight()) {
-            SectionTitle("Assets")
-            OutlinedTextField(
-                value = importPath,
-                onValueChange = { importPath = it },
-                label = { Text("Import path") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(6.dp))
-            Button(
-                onClick = {
-                    val path = importPath
-                    if (path.isBlank()) return@Button
-                    scope.launch {
-                        runCatching {
-                            val asset = container.media.import(MediaSource.File(path)) { container.engine.probe(it) }
-                            assets += "${asset.id.value}  ·  ${"%.1f".format(asset.metadata.duration.inWholeMilliseconds / 1000.0)}s"
-                            log += "imported ${asset.id.value}"
-                            importPath = ""
-                        }.onFailure { log += "import failed: ${it.message}" }
+    if (!bootstrapped) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Loading…")
+        }
+        return
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        ProjectBar(
+            container = container,
+            activeProjectId = projectId,
+            onProjectChange = { projectId = it },
+            log = log,
+        )
+        Divider()
+        Row(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+            // ── Left: assets + actions ────────────────────────────────────────────
+            Column(modifier = Modifier.width(360.dp).fillMaxHeight()) {
+                SectionTitle("Assets")
+                OutlinedTextField(
+                    value = importPath,
+                    onValueChange = { importPath = it },
+                    label = { Text("Import path") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(6.dp))
+                Button(
+                    onClick = {
+                        val path = importPath
+                        if (path.isBlank()) return@Button
+                        scope.launch {
+                            runCatching {
+                                val asset = container.media.import(MediaSource.File(path)) { container.engine.probe(it) }
+                                assets += "${asset.id.value}  ·  ${"%.1f".format(asset.metadata.duration.inWholeMilliseconds / 1000.0)}s"
+                                log += "imported ${asset.id.value}"
+                                importPath = ""
+                            }.onFailure { log += "import failed: ${it.message}" }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Import") }
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
+                    items(assets) { line ->
+                        Text(line, modifier = Modifier.padding(vertical = 2.dp), fontFamily = FontFamily.Monospace)
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Import") }
-            Spacer(Modifier.height(8.dp))
-            LazyColumn(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
-                items(assets) { line ->
-                    Text(line, modifier = Modifier.padding(vertical = 2.dp), fontFamily = FontFamily.Monospace)
                 }
             }
-        }
 
-        Divider(modifier = Modifier.fillMaxHeight().width(1.dp))
+            Divider(modifier = Modifier.fillMaxHeight().width(1.dp))
 
-        // ── Centre: timeline + render ────────────────────────────────────────
-        Column(modifier = Modifier.weight(1f).fillMaxHeight().padding(horizontal = 12.dp)) {
-            SectionTitle("Timeline")
-            Button(
-                onClick = {
-                    if (assets.isEmpty()) {
-                        log += "no assets to add"
-                        return@Button
+            // ── Centre: timeline + render ────────────────────────────────────────
+            Column(modifier = Modifier.weight(1f).fillMaxHeight().padding(horizontal = 12.dp)) {
+                SectionTitle("Timeline")
+                Button(
+                    onClick = {
+                        if (assets.isEmpty()) {
+                            log += "no assets to add"
+                            return@Button
+                        }
+                        val nextAssetId = assets.last().substringBefore("  ·  ")
+                        scope.launch {
+                            runCatching {
+                                container.tools["add_clip"]!!.dispatch(
+                                    buildJsonObject {
+                                        put("projectId", projectId.value)
+                                        put("assetId", nextAssetId)
+                                    },
+                                    container.uiToolContext(projectId),
+                                )
+                                log += "added clip"
+                            }.onFailure { log += "add_clip failed: ${it.message}" }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Add last asset to timeline") }
+                Spacer(Modifier.height(6.dp))
+                TimelinePanel(container = container, projectId = projectId, log = log)
+
+                Spacer(Modifier.height(12.dp))
+                SectionTitle("Render")
+                OutlinedTextField(
+                    value = exportPath,
+                    onValueChange = { exportPath = it },
+                    label = { Text("Export path") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(6.dp))
+                Button(
+                    onClick = {
+                        val path = exportPath
+                        scope.launch {
+                            runCatching {
+                                renderProgress = 0f
+                                container.tools["export"]!!.dispatch(
+                                    buildJsonObject {
+                                        put("projectId", projectId.value)
+                                        put("outputPath", path)
+                                    },
+                                    container.uiToolContext(projectId),
+                                )
+                                log += "render done → $path"
+                                previewPath = path
+                            }.onFailure { log += "export failed: ${it.message}"; renderProgress = null }
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Export") }
+                Spacer(Modifier.height(6.dp))
+                renderProgress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
+
+                Spacer(Modifier.height(12.dp))
+                VideoPreviewPanel(filePath = previewPath, modifier = Modifier.fillMaxWidth())
+            }
+
+            Divider(modifier = Modifier.fillMaxHeight().width(1.dp))
+
+            // ── Right: tabbed workbench (chat / source) + activity log ───────────
+            Column(modifier = Modifier.width(460.dp).fillMaxHeight().padding(start = 12.dp)) {
+                var tab by remember { mutableStateOf(RightTab.Chat) }
+                androidx.compose.material3.TabRow(selectedTabIndex = tab.ordinal) {
+                    RightTab.entries.forEach { entry ->
+                        androidx.compose.material3.Tab(
+                            selected = tab == entry,
+                            onClick = { tab = entry },
+                            text = { Text(entry.label) },
+                        )
                     }
-                    val nextAssetId = assets.last().substringBefore("  ·  ")
-                    scope.launch {
-                        runCatching {
-                            container.tools["add_clip"]!!.dispatch(
-                                buildJsonObject {
-                                    put("projectId", projectId.value)
-                                    put("assetId", nextAssetId)
-                                },
-                                container.uiToolContext(projectId),
-                            )
-                            log += "added clip"
-                        }.onFailure { log += "add_clip failed: ${it.message}" }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Add last asset to timeline") }
-            Spacer(Modifier.height(6.dp))
-            TimelinePanel(container = container, projectId = projectId, log = log)
-
-            Spacer(Modifier.height(12.dp))
-            SectionTitle("Render")
-            OutlinedTextField(
-                value = exportPath,
-                onValueChange = { exportPath = it },
-                label = { Text("Export path") },
-                singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(6.dp))
-            Button(
-                onClick = {
-                    val path = exportPath
-                    scope.launch {
-                        runCatching {
-                            renderProgress = 0f
-                            container.tools["export"]!!.dispatch(
-                                buildJsonObject {
-                                    put("projectId", projectId.value)
-                                    put("outputPath", path)
-                                },
-                                container.uiToolContext(projectId),
-                            )
-                            log += "render done → $path"
-                            previewPath = path
-                        }.onFailure { log += "export failed: ${it.message}"; renderProgress = null }
-                    }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Export") }
-            Spacer(Modifier.height(6.dp))
-            renderProgress?.let { LinearProgressIndicator(progress = { it }, modifier = Modifier.fillMaxWidth()) }
-
-            Spacer(Modifier.height(12.dp))
-            VideoPreviewPanel(filePath = previewPath, modifier = Modifier.fillMaxWidth())
-        }
-
-        Divider(modifier = Modifier.fillMaxHeight().width(1.dp))
-
-        // ── Right: tabbed workbench (chat / source) + activity log ───────────
-        Column(modifier = Modifier.width(460.dp).fillMaxHeight().padding(start = 12.dp)) {
-            var tab by remember { mutableStateOf(RightTab.Chat) }
-            androidx.compose.material3.TabRow(selectedTabIndex = tab.ordinal) {
-                RightTab.entries.forEach { entry ->
-                    androidx.compose.material3.Tab(
-                        selected = tab == entry,
-                        onClick = { tab = entry },
-                        text = { Text(entry.label) },
-                    )
                 }
-            }
-            Spacer(Modifier.height(6.dp))
-            when (tab) {
-                RightTab.Chat -> ChatPanel(container = container, projectId = projectId, log = log)
-                RightTab.Source -> SourcePanel(container = container, projectId = projectId, log = log)
-            }
-            Spacer(Modifier.height(12.dp))
-            Divider()
-            Spacer(Modifier.height(6.dp))
-            SectionTitle("Activity")
-            LazyColumn(modifier = Modifier.fillMaxWidth().height(180.dp)) {
-                items(log) { line ->
-                    Text(line, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(vertical = 1.dp))
+                Spacer(Modifier.height(6.dp))
+                when (tab) {
+                    RightTab.Chat -> ChatPanel(container = container, projectId = projectId, log = log)
+                    RightTab.Source -> SourcePanel(container = container, projectId = projectId, log = log)
+                }
+                Spacer(Modifier.height(12.dp))
+                Divider()
+                Spacer(Modifier.height(6.dp))
+                SectionTitle("Activity")
+                LazyColumn(modifier = Modifier.fillMaxWidth().height(180.dp)) {
+                    items(log) { line ->
+                        Text(line, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(vertical = 1.dp))
+                    }
                 }
             }
         }
