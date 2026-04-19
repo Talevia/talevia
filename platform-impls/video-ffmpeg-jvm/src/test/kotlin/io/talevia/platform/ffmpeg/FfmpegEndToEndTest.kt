@@ -17,6 +17,7 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitleTool
+import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import kotlinx.coroutines.test.runTest
@@ -202,6 +203,97 @@ class FfmpegEndToEndTest {
             },
             ctx,
         )
+        registry["export"]!!.dispatch(
+            buildJsonObject {
+                put("projectId", projectId.value)
+                put("outputPath", output.absolutePath)
+                put("width", 320)
+                put("height", 240)
+                put("frameRate", 24)
+            },
+            ctx,
+        )
+
+        assertTrue(output.exists(), "output mp4 should exist at ${output.absolutePath}")
+        assertTrue(output.length() > 1024, "output mp4 should be non-trivial (${output.length()} bytes)")
+        driver.close()
+    }
+
+    /**
+     * Regression: verifies that AddTransitionTool's Effect-track transition clip
+     * becomes a real `fade` filter on the neighbouring video clips. Catches
+     * regressions in `transitionFadesFor` (wrong boundary match) or
+     * `buildFadeChain` (malformed filtergraph segment).
+     */
+    @Test
+    fun renderWithTransitionProducesVideo() = runTest(timeout = kotlin.time.Duration.parse("60s")) {
+        if (!ffmpegOnPath()) return@runTest
+
+        generateTestSource(inputA, "testsrc")
+        generateTestSource(inputB, "testsrc2")
+
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
+        val db = TaleviaDb(driver)
+        val media = InMemoryMediaStorage()
+        val engine = FfmpegVideoEngine(pathResolver = media)
+        val projects = SqlDelightProjectStore(db)
+        val perms = AllowAllPermissionService()
+
+        val projectId = ProjectId(Uuid.random().toString())
+        projects.upsert(
+            "trans-smoke",
+            Project(id = projectId, timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P),
+        )
+
+        val registry = ToolRegistry().apply {
+            register(ImportMediaTool(media, engine))
+            register(AddClipTool(projects, media))
+            register(AddTransitionTool(projects))
+            register(ExportTool(projects, engine))
+        }
+
+        val ctx = ToolContext(
+            sessionId = SessionId("test"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { perms.check(emptyList(), it) },
+            emitPart = { },
+            messages = emptyList(),
+        )
+
+        val importA = registry["import_media"]!!.dispatch(buildJsonObject { put("path", inputA.absolutePath) }, ctx)
+        val importB = registry["import_media"]!!.dispatch(buildJsonObject { put("path", inputB.absolutePath) }, ctx)
+        val assetIdA = (importA.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
+        val assetIdB = (importB.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
+
+        val addA = registry["add_clip"]!!.dispatch(
+            buildJsonObject {
+                put("projectId", projectId.value)
+                put("assetId", assetIdA)
+            },
+            ctx,
+        )
+        val addB = registry["add_clip"]!!.dispatch(
+            buildJsonObject {
+                put("projectId", projectId.value)
+                put("assetId", assetIdB)
+            },
+            ctx,
+        )
+        val clipIdA = (addA.data as io.talevia.core.tool.builtin.video.AddClipTool.Output).clipId
+        val clipIdB = (addB.data as io.talevia.core.tool.builtin.video.AddClipTool.Output).clipId
+
+        registry["add_transition"]!!.dispatch(
+            buildJsonObject {
+                put("projectId", projectId.value)
+                put("fromClipId", clipIdA)
+                put("toClipId", clipIdB)
+                put("transitionName", "fade")
+                put("durationSeconds", 0.5)
+            },
+            ctx,
+        )
+
         registry["export"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)

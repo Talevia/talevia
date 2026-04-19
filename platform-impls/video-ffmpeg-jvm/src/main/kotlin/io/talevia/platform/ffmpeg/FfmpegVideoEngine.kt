@@ -112,6 +112,14 @@ class FfmpegVideoEngine(
             .mapNotNull { it.assetId }
             .distinct()
             .associateWith { pathResolver.resolve(it) }
+        // Transition pass. AddTransitionTool records a transition as a clip on
+        // an Effect track, centered at the boundary between two adjacent video
+        // clips. For v1 we render every transition name as a dip-to-black fade
+        // (fromClip tail fades to black over D/2; toClip head fades in from
+        // black over D/2) — this is the cross-engine parity floor and matches
+        // what the Media3 / AVFoundation engines can render without custom
+        // shaders.
+        val transitionFades: Map<String, ClipFades> = transitionFadesFor(timeline, videoClips)
         val args = mutableListOf(
             ffmpegPath, "-y", "-progress", "pipe:2",
         )
@@ -133,17 +141,21 @@ class FfmpegVideoEngine(
             output.resolution.width,
             output.resolution.height,
         )
-        // Build the filtergraph. For clips with per-clip filters, pre-process
-        // the video stream through a chain and label it [vN]; clips without
-        // filters pass [N:v:0] through unchanged. Audio is always taken from
-        // [N:a:0?] without filters (apply_filter only supports video in core).
+        // Build the filtergraph. For clips with per-clip filters or transition
+        // fades, pre-process the video stream through a chain and label it [vN];
+        // clips without either pass [N:v:0] through unchanged. Audio is always
+        // taken from [N:a:0?] without filters (apply_filter only supports video
+        // in core).
         val filter = buildString {
             val videoLabels = mutableListOf<String>()
             for (i in 0 until n) {
                 val clip = videoClips[i]
-                val chain = filterChainFor(clip.filters, filterAssetPaths)
-                if (chain != null) {
-                    append("[$i:v:0]$chain[v$i];")
+                val filterChain = filterChainFor(clip.filters, filterAssetPaths)
+                val fadeChain = buildFadeChain(clip, transitionFades[clip.id.value])
+                val fullChain = listOfNotNull(filterChain, fadeChain)
+                    .ifEmpty { null }?.joinToString(",")
+                if (fullChain != null) {
+                    append("[$i:v:0]$fullChain[v$i];")
                     videoLabels += "[v$i]"
                 } else {
                     videoLabels += "[$i:v:0]"
@@ -425,6 +437,78 @@ class FfmpegVideoEngine(
         is MediaSource.File -> source.path
         is MediaSource.Http -> error("Http MediaSource not supported by FfmpegVideoEngine yet (download first)")
         is MediaSource.Platform -> error("Platform MediaSource not supported on JVM (${source.scheme})")
+    }
+
+    /**
+     * Per-clip fade envelope derived from transition clips on Effect tracks.
+     * A video clip sitting *before* a transition gets a tail fade-out; the one
+     * sitting *after* gets a head fade-in. Each half-duration is the transition
+     * clip's `duration / 2` — transitions are centered on the boundary between
+     * their two neighbours.
+     */
+    internal data class ClipFades(
+        val headFade: Duration? = null,
+        val tailFade: Duration? = null,
+    )
+
+    /**
+     * Scan [timeline] for transition clips and map each affected video clip's
+     * id to its fade envelope. V1 renders every transition name (fade, dissolve,
+     * slide, wipe, …) as a dip-to-black fade — this is the cross-engine parity
+     * floor and matches what Media3 / AVFoundation can render without custom
+     * shaders. A true crossfade would require the two clips to overlap on the
+     * timeline, which the current [io.talevia.core.tool.builtin.video.AddTransitionTool]
+     * doesn't produce (clips stay sequential, the transition sits on a separate
+     * Effect track and only encodes the boundary).
+     */
+    internal fun transitionFadesFor(
+        timeline: Timeline,
+        videoClips: List<Clip.Video>,
+    ): Map<String, ClipFades> {
+        val transitions = timeline.tracks
+            .filterIsInstance<Track.Effect>()
+            .flatMap { it.clips.filterIsInstance<Clip.Video>() }
+            .filter { it.assetId.value.startsWith("transition:") }
+        if (transitions.isEmpty()) return emptyMap()
+        val accum = mutableMapOf<String, ClipFades>()
+        for (trans in transitions) {
+            val halfDur = trans.timeRange.duration / 2
+            val boundary = trans.timeRange.start + halfDur
+            val fromClip = videoClips.firstOrNull { it.timeRange.end == boundary }
+            val toClip = videoClips.firstOrNull { it.timeRange.start == boundary }
+            if (fromClip != null) {
+                val prior = accum[fromClip.id.value] ?: ClipFades()
+                accum[fromClip.id.value] = prior.copy(tailFade = halfDur)
+            }
+            if (toClip != null) {
+                val prior = accum[toClip.id.value] ?: ClipFades()
+                accum[toClip.id.value] = prior.copy(headFade = halfDur)
+            }
+        }
+        return accum
+    }
+
+    /**
+     * Emit an ffmpeg `fade` filter chain for a clip's transition envelope, or
+     * null when the clip has no fades to apply. `fade=t=in:...` ramps from black
+     * to the source image at the head; `fade=t=out:...` ramps to black at the
+     * tail. We anchor the tail fade at `clipDur - tailDur` so it lands exactly
+     * at the clip's end regardless of which input pre-seek ffmpeg used.
+     */
+    internal fun buildFadeChain(clip: Clip.Video, fades: ClipFades?): String? {
+        if (fades == null) return null
+        val clipDur = clip.sourceRange.duration.toDouble(kotlin.time.DurationUnit.SECONDS)
+        val parts = mutableListOf<String>()
+        fades.headFade?.let {
+            val d = it.toDouble(kotlin.time.DurationUnit.SECONDS).coerceAtMost(clipDur)
+            if (d > 0.0) parts += "fade=t=in:st=0:d=${formatFloat(d.toFloat())}:c=black"
+        }
+        fades.tailFade?.let {
+            val d = it.toDouble(kotlin.time.DurationUnit.SECONDS).coerceAtMost(clipDur)
+            val start = (clipDur - d).coerceAtLeast(0.0)
+            if (d > 0.0) parts += "fade=t=out:st=${formatFloat(start.toFloat())}:d=${formatFloat(d.toFloat())}:c=black"
+        }
+        return if (parts.isEmpty()) null else parts.joinToString(",")
     }
 
     private data class ProcessResult(val exitCode: Int, val stdout: String, val stderr: String)
