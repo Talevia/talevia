@@ -191,12 +191,20 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
                         ),
                     )
                 } catch (t: Throwable) {
-                    // Surface the failure to SSE subscribers; stderr keeps a full trace
+                    // Surface the failure to SSE subscribers; the Logger keeps a full trace
                     // for operators. Rethrow CancellationException so coroutine cancel
                     // still propagates normally.
                     if (t is kotlinx.coroutines.CancellationException) throw t
-                    System.err.println("[agent.run] session=${sid.value} correlationId=$correlationId failed: ${t.message}")
-                    t.printStackTrace(System.err)
+                    io.talevia.core.logging.Loggers.get("server.agent.run").log(
+                        io.talevia.core.logging.LogLevel.ERROR,
+                        "agent run failed",
+                        fields = mapOf(
+                            "session" to sid.value,
+                            "correlationId" to correlationId,
+                            "error" to (t.message ?: t::class.simpleName),
+                        ),
+                        cause = t,
+                    )
                     container.bus.publish(
                         BusEvent.AgentRunFailed(
                             sessionId = sid,
