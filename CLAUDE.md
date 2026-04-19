@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Targets: **iOS · Android · Desktop (macOS/Windows/Linux) · Server**. Agent logic runs primarily on-device; the server is an optional headless deployment.
 
-Read first: `docs/REQUIREMENTS.md` (principles, hard rules), `docs/ARCHITECTURE.md` (module design + rationale). The requirements doc is the source of truth — do not override it without the user's direction.
+Read first: `docs/VISION.md` (north star — where we're going and why), `docs/REQUIREMENTS.md` (principles, hard rules — what's forbidden), `docs/ARCHITECTURE.md` (module design + rationale — current shape). For autonomous "find-gap → fill-gap" loops, use the rubric in VISION §5. The requirements doc is the source of truth for constraints — do not override it without the user's direction.
 
 ## Build & run
 
