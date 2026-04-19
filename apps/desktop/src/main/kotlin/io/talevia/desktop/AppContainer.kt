@@ -43,6 +43,7 @@ import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
 import io.talevia.core.tool.builtin.aigc.UpscaleAssetTool
 import io.talevia.core.tool.builtin.ml.DescribeAssetTool
 import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
+import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
@@ -205,6 +206,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(AddTransitionTool(projects))
         register(RevertTimelineTool(sessions, projects))
         register(CreateProjectTool(projects))
+        register(CreateProjectFromTemplateTool(projects))
         register(ListProjectsTool(projects))
         register(GetProjectStateTool(projects))
         register(DeleteProjectTool(projects))
