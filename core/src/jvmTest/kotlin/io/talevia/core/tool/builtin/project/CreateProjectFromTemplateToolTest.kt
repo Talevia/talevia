@@ -17,6 +17,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class CreateProjectFromTemplateToolTest {
@@ -137,5 +138,32 @@ class CreateProjectFromTemplateToolTest {
         assertEquals(3840, out.resolutionWidth)
         assertEquals(2160, out.resolutionHeight)
         assertEquals(24, out.fps)
+    }
+
+    @Test fun autoSlugFromTitleWhenProjectIdOmitted() = runTest {
+        val store = newStore()
+        val tool = CreateProjectFromTemplateTool(store)
+        val out = tool.execute(
+            CreateProjectFromTemplateTool.Input(title = "My Graduation Vlog", template = "vlog"),
+            ctx(),
+        ).data
+        // Slug must be derived from the title (lower-case, hyphenated) and must be non-blank.
+        assertTrue(out.projectId.isNotBlank(), "auto-slug must not be blank")
+        assertTrue(out.projectId.contains("graduation") || out.projectId.contains("my"), "slug must embed title words")
+        assertNotNull(store.get(ProjectId(out.projectId)), "project must be persisted under the auto-slug id")
+    }
+
+    @Test fun titlePreservedInProjectRecord() = runTest {
+        val store = newStore()
+        val tool = CreateProjectFromTemplateTool(store)
+        val title = "Cinematic Short Film"
+        tool.execute(
+            CreateProjectFromTemplateTool.Input(title = title, template = "narrative", projectId = "p-title"),
+            ctx(),
+        )
+        val summaries = store.listSummaries()
+        val summary = summaries.firstOrNull { it.id == "p-title" }
+        assertNotNull(summary, "created project must appear in listSummaries")
+        assertEquals(title, summary!!.title, "project title must match the input title")
     }
 }

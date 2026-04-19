@@ -8,6 +8,7 @@ import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.ProjectSnapshotId
 import io.talevia.core.SessionId
+import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
@@ -20,9 +21,16 @@ import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
+import io.talevia.core.domain.lockfile.Lockfile
+import io.talevia.core.domain.lockfile.LockfileEntry
+import io.talevia.core.domain.source.Source
+import io.talevia.core.domain.source.SourceNode
+import io.talevia.core.domain.source.addNode
 import io.talevia.core.permission.PermissionDecision
+import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.buildJsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -229,5 +237,111 @@ class ForkProjectToolTest {
                 rig.ctx,
             )
         }
+    }
+
+    @Test fun forkPreservesSourceDagNodes() = runTest {
+        val rig = rig()
+        val charNodeId = SourceNodeId("mei")
+        val sourceWithNode = Project(
+            id = ProjectId("p-src"),
+            timeline = Timeline(),
+            source = Source.EMPTY.addNode(
+                SourceNode(
+                    id = charNodeId,
+                    kind = "core.consistency.character_ref",
+                    body = buildJsonObject { },
+                ),
+            ),
+        )
+        rig.store.upsert("source", sourceWithNode)
+
+        val tool = ForkProjectTool(rig.store)
+        val out = tool.execute(
+            ForkProjectTool.Input(sourceProjectId = "p-src", newTitle = "Fork with nodes"),
+            rig.ctx,
+        )
+
+        val fork = rig.store.get(ProjectId(out.data.newProjectId))!!
+        assertNotNull(fork.source.byId[charNodeId], "fork must carry source DAG nodes from the original")
+        assertEquals(1, fork.source.nodes.size)
+
+        // Originals are unchanged.
+        val original = rig.store.get(ProjectId("p-src"))!!
+        assertEquals(1, original.source.nodes.size)
+    }
+
+    @Test fun forkPreservesLockfileEntries() = runTest {
+        val rig = rig()
+        val asset = AssetId("a-gen")
+        val bindingNodeId = SourceNodeId("style-node")
+        val entry = LockfileEntry(
+            inputHash = "h-1",
+            toolId = "generate_image",
+            assetId = asset,
+            provenance = GenerationProvenance(
+                providerId = "openai",
+                modelId = "gpt-image-1",
+                modelVersion = null,
+                seed = 42L,
+                parameters = buildJsonObject { },
+                createdAtEpochMs = 1_000L,
+            ),
+            sourceBinding = setOf(bindingNodeId),
+        )
+        val sourceProject = Project(
+            id = ProjectId("p-lf"),
+            timeline = Timeline(),
+            lockfile = Lockfile.EMPTY.append(entry),
+        )
+        rig.store.upsert("source", sourceProject)
+
+        val tool = ForkProjectTool(rig.store)
+        val out = tool.execute(
+            ForkProjectTool.Input(sourceProjectId = "p-lf", newTitle = "Fork with lockfile"),
+            rig.ctx,
+        )
+
+        val fork = rig.store.get(ProjectId(out.data.newProjectId))!!
+        assertEquals(1, fork.lockfile.entries.size, "fork must carry lockfile entries for cache reuse")
+        assertEquals("h-1", fork.lockfile.entries.single().inputHash)
+        assertEquals(asset, fork.lockfile.entries.single().assetId)
+    }
+
+    @Test fun forkIsIndependentOfOriginalAfterMutation() = runTest {
+        val rig = rig()
+        val asset = AssetId("a-orig")
+        rig.store.upsert(
+            "source",
+            Project(
+                id = ProjectId("p-ind"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v"), listOf(videoClip("c-1", asset))))),
+                assets = listOf(fakeAsset(asset)),
+            ),
+        )
+        val tool = ForkProjectTool(rig.store)
+        val out = tool.execute(
+            ForkProjectTool.Input(sourceProjectId = "p-ind", newTitle = "Independence test"),
+            rig.ctx,
+        )
+        val forkId = ProjectId(out.data.newProjectId)
+
+        // Mutate the fork — add a second clip.
+        rig.store.mutate(forkId) { p ->
+            p.copy(
+                timeline = Timeline(
+                    tracks = listOf(
+                        Track.Video(
+                            TrackId("v"),
+                            listOf(videoClip("c-1", asset), videoClip("c-2", asset)),
+                        ),
+                    ),
+                ),
+            )
+        }
+
+        val original = rig.store.get(ProjectId("p-ind"))!!
+        assertEquals(1, original.timeline.tracks.flatMap { it.clips }.size, "original must not be affected by fork mutations")
+        val forked = rig.store.get(forkId)!!
+        assertEquals(2, forked.timeline.tracks.flatMap { it.clips }.size)
     }
 }
