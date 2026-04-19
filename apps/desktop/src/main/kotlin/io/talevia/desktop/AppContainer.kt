@@ -65,6 +65,7 @@ import io.talevia.core.tool.builtin.video.RemoveClipTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
+import io.talevia.core.tool.builtin.video.TrimClipTool
 import io.talevia.platform.ffmpeg.FfmpegVideoEngine
 import java.io.File
 
@@ -141,6 +142,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(SplitClipTool(projects))
         register(RemoveClipTool(projects))
         register(MoveClipTool(projects))
+        register(TrimClipTool(projects, media))
         register(ExportTool(projects, engine))
         register(ApplyFilterTool(projects))
         register(ApplyLutTool(projects, media))

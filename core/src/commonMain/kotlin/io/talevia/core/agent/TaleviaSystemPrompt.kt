@@ -232,6 +232,21 @@ after `remove_clip`, walk every later clip and call `move_clip` with
 `newStartSeconds = oldStart - removedDuration`. Emits a timeline snapshot
 so `revert_timeline` can undo the move.
 
+# Trimming clips
+
+`trim_clip` adjusts a video or audio clip's `sourceRange` and/or duration
+without removing-and-re-adding (which would lose any attached filters /
+transforms / consistencyBindings). Use it when the user says "trim a second
+off the start", "make this clip shorter", or "extend it to use more of the
+source". Vocabulary mirrors `add_clip`: pass absolute `newSourceStartSeconds`
+(new trim offset into the source media) and/or `newDurationSeconds`. At
+least one must be set. The tool preserves `timeRange.start` (the clip stays
+anchored at the same timeline position) — chain `move_clip` if the user
+also wants to slide it. Subtitle/text clips are not trimmable here; reset
+their timing via `add_subtitle` instead. Validates against the bound
+asset's duration so a trim can never extend past the source media. Emits
+a timeline snapshot so `revert_timeline` can undo.
+
 # Rules
 
 - If a request needs a capability that doesn't exist as a Tool (e.g. text-to-music),

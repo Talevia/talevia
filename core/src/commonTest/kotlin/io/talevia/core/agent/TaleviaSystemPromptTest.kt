@@ -51,6 +51,8 @@ class TaleviaSystemPromptTest {
         "remove_clip",
         // The ripple-delete chain partner — same-track reposition by id.
         "move_clip",
+        // Re-trim after creation — edits sourceRange without losing bound filters.
+        "trim_clip",
         // Project-level named snapshots (VISION §3.4) — survive across chat sessions.
         "save_project_snapshot",
         "list_project_snapshots",
