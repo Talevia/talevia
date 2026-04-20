@@ -17,9 +17,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
 import kotlinx.datetime.Clock
 import org.jline.reader.EndOfFileException
-import org.jline.reader.LineReaderBuilder
+import org.jline.reader.LineReader
 import org.jline.reader.UserInterruptException
-import org.jline.terminal.TerminalBuilder
+import org.jline.terminal.Terminal
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -33,29 +33,23 @@ import kotlin.uuid.Uuid
  */
 class Repl(
     private val container: CliContainer,
+    private val terminal: Terminal,
+    private val reader: LineReader,
     private val resume: Boolean,
 ) {
     @OptIn(ExperimentalUuidApi::class)
     suspend fun run(): Int = coroutineScope {
         val agent = container.newAgent()
-        if (agent == null) {
-            System.err.println(
-                "No LLM provider configured. Set ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY " +
-                    "in the environment or write it to ~/.talevia/secrets.properties, then re-launch.",
-            )
-            return@coroutineScope 2
-        }
+            ?: error("SecretBootstrap reported ready but CliContainer has no default provider")
         val provider = container.providers.default!!
         println("talevia cli · db=${container.dbPath} · provider=${provider.id}")
 
         val projectId = bootstrapProject()
-        var sessionId = bootstrapSession(projectId)
+        val sessionId = bootstrapSession(projectId)
         println("project=${projectId.value.take(8)} · session=${sessionId.value.take(8)}")
         println("type /exit to quit (Ctrl+D also works)")
         println()
 
-        val terminal = TerminalBuilder.builder().system(true).build()
-        val reader = LineReaderBuilder.builder().terminal(terminal).build()
         val renderer = Renderer(terminal)
 
         val routerScope = CoroutineScope(coroutineContext + SupervisorJob())

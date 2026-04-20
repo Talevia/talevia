@@ -3,8 +3,12 @@ package io.talevia.cli
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
+import io.talevia.cli.bootstrap.SecretBootstrapResult
+import io.talevia.cli.bootstrap.ensureProviderKey
 import io.talevia.cli.repl.Repl
 import kotlinx.coroutines.runBlocking
+import org.jline.reader.LineReaderBuilder
+import org.jline.terminal.TerminalBuilder
 import kotlin.system.exitProcess
 
 private class TaleviaCli : CliktCommand(name = "talevia") {
@@ -15,9 +19,25 @@ private class TaleviaCli : CliktCommand(name = "talevia") {
 
     override fun run() {
         val code = runBlocking {
-            val container = CliContainer(envWithDefaults())
+            val env = envWithDefaults()
+            val terminal = TerminalBuilder.builder().system(true).build()
+            val reader = LineReaderBuilder.builder().terminal(terminal).build()
+
+            when (ensureProviderKey(env, reader)) {
+                SecretBootstrapResult.Ready -> Unit
+                SecretBootstrapResult.Missing -> {
+                    reader.printAbove(
+                        "No LLM provider configured. Set ANTHROPIC_API_KEY / OPENAI_API_KEY / " +
+                            "GEMINI_API_KEY in the environment or write it to " +
+                            "~/.talevia/secrets.properties, then re-launch.",
+                    )
+                    return@runBlocking 2
+                }
+            }
+
+            val container = CliContainer(env)
             try {
-                Repl(container, resume = resume).run()
+                Repl(container, terminal, reader, resume = resume).run()
             } finally {
                 container.close()
             }
