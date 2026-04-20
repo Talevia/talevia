@@ -104,6 +104,7 @@ import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
 import io.talevia.core.tool.builtin.video.ClearTimelineTool
 import io.talevia.core.tool.builtin.video.DuplicateClipTool
+import io.talevia.core.tool.builtin.video.DuplicateTrackTool
 import io.talevia.core.tool.builtin.video.EditTextClipTool
 import io.talevia.core.tool.builtin.video.ExportDryRunTool
 import io.talevia.core.tool.builtin.video.ExportTool
@@ -243,6 +244,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(EditTextClipTool(projects))
         register(AddTransitionTool(projects))
         register(AddTrackTool(projects))
+        register(DuplicateTrackTool(projects))
         register(RevertTimelineTool(sessions, projects))
         register(ClearTimelineTool(projects))
         register(CreateProjectTool(projects))

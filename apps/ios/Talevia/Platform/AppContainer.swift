@@ -94,6 +94,7 @@ final class AppContainer {
         registry.register(tool: EditTextClipTool(store: self.projects))
         registry.register(tool: AddTransitionTool(store: self.projects))
         registry.register(tool: AddTrackTool(store: self.projects))
+        registry.register(tool: DuplicateTrackTool(store: self.projects))
         registry.register(tool: RevertTimelineTool(sessions: self.sessions, projects: self.projects))
         registry.register(tool: ClearTimelineTool(store: self.projects))
         registry.register(tool: CreateProjectTool(projects: self.projects))
