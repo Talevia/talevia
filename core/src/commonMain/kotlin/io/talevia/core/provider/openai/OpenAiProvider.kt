@@ -208,7 +208,12 @@ class OpenAiProvider(
 
     private fun buildRequestBody(request: LlmRequest): JsonObject = buildJsonObject {
         put("model", request.model.modelId)
-        put("max_tokens", request.maxTokens)
+        // OpenAI deprecated `max_tokens` in favour of `max_completion_tokens`; the
+        // newer reasoning / GPT-5 families actively reject the old name with a
+        // 400 ("unsupported_parameter"). `max_completion_tokens` works on every
+        // current chat-completion model including legacy gpt-4o, so we send only
+        // the new name.
+        put("max_completion_tokens", request.maxTokens)
         request.temperature?.let { put("temperature", it) }
         put("stream", true)
         putJsonObject("stream_options") { put("include_usage", true) }
