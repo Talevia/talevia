@@ -184,4 +184,103 @@ class RemoveClipToolTest {
         val ids = snap.timeline.tracks.single().clips.map { it.id.value }
         assertEquals(listOf("c2"), ids)
     }
+
+    @Test fun rippleShiftsDownstreamClipsLeft() = runTest {
+        val a = videoClip("c1", Duration.ZERO, 3.seconds)
+        val b = videoClip("c2", 3.seconds, 3.seconds)
+        val c = videoClip("c3", 6.seconds, 3.seconds)
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(a, b, c)))),
+            ),
+        )
+
+        val out = rig.tool.execute(RemoveClipTool.Input("p", "c2", ripple = true), rig.ctx)
+        assertTrue(out.data.rippled)
+        assertEquals(1, out.data.shiftedClipCount)
+        assertEquals(3.0, out.data.shiftSeconds)
+
+        val clips = rig.store.get(rig.projectId)!!.timeline.tracks.single().clips
+        assertEquals(listOf("c1", "c3"), clips.map { it.id.value })
+        // c1 stays where it was; c3 was at 6s, now sits at 3s (shifted by removed 3s duration).
+        assertEquals(Duration.ZERO, clips[0].timeRange.start)
+        assertEquals(3.seconds, clips[1].timeRange.start)
+    }
+
+    @Test fun rippleDoesNotTouchOverlappingClipsOnSameTrack() = runTest {
+        // c2 sits INSIDE c1's range (PiP / layered edit). Removing c1 with ripple=true
+        // should NOT shift c2 — the overlap was intentional and shifting it left
+        // would destroy the layered placement.
+        val c1 = videoClip("c1", Duration.ZERO, 5.seconds)
+        val c2 = videoClip("c2", 2.seconds, 2.seconds)
+        val c3 = videoClip("c3", 10.seconds, 3.seconds)
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(c1, c2, c3)))),
+            ),
+        )
+
+        val out = rig.tool.execute(RemoveClipTool.Input("p", "c1", ripple = true), rig.ctx)
+        // Only c3 (start=10 >= end=5) is shifted.
+        assertEquals(1, out.data.shiftedClipCount)
+        val clips = rig.store.get(rig.projectId)!!.timeline.tracks.single().clips
+        val byId = clips.associateBy { it.id.value }
+        assertEquals(2.seconds, byId["c2"]!!.timeRange.start, "overlapping clip must stay put")
+        assertEquals(5.seconds, byId["c3"]!!.timeRange.start, "downstream clip shifted by 5s")
+    }
+
+    @Test fun rippleIsSingleTrackOnly() = runTest {
+        // Video c1 is 4s; after removing c1 with ripple, video clips after
+        // it shift — but audio clips on a separate track must NOT move.
+        val v1 = videoClip("v1", Duration.ZERO, 4.seconds)
+        val v2 = videoClip("v2", 4.seconds, 2.seconds)
+        val a1 = Clip.Audio(
+            id = ClipId("a1"),
+            timeRange = TimeRange(Duration.ZERO, 6.seconds),
+            sourceRange = TimeRange(Duration.ZERO, 6.seconds),
+            assetId = AssetId("voice"),
+        )
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(
+                    tracks = listOf(
+                        Track.Video(TrackId("vt"), listOf(v1, v2)),
+                        Track.Audio(TrackId("at"), listOf(a1)),
+                    ),
+                ),
+            ),
+        )
+
+        rig.tool.execute(RemoveClipTool.Input("p", "v1", ripple = true), rig.ctx)
+        val project = rig.store.get(rig.projectId)!!
+        val video = project.timeline.tracks.filterIsInstance<Track.Video>().single()
+        val audio = project.timeline.tracks.filterIsInstance<Track.Audio>().single()
+        // v2 shifted left by 4s → now at 0s.
+        assertEquals(Duration.ZERO, video.clips.single().timeRange.start)
+        // Audio clip untouched.
+        assertEquals(Duration.ZERO, audio.clips.single().timeRange.start)
+        assertEquals(6.seconds, audio.clips.single().timeRange.duration)
+    }
+
+    @Test fun rippleFalseMatchesPreRippleBehavior() = runTest {
+        // Sanity: explicit ripple=false is identical to the old default (no shifting).
+        val a = videoClip("c1", Duration.ZERO, 3.seconds)
+        val b = videoClip("c2", 3.seconds, 3.seconds)
+        val c = videoClip("c3", 6.seconds, 3.seconds)
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(a, b, c)))),
+            ),
+        )
+
+        val out = rig.tool.execute(RemoveClipTool.Input("p", "c2", ripple = false), rig.ctx)
+        assertEquals(0, out.data.shiftedClipCount)
+        val clips = rig.store.get(rig.projectId)!!.timeline.tracks.single().clips
+        assertEquals(listOf("c1", "c3"), clips.map { it.id.value })
+        assertEquals(6.seconds, clips.last().timeRange.start, "c3 must stay at its original 6s start")
+    }
 }

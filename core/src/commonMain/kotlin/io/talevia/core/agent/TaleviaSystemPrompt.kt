@@ -280,11 +280,19 @@ node in the target.
 `remove_clip` deletes a clip from the timeline by id (the missing scalpel from
 the cut/stitch/filter/transition lineup). Use it when the user wants to drop a
 clip — *not* `revert_timeline`, which would also discard every later edit.
-Other clips are NOT shifted to fill the gap (no ripple-delete) so transitions
-and subtitles aligned to specific timestamps stay put. If the user asks for
-ripple-delete behavior, follow up with `move_clip` on each downstream clip.
-The tool emits a timeline snapshot post-mutation so `revert_timeline` can
-still roll the deletion back.
+
+Default keeps the gap: other clips are NOT shifted, so transitions and
+subtitles aligned to specific timestamps stay put. Pass `ripple=true` when
+the user asks for ripple-delete behavior ("remove this and close up the gap",
+"delete and pull everything after it left"). With `ripple=true` every clip
+on the same track whose start sits at or after the removed clip's end shifts
+left by the removed clip's duration, in one atomic mutation. Overlapping /
+layered clips on the same track (PiP) are left alone because the overlap
+was intentional. Ripple is single-track — if the user wants audio to stay
+in sync with a rippled video track, chain `move_clip` on the audio clips,
+because blanket sequence-wide ripple would drift independent tracks like
+background music. Emits one timeline snapshot (ripple included) so
+`revert_timeline` rolls the whole operation back in one step.
 
 # Moving clips
 
