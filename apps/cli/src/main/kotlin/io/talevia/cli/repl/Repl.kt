@@ -2,6 +2,7 @@ package io.talevia.cli.repl
 
 import io.talevia.cli.CliContainer
 import io.talevia.cli.event.EventRouter
+import io.talevia.cli.permission.StdinPermissionPrompt
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.agent.RunInput
@@ -60,6 +61,15 @@ class Repl(
         val routerScope = CoroutineScope(coroutineContext + SupervisorJob())
         val router = EventRouter(container.bus, renderer, activeSessionId = { sessionId })
         router.start(routerScope)
+        val permissionPrompt = StdinPermissionPrompt(
+            bus = container.bus,
+            permissions = container.permissions,
+            renderer = renderer,
+            lineReader = reader,
+            permissionRules = container.permissionRules,
+            activeSessionId = { sessionId },
+        )
+        permissionPrompt.start(routerScope)
 
         try {
             while (true) {
@@ -96,6 +106,7 @@ class Repl(
                 renderer.endTurn()
             }
         } finally {
+            permissionPrompt.stop()
             router.stop()
             routerScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
         }
