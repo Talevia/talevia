@@ -51,12 +51,11 @@ import io.talevia.core.tool.builtin.fs.EditTool
 import io.talevia.core.tool.builtin.fs.GlobTool
 import io.talevia.core.tool.builtin.fs.GrepTool
 import io.talevia.core.tool.builtin.fs.ListDirectoryTool
+import io.talevia.core.tool.builtin.fs.MultiEditTool
 import io.talevia.core.tool.builtin.fs.ReadFileTool
 import io.talevia.core.tool.builtin.fs.WriteFileTool
 import io.talevia.core.tool.builtin.ml.DescribeAssetTool
 import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
-import io.talevia.core.tool.builtin.shell.BashTool
-import io.talevia.core.tool.builtin.web.WebFetchTool
 import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
@@ -71,6 +70,7 @@ import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
 import io.talevia.core.tool.builtin.project.RestoreProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.SaveProjectSnapshotTool
+import io.talevia.core.tool.builtin.shell.BashTool
 import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
 import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
 import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
@@ -100,6 +100,7 @@ import io.talevia.core.tool.builtin.video.SetClipTransformTool
 import io.talevia.core.tool.builtin.video.SetClipVolumeTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
 import io.talevia.core.tool.builtin.video.TrimClipTool
+import io.talevia.core.tool.builtin.web.WebFetchTool
 import io.talevia.platform.ffmpeg.FfmpegVideoEngine
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -260,6 +261,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(ReadFileTool(fileSystem))
         register(WriteFileTool(fileSystem))
         register(EditTool(fileSystem))
+        register(MultiEditTool(fileSystem))
         register(ListDirectoryTool(fileSystem))
         register(GlobTool(fileSystem))
         register(GrepTool(fileSystem))

@@ -299,4 +299,107 @@ class FsToolsTest {
     @Test fun `edit_file patternFrom falls back to wildcard on malformed JSON`() {
         assertEquals("*", EditTool(fs).permission.patternFrom("{"))
     }
+
+    @Test fun `multi_edit applies sequential edits atomically`() = runBlocking {
+        val p = File(root, "multi.txt").apply { writeText("alpha\nbeta\ngamma\n") }.absolutePath
+        val tool = MultiEditTool(fs)
+
+        val result = tool.execute(
+            MultiEditTool.Input(
+                path = p,
+                edits = listOf(
+                    MultiEditTool.EditOp(oldString = "alpha", newString = "AAA"),
+                    MultiEditTool.EditOp(oldString = "beta", newString = "BBB"),
+                    MultiEditTool.EditOp(oldString = "gamma", newString = "GGG"),
+                ),
+            ),
+            ctx,
+        )
+        assertEquals(3, result.data.totalReplacements)
+        assertEquals(3, result.data.perEdit.size)
+        assertEquals("AAA\nBBB\nGGG\n", File(p).readText())
+        assertTrue(result.outputForLlm.contains("3 edit"))
+
+        val pattern = tool.permission.patternFrom("""{"path":"$p"}""")
+        assertEquals(p, pattern)
+    }
+
+    @Test fun `multi_edit operates on running result of previous edits`() = runBlocking {
+        val p = File(root, "chain.txt").apply { writeText("foo bar baz\n") }.absolutePath
+        val tool = MultiEditTool(fs)
+
+        val result = tool.execute(
+            MultiEditTool.Input(
+                path = p,
+                edits = listOf(
+                    MultiEditTool.EditOp(oldString = "foo", newString = "qux"),
+                    MultiEditTool.EditOp(oldString = "qux bar", newString = "qux QUX"),
+                ),
+            ),
+            ctx,
+        )
+        assertEquals(2, result.data.totalReplacements)
+        assertEquals("qux QUX baz\n", File(p).readText())
+    }
+
+    @Test fun `multi_edit replaceAll counts all occurrences in that step`() = runBlocking {
+        val p = File(root, "many.txt").apply { writeText("foo foo foo\n") }.absolutePath
+        val tool = MultiEditTool(fs)
+
+        val result = tool.execute(
+            MultiEditTool.Input(
+                path = p,
+                edits = listOf(
+                    MultiEditTool.EditOp(oldString = "foo", newString = "bar", replaceAll = true),
+                ),
+            ),
+            ctx,
+        )
+        assertEquals(3, result.data.totalReplacements)
+        assertEquals("bar bar bar\n", File(p).readText())
+    }
+
+    @Test fun `multi_edit fails atomically when one edit cannot apply`(): Unit = runBlocking {
+        val p = File(root, "atomic.txt").apply { writeText("alpha beta\n") }.absolutePath
+        val tool = MultiEditTool(fs)
+
+        assertFailsWith<IllegalArgumentException> {
+            tool.execute(
+                MultiEditTool.Input(
+                    path = p,
+                    edits = listOf(
+                        MultiEditTool.EditOp(oldString = "alpha", newString = "AAA"),
+                        // This second edit will not match — the file should be untouched.
+                        MultiEditTool.EditOp(oldString = "this-string-isnt-here", newString = "x"),
+                    ),
+                ),
+                ctx,
+            )
+        }
+        // Disk file untouched — atomicity invariant.
+        assertEquals("alpha beta\n", File(p).readText())
+    }
+
+    @Test fun `multi_edit rejects empty edits list`(): Unit = runBlocking {
+        val p = File(root, "x.txt").apply { writeText("hi") }.absolutePath
+        val tool = MultiEditTool(fs)
+        assertFailsWith<IllegalArgumentException> {
+            tool.execute(MultiEditTool.Input(path = p, edits = emptyList()), ctx)
+        }
+    }
+
+    @Test fun `multi_edit rejects duplicate match without replaceAll`(): Unit = runBlocking {
+        val p = File(root, "dup.txt").apply { writeText("foo foo\n") }.absolutePath
+        val tool = MultiEditTool(fs)
+        assertFailsWith<IllegalArgumentException> {
+            tool.execute(
+                MultiEditTool.Input(
+                    path = p,
+                    edits = listOf(MultiEditTool.EditOp(oldString = "foo", newString = "bar")),
+                ),
+                ctx,
+            )
+        }
+        assertEquals("foo foo\n", File(p).readText())
+    }
 }

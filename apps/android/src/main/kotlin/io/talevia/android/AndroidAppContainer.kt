@@ -22,6 +22,7 @@ import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
+import io.talevia.core.tool.builtin.TodoWriteTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
@@ -42,7 +43,6 @@ import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
 import io.talevia.core.tool.builtin.source.UpdateBrandPaletteTool
 import io.talevia.core.tool.builtin.source.UpdateCharacterRefTool
 import io.talevia.core.tool.builtin.source.UpdateStyleBibleTool
-import io.talevia.core.tool.builtin.TodoWriteTool
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitleTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
