@@ -99,6 +99,7 @@ final class AppContainer {
         registry.register(tool: ListProjectsTool(projects: self.projects))
         registry.register(tool: GetProjectStateTool(projects: self.projects))
         registry.register(tool: ListTimelineClipsTool(projects: self.projects))
+        registry.register(tool: ListClipsBoundToAssetTool(projects: self.projects))
         registry.register(tool: ListAssetsTool(projects: self.projects))
         registry.register(tool: RemoveAssetTool(projects: self.projects))
         registry.register(tool: SetOutputProfileTool(projects: self.projects))

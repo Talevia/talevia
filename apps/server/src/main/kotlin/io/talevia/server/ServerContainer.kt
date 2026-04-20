@@ -71,6 +71,7 @@ import io.talevia.core.tool.builtin.project.FindStaleClipsTool
 import io.talevia.core.tool.builtin.project.ForkProjectTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
 import io.talevia.core.tool.builtin.project.ListAssetsTool
+import io.talevia.core.tool.builtin.project.ListClipsBoundToAssetTool
 import io.talevia.core.tool.builtin.project.ListClipsForSourceTool
 import io.talevia.core.tool.builtin.project.ListLockfileEntriesTool
 import io.talevia.core.tool.builtin.project.ListProjectSnapshotsTool
@@ -315,6 +316,7 @@ class ServerContainer(
         register(RenameProjectTool(projects))
         register(FindStaleClipsTool(projects))
         register(ListClipsForSourceTool(projects))
+        register(ListClipsBoundToAssetTool(projects))
         register(ListTimelineClipsTool(projects))
         register(ListAssetsTool(projects))
         register(RemoveAssetTool(projects))
