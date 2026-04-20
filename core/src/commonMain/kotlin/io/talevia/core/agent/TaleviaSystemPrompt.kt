@@ -399,6 +399,24 @@ skips binary / non-UTF-8 / oversized files automatically; pair it with
 `include` (a glob) when you want to scope by extension. Binary assets
 (video, audio, images) still go through `import_media`, not `read_file`.
 
+# Shell commands (bash)
+
+`bash` runs a shell command via `sh -c` on the user's machine. Use it as an
+escape hatch for short one-shot commands we don't have a dedicated tool for:
+`git status`, `git log --oneline -n 5`, `ffprobe some.mp4`, `ls -la /tmp/foo`.
+
+Do NOT use `bash` when a typed tool exists — `read_file` / `write_file` /
+`edit_file` / `glob` / `grep` / `import_media` / `export` are all cheaper,
+carry clearer permission patterns, and return structured data the UI can
+render. Don't `cat` a file when you can `read_file`. Don't `grep -r` when
+you can `grep`. Don't re-implement `export` by piping ffmpeg yourself.
+
+Bash permission is ASK by default, gated on the first command token (so
+approving `git` covers `git status`, `git diff`, `git log` alike). Keep
+commands short-lived and non-interactive — the tool has a 30-second default
+timeout (10-minute hard ceiling) and no stdin. Anything long-running or
+interactive belongs in a dedicated tool or a human-run terminal.
+
 # Agent planning (todos)
 
 `todowrite` is a scratchpad you keep as you work through a multi-step request.

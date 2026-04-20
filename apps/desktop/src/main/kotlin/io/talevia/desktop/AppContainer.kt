@@ -20,9 +20,11 @@ import io.talevia.core.platform.FileSystem
 import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.JvmFileSystem
+import io.talevia.core.platform.JvmProcessRunner
 import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.MusicGenEngine
+import io.talevia.core.platform.ProcessRunner
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.UpscaleEngine
@@ -53,6 +55,7 @@ import io.talevia.core.tool.builtin.fs.ReadFileTool
 import io.talevia.core.tool.builtin.fs.WriteFileTool
 import io.talevia.core.tool.builtin.ml.DescribeAssetTool
 import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
+import io.talevia.core.tool.builtin.shell.BashTool
 import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
@@ -135,6 +138,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         ?: InMemoryMediaStorage()
     val engine: VideoEngine = FfmpegVideoEngine(pathResolver = media)
     val fileSystem: FileSystem = JvmFileSystem()
+    val processRunner: ProcessRunner = JvmProcessRunner()
     val permissions = DefaultPermissionService(bus)
     val permissionRules = DefaultPermissionRuleset.rules.toMutableList()
     val filePicker: FilePicker = AwtFilePicker()
@@ -258,6 +262,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(ListDirectoryTool(fileSystem))
         register(GlobTool(fileSystem))
         register(GrepTool(fileSystem))
+        register(BashTool(processRunner))
         imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
         videoGen?.let { register(GenerateVideoTool(it, media, blobWriter, projects)) }
         musicGen?.let { register(GenerateMusicTool(it, media, blobWriter, projects)) }

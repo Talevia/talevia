@@ -48,5 +48,11 @@ object DefaultPermissionRuleset {
         PermissionRule(permission = "fs.read", pattern = "*", action = PermissionAction.ASK),
         PermissionRule(permission = "fs.write", pattern = "*", action = PermissionAction.ASK),
         PermissionRule(permission = "fs.list", pattern = "*", action = PermissionAction.ASK),
+
+        // Shell command execution via `bash` tool. Always ASK — arbitrary
+        // shell access is the single biggest blast-radius capability the
+        // agent has. Pattern is populated with the first command token
+        // (`git`, `ls`, `./gradlew`) so an "Always" rule scopes cleanly.
+        PermissionRule(permission = "bash.exec", pattern = "*", action = PermissionAction.ASK),
     )
 }
