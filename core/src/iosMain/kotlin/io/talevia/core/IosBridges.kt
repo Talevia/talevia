@@ -1,13 +1,32 @@
 package io.talevia.core
 
 import app.cash.sqldelight.driver.native.NativeSqliteDriver
+import io.ktor.client.HttpClient
+import io.ktor.client.engine.darwin.Darwin
+import io.talevia.core.agent.Agent
+import io.talevia.core.agent.RunInput
+import io.talevia.core.agent.taleviaSystemPrompt
+import io.talevia.core.bus.BusEvent
+import io.talevia.core.bus.EventBus
+import io.talevia.core.compaction.Compactor
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.Project
+import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
+import io.talevia.core.permission.DefaultPermissionRuleset
+import io.talevia.core.permission.PermissionService
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.lut.CubeLutParser
 import io.talevia.core.platform.lut.toCoreImageRgbaFloats
+import io.talevia.core.provider.LlmProvider
+import io.talevia.core.provider.ProviderRegistry
+import io.talevia.core.session.Message
+import io.talevia.core.session.ModelRef
+import io.talevia.core.session.Session
+import io.talevia.core.session.SessionStore
+import io.talevia.core.tool.ToolRegistry
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.cinterop.ExperimentalForeignApi
 import kotlinx.cinterop.addressOf
@@ -16,8 +35,10 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.takeWhile
 import platform.Foundation.NSData
+import platform.Foundation.NSProcessInfo
 import platform.Foundation.create
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -74,6 +95,9 @@ fun clipIdRaw(id: ClipId): String = id.value
 
 fun callId(value: String): CallId = CallId(value)
 fun callIdRaw(id: CallId): String = id.value
+
+fun sourceNodeId(value: String): SourceNodeId = SourceNodeId(value)
+fun sourceNodeIdRaw(id: SourceNodeId): String = id.value
 
 // =============================================================================
 // SKIE bridging: kotlin.time.Duration ↔ Double seconds / Long millis
@@ -379,3 +403,146 @@ suspend fun importWithKnownMetadata(
     source: io.talevia.core.domain.MediaSource,
     metadata: io.talevia.core.domain.MediaMetadata,
 ): io.talevia.core.domain.MediaAsset = storage.import(source) { metadata }
+
+// =============================================================================
+// SKIE bridging: provider registry + agent factory for the iOS app container
+// =============================================================================
+//
+// Mirrors `apps/desktop/AppContainer.kt` and `AndroidAppContainer.kt`: wires a
+// Ktor Darwin HttpClient, reads ANTHROPIC_API_KEY / OPENAI_API_KEY from the
+// process environment, and — when a provider is configured — returns a ready
+// Agent with Compactor attached. Swift callers go through these helpers instead
+// of constructing `ProviderRegistry.Builder` / `Agent` themselves, which would
+// mean dealing with Ktor and Kotlin default arguments from Swift.
+
+/** Darwin-backed `HttpClient` for the iOS provider registry. */
+fun createIosHttpClient(): HttpClient = HttpClient(Darwin)
+
+/**
+ * Build a provider registry from the iOS process environment. Reads
+ * `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` via `NSProcessInfo.processInfo.environment`;
+ * simulator runs can set these in the Xcode scheme's "Run → Arguments → Environment".
+ */
+fun buildIosProviderRegistry(httpClient: HttpClient): ProviderRegistry {
+    val env = NSProcessInfo.processInfo.environment
+    val map = buildMap<String, String> {
+        (env["ANTHROPIC_API_KEY"] as? String)?.takeIf { it.isNotBlank() }?.let { put("ANTHROPIC_API_KEY", it) }
+        (env["OPENAI_API_KEY"] as? String)?.takeIf { it.isNotBlank() }?.let { put("OPENAI_API_KEY", it) }
+    }
+    return ProviderRegistry.Builder().addEnv(httpClient, map).build()
+}
+
+/**
+ * Build an [Agent] wired to [provider] with a [Compactor] and the Talevia system
+ * prompt. Returns a fresh Agent each call — callers typically cache by
+ * `provider.id` to avoid re-instantiating the Compactor.
+ */
+fun newIosAgent(
+    provider: LlmProvider,
+    tools: ToolRegistry,
+    sessions: SessionStore,
+    permissions: PermissionService,
+    bus: EventBus,
+): Agent = Agent(
+    provider = provider,
+    registry = tools,
+    store = sessions,
+    permissions = permissions,
+    bus = bus,
+    systemPrompt = taleviaSystemPrompt(),
+    compactor = Compactor(provider = provider, store = sessions, bus = bus),
+)
+
+/** Swift-friendly RunInput factory — avoids constructing [ModelRef] / rules from Swift. */
+fun newIosRunInput(
+    sessionId: SessionId,
+    text: String,
+    providerId: String,
+    modelId: String,
+): RunInput = RunInput(
+    sessionId = sessionId,
+    text = text,
+    model = ModelRef(providerId = providerId, modelId = modelId),
+    permissionRules = DefaultPermissionRuleset.rules,
+)
+
+/**
+ * Swift-side `async` bridge for [Agent.run] — one-shot helper that submits the
+ * prompt and returns when the agent's final assistant message is ready.
+ *
+ * SKIE already maps `suspend` functions to Swift `async`, but this helper pins
+ * down the argument shape (no [ModelRef] construction from Swift, no default
+ * permission-rule plumbing) so `TaleviaApp` can call:
+ *
+ *     let reply = try await runAgent(agent, sessionId: sid, text: prompt,
+ *                                    providerId: pid, modelId: "claude-opus-4-7")
+ */
+suspend fun runAgent(
+    agent: Agent,
+    sessionId: SessionId,
+    text: String,
+    providerId: String,
+    modelId: String,
+): Message.Assistant = agent.run(newIosRunInput(sessionId, text, providerId, modelId))
+
+/**
+ * Swift-friendly session bootstrap: either resume the most recent non-archived
+ * session for [projectId], or create a fresh one. Returns the effective
+ * [Session] so Swift can read `id` / `title` without sealed-class gymnastics.
+ *
+ * Mirrors the bootstrap path in `AndroidAppContainer`'s `ChatPanel`.
+ */
+@OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+suspend fun bootstrapChatSession(
+    sessions: SessionStore,
+    projectId: ProjectId,
+    clock: kotlinx.datetime.Clock = kotlinx.datetime.Clock.System,
+): Session {
+    val existing = sessions.listSessions(projectId).filter { !it.archived }.maxByOrNull { it.updatedAt }
+    if (existing != null) return existing
+    val now = clock.now()
+    val sid = SessionId(kotlin.uuid.Uuid.random().toString())
+    val created = Session(
+        id = sid,
+        projectId = projectId,
+        title = "Chat",
+        createdAt = now,
+        updatedAt = now,
+    )
+    sessions.createSession(created)
+    return created
+}
+
+/**
+ * Filter the bus to `PartUpdated` events for [sessionId]. SKIE turns the
+ * resulting `Flow` into a Swift `AsyncSequence`, so Swift can `for await`
+ * over live assistant-text / tool-call updates without building its own
+ * subscribe+filter plumbing.
+ */
+fun sessionPartUpdates(bus: EventBus, sessionId: SessionId): Flow<BusEvent.PartUpdated> =
+    bus.subscribe<BusEvent.PartUpdated>().filter { it.sessionId == sessionId }
+
+/**
+ * Find-or-create a default project for the iOS shell. Mirrors the bootstrap
+ * path `AndroidAppContainer.AppRoot` runs: reuse the first row if one exists,
+ * else stand up a "My Project" with empty [Timeline] / [io.talevia.core.domain.source.Source].
+ *
+ * Returns the effective [ProjectId] so Swift never has to construct a
+ * [Project] (that requires pulling in every default across `outputProfile`,
+ * `lockfile`, `renderCache`, …, which isn't worth the SKIE pain when the
+ * Kotlin side already knows the defaults).
+ */
+@OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+suspend fun bootstrapDefaultProject(projects: ProjectStore): ProjectId {
+    val existing = projects.listSummaries().firstOrNull()
+    if (existing != null) return ProjectId(existing.id)
+    val pid = ProjectId(kotlin.uuid.Uuid.random().toString())
+    projects.upsert(title = "My Project", project = Project(id = pid, timeline = Timeline()))
+    return pid
+}
+
+/**
+ * Swift-friendly bus projection: bare `PartUpdated` stream (no session filter)
+ * so the Timeline / Source panels can trigger refreshes on every tool dispatch.
+ */
+fun anyPartUpdates(bus: EventBus): Flow<BusEvent.PartUpdated> = bus.subscribe()

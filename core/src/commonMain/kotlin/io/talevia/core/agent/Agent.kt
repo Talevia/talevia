@@ -8,8 +8,8 @@ import io.talevia.core.SessionId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
-import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.compaction.TokenEstimator
+import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.permission.PermissionRequest
 import io.talevia.core.permission.PermissionRule
 import io.talevia.core.permission.PermissionService

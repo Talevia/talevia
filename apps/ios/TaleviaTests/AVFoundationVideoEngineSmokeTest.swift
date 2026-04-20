@@ -61,7 +61,8 @@ final class AVFoundationVideoEngineSmokeTest: XCTestCase {
             sourceRange: TimeRange(start: zero, duration: oneSecond),
             transforms: [],
             assetId: assetA.id,
-            filters: []
+            filters: [],
+            sourceBinding: []
         )
         let clip1 = Clip.Video(
             id: IosBridgesKt.clipId(value: "c1"),
@@ -69,7 +70,8 @@ final class AVFoundationVideoEngineSmokeTest: XCTestCase {
             sourceRange: TimeRange(start: zero, duration: oneSecond),
             transforms: [],
             assetId: assetB.id,
-            filters: []
+            filters: [],
+            sourceBinding: []
         )
         let videoTrack = Track.Video(id: IosBridgesKt.trackId(value: "t0"), clips: [clip0, clip1])
         let timeline = Timeline(

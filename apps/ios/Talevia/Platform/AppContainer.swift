@@ -26,6 +26,34 @@ final class AppContainer {
     let permissions: DefaultPermissionService
     let tools: ToolRegistry
 
+    /// HTTP client shared by the provider registry. Kept alive for the
+    /// container's lifetime — Ktor pools connections internally.
+    let httpClient: Ktor_client_coreHttpClient
+    let providers: ProviderRegistry
+
+    /// One Agent per provider id, memoized so subsequent `Send` taps reuse the
+    /// same Compactor / background scope. Mirrors `AndroidAppContainer.agentFor`.
+    private var agents: [String: Agent] = [:]
+
+    /// Nil when neither `ANTHROPIC_API_KEY` nor `OPENAI_API_KEY` is present in
+    /// the process environment — the SwiftUI shell shows a helper banner in
+    /// that case instead of a dead chat box.
+    var defaultProvider: (any LlmProvider)? { providers.default }
+
+    func agent(for providerId: String) -> Agent? {
+        if let existing = agents[providerId] { return existing }
+        guard let provider = providers.get(providerId: providerId) else { return nil }
+        let agent = doNewIosAgent(
+            provider: provider,
+            tools: tools,
+            sessions: sessions,
+            permissions: permissions,
+            bus: bus
+        )
+        agents[providerId] = agent
+        return agent
+    }
+
     private init() {
         let factory = TaleviaDatabaseFactory()
         self.driver = factory.createInMemoryDriver()
@@ -80,5 +108,8 @@ final class AppContainer {
         registry.register(tool: RemoveSourceNodeTool(projects: self.projects))
         registry.register(tool: ImportSourceNodeTool(projects: self.projects))
         self.tools = registry
+
+        self.httpClient = createIosHttpClient()
+        self.providers = buildIosProviderRegistry(httpClient: self.httpClient)
     }
 }
