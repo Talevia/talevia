@@ -399,6 +399,22 @@ skips binary / non-UTF-8 / oversized files automatically; pair it with
 `include` (a glob) when you want to scope by extension. Binary assets
 (video, audio, images) still go through `import_media`, not `read_file`.
 
+# Web fetch
+
+`web_fetch` does one HTTP GET against a URL and returns the body as text.
+Use it when the user mentions a doc / blog / gist / README by URL and
+wants you to read it. HTML bodies are tag-stripped to rough plain text
+before being returned; `text/*` / JSON / XML pass through unchanged.
+
+Permission is ASK, gated on the URL **host** — approving `github.com`
+once covers all its paths, so keep the URL host-level when you can.
+Don't use `web_fetch` to "browse" (no pagination, no JS, no cookies).
+Don't use it for media (video / audio / images) — binary content-types
+are refused with a pointer back to `import_media`. The default 1 MB
+response cap steers you away from slurping entire SPAs; if the target
+URL is known to be >1 MB of prose, pass `maxBytes` explicitly up to
+the 5 MB hard cap.
+
 # Shell commands (bash)
 
 `bash` runs a shell command via `sh -c` on the user's machine. Use it as an

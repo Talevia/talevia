@@ -54,5 +54,11 @@ object DefaultPermissionRuleset {
         // agent has. Pattern is populated with the first command token
         // (`git`, `ls`, `./gradlew`) so an "Always" rule scopes cleanly.
         PermissionRule(permission = "bash.exec", pattern = "*", action = PermissionAction.ASK),
+
+        // Web fetches (`web_fetch` tool). Pattern is populated with the URL
+        // host, so an "Always" rule scopes to a single site (`github.com`,
+        // `docs.kernel.org`). Server containers auto-reject ASK; operators
+        // add ALLOW rules per host as needed.
+        PermissionRule(permission = "web.fetch", pattern = "*", action = PermissionAction.ASK),
     )
 }

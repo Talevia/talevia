@@ -55,6 +55,7 @@ import io.talevia.core.tool.builtin.fs.WriteFileTool
 import io.talevia.core.tool.builtin.ml.DescribeAssetTool
 import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
 import io.talevia.core.tool.builtin.shell.BashTool
+import io.talevia.core.tool.builtin.web.WebFetchTool
 import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
@@ -238,6 +239,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(GlobTool(fileSystem))
         register(GrepTool(fileSystem))
         register(BashTool(processRunner))
+        register(WebFetchTool(httpClient))
         imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
         videoGen?.let { register(GenerateVideoTool(it, media, blobWriter, projects)) }
         musicGen?.let { register(GenerateMusicTool(it, media, blobWriter, projects)) }
