@@ -26,9 +26,12 @@ local.properties
 .DS_Store
 Thumbs.db
 
-# Claude Code local state
-.claude/
 .worktrees/
+
+# Claude Code: ignore local state but keep team-shared settings + hooks
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 
 # Logs
 *.log
