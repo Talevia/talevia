@@ -72,6 +72,9 @@ struct ChatPanel: View {
     @State private var prompt: String = ""
     @State private var busy: Bool = false
     @State private var error: String? = nil
+    /// Tracks the in-progress streaming part so PartDelta can append rather
+    /// than spawn a new line per token — matches OpenCode's delta semantics.
+    @State private var streamingPartId: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -99,11 +102,19 @@ struct ChatPanel: View {
                     TextField("Ask the agent…", text: $prompt)
                         .textFieldStyle(.roundedBorder)
                         .disabled(busy || container.defaultProvider == nil)
-                    Button(action: { Task { await send() } }) {
-                        Text(busy ? "…" : "Send")
+                    if busy {
+                        Button(action: { Task { await stop() } }) {
+                            Text("Stop")
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(.red)
+                    } else {
+                        Button(action: { Task { await send() } }) {
+                            Text("Send")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(prompt.trimmingCharacters(in: .whitespaces).isEmpty || container.defaultProvider == nil)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(busy || prompt.trimmingCharacters(in: .whitespaces).isEmpty || container.defaultProvider == nil)
                 }.padding([.horizontal, .bottom])
             }
             .navigationTitle("Chat")
@@ -120,24 +131,74 @@ struct ChatPanel: View {
                 clock: ClockSystem.shared
             )
             self.sessionId = session.id
+            // Rehydrate busy state in case a previous run is still in-flight
+            // (can happen when the shell is re-created while the Agent keeps
+            // its background coroutine alive — Android doesn't have this
+            // problem because MainActivity gets torn down with the Agent).
+            if let provider = container.defaultProvider,
+               let agent = container.agent(for: provider.id) {
+                let running = try? await isAgentRunning(agent: agent, sessionId: session.id)
+                self.busy = running?.boolValue ?? false
+            }
             await subscribe(sessionId: session.id)
         } catch {
             self.error = "Session bootstrap failed: \(error.localizedDescription)"
         }
     }
 
+    /// Consume every SessionEvent for this chat: `PartUpdated` finalises a
+    /// part, `PartDelta` streams into it, `SessionCancelled` / `AgentRunFailed`
+    /// flip state machine transitions. All driven by `sessionEvents` in
+    /// IosBridges.kt — SKIE turns the `Flow<BusEvent.SessionEvent>` into a
+    /// Swift `AsyncSequence`.
     @MainActor
     private func subscribe(sessionId sid: Any) async {
-        // SKIE bridges Kotlin Flow → Swift AsyncSequence.
-        for await event in sessionPartUpdates(bus: container.bus, sessionId: sid) {
-            switch onEnum(of: event.part) {
-            case .text(let t):
-                append(.assistant(String(t.text.prefix(400))))
-            case .tool(let tool):
-                append(.tool("[\(tool.toolId)] \(String(describing: type(of: tool.state)))"))
+        for await event in sessionEvents(bus: container.bus, sessionId: sid) {
+            switch onEnum(of: event) {
+            case .partUpdated(let e):
+                handlePartUpdated(e.part)
+            case .partDelta(let e):
+                handlePartDelta(partId: partIdRaw(id: e.partId), field: e.field, delta: e.delta)
+            case .sessionCancelled:
+                self.busy = false
+            case .agentRunFailed(let e):
+                append(.error("agent: \(e.message)"))
+                self.busy = false
             default:
                 break
             }
+        }
+    }
+
+    @MainActor
+    private func handlePartUpdated(_ part: Part) {
+        switch onEnum(of: part) {
+        case .text(let t):
+            let partIdStr = partIdRaw(id: t.id)
+            // If we were streaming this text part via PartDelta, the final
+            // update just replaces the streaming buffer. Otherwise create a
+            // new line.
+            if streamingPartId == partIdStr, let idx = messages.lastIndex(where: { $0.partId == partIdStr }) {
+                messages[idx] = .assistantFinal(text: String(t.text.prefix(400)), partId: partIdStr)
+                streamingPartId = nil
+            } else if streamingPartId != partIdStr {
+                append(.assistantFinal(text: String(t.text.prefix(400)), partId: partIdStr))
+            }
+        case .tool(let tool):
+            append(.tool("[\(tool.toolId)] \(String(describing: type(of: tool.state)))"))
+        default:
+            break
+        }
+    }
+
+    @MainActor
+    private func handlePartDelta(partId: String, field: String, delta: String) {
+        guard field == "text" else { return }
+        if streamingPartId == partId, let idx = messages.lastIndex(where: { $0.partId == partId }) {
+            messages[idx] = messages[idx].appending(delta)
+        } else {
+            streamingPartId = partId
+            append(.assistantStreaming(delta, partId: partId))
         }
     }
 
@@ -173,6 +234,18 @@ struct ChatPanel: View {
         self.busy = false
     }
 
+    @MainActor
+    private func stop() async {
+        guard let provider = container.defaultProvider,
+              let agent = container.agent(for: provider.id),
+              let sid = sessionId else { return }
+        // cancelAgent (IosBridges.kt) calls Agent.cancel — the running
+        // coroutine throws CancellationException and the Agent finalises
+        // the in-flight assistant message with FinishReason.CANCELLED.
+        // The `SessionCancelled` event on the bus flips `busy` back.
+        _ = try? await cancelAgent(agent: agent, sessionId: sid)
+    }
+
     private func append(_ line: ChatLine) {
         messages.append(line)
     }
@@ -189,13 +262,27 @@ struct ChatPanel: View {
 }
 
 private struct ChatLine: Identifiable {
-    let id = UUID()
+    let id: UUID
     let text: String
+    /// Bound to the Part.id for streaming assistant messages; `nil` for
+    /// user lines and tool markers.
+    let partId: String?
 
-    static func user(_ s: String) -> ChatLine    { ChatLine(text: "you: \(s)") }
-    static func assistant(_ s: String) -> ChatLine { ChatLine(text: "ai: \(s)") }
-    static func tool(_ s: String) -> ChatLine     { ChatLine(text: "tool \(s)") }
-    static func error(_ s: String) -> ChatLine    { ChatLine(text: "! \(s)") }
+    init(text: String, partId: String? = nil) {
+        self.id = UUID()
+        self.text = text
+        self.partId = partId
+    }
+
+    static func user(_ s: String) -> ChatLine                           { ChatLine(text: "you: \(s)") }
+    static func assistantFinal(text: String, partId: String) -> ChatLine { ChatLine(text: "ai: \(text)", partId: partId) }
+    static func assistantStreaming(_ s: String, partId: String) -> ChatLine { ChatLine(text: "ai: \(s)", partId: partId) }
+    static func tool(_ s: String) -> ChatLine                           { ChatLine(text: "tool \(s)") }
+    static func error(_ s: String) -> ChatLine                          { ChatLine(text: "! \(s)") }
+
+    func appending(_ delta: String) -> ChatLine {
+        ChatLine(text: text + delta, partId: partId)
+    }
 }
 
 // MARK: - Timeline panel

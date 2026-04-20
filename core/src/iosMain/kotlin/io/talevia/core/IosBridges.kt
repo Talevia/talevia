@@ -546,3 +546,33 @@ suspend fun bootstrapDefaultProject(projects: ProjectStore): ProjectId {
  * so the Timeline / Source panels can trigger refreshes on every tool dispatch.
  */
 fun anyPartUpdates(bus: EventBus): Flow<BusEvent.PartUpdated> = bus.subscribe()
+
+/**
+ * Every [BusEvent.SessionEvent] scoped to [sessionId]. The SwiftUI ChatPanel
+ * uses this to drive a richer "live transcript" — `PartDelta` for streaming
+ * assistant text, `SessionCancelled` to flip the Stop button back to Send,
+ * `AgentRunFailed` to surface failures without polling.
+ *
+ * Returned as a `Flow` → SKIE bridges to a Swift `AsyncSequence`.
+ */
+fun sessionEvents(bus: EventBus, sessionId: SessionId): Flow<BusEvent.SessionEvent> =
+    bus.forSession(sessionId)
+
+/**
+ * Swift-friendly cancel for an in-flight [Agent.run]. Calls through to
+ * [Agent.cancel] (suspend); SKIE exposes it as `async throws -> Bool`. Returns
+ * true when a run was found and cancelled, false when nothing was in flight.
+ *
+ * The ChatPanel's Stop button wires this in: every `send()` owns a sessionId,
+ * so "cancel the current turn" is a one-liner on the Swift side.
+ */
+suspend fun cancelAgent(agent: Agent, sessionId: SessionId): Boolean =
+    agent.cancel(sessionId)
+
+/**
+ * Swift-friendly query: is [sessionId] currently running on [agent]? Mirrors
+ * [Agent.isRunning]. Useful on launch to decide whether the chat input should
+ * show "Stop" vs "Send" without racing a bus subscription.
+ */
+suspend fun isAgentRunning(agent: Agent, sessionId: SessionId): Boolean =
+    agent.isRunning(sessionId)
