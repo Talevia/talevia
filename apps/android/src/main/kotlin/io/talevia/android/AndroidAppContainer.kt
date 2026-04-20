@@ -35,6 +35,7 @@ import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.project.ListTimelineClipsTool
 import io.talevia.core.tool.builtin.project.RestoreProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.SaveProjectSnapshotTool
+import io.talevia.core.tool.builtin.project.ValidateProjectTool
 import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
 import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
 import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
@@ -120,6 +121,7 @@ class AndroidAppContainer(context: Context) {
         register(ListProjectsTool(projects))
         register(GetProjectStateTool(projects))
         register(ListTimelineClipsTool(projects))
+        register(ValidateProjectTool(projects))
         register(DeleteProjectTool(projects))
         register(FindStaleClipsTool(projects))
         register(ListLockfileEntriesTool(projects))

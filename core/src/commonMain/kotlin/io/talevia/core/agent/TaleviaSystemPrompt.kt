@@ -250,6 +250,20 @@ decisions ("do we already have a Mei portrait we can crop instead of
 re-generating?"). Filter by `toolId` to scope to one modality. For staleness
 queries use `find_stale_clips` instead.
 
+`validate_project` lints the project for structural invariants before
+export: dangling `assetId` (clip references an asset not in
+`project.assets`), dangling `sourceBinding` (references a source node
+that no longer exists), non-positive clip duration, audio `volume`
+outside `[0, 4]`, negative fade, fade-in + fade-out exceeding clip
+duration, and `timeline.duration` behind the latest clip end. Each row
+has `severity` (`error`/`warn`), machine `code`, `trackId`, `clipId`,
+and a human message. `passed: Boolean` is true iff `errorCount == 0`;
+warnings are informational. Call this before `export` when you've made
+several edits in one turn, after `remove_source_node` (to catch clips
+that still bind the removed node), or whenever the user reports an
+unexpected render. It does NOT cover staleness — pair with
+`find_stale_clips` for content-hash drift.
+
 `list_timeline_clips` walks the timeline and returns one row per clip with
 its id, track, kind (video/audio/text), start / duration / end in seconds,
 bound `assetId`, filter count, audio volume/fade envelope (audio only),

@@ -72,6 +72,7 @@ import io.talevia.core.tool.builtin.project.ListTimelineClipsTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
 import io.talevia.core.tool.builtin.project.RestoreProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.SaveProjectSnapshotTool
+import io.talevia.core.tool.builtin.project.ValidateProjectTool
 import io.talevia.core.tool.builtin.shell.BashTool
 import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
 import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
@@ -226,6 +227,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(FindStaleClipsTool(projects))
         register(ListClipsForSourceTool(projects))
         register(ListTimelineClipsTool(projects))
+        register(ValidateProjectTool(projects))
         register(RegenerateStaleClipsTool(projects, this))
         register(ListLockfileEntriesTool(projects))
         register(SaveProjectSnapshotTool(projects))
