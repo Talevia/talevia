@@ -9,9 +9,11 @@ import io.talevia.core.agent.RunInput
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.Timeline
+import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
 import io.talevia.core.session.Session
+import io.talevia.core.session.TokenUsage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
@@ -20,6 +22,7 @@ import org.jline.reader.EndOfFileException
 import org.jline.reader.LineReader
 import org.jline.reader.UserInterruptException
 import org.jline.terminal.Terminal
+import org.jline.utils.InfoCmp
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -37,6 +40,8 @@ class Repl(
     private val reader: LineReader,
     private val resume: Boolean,
 ) {
+    private enum class Outcome { CONTINUE, EXIT }
+
     @OptIn(ExperimentalUuidApi::class)
     suspend fun run(): Int = coroutineScope {
         val agent = container.newAgent()
@@ -45,9 +50,10 @@ class Repl(
         println("talevia cli · db=${container.dbPath} · provider=${provider.id}")
 
         val projectId = bootstrapProject()
-        val sessionId = bootstrapSession(projectId)
-        println("project=${projectId.value.take(8)} · session=${sessionId.value.take(8)}")
-        println("type /exit to quit (Ctrl+D also works)")
+        var sessionId = bootstrapSession(projectId)
+        var modelId = defaultModelFor(provider.id)
+        println("project=${projectId.value.take(8)} · session=${sessionId.value.take(8)} · model=$modelId")
+        println("type /help for commands, /exit to quit (Ctrl+D also works)")
         println()
 
         val renderer = Renderer(terminal)
@@ -78,14 +84,27 @@ class Repl(
 
                 val trimmed = line.trim()
                 if (trimmed.isEmpty()) continue
-                if (trimmed == "/exit" || trimmed == "/quit") break
+
+                if (trimmed.startsWith("/")) {
+                    val outcome = handleSlash(
+                        raw = trimmed,
+                        renderer = renderer,
+                        projectId = projectId,
+                        currentSession = sessionId,
+                        onSwitchSession = { sessionId = it },
+                        currentModel = modelId,
+                        onSwitchModel = { modelId = it },
+                    )
+                    if (outcome == Outcome.EXIT) break
+                    continue
+                }
 
                 runCatching {
                     val assistant = agent.run(
                         RunInput(
                             sessionId = sessionId,
                             text = trimmed,
-                            model = ModelRef(provider.id, defaultModelFor(provider.id)),
+                            model = ModelRef(provider.id, modelId),
                             permissionRules = container.permissionRules.toList(),
                         ),
                     )
@@ -105,6 +124,122 @@ class Repl(
             routerScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
         }
         0
+    }
+
+    @OptIn(ExperimentalUuidApi::class)
+    private suspend fun handleSlash(
+        raw: String,
+        renderer: Renderer,
+        projectId: ProjectId,
+        currentSession: SessionId,
+        onSwitchSession: (SessionId) -> Unit,
+        currentModel: String,
+        onSwitchModel: (String) -> Unit,
+    ): Outcome {
+        val body = raw.removePrefix("/")
+        val parts = body.split(Regex("\\s+"), limit = 2)
+        val name = parts[0].lowercase()
+        val args = parts.getOrNull(1)?.trim().orEmpty()
+
+        when (name) {
+            "exit", "quit" -> return Outcome.EXIT
+            "help" -> renderer.println(helpText())
+            "clear" -> {
+                terminal.puts(InfoCmp.Capability.clear_screen)
+                terminal.flush()
+            }
+            "new" -> {
+                val fresh = SessionId(Uuid.random().toString())
+                val now = Clock.System.now()
+                container.sessions.createSession(
+                    Session(
+                        id = fresh,
+                        projectId = projectId,
+                        title = "Chat",
+                        createdAt = now,
+                        updatedAt = now,
+                    ),
+                )
+                onSwitchSession(fresh)
+                renderer.println("✓ new session ${fresh.value.take(8)}")
+            }
+            "sessions" -> renderer.println(sessionsTable(projectId, currentSession))
+            "resume" -> {
+                if (args.isBlank()) {
+                    renderer.println("usage: /resume <id-prefix>")
+                } else {
+                    val matches = container.sessions.listSessions(projectId)
+                        .filter { !it.archived && it.id.value.startsWith(args) }
+                    when (matches.size) {
+                        0 -> renderer.println("no session id starts with '$args'")
+                        1 -> {
+                            onSwitchSession(matches.single().id)
+                            renderer.println("✓ switched to ${matches.single().id.value.take(8)} · ${matches.single().title}")
+                        }
+                        else -> {
+                            renderer.println("ambiguous: ${matches.size} sessions match '$args'")
+                            matches.take(5).forEach { renderer.println("  · ${it.id.value.take(12)} · ${it.title}") }
+                        }
+                    }
+                }
+            }
+            "model" -> {
+                if (args.isBlank()) {
+                    renderer.println("current: ${container.providers.default!!.id}/$currentModel")
+                } else {
+                    onSwitchModel(args)
+                    renderer.println("✓ model=${container.providers.default!!.id}/$args (takes effect next turn)")
+                }
+            }
+            "cost" -> renderer.println(costSummary(currentSession))
+            else -> renderer.println("unknown command: /$name (try /help)")
+        }
+        return Outcome.CONTINUE
+    }
+
+    private fun helpText(): String = buildString {
+        appendLine("slash commands:")
+        appendLine("  /new              create a fresh session in this project")
+        appendLine("  /sessions         list sessions in this project")
+        appendLine("  /resume <prefix>  switch to the session whose id starts with <prefix>")
+        appendLine("  /model [<id>]     show or override the model id (same provider)")
+        appendLine("  /cost             token + usd totals for the current session")
+        appendLine("  /clear            clear the screen (keeps the session)")
+        appendLine("  /help             this list")
+        append("  /exit /quit       exit")
+    }
+
+    private suspend fun sessionsTable(projectId: ProjectId, current: SessionId): String {
+        val sessions = container.sessions.listSessions(projectId)
+            .filter { !it.archived }
+            .sortedByDescending { it.updatedAt }
+        if (sessions.isEmpty()) return "no sessions in this project"
+        return buildString {
+            appendLine("sessions (most recent first):")
+            sessions.forEach { s ->
+                val marker = if (s.id == current) "*" else " "
+                appendLine("  $marker ${s.id.value.take(12)}  ${s.updatedAt}  ${s.title}")
+            }
+        }.trimEnd()
+    }
+
+    private suspend fun costSummary(sessionId: SessionId): String {
+        val assistants = container.sessions.listMessages(sessionId).filterIsInstance<Message.Assistant>()
+        if (assistants.isEmpty()) return "no assistant messages yet in this session"
+        var tokens = TokenUsage.ZERO
+        var usd = 0.0
+        assistants.forEach {
+            tokens = TokenUsage(
+                input = tokens.input + it.tokens.input,
+                output = tokens.output + it.tokens.output,
+                reasoning = tokens.reasoning + it.tokens.reasoning,
+                cacheRead = tokens.cacheRead + it.tokens.cacheRead,
+                cacheWrite = tokens.cacheWrite + it.tokens.cacheWrite,
+            )
+            usd += it.cost.usd
+        }
+        return "in=${tokens.input} · out=${tokens.output} · reasoning=${tokens.reasoning} · " +
+            "cache r/w=${tokens.cacheRead}/${tokens.cacheWrite} · usd=${"%.5f".format(usd)}"
     }
 
     @OptIn(ExperimentalUuidApi::class)
