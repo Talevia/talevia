@@ -298,4 +298,84 @@ class ProjectSnapshotToolsTest {
         )
         assertEquals(1, rig.store.get(ProjectId("p"))!!.timeline.tracks.size)
     }
+
+    @Test fun deleteDropsTargetedSnapshotAndLeavesOthers() = runTest {
+        val rig = rig()
+        val clock = FixedClock(Instant.fromEpochMilliseconds(1_700_000_000_000L))
+        rig.store.upsert("test", seedProject("p"))
+
+        val save = SaveProjectSnapshotTool(rig.store, clock)
+        save.execute(SaveProjectSnapshotTool.Input(projectId = "p", label = "keep-me"), rig.ctx)
+        clock.instant = Instant.fromEpochMilliseconds(1_700_000_001_000L)
+        val victim = save.execute(
+            SaveProjectSnapshotTool.Input(projectId = "p", label = "drop-me"),
+            rig.ctx,
+        ).data.snapshotId
+
+        val out = DeleteProjectSnapshotTool(rig.store).execute(
+            DeleteProjectSnapshotTool.Input(projectId = "p", snapshotId = victim),
+            rig.ctx,
+        )
+
+        assertEquals(victim, out.data.snapshotId)
+        assertEquals("drop-me", out.data.label)
+        assertEquals(1, out.data.remainingSnapshotCount)
+        val remaining = rig.store.get(ProjectId("p"))!!.snapshots
+        assertEquals(1, remaining.size)
+        assertEquals("keep-me", remaining.single().label)
+    }
+
+    @Test fun deleteUnknownSnapshotThrows() = runTest {
+        val rig = rig()
+        rig.store.upsert("test", seedProject("p"))
+        val tool = DeleteProjectSnapshotTool(rig.store)
+
+        assertFailsWith<IllegalStateException> {
+            tool.execute(
+                DeleteProjectSnapshotTool.Input(projectId = "p", snapshotId = "missing"),
+                rig.ctx,
+            )
+        }
+    }
+
+    @Test fun deleteIsIdempotentFromUserPerspectiveAfterFirstRun() = runTest {
+        val rig = rig()
+        val clock = FixedClock(Instant.fromEpochMilliseconds(1_700_000_000_000L))
+        rig.store.upsert("test", seedProject("p"))
+
+        val sid = SaveProjectSnapshotTool(rig.store, clock).execute(
+            SaveProjectSnapshotTool.Input(projectId = "p", label = "v1"),
+            rig.ctx,
+        ).data.snapshotId
+
+        val tool = DeleteProjectSnapshotTool(rig.store)
+        tool.execute(DeleteProjectSnapshotTool.Input(projectId = "p", snapshotId = sid), rig.ctx)
+        // second call throws — silent success would hide typos / stale ids.
+        assertFailsWith<IllegalStateException> {
+            tool.execute(DeleteProjectSnapshotTool.Input(projectId = "p", snapshotId = sid), rig.ctx)
+        }
+    }
+
+    @Test fun deleteDoesNotAffectLiveProjectContents() = runTest {
+        val rig = rig()
+        val clock = FixedClock(Instant.fromEpochMilliseconds(1_700_000_000_000L))
+        val clip = videoClip("c-1", AssetId("a-1"))
+        rig.store.upsert("test", seedProject("p", listOf(clip)))
+
+        val sid = SaveProjectSnapshotTool(rig.store, clock).execute(
+            SaveProjectSnapshotTool.Input(projectId = "p", label = "v1"),
+            rig.ctx,
+        ).data.snapshotId
+
+        DeleteProjectSnapshotTool(rig.store).execute(
+            DeleteProjectSnapshotTool.Input(projectId = "p", snapshotId = sid),
+            rig.ctx,
+        )
+
+        val refreshed = rig.store.get(ProjectId("p"))!!
+        // Snapshots gone, but live timeline + assets intact.
+        assertTrue(refreshed.snapshots.isEmpty())
+        assertEquals(1, refreshed.timeline.tracks.single().clips.size)
+        assertEquals(1, refreshed.assets.size)
+    }
 }

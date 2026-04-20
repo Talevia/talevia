@@ -24,6 +24,7 @@ import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.TodoWriteTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
+import io.talevia.core.tool.builtin.project.DeleteProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
@@ -148,6 +149,7 @@ class AndroidAppContainer(context: Context) {
         register(SaveProjectSnapshotTool(projects))
         register(ListProjectSnapshotsTool(projects))
         register(RestoreProjectSnapshotTool(projects))
+        register(DeleteProjectSnapshotTool(projects))
         register(ForkProjectTool(projects))
         register(DiffProjectsTool(projects))
         register(DefineCharacterRefTool(projects))
