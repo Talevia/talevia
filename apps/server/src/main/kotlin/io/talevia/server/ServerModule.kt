@@ -467,7 +467,7 @@ private fun eventName(e: BusEvent): String = when (e) {
 
 private fun defaultModelFor(providerId: String): String = when (providerId) {
     "anthropic" -> "claude-opus-4-7"
-    "openai" -> "gpt-4o"
+    "openai" -> "gpt-5.4-mini"
     else -> "default"
 }
 

@@ -255,7 +255,7 @@ struct ChatPanel: View {
     private func defaultModelId(for providerId: String) -> String {
         switch providerId {
         case "anthropic": return "claude-opus-4-7"
-        case "openai":    return "gpt-4o"
+        case "openai":    return "gpt-5.4-mini"
         default:          return "claude-opus-4-7"
         }
     }
