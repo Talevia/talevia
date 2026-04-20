@@ -85,6 +85,11 @@ class OpenAiProvider(
         var textPartId: PartId? = null
         var promptTokens = 0L
         var completionTokens = 0L
+        // OpenAI reports cache hits in `usage.prompt_tokens_details.cached_tokens`
+        // on the final usage chunk (requires `stream_options.include_usage=true`,
+        // which we already set below). These are a subset of promptTokens — they
+        // still count toward input billing, but at ~50% the uncached rate.
+        var cachedTokens = 0L
         var finishRaw: String? = null
         var aborted = false
 
@@ -124,6 +129,8 @@ class OpenAiProvider(
                 (payload["usage"] as? JsonObject)?.let { usage ->
                     promptTokens = usage["prompt_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: promptTokens
                     completionTokens = usage["completion_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: completionTokens
+                    cachedTokens = (usage["prompt_tokens_details"] as? JsonObject)
+                        ?.get("cached_tokens")?.jsonPrimitive?.intOrNull?.toLong() ?: cachedTokens
                 }
 
                 // OpenAI may emit `"choices": []` on usage-only final chunks (when
@@ -182,7 +189,11 @@ class OpenAiProvider(
         send(
             LlmEvent.StepFinish(
                 finish = mapFinish(finishRaw),
-                usage = TokenUsage(input = promptTokens, output = completionTokens),
+                usage = TokenUsage(
+                    input = promptTokens,
+                    output = completionTokens,
+                    cacheRead = cachedTokens,
+                ),
             ),
         )
     }
@@ -201,6 +212,12 @@ class OpenAiProvider(
         request.temperature?.let { put("temperature", it) }
         put("stream", true)
         putJsonObject("stream_options") { put("include_usage", true) }
+        // Stable cache-routing hint — identical keys route to the same replica so
+        // that OpenAI's automatic prompt cache hits consistently instead of
+        // bouncing between machines. Agent seeds this from `sessionId`.
+        request.options.openaiPromptCacheKey?.takeIf { it.isNotEmpty() }?.let {
+            put("prompt_cache_key", it)
+        }
         if (request.tools.isNotEmpty()) {
             putJsonArray("tools") {
                 request.tools.forEach { spec ->

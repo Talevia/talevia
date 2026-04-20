@@ -46,5 +46,11 @@ data class LlmRequest(
 data class ProviderOptions(
     val anthropicThinkingBudget: Int? = null,
     val openaiReasoningEffort: String? = null,
+    /**
+     * Stable routing hint for OpenAI automatic prompt caching. Identical keys route
+     * requests to the same cache replica, turning best-effort 50-ish% hit rate into
+     * near-steady-state hits across a session. Agent defaults this to `sessionId`.
+     */
+    val openaiPromptCacheKey: String? = null,
     val extra: JsonObject? = null,
 )

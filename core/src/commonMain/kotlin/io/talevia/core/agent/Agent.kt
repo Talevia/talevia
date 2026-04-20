@@ -281,7 +281,12 @@ class Agent(
             messages = history,
             tools = registry.specs(),
             systemPrompt = systemPrompt,
-            options = input.options,
+            // Seed the OpenAI cache-routing hint from the session id so every
+            // turn in a session hits the same replica — unless the caller
+            // already picked a key.
+            options = input.options.copy(
+                openaiPromptCacheKey = input.options.openaiPromptCacheKey ?: input.sessionId.value,
+            ),
         )
 
         var finish: FinishReason? = null
@@ -349,6 +354,13 @@ class Agent(
                             finish = event.finish,
                         ),
                     )
+                    metrics?.let { m ->
+                        val pid = input.model.providerId
+                        m.increment("provider.$pid.tokens.input", event.usage.input)
+                        m.increment("provider.$pid.tokens.output", event.usage.output)
+                        m.increment("provider.$pid.tokens.cache_read", event.usage.cacheRead)
+                        m.increment("provider.$pid.tokens.cache_write", event.usage.cacheWrite)
+                    }
                 }
                 is LlmEvent.Error -> {
                     error = event.message

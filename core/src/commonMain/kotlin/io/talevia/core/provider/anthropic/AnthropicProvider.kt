@@ -189,7 +189,13 @@ class AnthropicProvider(
                         LlmEvent.StepFinish(
                             finish = mapStopReason(stopReason),
                             usage = TokenUsage(
-                                input = inputTokens,
+                                // Normalise to match OpenAI's semantics: `input` is
+                                // the total input, with `cacheRead` / `cacheWrite`
+                                // as subsets of it. Anthropic's raw `input_tokens`
+                                // reports only the uncached portion, so we sum in
+                                // the cache buckets here. Hit rate is then
+                                // `cacheRead / input` on any provider.
+                                input = inputTokens + cacheReadTokens + cacheCreationTokens,
                                 output = outputTokens,
                                 cacheRead = cacheReadTokens,
                                 cacheWrite = cacheCreationTokens,

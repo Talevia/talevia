@@ -121,6 +121,30 @@ class AnthropicProviderStreamTest {
         assertEquals(FinishReason.ERROR, finish.finish)
     }
 
+    @Test
+    fun cacheTokensFoldIntoTotalInput() = runTest {
+        // Anthropic reports uncached / cache-read / cache-creation as three
+        // disjoint buckets. We surface `input` as the *total* input (so
+        // `cacheRead / input` == hit rate, matching OpenAI/Gemini), while still
+        // preserving the split via cacheRead / cacheWrite.
+        val sse = listOf(
+            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":" +
+                "{\"input_tokens\":100,\"cache_read_input_tokens\":80,\"cache_creation_input_tokens\":20}}}\n\n",
+            "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\"}}\n\n",
+            "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"ok\"}}\n\n",
+            "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+            "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":3}}\n\n",
+            "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+        ).joinToString("")
+
+        val events = provider(sse).stream(simpleRequest()).toList()
+        val finish = events.filterIsInstance<LlmEvent.StepFinish>().single()
+        assertEquals(200L, finish.usage.input)
+        assertEquals(3L, finish.usage.output)
+        assertEquals(80L, finish.usage.cacheRead)
+        assertEquals(20L, finish.usage.cacheWrite)
+    }
+
     private fun simpleRequest() = LlmRequest(
         model = ModelRef("anthropic", "claude-test"),
         messages = emptyList(),

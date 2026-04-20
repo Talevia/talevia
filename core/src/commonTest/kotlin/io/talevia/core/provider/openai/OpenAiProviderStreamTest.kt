@@ -13,6 +13,7 @@ import io.talevia.core.MessageId
 import io.talevia.core.SessionId
 import io.talevia.core.provider.LlmEvent
 import io.talevia.core.provider.LlmRequest
+import io.talevia.core.provider.ProviderOptions
 import io.talevia.core.session.FinishReason
 import io.talevia.core.session.Message
 import io.talevia.core.session.MessageWithParts
@@ -164,6 +165,94 @@ class OpenAiProviderStreamTest {
         val assistant = msgs.single { it.jsonObject["role"]!!.jsonPrimitive.content == "assistant" }.jsonObject
         assertEquals("", assistant["content"]!!.jsonPrimitive.content)
         assertFalse(assistant.containsKey("tool_calls"))
+    }
+
+    @Test
+    fun cachedTokensFromUsageDetailsSurfaceAsCacheRead() = runTest {
+        // OpenAI's automatic prompt cache reports hits in
+        // `usage.prompt_tokens_details.cached_tokens` on the final usage chunk.
+        // Pin: the provider must forward this into TokenUsage.cacheRead so
+        // downstream metrics can compute a real hit rate (anchor verified live
+        // against gpt-4o-mini: 2304/2411 prompt tokens cached).
+        val sse = listOf(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\n",
+            "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]," +
+                "\"usage\":{\"prompt_tokens\":2411,\"completion_tokens\":14," +
+                "\"prompt_tokens_details\":{\"cached_tokens\":2304,\"audio_tokens\":0}}}\n\n",
+            "data: [DONE]\n\n",
+        ).joinToString("")
+
+        val events = provider(sse).stream(simpleRequest()).toList()
+        val finish = events.filterIsInstance<LlmEvent.StepFinish>().single()
+        assertEquals(2411L, finish.usage.input)
+        assertEquals(14L, finish.usage.output)
+        assertEquals(2304L, finish.usage.cacheRead)
+    }
+
+    @Test
+    fun missingCachedTokensDefaultsToZero() = runTest {
+        // If the usage chunk omits prompt_tokens_details (older models, non-OpenAI
+        // compatible servers) cacheRead must stay 0 rather than throwing.
+        val sse = listOf(
+            "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":\"stop\"}]," +
+                "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":3}}\n\n",
+            "data: [DONE]\n\n",
+        ).joinToString("")
+
+        val events = provider(sse).stream(simpleRequest()).toList()
+        val finish = events.filterIsInstance<LlmEvent.StepFinish>().single()
+        assertEquals(0L, finish.usage.cacheRead)
+    }
+
+    @Test
+    fun promptCacheKeyIsForwardedToRequestBody() = runTest {
+        // A stable prompt_cache_key turns OpenAI's best-effort cache into a
+        // deterministic hit: identical keys route to the same replica.
+        var capturedBody: String? = null
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler { request ->
+                    capturedBody = (request.body as TextContent).text
+                    respond(
+                        content = ByteReadChannel("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Text.EventStream.toString()),
+                    )
+                }
+            }
+        }
+        val req = LlmRequest(
+            model = ModelRef("openai", "gpt-test"),
+            messages = emptyList(),
+            options = ProviderOptions(openaiPromptCacheKey = "session-abc"),
+        )
+        OpenAiProvider(client, apiKey = "test-key").stream(req).toList()
+
+        val body = Json.parseToJsonElement(capturedBody!!).jsonObject
+        assertEquals("session-abc", body["prompt_cache_key"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun promptCacheKeyIsOmittedWhenAbsent() = runTest {
+        // Never send an empty/null key — OpenAI treats missing as best-effort,
+        // but an explicit empty string is a validation error.
+        var capturedBody: String? = null
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler { request ->
+                    capturedBody = (request.body as TextContent).text
+                    respond(
+                        content = ByteReadChannel("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Text.EventStream.toString()),
+                    )
+                }
+            }
+        }
+        OpenAiProvider(client, apiKey = "test-key").stream(simpleRequest()).toList()
+
+        val body = Json.parseToJsonElement(capturedBody!!).jsonObject
+        assertFalse(body.containsKey("prompt_cache_key"))
     }
 
     @Test

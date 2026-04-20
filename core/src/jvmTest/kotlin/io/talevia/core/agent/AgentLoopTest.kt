@@ -6,6 +6,7 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.permission.AllowAllPermissionService
 import io.talevia.core.provider.LlmEvent
 import io.talevia.core.session.FinishReason
@@ -138,6 +139,53 @@ class AgentLoopTest {
         val state = toolPart.state
         assertTrue(state is ToolState.Failed, "missing tool should produce a Failed state")
         assertTrue((state as ToolState.Failed).message.contains("Unknown tool"))
+    }
+
+    @Test
+    fun stepFinishUsageIsRecordedInMetricsPerProvider() = runTest {
+        val (store, bus) = newStore()
+        val sessionId = primeSession(store)
+
+        val turn1 = listOf(
+            LlmEvent.StepFinish(
+                FinishReason.END_TURN,
+                TokenUsage(input = 100, output = 20, cacheRead = 80, cacheWrite = 5),
+            ),
+        )
+        val turn2 = listOf(
+            LlmEvent.StepFinish(
+                FinishReason.END_TURN,
+                TokenUsage(input = 50, output = 10, cacheRead = 40),
+            ),
+        )
+        val provider = FakeProvider(listOf(turn1))
+        val metrics = MetricsRegistry()
+        val agent = Agent(
+            provider = provider,
+            registry = ToolRegistry(),
+            store = store,
+            permissions = AllowAllPermissionService(),
+            bus = bus,
+            metrics = metrics,
+        )
+
+        agent.run(RunInput(sessionId, "first", ModelRef("fake", "test")))
+        // Second run within the same session — counters should accumulate.
+        val provider2 = FakeProvider(listOf(turn2))
+        val agent2 = Agent(
+            provider = provider2,
+            registry = ToolRegistry(),
+            store = store,
+            permissions = AllowAllPermissionService(),
+            bus = bus,
+            metrics = metrics,
+        )
+        agent2.run(RunInput(sessionId, "second", ModelRef("fake", "test")))
+
+        assertEquals(150L, metrics.get("provider.fake.tokens.input"))
+        assertEquals(30L, metrics.get("provider.fake.tokens.output"))
+        assertEquals(120L, metrics.get("provider.fake.tokens.cache_read"))
+        assertEquals(5L, metrics.get("provider.fake.tokens.cache_write"))
     }
 
     private fun newStore(): Pair<SqlDelightSessionStore, EventBus> {
