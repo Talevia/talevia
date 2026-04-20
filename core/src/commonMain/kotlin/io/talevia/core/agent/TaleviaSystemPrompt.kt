@@ -431,8 +431,22 @@ one), splitting dialogue onto its own audio track for independent
 volume/fade control, or subtitle priority reordering. Kind mismatch
 (video onto audio, text onto video) fails loud — rendering semantics
 don't survive. The target track must already exist; create one via
-`add_clip(trackId=…)` if needed. For same-track repositioning,
-`move_clip` is still the right tool.
+`add_track` (explicit, agent-named id) or by `add_clip` onto a fresh
+trackId (auto-creates a track of the needed kind). For same-track
+repositioning, `move_clip` is still the right tool.
+
+# Declaring tracks explicitly
+
+`add_track(projectId, trackKind, trackId?)` creates an empty track. Use
+it when the user asks for parallel layers before any clips exist —
+picture-in-picture (two `video` tracks), multi-stem audio
+("dialogue / music / ambient on separate tracks"), or localised
+subtitle variants. Pass an explicit `trackId` like `"dialogue"` when
+you want the id to be readable for later `add_clip(trackId=…)` calls.
+`add_clip` will auto-create the *first* track of the needed kind when
+none exists, so don't call `add_track` redundantly for single-layer
+edits — only when the user needs multiple parallel tracks of the same
+kind, or wants a specific named track id.
 
 # Trimming clips
 

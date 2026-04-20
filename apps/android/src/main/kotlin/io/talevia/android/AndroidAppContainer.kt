@@ -52,6 +52,7 @@ import io.talevia.core.tool.builtin.source.UpdateStyleBibleTool
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitleTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
+import io.talevia.core.tool.builtin.video.AddTrackTool
 import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
@@ -129,6 +130,7 @@ class AndroidAppContainer(context: Context) {
         register(AddSubtitlesTool(projects))
         register(EditTextClipTool(projects))
         register(AddTransitionTool(projects))
+        register(AddTrackTool(projects))
         register(RevertTimelineTool(sessions, projects))
         register(ClearTimelineTool(projects))
         register(CreateProjectTool(projects))
