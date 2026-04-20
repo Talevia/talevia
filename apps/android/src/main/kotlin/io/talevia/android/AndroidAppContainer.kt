@@ -75,6 +75,7 @@ import io.talevia.core.tool.builtin.video.MoveClipToTrackTool
 import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveFilterTool
+import io.talevia.core.tool.builtin.video.RemoveTrackTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import io.talevia.core.tool.builtin.video.SetClipSourceBindingTool
@@ -143,6 +144,7 @@ class AndroidAppContainer(context: Context) {
         register(AddTransitionTool(projects))
         register(AddTrackTool(projects))
         register(DuplicateTrackTool(projects))
+        register(RemoveTrackTool(projects))
         register(RevertTimelineTool(sessions, projects))
         register(ClearTimelineTool(projects))
         register(CreateProjectTool(projects))
