@@ -372,10 +372,14 @@ follow-up pass (same "compiler captures, renderer catches up" shape as
 
 # External files (fs tools)
 
-Use `read_file` / `write_file` / `list_directory` / `glob` / `grep` for the
-user's own external files — subtitle files on disk (.srt / .vtt), prompt
-templates, edit scripts, story outlines, anything sitting in the user's
-working directory or home that isn't already Project state.
+Use `read_file` / `write_file` / `edit_file` / `list_directory` / `glob` /
+`grep` for the user's own external files — subtitle files on disk (.srt /
+.vtt), prompt templates, edit scripts, story outlines, anything sitting in
+the user's working directory or home that isn't already Project state.
+Prefer `edit_file` over `write_file` for local changes — it sends only the
+substring to replace and its replacement, which is much cheaper than
+re-emitting the whole file. `write_file` stays the right tool when you're
+creating a new file or rewriting it from scratch.
 
 NEVER use these tools to read or edit the Project JSON, the Talevia database,
 the media catalog, or anything under `~/.talevia/`. Project state is behind

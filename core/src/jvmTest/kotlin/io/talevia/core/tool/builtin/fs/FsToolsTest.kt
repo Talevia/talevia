@@ -227,4 +227,76 @@ class FsToolsTest {
             tool.execute(GrepTool.Input(path = root.absolutePath, pattern = "[unclosed"), ctx)
         }
     }
+
+    @Test fun `edit_file replaces unique match and extracts path pattern`() = runBlocking {
+        val p = File(root, "edit.txt").apply { writeText("alpha\nbeta\ngamma\n") }.absolutePath
+        val tool = EditTool(fs)
+
+        val result = tool.execute(
+            EditTool.Input(path = p, oldString = "beta", newString = "BETA"),
+            ctx,
+        )
+        assertEquals(1, result.data.replacements)
+        assertEquals("alpha\nBETA\ngamma\n", File(p).readText())
+        assertTrue(result.outputForLlm.contains("1 occurrence"))
+
+        val pattern = tool.permission.patternFrom("""{"path":"$p"}""")
+        assertEquals(p, pattern)
+    }
+
+    @Test fun `edit_file replaceAll rewrites every occurrence`() = runBlocking {
+        val p = File(root, "many.txt").apply { writeText("foo foo bar foo\n") }.absolutePath
+        val tool = EditTool(fs)
+
+        val result = tool.execute(
+            EditTool.Input(path = p, oldString = "foo", newString = "baz", replaceAll = true),
+            ctx,
+        )
+        assertEquals(3, result.data.replacements)
+        assertEquals("baz baz bar baz\n", File(p).readText())
+        assertTrue(result.outputForLlm.contains("3 occurrence"))
+    }
+
+    @Test fun `edit_file fails when oldString not found`(): Unit = runBlocking {
+        val p = File(root, "miss.txt").apply { writeText("hello world\n") }.absolutePath
+        val tool = EditTool(fs)
+        assertFailsWith<IllegalArgumentException> {
+            tool.execute(EditTool.Input(path = p, oldString = "xyz", newString = "abc"), ctx)
+        }
+    }
+
+    @Test fun `edit_file fails when oldString matches multiple times without replaceAll`(): Unit = runBlocking {
+        val p = File(root, "dup.txt").apply { writeText("foo foo\n") }.absolutePath
+        val tool = EditTool(fs)
+        assertFailsWith<IllegalArgumentException> {
+            tool.execute(EditTool.Input(path = p, oldString = "foo", newString = "bar"), ctx)
+        }
+    }
+
+    @Test fun `edit_file rejects empty oldString and identical new-old`(): Unit = runBlocking {
+        val p = File(root, "x.txt").apply { writeText("abc\n") }.absolutePath
+        val tool = EditTool(fs)
+        assertFailsWith<IllegalArgumentException> {
+            tool.execute(EditTool.Input(path = p, oldString = "", newString = "x"), ctx)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            tool.execute(EditTool.Input(path = p, oldString = "abc", newString = "abc"), ctx)
+        }
+    }
+
+    @Test fun `edit_file empty newString deletes the match`() = runBlocking {
+        val p = File(root, "del.txt").apply { writeText("keep <<drop>> keep\n") }.absolutePath
+        val tool = EditTool(fs)
+
+        val result = tool.execute(
+            EditTool.Input(path = p, oldString = "<<drop>>", newString = ""),
+            ctx,
+        )
+        assertEquals(1, result.data.replacements)
+        assertEquals("keep  keep\n", File(p).readText())
+    }
+
+    @Test fun `edit_file patternFrom falls back to wildcard on malformed JSON`() {
+        assertEquals("*", EditTool(fs).permission.patternFrom("{"))
+    }
 }

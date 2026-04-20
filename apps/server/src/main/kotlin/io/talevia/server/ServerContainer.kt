@@ -49,6 +49,7 @@ import io.talevia.core.tool.builtin.aigc.GenerateMusicTool
 import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
 import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
 import io.talevia.core.tool.builtin.aigc.UpscaleAssetTool
+import io.talevia.core.tool.builtin.fs.EditTool
 import io.talevia.core.tool.builtin.fs.GlobTool
 import io.talevia.core.tool.builtin.fs.GrepTool
 import io.talevia.core.tool.builtin.fs.ListDirectoryTool
@@ -293,6 +294,7 @@ class ServerContainer(
         register(ImportSourceNodeTool(projects))
         register(ReadFileTool(fileSystem))
         register(WriteFileTool(fileSystem))
+        register(EditTool(fileSystem))
         register(ListDirectoryTool(fileSystem))
         register(GlobTool(fileSystem))
         register(GrepTool(fileSystem))
