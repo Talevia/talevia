@@ -122,7 +122,7 @@ class ListAssetsTool(
         val project = projects.get(ProjectId(input.projectId))
             ?: error("project ${input.projectId} not found")
 
-        val refCount: Map<String, Int> = buildMap {
+        val refCount: Map<String, Int> = buildMap<String, Int> {
             project.timeline.tracks.forEach { track ->
                 track.clips.forEach { clip ->
                     val assetId = when (clip) {
@@ -130,7 +130,7 @@ class ListAssetsTool(
                         is Clip.Audio -> clip.assetId.value
                         is Clip.Text -> null
                     }
-                    if (assetId != null) merge(assetId, 1, Int::plus)
+                    if (assetId != null) put(assetId, (get(assetId) ?: 0) + 1)
                 }
             }
         }

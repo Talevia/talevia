@@ -289,6 +289,17 @@ Filters: `kind`, `onlyUnused=true`. Paginated with `limit`/`offset`.
 Prefer this over `get_project_state` whenever the question is about
 media, not timeline structure.
 
+`remove_asset` drops a single asset row from `Project.assets`. Safe by
+default: refuses when any clip still references the asset, and returns
+the dependent clipIds in the error so you can prune them first. Pass
+`force=true` to remove anyway (Unix `rm -f` — leaves dangling clips
+that `validate_project` will flag). Does **not** delete bytes from
+shared media storage; the same AssetId may live in snapshots or other
+projects. Typical flow: `list_assets(onlyUnused=true)` →
+`remove_asset`. For a broad sweep of dangling AIGC regenerations,
+prefer `find_stale_clips` + `regenerate_stale_clips`; `remove_asset`
+is for the catalog-level prune, not the regen path.
+
 `fork_project` branches a project into a new one — closes the third VISION §3.4
 leg ("可分支"). Forks from the source project's current state by default; pass
 `snapshotId` to fork from a specific snapshot. The new project gets a fresh id
