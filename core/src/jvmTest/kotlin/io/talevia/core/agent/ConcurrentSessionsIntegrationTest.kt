@@ -5,6 +5,7 @@ import io.talevia.core.CallId
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
+import io.talevia.core.TrackId
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Project
@@ -22,7 +23,6 @@ import io.talevia.core.session.TokenUsage
 import io.talevia.core.session.ToolState
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.EchoTool
-import io.talevia.core.TrackId
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
