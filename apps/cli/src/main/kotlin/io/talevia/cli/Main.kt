@@ -7,8 +7,10 @@ import io.talevia.cli.bootstrap.SecretBootstrapResult
 import io.talevia.cli.bootstrap.ensureProviderKey
 import io.talevia.cli.repl.Repl
 import io.talevia.cli.repl.buildInteractiveLineReader
+import io.talevia.core.logging.LogLevel
 import kotlinx.coroutines.runBlocking
 import org.jline.terminal.TerminalBuilder
+import java.io.File
 import kotlin.system.exitProcess
 
 private class TaleviaCli : CliktCommand(name = "talevia") {
@@ -20,6 +22,10 @@ private class TaleviaCli : CliktCommand(name = "talevia") {
     override fun run() {
         val code = runBlocking {
             val env = envWithDefaults()
+            val home = System.getProperty("user.home")
+            val logLevel = runCatching { LogLevel.valueOf(env["TALEVIA_CLI_LOG_LEVEL"]?.uppercase().orEmpty()) }
+                .getOrElse { LogLevel.INFO }
+            CliLoggers.install(File(home, ".talevia/cli.log"), logLevel)
             val terminal = TerminalBuilder.builder().system(true).build()
             val reader = buildInteractiveLineReader(terminal)
 
