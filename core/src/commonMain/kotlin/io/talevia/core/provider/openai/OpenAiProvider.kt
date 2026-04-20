@@ -4,8 +4,10 @@ import io.ktor.client.HttpClient
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.talevia.core.CallId
 import io.talevia.core.JsonConfig
 import io.talevia.core.PartId
@@ -27,12 +29,12 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -68,10 +70,11 @@ class OpenAiProvider(
         send(LlmEvent.StepStart)
 
         val body = buildRequestBody(request)
+        val encoded = json.encodeToString(JsonElement.serializer(), body)
         val response = httpClient.preparePost("$baseUrl/v1/chat/completions") {
             bearerAuth(apiKey)
             contentType(ContentType.Application.Json)
-            setBody(json.encodeToString(JsonElement.serializer(), body))
+            setBody(encoded)
         }
 
         // Per-tool-call accumulators keyed by `index` (the field OpenAI uses to disambiguate
@@ -83,8 +86,34 @@ class OpenAiProvider(
         var promptTokens = 0L
         var completionTokens = 0L
         var finishRaw: String? = null
+        var aborted = false
 
         response.execute { http ->
+            // OpenAI returns 4xx/5xx with a JSON `{"error": {...}}` body, NOT an SSE
+            // stream. If we let sseEvents() chew on that, it just yields nothing and
+            // the caller sees a phantom "STOP / 0 tokens" finish. Surface it as Error.
+            if (!http.status.isSuccess()) {
+                val raw = runCatching { http.bodyAsText() }.getOrElse { "<no body>" }
+                val parsed = runCatching {
+                    val obj = json.parseToJsonElement(raw).jsonObject
+                    val err = obj["error"] as? JsonObject
+                    val msg = (err?.get("message") as? JsonPrimitive)?.contentOrNull
+                    val type = (err?.get("type") as? JsonPrimitive)?.contentOrNull
+                    val code = (err?.get("code") as? JsonPrimitive)?.contentOrNull
+                    listOfNotNull(type, code, msg).joinToString(": ").ifBlank { raw }
+                }.getOrElse { raw }
+                // On error, also surface the request payload at DEBUG so you can
+                // see exactly which message tripped the schema check.
+                io.talevia.core.logging.Loggers.get("provider.openai").log(
+                    io.talevia.core.logging.LogLevel.DEBUG,
+                    "request.dump",
+                    mapOf("body" to encoded),
+                )
+                send(LlmEvent.Error("openai HTTP ${http.status.value}: $parsed"))
+                send(LlmEvent.StepFinish(finish = FinishReason.ERROR, usage = TokenUsage.ZERO))
+                aborted = true
+                return@execute
+            }
             http.sseEvents().collect { sse ->
                 if (sse.data == "[DONE]") return@collect
                 val payload = runCatching { json.parseToJsonElement(sse.data).jsonObject }.getOrElse { cause ->
@@ -92,15 +121,18 @@ class OpenAiProvider(
                     return@collect
                 }
 
-                payload["usage"]?.jsonObject?.let { usage ->
+                (payload["usage"] as? JsonObject)?.let { usage ->
                     promptTokens = usage["prompt_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: promptTokens
                     completionTokens = usage["completion_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: completionTokens
                 }
 
-                val choice = payload["choices"]?.jsonArray?.firstOrNull()?.jsonObject ?: return@collect
-                val delta = choice["delta"]?.jsonObject
+                // OpenAI may emit `"choices": []` on usage-only final chunks (when
+                // stream_options.include_usage=true), and individual fields like
+                // `delta` / `tool_calls` may arrive as JsonNull rather than absent.
+                val choice = (payload["choices"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return@collect
+                val delta = choice["delta"] as? JsonObject
 
-                delta?.get("content")?.jsonPrimitive?.contentOrNull?.let { text ->
+                (delta?.get("content") as? JsonPrimitive)?.contentOrNull?.let { text ->
                     if (text.isNotEmpty()) {
                         val pid = textPartId ?: PartId(Uuid.random().toString()).also {
                             textPartId = it
@@ -110,13 +142,13 @@ class OpenAiProvider(
                     }
                 }
 
-                delta?.get("tool_calls")?.jsonArray?.forEach { tcEl ->
-                    val tc = tcEl.jsonObject
-                    val index = tc["index"]?.jsonPrimitive?.intOrNull ?: 0
+                (delta?.get("tool_calls") as? JsonArray)?.forEach { tcEl ->
+                    val tc = tcEl as? JsonObject ?: return@forEach
+                    val index = (tc["index"] as? JsonPrimitive)?.intOrNull ?: 0
                     val buf = tools.getOrPut(index) { ToolBuf(PartId(Uuid.random().toString())) }
-                    val function = tc["function"]?.jsonObject
-                    val newId = tc["id"]?.jsonPrimitive?.contentOrNull
-                    val newName = function?.get("name")?.jsonPrimitive?.contentOrNull
+                    val function = tc["function"] as? JsonObject
+                    val newId = (tc["id"] as? JsonPrimitive)?.contentOrNull
+                    val newName = (function?.get("name") as? JsonPrimitive)?.contentOrNull
                     if (buf.callId == null && newId != null) {
                         buf.callId = CallId(newId)
                         buf.name = newName
@@ -124,7 +156,7 @@ class OpenAiProvider(
                     } else if (newName != null && buf.name == null) {
                         buf.name = newName
                     }
-                    function?.get("arguments")?.jsonPrimitive?.contentOrNull?.let { chunk ->
+                    (function?.get("arguments") as? JsonPrimitive)?.contentOrNull?.let { chunk ->
                         if (chunk.isNotEmpty()) {
                             buf.args.append(chunk)
                             buf.callId?.let { id -> send(LlmEvent.ToolCallInputDelta(buf.partId, id, chunk)) }
@@ -132,9 +164,11 @@ class OpenAiProvider(
                     }
                 }
 
-                choice["finish_reason"]?.jsonPrimitive?.contentOrNull?.let { finishRaw = it }
+                (choice["finish_reason"] as? JsonPrimitive)?.contentOrNull?.let { finishRaw = it }
             }
         }
+
+        if (aborted) return@channelFlow
 
         textPartId?.let { send(LlmEvent.TextEnd(it, "")) /* delta-summed text already sent */ }
         for ((_, buf) in tools) {
@@ -212,8 +246,16 @@ class OpenAiProvider(
                             append(rendered)
                         }
                     }
-                    if (text.isNotEmpty()) put("content", text)
                     val replayable = toolParts.filter { it.state is ToolState.Running || it.state is ToolState.Completed }
+                    // OpenAI assistant messages: `content` is required as a string when
+                    // there are no `tool_calls`. Aborted prior turns leave assistant
+                    // messages with neither text nor tool_calls — emit "" so the
+                    // request validates instead of getting "expected string, got null".
+                    if (text.isNotEmpty()) {
+                        put("content", text)
+                    } else if (replayable.isEmpty()) {
+                        put("content", "")
+                    }
                     if (replayable.isNotEmpty()) putJsonArray("tool_calls") {
                         for (p in replayable) addJsonObject {
                             put("id", p.callId.value)

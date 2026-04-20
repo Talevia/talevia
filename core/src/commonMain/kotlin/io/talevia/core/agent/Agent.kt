@@ -9,6 +9,9 @@ import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
 import io.talevia.core.compaction.TokenEstimator
+import io.talevia.core.logging.Loggers
+import io.talevia.core.logging.info
+import io.talevia.core.logging.warn
 import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.permission.PermissionRequest
 import io.talevia.core.permission.PermissionRule
@@ -100,6 +103,8 @@ class Agent(
     private val metrics: MetricsRegistry? = null,
 ) {
 
+    private val log = Loggers.get("agent")
+
     /**
      * Per-session handle tracking an in-flight [run] so [cancel] can reach into
      * the running coroutine and finalise the current assistant message with
@@ -140,13 +145,30 @@ class Agent(
         }
 
         val runStart = clock.now()
+        log.info(
+            "run.start",
+            "session" to input.sessionId.value,
+            "model" to "${input.model.providerId}/${input.model.modelId}",
+            "promptLen" to input.text.length,
+        )
         try {
-            return runLoop(input, handle)
+            val result = runLoop(input, handle)
+            log.info(
+                "run.finish",
+                "session" to input.sessionId.value,
+                "finish" to result.finish,
+                "input" to result.tokens.input,
+                "output" to result.tokens.output,
+                "ms" to (clock.now() - runStart).inWholeMilliseconds,
+                "error" to result.error,
+            )
+            return result
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
                 finalizeCancelled(handle, e.message)
                 bus.publish(BusEvent.SessionCancelled(input.sessionId))
             }
+            log.info("run.cancelled", "session" to input.sessionId.value, "reason" to e.message)
             throw e
         } finally {
             metrics?.observe("agent.run.ms", (clock.now() - runStart).inWholeMilliseconds)
@@ -206,6 +228,12 @@ class Agent(
             step++
 
             var history = store.listMessagesWithParts(input.sessionId, includeCompacted = false)
+            log.info(
+                "step",
+                "session" to input.sessionId.value,
+                "n" to step,
+                "historyMessages" to history.size,
+            )
 
             // Compaction hook: before asking the provider for another turn, estimate
             // token usage and let the Compactor prune + summarise if we are over budget.
@@ -400,7 +428,8 @@ class Agent(
 
         val toolStart = clock.now()
         val outcome = runCatching { tool.dispatch(event.input, ctx) }
-        metrics?.observe("tool.${event.toolId}.ms", (clock.now() - toolStart).inWholeMilliseconds)
+        val toolMs = (clock.now() - toolStart).inWholeMilliseconds
+        metrics?.observe("tool.${event.toolId}.ms", toolMs)
         outcome.fold(
             onSuccess = { result ->
                 val data = tool.encodeOutput(result)
@@ -410,12 +439,21 @@ class Agent(
                         title = result.title,
                     ),
                 )
+                log.info("tool.ok", "tool" to event.toolId, "callId" to event.callId.value, "ms" to toolMs)
             },
             onFailure = { e ->
                 store.upsertPart(
                     basePart.copy(
                         state = ToolState.Failed(event.input, e.message ?: e::class.simpleName ?: "tool error"),
                     ),
+                )
+                log.warn(
+                    "tool.fail",
+                    "tool" to event.toolId,
+                    "callId" to event.callId.value,
+                    "ms" to toolMs,
+                    "error" to (e.message ?: e::class.simpleName),
+                    cause = e,
                 )
             },
         )

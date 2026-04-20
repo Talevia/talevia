@@ -10,6 +10,7 @@ import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
 import io.talevia.core.provider.LlmEvent
 import io.talevia.core.provider.LlmRequest
+import io.talevia.core.session.FinishReason
 import io.talevia.core.session.ModelRef
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
@@ -96,6 +97,28 @@ class AnthropicProviderStreamTest {
         assertEquals("toolu_abc", ready.callId.value)
         // Serialised form of JsonObject(emptyMap()) is "{}"
         assertEquals("{}", ready.input.toString())
+    }
+
+    @Test
+    fun httpErrorSurfacesAsErrorEvent() = runTest {
+        val errBody = """{"type":"error","error":{"type":"invalid_request_error","message":"messages: at least one message is required"}}"""
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler {
+                    respond(
+                        content = ByteReadChannel(errBody),
+                        status = HttpStatusCode.BadRequest,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+            }
+        }
+        val events = AnthropicProvider(client, apiKey = "test-key").stream(simpleRequest()).toList()
+        val err = events.filterIsInstance<LlmEvent.Error>().single()
+        assertTrue(err.message.contains("HTTP 400"))
+        assertTrue(err.message.contains("invalid_request_error"))
+        val finish = events.filterIsInstance<LlmEvent.StepFinish>().single()
+        assertEquals(FinishReason.ERROR, finish.finish)
     }
 
     private fun simpleRequest() = LlmRequest(

@@ -3,8 +3,10 @@ package io.talevia.core.provider.gemini
 import io.ktor.client.HttpClient
 import io.ktor.client.request.preparePost
 import io.ktor.client.request.setBody
+import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import io.ktor.http.isSuccess
 import io.talevia.core.CallId
 import io.talevia.core.JsonConfig
 import io.talevia.core.PartId
@@ -94,8 +96,25 @@ class GeminiProvider(
         var thoughtsTokens = 0L
         var finishRaw: String? = null
         var sawToolCall = false
+        var aborted = false
 
         response.execute { http ->
+            // Gemini returns a JSON `{"error":{...}}` envelope on 4xx/5xx, not SSE.
+            // Surface as a real Error event so callers don't see a phantom finish.
+            if (!http.status.isSuccess()) {
+                val raw = runCatching { http.bodyAsText() }.getOrElse { "<no body>" }
+                val parsed = runCatching {
+                    val obj = json.parseToJsonElement(raw).jsonObject
+                    val err = obj["error"]?.jsonObject
+                    val status = err?.get("status")?.jsonPrimitive?.contentOrNull
+                    val msg = err?.get("message")?.jsonPrimitive?.contentOrNull
+                    listOfNotNull(status, msg).joinToString(": ").ifBlank { raw }
+                }.getOrElse { raw }
+                send(LlmEvent.Error("gemini HTTP ${http.status.value}: $parsed"))
+                send(LlmEvent.StepFinish(finish = FinishReason.ERROR, usage = TokenUsage.ZERO))
+                aborted = true
+                return@execute
+            }
             http.sseEvents().collect { sse ->
                 if (sse.data == "[DONE]") return@collect
                 val payload = runCatching { json.parseToJsonElement(sse.data).jsonObject }.getOrElse { cause ->
@@ -151,6 +170,8 @@ class GeminiProvider(
                 }
             }
         }
+
+        if (aborted) return@channelFlow
 
         reasoningPartId?.let { send(LlmEvent.ReasoningEnd(it, "")) }
         textPartId?.let { send(LlmEvent.TextEnd(it, "")) }

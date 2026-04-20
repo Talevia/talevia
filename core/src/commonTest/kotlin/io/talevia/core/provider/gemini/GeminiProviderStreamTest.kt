@@ -101,6 +101,28 @@ class GeminiProviderStreamTest {
         assertTrue(events.any { it is LlmEvent.StepFinish })
     }
 
+    @Test
+    fun httpErrorSurfacesAsErrorEvent() = runTest {
+        val errBody = """{"error":{"code":400,"message":"Invalid value at 'contents[0].parts[0].text' (TYPE_STRING), null","status":"INVALID_ARGUMENT"}}"""
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler {
+                    respond(
+                        content = ByteReadChannel(errBody),
+                        status = HttpStatusCode.BadRequest,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Application.Json.toString()),
+                    )
+                }
+            }
+        }
+        val events = GeminiProvider(client, apiKey = "test-key").stream(simpleRequest()).toList()
+        val err = events.filterIsInstance<LlmEvent.Error>().single()
+        assertTrue(err.message.contains("HTTP 400"))
+        assertTrue(err.message.contains("INVALID_ARGUMENT"))
+        val finish = events.filterIsInstance<LlmEvent.StepFinish>().single()
+        assertEquals(FinishReason.ERROR, finish.finish)
+    }
+
     private fun simpleRequest() = LlmRequest(
         model = ModelRef("gemini", "gemini-test"),
         messages = emptyList(),

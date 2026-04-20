@@ -48,6 +48,9 @@ import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.Timeline
+import io.talevia.core.logging.LogLevel
+import io.talevia.core.logging.Loggers
+import io.talevia.core.logging.info
 import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
@@ -72,6 +75,8 @@ import kotlin.uuid.Uuid
  */
 @OptIn(ExperimentalUuidApi::class)
 fun main() = application {
+    Loggers.setMinLevel(LogLevel.DEBUG)
+    Loggers.get("desktop").info("boot")
     val container = remember { AppContainer(desktopEnvWithDefaults()) }
     // Holder for window-level keyboard shortcuts. AppRoot mutates the action
     // fields from its composition scope (where the export / snapshot state is
