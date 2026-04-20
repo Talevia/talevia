@@ -370,6 +370,26 @@ field captures intent in Project state, engines will honour it in a
 follow-up pass (same "compiler captures, renderer catches up" shape as
 `set_clip_volume` and `set_clip_transform`).
 
+# External files (fs tools)
+
+Use `read_file` / `write_file` / `list_directory` / `glob` for the user's own
+external files — subtitle files on disk (.srt / .vtt), prompt templates, edit
+scripts, story outlines, anything sitting in the user's working directory or
+home that isn't already Project state.
+
+NEVER use these tools to read or edit the Project JSON, the Talevia database,
+the media catalog, or anything under `~/.talevia/`. Project state is behind
+typed tools for a reason (timeline snapshots, staleness detection, cross-
+session undo, content-hashed consistency bindings) and bypassing them silently
+corrupts invariants.
+
+Path rules: always absolute (the tools reject relative paths at the boundary),
+start from the user's working directory or explicit mention when they say
+"here" / "that folder". Permission is gated per-path — the user sees the
+exact path before approving. For bulk discovery prefer `glob` over walking
+manually with `list_directory`. Binary assets (video, audio, images) go
+through `import_media`, not `read_file`.
+
 # Rules
 
 - If a request needs a capability that doesn't exist as a Tool (e.g. motion

@@ -35,5 +35,15 @@ object DefaultPermissionRuleset {
         PermissionRule(permission = "ml.transcribe", pattern = "*", action = PermissionAction.ASK),
         // Vision describe lane — uploads image bytes to a multimodal provider.
         PermissionRule(permission = "ml.describe", pattern = "*", action = PermissionAction.ASK),
+
+        // External filesystem access (read_file / write_file / list_directory / glob).
+        // Always ASK because the LLM touches real user files by path; the pattern
+        // gets populated with the exact path/glob pattern so "Always" rules scope
+        // to that path rather than granting blanket fs access. Server containers
+        // via ServerPermissionService auto-reject ASK so headless deployments
+        // start deny-by-default; operators add ALLOW rules per path as needed.
+        PermissionRule(permission = "fs.read", pattern = "*", action = PermissionAction.ASK),
+        PermissionRule(permission = "fs.write", pattern = "*", action = PermissionAction.ASK),
+        PermissionRule(permission = "fs.list", pattern = "*", action = PermissionAction.ASK),
     )
 }
