@@ -134,6 +134,7 @@ class Repl(
                 // Run the turn on a child launch so the SIGINT handler can cancel
                 // just the turn rather than the REPL scope itself.
                 var turnError: Throwable? = null
+                var turnAssistant: Message.Assistant? = null
                 val turnJob = launch {
                     try {
                         val assistant = agent.run(
@@ -144,6 +145,7 @@ class Repl(
                                 permissionRules = container.permissionRules.toList(),
                             ),
                         )
+                        turnAssistant = assistant
                         // Fallback for providers that upsert the final Part.Text without firing deltas;
                         // Renderer.ensureAssistantText is idempotent, so this no-ops when streaming worked.
                         container.sessions.listParts(assistant.id)
@@ -163,6 +165,7 @@ class Repl(
                     if (t is CancellationException) renderer.println("(cancelled)")
                     else renderer.error("agent failed: ${t.message ?: t::class.simpleName}")
                 }
+                turnAssistant?.let { renderer.println(turnTokenSummary(it.tokens)) }
                 renderer.endTurn()
             }
         } finally {
@@ -266,6 +269,24 @@ class Repl(
                 appendLine("  $marker ${s.id.value.take(12)}  ${s.updatedAt}  ${s.title}")
             }
         }.trimEnd()
+    }
+
+    /**
+     * One-line per-turn token / cache summary printed after the assistant finishes.
+     * `input` is always the total input (subsumes cacheRead / cacheWrite on every
+     * provider since the unified normalisation), so `cacheRead / input` is the real
+     * cache hit rate regardless of backend.
+     */
+    private fun turnTokenSummary(t: TokenUsage): String {
+        val hitPct = if (t.input > 0) (t.cacheRead.toDouble() / t.input.toDouble()) * 100.0 else 0.0
+        val base = "· tokens in=${t.input} out=${t.output}"
+        val reasoning = if (t.reasoning > 0) " reasoning=${t.reasoning}" else ""
+        val cache = when {
+            t.cacheRead == 0L && t.cacheWrite == 0L -> ""
+            t.cacheWrite > 0L -> " · cache ${"%.1f".format(hitPct)}% (read=${t.cacheRead} write=${t.cacheWrite})"
+            else -> " · cache ${"%.1f".format(hitPct)}% (read=${t.cacheRead})"
+        }
+        return base + reasoning + cache
     }
 
     private suspend fun costSummary(sessionId: SessionId): String {
