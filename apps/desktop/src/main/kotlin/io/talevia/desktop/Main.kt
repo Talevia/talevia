@@ -523,28 +523,14 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
                 .maxByOrNull { it.updatedAt }
             if (existing != null) {
                 sessionId.value = existing.id
-                // Replay stored parts into the visible chatLines.
+                // Replay stored parts into the visible chatLines. Using
+                // listMessagesWithParts (not listSessionParts) is load-bearing:
+                // we need the parent Message to label a Part.Text as "you"
+                // vs "assistant" — otherwise a user prompt shows up as an
+                // assistant echo and looks like the AI is parroting the user.
                 runCatching {
-                    container.sessions.listSessionParts(existing.id, includeCompacted = false)
-                        .forEach { p ->
-                            when (p) {
-                                is Part.Text -> chatLines += ChatLine("assistant", p.text.take(400))
-                                is Part.Tool -> {
-                                    val st = p.state
-                                    val path = if (st is io.talevia.core.session.ToolState.Completed) {
-                                        runCatching { resolveOpenablePath(container, st.data) }.getOrNull()
-                                    } else {
-                                        null
-                                    }
-                                    chatLines += ChatLine(
-                                        role = "tool/${p.toolId}",
-                                        text = "→ ${p.state::class.simpleName}" + (path?.let { " · $it" } ?: ""),
-                                        openPath = path,
-                                    )
-                                }
-                                else -> {}
-                            }
-                        }
+                    container.sessions.listMessagesWithParts(existing.id, includeCompacted = false)
+                        .forEach { mwp -> replayMessageParts(container, mwp, chatLines) }
                 }
                 sessionBootstrapped.value = true
                 log += "resumed session ${existing.id.value.take(8)} · ${chatLines.size} line(s)"
@@ -575,7 +561,14 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
                 .collect { ev ->
                     if (ev.sessionId != sessionId.value) return@collect
                     val line: ChatLine? = when (val p = ev.part) {
-                        is Part.Text -> ChatLine("assistant", p.text.take(400))
+                        is Part.Text -> {
+                            // The agent persists the user prompt as a Part.Text on
+                            // the user message; we already rendered that locally
+                            // when Send was clicked, so drop it to avoid echoing
+                            // the prompt back as an "assistant" line.
+                            val parent = runCatching { container.sessions.getMessage(ev.messageId) }.getOrNull()
+                            if (parent is Message.Assistant) ChatLine("assistant", p.text.take(400)) else null
+                        }
                         is Part.Tool -> {
                             val state = p.state
                             val path = if (state is io.talevia.core.session.ToolState.Completed) {
@@ -682,26 +675,8 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
                                     chatLines.clear()
                                     scope.launch {
                                         runCatching {
-                                            container.sessions.listSessionParts(s.id, includeCompacted = false)
-                                                .forEach { p ->
-                                                    when (p) {
-                                                        is Part.Text -> chatLines += ChatLine("assistant", p.text.take(400))
-                                                        is Part.Tool -> {
-                                                            val st = p.state
-                                                            val path = if (st is io.talevia.core.session.ToolState.Completed) {
-                                                                runCatching { resolveOpenablePath(container, st.data) }.getOrNull()
-                                                            } else {
-                                                                null
-                                                            }
-                                                            chatLines += ChatLine(
-                                                                role = "tool/${p.toolId}",
-                                                                text = "→ ${p.state::class.simpleName}" + (path?.let { " · $it" } ?: ""),
-                                                                openPath = path,
-                                                            )
-                                                        }
-                                                        else -> {}
-                                                    }
-                                                }
+                                            container.sessions.listMessagesWithParts(s.id, includeCompacted = false)
+                                                .forEach { mwp -> replayMessageParts(container, mwp, chatLines) }
                                         }
                                         log += "resumed session ${s.id.value.take(8)} · ${chatLines.size} line(s)"
                                     }
@@ -791,6 +766,41 @@ private data class ChatLine(
     /** Optional absolute filesystem path to an artefact the user can open from the row. */
     val openPath: String? = null,
 )
+
+/**
+ * Replay one persisted message into [chatLines]. Labels Part.Text by the
+ * owning Message role — a User message's Part.Text is "you", an Assistant's
+ * is "assistant". (A previous implementation read parts without their parent
+ * message and wound up labelling every stored prompt as "assistant", which
+ * looked like the AI was echoing the user.)
+ */
+private suspend fun replayMessageParts(
+    container: AppContainer,
+    mwp: io.talevia.core.session.MessageWithParts,
+    chatLines: androidx.compose.runtime.snapshots.SnapshotStateList<ChatLine>,
+) {
+    val role = when (mwp.message) {
+        is Message.User -> "you"
+        is Message.Assistant -> "assistant"
+    }
+    for (p in mwp.parts) when (p) {
+        is Part.Text -> chatLines += ChatLine(role, p.text.take(400))
+        is Part.Tool -> {
+            val st = p.state
+            val path = if (st is io.talevia.core.session.ToolState.Completed) {
+                runCatching { resolveOpenablePath(container, st.data) }.getOrNull()
+            } else {
+                null
+            }
+            chatLines += ChatLine(
+                role = "tool/${p.toolId}",
+                text = "→ ${p.state::class.simpleName}" + (path?.let { " · $it" } ?: ""),
+                openPath = path,
+            )
+        }
+        else -> {}
+    }
+}
 
 private fun defaultModelFor(providerId: String): String = when (providerId) {
     "anthropic" -> "claude-opus-4-7"
