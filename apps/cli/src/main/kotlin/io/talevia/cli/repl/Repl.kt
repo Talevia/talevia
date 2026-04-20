@@ -270,9 +270,56 @@ class Repl(
             "todos" -> renderer.println(todosSummary(currentSession))
             "history" -> renderer.println(historyTable(currentSession))
             "revert" -> renderer.println(handleRevert(currentSession, projectId, args))
+            "fork" -> {
+                val result = handleFork(currentSession, args)
+                renderer.println(result.message)
+                result.newSessionId?.let { onSwitchSession(it) }
+            }
             else -> renderer.println(Styles.meta("unknown command: /$name (try /help)"))
         }
         return Outcome.CONTINUE
+    }
+
+    private data class ForkOutcome(val message: String, val newSessionId: SessionId?)
+
+    /**
+     * `/fork` with no arg duplicates the current session whole. With a prefix,
+     * truncates the branch at that anchor — everything after it in the parent
+     * stays in the parent, so the branched session is a clean continuation
+     * point. Switches the REPL into the new branch on success (like `/resume`)
+     * because the natural UX after typing `/fork` is "now keep editing in the
+     * branch I just made".
+     */
+    private suspend fun handleFork(sessionId: SessionId, args: String): ForkOutcome {
+        val anchor = if (args.isBlank()) {
+            null
+        } else {
+            val matches = container.sessions.listMessages(sessionId)
+                .filter { it.id.value.startsWith(args) }
+            when (matches.size) {
+                0 -> return ForkOutcome(
+                    Styles.meta("no message id starts with '$args' (see /history)"),
+                    newSessionId = null,
+                )
+                1 -> matches.single().id
+                else -> {
+                    val lines = buildString {
+                        appendLine(Styles.meta("ambiguous: ${matches.size} messages match '$args'"))
+                        matches.take(5).forEach {
+                            appendLine(Styles.meta("  · ${it.id.value.take(16)}"))
+                        }
+                    }.trimEnd()
+                    return ForkOutcome(lines, newSessionId = null)
+                }
+            }
+        }
+        val newId = container.sessions.fork(sessionId, newTitle = null, anchorMessageId = anchor)
+        val detail = if (anchor == null) "full history" else "up to ${anchor.value.take(12)}"
+        return ForkOutcome(
+            "${Styles.ok("✓")} forked → ${Styles.accent(newId.value.take(12))} " +
+                Styles.meta("· $detail · switched to new branch"),
+            newSessionId = newId,
+        )
     }
 
     /**

@@ -213,7 +213,11 @@ class SqlDelightSessionStore(
             .map { it.part }
 
     @OptIn(ExperimentalUuidApi::class)
-    override suspend fun fork(parentId: SessionId, newTitle: String?): SessionId {
+    override suspend fun fork(
+        parentId: SessionId,
+        newTitle: String?,
+        anchorMessageId: MessageId?,
+    ): SessionId {
         val parent = getSession(parentId) ?: error("Cannot fork unknown session $parentId")
         val now = Clock.System.now()
         val newId = SessionId(Uuid.random().toString())
@@ -228,8 +232,18 @@ class SqlDelightSessionStore(
         createSession(branch)
 
         val parentMessages = listMessagesWithParts(parentId, includeCompacted = true)
+        val truncated = if (anchorMessageId == null) {
+            parentMessages
+        } else {
+            val anchorIdx = parentMessages.indexOfFirst { it.message.id == anchorMessageId }
+            require(anchorIdx >= 0) {
+                "Fork anchor $anchorMessageId does not belong to session $parentId"
+            }
+            parentMessages.subList(0, anchorIdx + 1)
+        }
+
         val messageIdRemap = mutableMapOf<MessageId, MessageId>()
-        for (mwp in parentMessages) {
+        for (mwp in truncated) {
             val newMid = MessageId(Uuid.random().toString())
             messageIdRemap[mwp.message.id] = newMid
             val newMessage = when (val m = mwp.message) {

@@ -73,8 +73,18 @@ interface SessionStore {
 
     /**
      * Branch a session: create a new session whose `parentId` points at [parentId],
-     * copying every message + part with fresh IDs so the branch can diverge without
+     * copying messages + parts with fresh IDs so the branch can diverge without
      * touching the parent's history. Returns the new session id.
+     *
+     * When [anchorMessageId] is non-null, only messages at-or-before the anchor in
+     * `(createdAt, id)` order are copied — everything strictly after is dropped
+     * from the branch. Useful for "fork from here" flows that want a clean
+     * continuation point without polluting the new session with the tangent that
+     * followed the anchor in the parent. Throws if the anchor isn't in [parentId].
      */
-    suspend fun fork(parentId: SessionId, newTitle: String? = null): SessionId
+    suspend fun fork(
+        parentId: SessionId,
+        newTitle: String? = null,
+        anchorMessageId: MessageId? = null,
+    ): SessionId
 }

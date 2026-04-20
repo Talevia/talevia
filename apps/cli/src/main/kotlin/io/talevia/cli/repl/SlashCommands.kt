@@ -20,6 +20,11 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         "rewind session + timeline to an earlier turn (deletes later turns)",
         argHint = "<messageId-prefix>",
     ),
+    SlashCommandSpec(
+        "/fork",
+        "branch this session (optionally at a past turn) and switch to the new branch",
+        argHint = "[<messageId-prefix>]",
+    ),
     SlashCommandSpec("/clear", "clear the screen (keeps the session)"),
     SlashCommandSpec("/help", "this list"),
     SlashCommandSpec("/exit", "exit"),
