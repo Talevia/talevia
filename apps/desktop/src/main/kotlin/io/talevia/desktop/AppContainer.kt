@@ -25,6 +25,7 @@ import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.MusicGenEngine
 import io.talevia.core.platform.ProcessRunner
+import io.talevia.core.platform.SearchEngine
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.UpscaleEngine
@@ -39,6 +40,7 @@ import io.talevia.core.provider.openai.OpenAiVisionEngine
 import io.talevia.core.provider.openai.OpenAiWhisperEngine
 import io.talevia.core.provider.replicate.ReplicateMusicGenEngine
 import io.talevia.core.provider.replicate.ReplicateUpscaleEngine
+import io.talevia.core.provider.tavily.TavilySearchEngine
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.TodoWriteTool
@@ -101,6 +103,7 @@ import io.talevia.core.tool.builtin.video.SetClipVolumeTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
 import io.talevia.core.tool.builtin.video.TrimClipTool
 import io.talevia.core.tool.builtin.web.WebFetchTool
+import io.talevia.core.tool.builtin.web.WebSearchTool
 import io.talevia.platform.ffmpeg.FfmpegVideoEngine
 import kotlinx.coroutines.runBlocking
 import java.io.File
@@ -211,6 +214,15 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
             )
         }
 
+    /**
+     * Web-search backing for the `web_search` tool. Wired to Tavily when
+     * `TAVILY_API_KEY` is set; otherwise stays null and `web_search` stays
+     * unregistered, mirroring the gating posture of the AIGC engines.
+     */
+    val search: SearchEngine? = env["TAVILY_API_KEY"]
+        ?.takeIf { it.isNotBlank() }
+        ?.let { TavilySearchEngine(httpClient, it) }
+
     /** JVM blob writer backing AIGC tools. Paired with [mediaRootDir]. */
     val blobWriter: MediaBlobWriter = FileBlobWriter(mediaRootDir)
 
@@ -267,6 +279,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(GrepTool(fileSystem))
         register(BashTool(processRunner))
         register(WebFetchTool(httpClient))
+        search?.let { register(WebSearchTool(it)) }
         imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
         videoGen?.let { register(GenerateVideoTool(it, media, blobWriter, projects)) }
         musicGen?.let { register(GenerateMusicTool(it, media, blobWriter, projects)) }

@@ -60,5 +60,13 @@ object DefaultPermissionRuleset {
         // `docs.kernel.org`). Server containers auto-reject ASK; operators
         // add ALLOW rules per host as needed.
         PermissionRule(permission = "web.fetch", pattern = "*", action = PermissionAction.ASK),
+
+        // Web searches (`web_search` tool). Pattern is the lower-cased
+        // query, so an "Always" rule scopes to that exact phrase rather
+        // than blanket-granting search. Every call hits an external
+        // (potentially metered) provider, so default to ASK; users that
+        // want frictionless search can flip to ALLOW with pattern `*`.
+        // Server containers auto-reject ASK by default.
+        PermissionRule(permission = "web.search", pattern = "*", action = PermissionAction.ASK),
     )
 }
