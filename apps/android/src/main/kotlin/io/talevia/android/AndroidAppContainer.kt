@@ -51,6 +51,7 @@ import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
+import io.talevia.core.tool.builtin.video.DuplicateClipTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ExtractFrameTool
 import io.talevia.core.tool.builtin.video.FadeAudioClipTool
@@ -106,6 +107,7 @@ class AndroidAppContainer(context: Context) {
         register(SplitClipTool(projects))
         register(RemoveClipTool(projects))
         register(MoveClipTool(projects))
+        register(DuplicateClipTool(projects))
         register(TrimClipTool(projects, media))
         register(SetClipVolumeTool(projects))
         register(FadeAudioClipTool(projects))

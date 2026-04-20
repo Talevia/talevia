@@ -323,6 +323,19 @@ because blanket sequence-wide ripple would drift independent tracks like
 background music. Emits one timeline snapshot (ripple included) so
 `revert_timeline` rolls the whole operation back in one step.
 
+# Duplicating clips
+
+`duplicate_clip` clones a clip to a new timeline position with a fresh
+id, preserving filters, transforms, source bindings, audio envelope
+(volume + fades), and text style. Use it for "put the intro again at
+00:30, same look" / "repeat this clip later" / "duplicate this logo
+overlay at 01:15". Prefer this over `add_clip` when the original has
+any attached state you want to keep — `add_clip` only mounts the
+asset and drops everything else. Optional `trackId` moves the
+duplicate to another track of the same kind (Video→Video,
+Audio→Audio, Text→Subtitle/Effect); cross-kind is refused. Emits a
+timeline snapshot so `revert_timeline` can undo.
+
 # Moving clips
 
 `move_clip` repositions a clip on the timeline by id — changes its

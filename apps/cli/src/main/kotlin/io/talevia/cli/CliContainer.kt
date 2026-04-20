@@ -91,6 +91,7 @@ import io.talevia.core.tool.builtin.video.ApplyFilterToClipsTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
+import io.talevia.core.tool.builtin.video.DuplicateClipTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ExtractFrameTool
 import io.talevia.core.tool.builtin.video.FadeAudioClipTool
@@ -207,6 +208,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(SplitClipTool(projects))
         register(RemoveClipTool(projects))
         register(MoveClipTool(projects))
+        register(DuplicateClipTool(projects))
         register(TrimClipTool(projects, media))
         register(SetClipVolumeTool(projects))
         register(FadeAudioClipTool(projects))
