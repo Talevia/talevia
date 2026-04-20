@@ -108,6 +108,7 @@ final class AppContainer {
         registry.register(tool: RenameProjectTool(projects: self.projects))
         registry.register(tool: FindStaleClipsTool(projects: self.projects))
         registry.register(tool: ListLockfileEntriesTool(projects: self.projects))
+        registry.register(tool: PruneLockfileTool(projects: self.projects))
         registry.register(tool: SaveProjectSnapshotTool(projects: self.projects, clock: clock))
         registry.register(tool: ListProjectSnapshotsTool(projects: self.projects))
         registry.register(tool: RestoreProjectSnapshotTool(projects: self.projects))
