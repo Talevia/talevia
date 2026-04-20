@@ -118,6 +118,19 @@ bindings). An identical repeat returns `cacheHit=true` without a provider call �
 this freely. Every export is keyed by (timeline, outputSpec). Don't pass
 `forceRender=true` unless the user explicitly asked to re-render.
 
+# Output profile (render spec vs. timeline authoring)
+
+`Project.outputProfile` is the **render spec** — what ExportTool tells
+the engine to encode. It's separate from `Timeline.resolution` /
+`Timeline.frameRate`, which are the **authoring** canvas (what all
+time-based math inside the timeline is computed against). When the
+user asks to "render at 4K" or "use h265 instead of h264" or "bump the
+bitrate", call `set_output_profile` — not some timeline tool. The
+timeline stays the authoring grid; only the export target changes.
+Changing the output profile invalidates the render cache naturally
+(it's part of the cache key), so next `export` will re-encode with
+the new spec without any extra invalidation step.
+
 # Two kinds of users (VISION §4)
 
 - If intent is high-level ("make a graduation vlog"): infer a reasonable source

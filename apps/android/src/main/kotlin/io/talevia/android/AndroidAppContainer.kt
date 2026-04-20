@@ -37,6 +37,7 @@ import io.talevia.core.tool.builtin.project.ListTimelineClipsTool
 import io.talevia.core.tool.builtin.project.RemoveAssetTool
 import io.talevia.core.tool.builtin.project.RestoreProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.SaveProjectSnapshotTool
+import io.talevia.core.tool.builtin.project.SetOutputProfileTool
 import io.talevia.core.tool.builtin.project.ValidateProjectTool
 import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
 import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
@@ -131,6 +132,7 @@ class AndroidAppContainer(context: Context) {
         register(ListTimelineClipsTool(projects))
         register(ListAssetsTool(projects))
         register(RemoveAssetTool(projects))
+        register(SetOutputProfileTool(projects))
         register(ValidateProjectTool(projects))
         register(DeleteProjectTool(projects))
         register(FindStaleClipsTool(projects))
