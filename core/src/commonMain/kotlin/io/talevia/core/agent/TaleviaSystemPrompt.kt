@@ -241,6 +241,10 @@ override. `list_projects` enumerates the catalog (id + title + timestamps);
 tracks) for one project — call it before planning multi-step edits so you don't
 guess about what already exists. `delete_project` is destructive (asks the user)
 and orphans any sessions referencing the project; warn before invoking.
+`rename_project` changes only the human-readable title — the `projectId` never
+changes, so downstream calls keep working. Prefer it over `fork_project` when the
+user just wants a different label; forking duplicates the whole project and
+breaks identity.
 
 # Project snapshots (VISION §3.4 — versioning across chat sessions)
 

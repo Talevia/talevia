@@ -73,6 +73,7 @@ import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.project.ListTimelineClipsTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
 import io.talevia.core.tool.builtin.project.RemoveAssetTool
+import io.talevia.core.tool.builtin.project.RenameProjectTool
 import io.talevia.core.tool.builtin.project.RestoreProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.SaveProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.SetOutputProfileTool
@@ -265,6 +266,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(ListProjectsTool(projects))
         register(GetProjectStateTool(projects))
         register(DeleteProjectTool(projects))
+        register(RenameProjectTool(projects))
         register(FindStaleClipsTool(projects))
         register(ListClipsForSourceTool(projects))
         register(ListTimelineClipsTool(projects))

@@ -21,3 +21,6 @@ SELECT * FROM Projects ORDER BY time_updated DESC;
 
 delete:
 DELETE FROM Projects WHERE id = ?;
+
+renameProject:
+UPDATE Projects SET title = ?, time_updated = ? WHERE id = ?;

@@ -34,6 +34,12 @@ interface ProjectStore {
     suspend fun list(): List<Project>
     suspend fun delete(id: ProjectId)
 
+    /**
+     * Rename a project — updates only the catalog `title` column (and `time_updated`),
+     * leaving the JSON-blobbed [Project] model untouched. Throws if no row exists.
+     */
+    suspend fun setTitle(id: ProjectId, title: String)
+
     /** Catalog metadata for a single project, or null if no row exists. */
     suspend fun summary(id: ProjectId): ProjectSummary?
 
@@ -86,6 +92,16 @@ class SqlDelightProjectStore(
 
     override suspend fun delete(id: ProjectId) {
         db.projectsQueries.delete(id.value)
+    }
+
+    override suspend fun setTitle(id: ProjectId, title: String) = mutex.withLock {
+        val existing = db.projectsQueries.selectById(id.value).executeAsOneOrNull()
+            ?: error("Project ${id.value} does not exist")
+        db.projectsQueries.renameProject(
+            title = title,
+            time_updated = clock.now().toEpochMilliseconds(),
+            id = existing.id,
+        )
     }
 
     override suspend fun mutate(id: ProjectId, block: suspend (Project) -> Project): Project = mutex.withLock {

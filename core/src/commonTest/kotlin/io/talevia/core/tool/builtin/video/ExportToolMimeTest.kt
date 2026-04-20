@@ -25,6 +25,7 @@ class ExportToolMimeTest {
         override suspend fun upsert(title: String, project: Project) = error("not used")
         override suspend fun list(): List<Project> = error("not used")
         override suspend fun delete(id: ProjectId) = error("not used")
+        override suspend fun setTitle(id: ProjectId, title: String) = error("not used")
         override suspend fun summary(id: ProjectId): ProjectSummary? = error("not used")
         override suspend fun listSummaries(): List<ProjectSummary> = error("not used")
         override suspend fun mutate(id: ProjectId, block: suspend (Project) -> Project): Project = error("not used")
