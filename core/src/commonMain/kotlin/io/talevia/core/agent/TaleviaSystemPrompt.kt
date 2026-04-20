@@ -323,6 +323,18 @@ because blanket sequence-wide ripple would drift independent tracks like
 background music. Emits one timeline snapshot (ripple included) so
 `revert_timeline` rolls the whole operation back in one step.
 
+# Undoing filters
+
+`remove_filter` is the counterpart to `apply_filter`. Use it when the
+user changes their mind about a look ("actually drop the blur", "lose
+the vignette") or when iterating on filter choices. Removes every
+filter whose name matches — if the user stacked `blur` twice, one
+call clears both. Idempotent: removing a filter that isn't attached
+returns `removedCount: 0` with no error, so speculative cleanup is
+safe. Prefer this over `revert_timeline` (which nukes every later
+edit) when only the filter change is unwanted. Video clips only.
+Emits a timeline snapshot.
+
 # Duplicating clips
 
 `duplicate_clip` clones a clip to a new timeline position with a fresh

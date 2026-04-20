@@ -98,6 +98,7 @@ import io.talevia.core.tool.builtin.video.FadeAudioClipTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
+import io.talevia.core.tool.builtin.video.RemoveFilterTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import io.talevia.core.tool.builtin.video.SetClipTransformTool
@@ -216,6 +217,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(ExportTool(projects, engine))
         register(ApplyFilterTool(projects))
         register(ApplyFilterToClipsTool(projects))
+        register(RemoveFilterTool(projects))
         register(ApplyLutTool(projects, media))
         register(AddSubtitleTool(projects))
         register(AddSubtitlesTool(projects))

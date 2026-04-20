@@ -84,6 +84,7 @@ final class AppContainer {
         registry.register(tool: SetClipTransformTool(store: self.projects))
         registry.register(tool: ExportTool(store: self.projects, engine: self.engine, clock: clock))
         registry.register(tool: ApplyFilterTool(store: self.projects))
+        registry.register(tool: RemoveFilterTool(store: self.projects))
         registry.register(tool: ApplyLutTool(store: self.projects, media: self.media))
         registry.register(tool: AddSubtitleTool(store: self.projects))
         registry.register(tool: AddSubtitlesTool(store: self.projects))
