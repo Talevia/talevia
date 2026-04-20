@@ -104,6 +104,7 @@ import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
 import io.talevia.core.tool.builtin.video.ClearTimelineTool
 import io.talevia.core.tool.builtin.video.DuplicateClipTool
 import io.talevia.core.tool.builtin.video.EditTextClipTool
+import io.talevia.core.tool.builtin.video.ExportDryRunTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ExtractFrameTool
 import io.talevia.core.tool.builtin.video.FadeAudioClipTool
@@ -260,6 +261,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(FadeAudioClipTool(projects))
         register(SetClipTransformTool(projects))
         register(ExportTool(projects, engine))
+        register(ExportDryRunTool(projects))
         register(ApplyFilterTool(projects))
         register(ApplyFilterToClipsTool(projects))
         register(RemoveFilterTool(projects))
