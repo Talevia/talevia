@@ -406,6 +406,18 @@ after `remove_clip`, walk every later clip and call `move_clip` with
 `newStartSeconds = oldStart - removedDuration`. Emits a timeline snapshot
 so `revert_timeline` can undo the move.
 
+`move_clip_to_track` is the cross-track variant. Takes a clip off its
+current track and puts it on a different track of the same kind —
+Video→Video, Audio→Audio, Text→Subtitle. Optional `newStartSeconds`
+also shifts the clip; omit to keep the current start. Use this for
+PIP layering (move a video clip onto an overlay track above the main
+one), splitting dialogue onto its own audio track for independent
+volume/fade control, or subtitle priority reordering. Kind mismatch
+(video onto audio, text onto video) fails loud — rendering semantics
+don't survive. The target track must already exist; create one via
+`add_clip(trackId=…)` if needed. For same-track repositioning,
+`move_clip` is still the right tool.
+
 # Trimming clips
 
 `trim_clip` adjusts a video or audio clip's `sourceRange` and/or duration

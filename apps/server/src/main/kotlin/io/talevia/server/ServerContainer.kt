@@ -105,6 +105,7 @@ import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ExtractFrameTool
 import io.talevia.core.tool.builtin.video.FadeAudioClipTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
+import io.talevia.core.tool.builtin.video.MoveClipToTrackTool
 import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveFilterTool
@@ -282,6 +283,7 @@ class ServerContainer(
         register(SplitClipTool(projects))
         register(RemoveClipTool(projects))
         register(MoveClipTool(projects))
+        register(MoveClipToTrackTool(projects))
         register(DuplicateClipTool(projects))
         register(TrimClipTool(projects, media))
         register(SetClipVolumeTool(projects))
