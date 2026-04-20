@@ -341,6 +341,19 @@ class ServerContainer(
 
     private val agentsByProvider = mutableMapOf<String, Agent>()
 
+    /**
+     * Server-side AGENTS.md / CLAUDE.md discovery — walks from `user.dir` up
+     * so a deployment that `cd`s into a specific project folder (e.g. a
+     * systemd unit's `WorkingDirectory=`) inherits that project's rules
+     * alongside the headless-runtime note above. Cached at container init.
+     */
+    private val projectInstructionsSuffix: String by lazy {
+        val cwd = System.getProperty("user.dir")?.takeIf { it.isNotBlank() }?.let { java.io.File(it) }
+            ?: return@lazy ""
+        val found = io.talevia.core.agent.InstructionDiscovery.discover(startDir = cwd)
+        io.talevia.core.agent.formatProjectInstructionsSuffix(found)
+    }
+
     private fun buildAgent(provider: LlmProvider): Agent =
         Agent(
             provider = provider,
@@ -350,10 +363,13 @@ class ServerContainer(
             bus = bus,
             metrics = metrics,
             systemPrompt = io.talevia.core.agent.taleviaSystemPrompt(
-                // Server runs headless: permission prompts default to deny, so the model
-                // should not plan around interactive approval loops for ASK permissions.
-                extraSuffix = "Runtime: headless server. ASK-scoped permissions resolve to deny; " +
-                    "if a tool needs an ASK permission, surface that to the caller rather than retrying.",
+                extraSuffix = listOf(
+                    // Server runs headless: permission prompts default to deny, so the model
+                    // should not plan around interactive approval loops for ASK permissions.
+                    "Runtime: headless server. ASK-scoped permissions resolve to deny; " +
+                        "if a tool needs an ASK permission, surface that to the caller rather than retrying.",
+                    projectInstructionsSuffix,
+                ).filter { it.isNotBlank() }.joinToString("\n\n"),
             ),
             compactor = Compactor(
                 provider = provider,

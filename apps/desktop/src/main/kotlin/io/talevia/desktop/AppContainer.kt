@@ -325,7 +325,9 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
             store = sessions,
             permissions = permissions,
             bus = bus,
-            systemPrompt = io.talevia.core.agent.taleviaSystemPrompt(),
+            systemPrompt = io.talevia.core.agent.taleviaSystemPrompt(
+                extraSuffix = projectInstructionsSuffix,
+            ),
             compactor = Compactor(
                 provider = provider,
                 store = sessions,
@@ -333,6 +335,19 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
             ),
             titler = SessionTitler(provider = provider, store = sessions),
         )
+    }
+
+    /**
+     * Desktop-side AGENTS.md / CLAUDE.md discovery. Runs from the JVM `user.dir`
+     * (the Compose Desktop launcher's working directory) plus user-home globals.
+     * Cached at container init so `/new` sessions inherit the same injected
+     * rules rather than re-walking the disk per-session.
+     */
+    private val projectInstructionsSuffix: String by lazy {
+        val cwd = System.getProperty("user.dir")?.takeIf { it.isNotBlank() }?.let { java.io.File(it) }
+            ?: return@lazy ""
+        val found = io.talevia.core.agent.InstructionDiscovery.discover(startDir = cwd)
+        io.talevia.core.agent.formatProjectInstructionsSuffix(found)
     }
 
     fun close() {

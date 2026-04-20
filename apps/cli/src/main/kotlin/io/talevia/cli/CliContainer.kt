@@ -277,7 +277,9 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
             store = sessions,
             permissions = permissions,
             bus = bus,
-            systemPrompt = io.talevia.core.agent.taleviaSystemPrompt(extraSuffix = cliRuntimeContext()),
+            systemPrompt = io.talevia.core.agent.taleviaSystemPrompt(
+                extraSuffix = composeExtraSuffix(cliRuntimeContext(), projectInstructionsSuffix()),
+            ),
             compactor = Compactor(
                 provider = provider,
                 store = sessions,
@@ -315,6 +317,27 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
             )
         }
     }
+
+    /**
+     * Discover `AGENTS.md` / `CLAUDE.md` files from the user's cwd upward plus
+     * global home-dir spots, then format them as a "# Project context"
+     * suffix. Empty string if nothing was found, so the caller can unconditionally
+     * concatenate. Loaded once per container — an identical cycle per
+     * [newAgent] call would re-read disk on every `/new` session, which isn't
+     * what users expect from an explicit per-session reset.
+     */
+    private val projectInstructionsSuffixCache: String by lazy {
+        val cwd = System.getProperty("user.dir")?.takeIf { it.isNotBlank() }?.let { java.io.File(it) }
+            ?: return@lazy ""
+        val found = io.talevia.core.agent.InstructionDiscovery.discover(startDir = cwd)
+        io.talevia.core.agent.formatProjectInstructionsSuffix(found)
+    }
+
+    private fun projectInstructionsSuffix(): String = projectInstructionsSuffixCache
+
+    /** Join non-blank suffix fragments with a blank line separator. */
+    private fun composeExtraSuffix(vararg fragments: String): String =
+        fragments.filter { it.isNotBlank() }.joinToString("\n\n")
 
     fun close() {
         runCatching { httpClient.close() }
