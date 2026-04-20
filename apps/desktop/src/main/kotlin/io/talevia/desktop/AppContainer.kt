@@ -65,6 +65,7 @@ import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
 import io.talevia.core.tool.builtin.project.ForkProjectTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
+import io.talevia.core.tool.builtin.project.ListAssetsTool
 import io.talevia.core.tool.builtin.project.ListClipsForSourceTool
 import io.talevia.core.tool.builtin.project.ListLockfileEntriesTool
 import io.talevia.core.tool.builtin.project.ListProjectSnapshotsTool
@@ -263,6 +264,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(FindStaleClipsTool(projects))
         register(ListClipsForSourceTool(projects))
         register(ListTimelineClipsTool(projects))
+        register(ListAssetsTool(projects))
         register(ValidateProjectTool(projects))
         register(RegenerateStaleClipsTool(projects, this))
         register(ListLockfileEntriesTool(projects))

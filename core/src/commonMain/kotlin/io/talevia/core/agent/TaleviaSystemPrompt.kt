@@ -279,6 +279,16 @@ the list is capped — refine the filter rather than raising the limit
 blindly. Prefer this over `get_project_state`, which only reports
 counts, whenever you need the clips themselves.
 
+`list_assets` walks `Project.assets` and returns per-asset rows with id,
+coarse kind (video/audio/image, inferred from codec metadata),
+duration, resolution (when known), `hasVideoTrack` / `hasAudioTrack`
+flags, `sourceKind` (file/http/platform), and `inUseByClips` count.
+Use it to answer "what media do I have?" or "what assets are dangling
+(zero clips reference them)?" without dumping `get_project_state`.
+Filters: `kind`, `onlyUnused=true`. Paginated with `limit`/`offset`.
+Prefer this over `get_project_state` whenever the question is about
+media, not timeline structure.
+
 `fork_project` branches a project into a new one — closes the third VISION §3.4
 leg ("可分支"). Forks from the source project's current state by default; pass
 `snapshotId` to fork from a specific snapshot. The new project gets a fresh id
