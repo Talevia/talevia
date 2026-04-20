@@ -768,7 +768,9 @@ private fun ChatPanel(container: AppContainer, projectId: ProjectId, log: androi
         modifier = Modifier.fillMaxWidth(),
     ) { Text(if (busy) "Thinking…" else "Send") }
     Spacer(Modifier.height(4.dp))
-    val costLabel = if (sessionUsageIn == 0L && sessionUsageOut == 0L) "" else {
+    val costLabel = if (sessionUsageIn == 0L && sessionUsageOut == 0L) {
+        ""
+    } else {
         val costStr = if (sessionCostUsd == 0.0) "" else " · \$${"%.5f".format(sessionCostUsd)}"
         "${sessionUsageIn} in · ${sessionUsageOut} out$costStr"
     }
