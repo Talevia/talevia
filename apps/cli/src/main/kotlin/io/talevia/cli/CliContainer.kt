@@ -61,6 +61,7 @@ import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
+import io.talevia.core.tool.builtin.project.DescribeProjectTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
 import io.talevia.core.tool.builtin.project.FindUnreferencedAssetsTool
@@ -247,6 +248,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(CreateProjectFromTemplateTool(projects))
         register(ListProjectsTool(projects))
         register(GetProjectStateTool(projects))
+        register(DescribeProjectTool(projects))
         register(DeleteProjectTool(projects))
         register(RenameProjectTool(projects))
         register(FindStaleClipsTool(projects))

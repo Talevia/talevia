@@ -26,6 +26,7 @@ import io.talevia.core.tool.builtin.TodoWriteTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
+import io.talevia.core.tool.builtin.project.DescribeProjectTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
 import io.talevia.core.tool.builtin.project.FindUnreferencedAssetsTool
@@ -144,6 +145,7 @@ class AndroidAppContainer(context: Context) {
         register(CreateProjectTool(projects))
         register(ListProjectsTool(projects))
         register(GetProjectStateTool(projects))
+        register(DescribeProjectTool(projects))
         register(ListTimelineClipsTool(projects))
         register(ListClipsBoundToAssetTool(projects))
         register(ListAssetsTool(projects))
