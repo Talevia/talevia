@@ -28,6 +28,7 @@ Thumbs.db
 
 # Claude Code local state
 .claude/
+.worktrees/
 
 # Logs
 *.log
