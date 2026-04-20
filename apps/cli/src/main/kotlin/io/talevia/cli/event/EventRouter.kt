@@ -5,6 +5,7 @@ import io.talevia.core.SessionId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.session.Part
+import io.talevia.core.session.ToolState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
@@ -38,6 +39,12 @@ class EventRouter(
                 .collect { ev ->
                     when (val p = ev.part) {
                         is Part.Text -> renderer.ensureAssistantText(p.id, p.text)
+                        is Part.Tool -> when (val s = p.state) {
+                            is ToolState.Running -> renderer.toolRunning(p.id, p.toolId)
+                            is ToolState.Completed -> renderer.toolCompleted(p.id, p.toolId, s.outputForLlm)
+                            is ToolState.Failed -> renderer.toolFailed(p.id, p.toolId, s.message)
+                            ToolState.Pending -> Unit
+                        }
                         else -> Unit
                     }
                 }

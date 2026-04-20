@@ -17,6 +17,8 @@ import org.jline.terminal.Terminal
 class Renderer(private val terminal: Terminal) {
     private val mutex = Mutex()
     private val emittedLen: MutableMap<PartId, Int> = mutableMapOf()
+    private val announcedTools: MutableSet<PartId> = mutableSetOf()
+    private val finalisedTools: MutableSet<PartId> = mutableSetOf()
 
     /** True iff any assistant text has been streamed in the current turn. */
     private var assistantOpen: Boolean = false
@@ -58,6 +60,8 @@ class Renderer(private val terminal: Terminal) {
         terminal.writer().flush()
         assistantOpen = false
         emittedLen.clear()
+        announcedTools.clear()
+        finalisedTools.clear()
     }
 
     suspend fun println(text: String) = mutex.withLock {
@@ -69,5 +73,48 @@ class Renderer(private val terminal: Terminal) {
         // stderr bypasses the terminal writer on purpose — Mordant/ANSI colour
         // comes later; for now we just need it visibly separate from assistant text.
         System.err.println(text)
+    }
+
+    /**
+     * Announce a tool has started running. Idempotent per [partId] — multiple
+     * `Running` transitions (e.g. retries) only print once.
+     */
+    suspend fun toolRunning(partId: PartId, toolId: String) = mutex.withLock {
+        if (!announcedTools.add(partId)) return@withLock
+        breakAssistantLineLocked()
+        terminal.writer().println("  ⟳ $toolId")
+        terminal.writer().flush()
+    }
+
+    suspend fun toolCompleted(partId: PartId, toolId: String, summary: String) = mutex.withLock {
+        if (!finalisedTools.add(partId)) return@withLock
+        breakAssistantLineLocked()
+        val oneLine = summary.lineSequence().firstOrNull()?.take(120).orEmpty()
+        val suffix = if (oneLine.isBlank()) "" else " · $oneLine"
+        terminal.writer().println("  ✓ $toolId$suffix")
+        terminal.writer().flush()
+    }
+
+    suspend fun toolFailed(partId: PartId, toolId: String, message: String) = mutex.withLock {
+        if (!finalisedTools.add(partId)) return@withLock
+        breakAssistantLineLocked()
+        terminal.writer().println("  ✗ $toolId · $message")
+        terminal.writer().flush()
+    }
+
+    /**
+     * If we're mid-assistant-line (no trailing newline emitted yet), close it
+     * so the next printed line starts at column 0. We deliberately do not reset
+     * [assistantOpen] — the next delta will still want to flow inline on its
+     * own new line, and [emittedLen] must stay intact for the
+     * [ensureAssistantText] fallback to remain idempotent.
+     *
+     * Caller must hold [mutex].
+     */
+    private fun breakAssistantLineLocked() {
+        if (assistantOpen) {
+            terminal.writer().println()
+            assistantOpen = false
+        }
     }
 }
