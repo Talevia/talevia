@@ -96,6 +96,7 @@ import io.talevia.core.tool.builtin.video.ApplyFilterToClipsTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
+import io.talevia.core.tool.builtin.video.ClearTimelineTool
 import io.talevia.core.tool.builtin.video.DuplicateClipTool
 import io.talevia.core.tool.builtin.video.EditTextClipTool
 import io.talevia.core.tool.builtin.video.ExportTool
@@ -261,6 +262,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(EditTextClipTool(projects))
         register(AddTransitionTool(projects))
         register(RevertTimelineTool(sessions, projects))
+        register(ClearTimelineTool(projects))
         register(CreateProjectTool(projects))
         register(CreateProjectFromTemplateTool(projects))
         register(ListProjectsTool(projects))

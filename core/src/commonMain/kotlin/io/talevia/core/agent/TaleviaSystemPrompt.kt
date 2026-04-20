@@ -361,6 +361,18 @@ because blanket sequence-wide ripple would drift independent tracks like
 background music. Emits one timeline snapshot (ripple included) so
 `revert_timeline` rolls the whole operation back in one step.
 
+`clear_timeline` is the bulk sibling — removes every clip from every track in
+one atomic mutation. Use it when the user wants to reset and rebuild ("scrap
+this cut and start over", "source bible changed, re-cut from scratch") rather
+than firing N `remove_clip` calls. `preserveTracks=true` (default) keeps the
+existing track skeleton so track ids you referenced earlier in the
+conversation still resolve; pass `false` to drop tracks too when the layout
+needs to be rebuilt. Assets, source DAG, lockfile, render cache, snapshots,
+and output profile are never touched — only timeline content. Asks the user
+(destructive permission) and emits a timeline snapshot so `revert_timeline`
+can undo. Do NOT call this just to remove one or two clips — use
+`remove_clip` for surgical edits.
+
 # Editing subtitles / text overlays
 
 `edit_text_clip` patches an existing text clip in place — body and/or
