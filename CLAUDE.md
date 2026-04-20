@@ -70,12 +70,15 @@ Operational red lines. If a task seems to require any of these, stop and challen
 
 ## Platform priority — 当前阶段
 
-当下优先级：**macOS 桌面端先做到"相对完善可用"，再补其他平台**。
+当下优先级（从高到低）：**Core (`core/`) > Mac CLI (`apps/cli`) > Mac desktop app (`apps/desktop`) > iOS app > Android app > Others (server 等)**。
 
-- "相对完善可用"的判断：desktop 路径上 VISION §5 rubric 的每一节都至少达到"部分"及格线 —— source 层可用、工具集覆盖主要编辑意图、AIGC 产物可 pin、agent 能跑出可看初稿、专家能接管。
-- 在此之前，iOS / Android 只维持**不退化**（能编译、已有 E2E 测试继续通过），不主动扩新特性；Server 作为 desktop 的无头孪生同步演进。
-- 跨平台抽象（`core/platform` 接口、`ToolRegistry` 注册等）**不得**因为 desktop 赶进度而省略 —— 红线仍是 CommonMain 零平台依赖。
-- 任务梳理 / Gap-finding 时先按 VISION §5 打分，再按此平台优先级过滤候选项。
+- **Core 放在所有平台之前**：agent loop、provider 抽象、tool registry、session/compaction、domain model、permission、bus 等 KMP 共享逻辑的迭代高于任何单一平台的 UI/集成工作。上层平台缺的能力，多半来自 Core 缺口 —— 先补 Core，平台再消费。
+- **Core gap-finding 的首选参照是 OpenCode**：`/Volumes/Code/CodingAgent/opencode`（见下方 "OpenCode as a 'runnable spec'" 章节的模块索引）是当前最成熟的行为参考。梳理 Core 任务时，把 OpenCode 对应模块当作行为 spec 对照，找出我们缺的机制（例：流式 tool 输出、compaction 细节、permission 粒度、bus 事件覆盖等）。只抄行为，不抄 Effect.js 结构。
+- 在 Core 之后，平台顺序：先把 Mac CLI 打磨到"相对完善可用"再动 desktop GUI；desktop GUI 达到同一及格线之前，iOS / Android 只维持**不退化**（能编译、已有 E2E 测试继续通过），不主动扩新特性。
+- "相对完善可用"的判断：当前优先级平台上 VISION §5 rubric 的每一节都至少达到"部分"及格线 —— source 层可用、工具集覆盖主要编辑意图、AIGC 产物可 pin、agent 能跑出可看初稿、专家能接管。
+- Server 作为 CLI / desktop 的无头孪生同步演进，属于 "Others" —— 只在 CLI / desktop 需要其作为后端或测试目标时才推进。
+- 跨平台抽象（`core/platform` 接口、`ToolRegistry` 注册等）**不得**因为 CLI / desktop 赶进度而省略 —— 红线仍是 CommonMain 零平台依赖。
+- 任务梳理 / Gap-finding 顺序：① 对照 OpenCode 找 Core 缺口；② 再按 VISION §5 打分；③ 最后按上述平台顺序过滤候选项。
 
 ## OpenCode as a "runnable spec"
 
