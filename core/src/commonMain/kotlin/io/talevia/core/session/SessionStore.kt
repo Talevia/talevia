@@ -30,6 +30,26 @@ interface SessionStore {
     suspend fun getMessage(id: MessageId): Message?
     suspend fun listMessages(sessionId: SessionId): List<Message>
 
+    /**
+     * Delete a single message and all of its parts. Publishes
+     * [io.talevia.core.bus.BusEvent.MessageDeleted] on success.
+     *
+     * No-op if no row matches [id]. Used by [io.talevia.core.session.SessionRevert]
+     * to truncate a session back to an earlier turn.
+     */
+    suspend fun deleteMessage(id: MessageId)
+
+    /**
+     * Delete every message in [sessionId] whose `createdAt` is strictly after
+     * [anchorMessageId]'s — i.e. truncate the session back to the anchor,
+     * keeping the anchor itself. Publishes a [io.talevia.core.bus.BusEvent.MessageDeleted]
+     * for each removed message and returns the count.
+     *
+     * Returns 0 (and is a no-op) when [anchorMessageId] is the most recent
+     * message in the session, or when it doesn't exist.
+     */
+    suspend fun deleteMessagesAfter(sessionId: SessionId, anchorMessageId: MessageId): Int
+
     suspend fun upsertPart(part: Part)
     suspend fun markPartCompacted(id: PartId, at: kotlinx.datetime.Instant)
     suspend fun getPart(id: PartId): Part?

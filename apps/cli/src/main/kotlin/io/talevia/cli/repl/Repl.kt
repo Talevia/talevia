@@ -13,6 +13,7 @@ import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
 import io.talevia.core.session.Session
+import io.talevia.core.session.SessionRevert
 import io.talevia.core.session.TodoInfo
 import io.talevia.core.session.TodoStatus
 import io.talevia.core.session.TokenUsage
@@ -267,9 +268,86 @@ class Repl(
             }
             "cost" -> renderer.println(costSummary(currentSession))
             "todos" -> renderer.println(todosSummary(currentSession))
+            "history" -> renderer.println(historyTable(currentSession))
+            "revert" -> renderer.println(handleRevert(currentSession, projectId, args))
             else -> renderer.println(Styles.meta("unknown command: /$name (try /help)"))
         }
         return Outcome.CONTINUE
+    }
+
+    /**
+     * List recent turns as candidate anchors for `/revert`. We show every
+     * message (user + assistant) because the simplest mental model is
+     * "pick the line you want to keep, everything after it is dropped".
+     * Message ids are surfaced as a 12-char prefix — same affordance as
+     * `/resume` — enough for uniqueness in any realistic session length.
+     */
+    private suspend fun historyTable(sessionId: SessionId): String {
+        val messages = container.sessions.listMessages(sessionId)
+        if (messages.isEmpty()) return Styles.meta("no messages in this session yet")
+        val partsBy = container.sessions.listSessionParts(sessionId, includeCompacted = true)
+            .groupBy { it.messageId }
+        return buildString {
+            appendLine(Styles.meta("turns (oldest first) — /revert <idPrefix> keeps up to and including that line:"))
+            messages.forEach { m ->
+                val role = when (m) {
+                    is Message.User -> "user"
+                    is Message.Assistant -> "asst"
+                }
+                val id = Styles.accent(m.id.value.take(12))
+                val parts = partsBy[m.id].orEmpty()
+                val preview = parts.asSequence()
+                    .filterIsInstance<Part.Text>()
+                    .firstOrNull()?.text?.lineSequence()?.firstOrNull()
+                    ?.take(60)
+                    ?: parts.asSequence().filterIsInstance<Part.Tool>().firstOrNull()
+                        ?.let { "(tool: ${it.toolId})" }
+                    ?: "(no text)"
+                appendLine("  $id  ${Styles.meta(role)}  $preview")
+            }
+        }.trimEnd()
+    }
+
+    /**
+     * `/revert <prefix>` drives [SessionRevert]. Only 1 match allowed — picking
+     * the wrong anchor silently would blow away the wrong N turns. An empty
+     * prefix prints usage rather than reverting to the most recent turn
+     * (which would be a no-op but also looks like a footgun).
+     */
+    private suspend fun handleRevert(
+        sessionId: SessionId,
+        projectId: ProjectId,
+        args: String,
+    ): String {
+        if (args.isBlank()) return Styles.meta("usage: /revert <messageId-prefix> — see /history for ids")
+        val messages = container.sessions.listMessages(sessionId)
+        val matches = messages.filter { it.id.value.startsWith(args) }
+        return when (matches.size) {
+            0 -> Styles.meta("no message id starts with '$args' (see /history)")
+            1 -> {
+                val anchor = matches.single()
+                val service = SessionRevert(
+                    sessions = container.sessions,
+                    projects = container.projects,
+                    bus = container.bus,
+                )
+                val result = service.revertToMessage(sessionId, anchor.id, projectId)
+                val timelineTail = if (result.appliedSnapshotPartId != null) {
+                    " · timeline rolled back to ${result.restoredClipCount} clip(s) / " +
+                        "${result.restoredTrackCount} track(s)"
+                } else {
+                    " · no prior timeline snapshot (timeline untouched)"
+                }
+                "${Styles.ok("✓")} reverted to ${Styles.accent(anchor.id.value.take(12))}" +
+                    Styles.meta(" · dropped ${result.deletedMessages} message(s)$timelineTail")
+            }
+            else -> buildString {
+                appendLine(Styles.meta("ambiguous: ${matches.size} messages match '$args'"))
+                matches.take(5).forEach {
+                    appendLine(Styles.meta("  · ${it.id.value.take(16)}"))
+                }
+            }.trimEnd()
+        }
     }
 
     private fun helpText(): String = buildString {

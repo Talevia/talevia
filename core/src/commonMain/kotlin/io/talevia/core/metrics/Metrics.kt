@@ -106,6 +106,8 @@ class EventBusMetricsSink(
         is BusEvent.SessionUpdated -> "session.updated"
         is BusEvent.SessionDeleted -> "session.deleted"
         is BusEvent.MessageUpdated -> "message.updated"
+        is BusEvent.MessageDeleted -> "message.deleted"
+        is BusEvent.SessionReverted -> "session.reverted"
         is BusEvent.PartUpdated -> "part.updated"
         is BusEvent.PartDelta -> "part.delta"
         is BusEvent.PermissionAsked -> "permission.asked"

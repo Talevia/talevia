@@ -404,6 +404,8 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.SessionDeleted -> "session.deleted"
     is BusEvent.SessionCancelled -> "session.cancelled"
     is BusEvent.MessageUpdated -> "message.updated"
+    is BusEvent.MessageDeleted -> "message.deleted"
+    is BusEvent.SessionReverted -> "session.reverted"
     is BusEvent.PartUpdated -> "message.part.updated"
     is BusEvent.PartDelta -> "message.part.delta"
     is BusEvent.PermissionAsked -> "permission.asked"
@@ -490,6 +492,10 @@ data class BusEventDto(
     val remembered: Boolean? = null,
     val correlationId: String? = null,
     val message: String? = null,
+    val projectId: String? = null,
+    val anchorMessageId: String? = null,
+    val deletedMessages: Int? = null,
+    val appliedSnapshotPartId: String? = null,
 ) {
     companion object {
         fun from(e: BusEvent): BusEventDto = when (e) {
@@ -498,6 +504,14 @@ data class BusEventDto(
             is BusEvent.SessionDeleted -> BusEventDto("session.deleted", e.sessionId.value)
             is BusEvent.SessionCancelled -> BusEventDto("session.cancelled", e.sessionId.value)
             is BusEvent.MessageUpdated -> BusEventDto("message.updated", e.sessionId.value, messageId = e.messageId.value)
+            is BusEvent.MessageDeleted -> BusEventDto("message.deleted", e.sessionId.value, messageId = e.messageId.value)
+            is BusEvent.SessionReverted -> BusEventDto(
+                "session.reverted", e.sessionId.value,
+                projectId = e.projectId.value,
+                anchorMessageId = e.anchorMessageId.value,
+                deletedMessages = e.deletedMessages,
+                appliedSnapshotPartId = e.appliedSnapshotPartId?.value,
+            )
             is BusEvent.PartUpdated -> BusEventDto("message.part.updated", e.sessionId.value, messageId = e.messageId.value, partId = e.partId.value)
             is BusEvent.PartDelta -> BusEventDto(
                 "message.part.delta", e.sessionId.value,

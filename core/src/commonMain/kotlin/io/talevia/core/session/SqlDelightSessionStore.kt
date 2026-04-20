@@ -104,6 +104,35 @@ class SqlDelightSessionStore(
         db.messagesQueries.selectBySession(sessionId.value).executeAsList()
             .map { json.decodeFromString(Message.serializer(), it.data_) }
 
+    override suspend fun deleteMessage(id: MessageId) {
+        val row = db.messagesQueries.selectById(id.value).executeAsOneOrNull() ?: return
+        // SQLite foreign_keys is OFF by default in our driver setup, so we
+        // explicitly delete parts before the message rather than relying on
+        // ON DELETE CASCADE.
+        db.partsQueries.deleteByMessage(id.value)
+        db.messagesQueries.delete(id.value)
+        bus.publish(BusEvent.MessageDeleted(SessionId(row.session_id), id))
+    }
+
+    override suspend fun deleteMessagesAfter(sessionId: SessionId, anchorMessageId: MessageId): Int {
+        val anchor = db.messagesQueries.selectById(anchorMessageId.value).executeAsOneOrNull()
+            ?: return 0
+        if (anchor.session_id != sessionId.value) return 0
+        // selectBySession orders by (time_created ASC, id ASC). "After" means
+        // strictly later in that ordering — same tie-break the index uses so
+        // two messages sharing a timestamp stay deterministic.
+        val rows = db.messagesQueries.selectBySession(sessionId.value).executeAsList()
+        val anchorIdx = rows.indexOfFirst { it.id == anchor.id }
+        if (anchorIdx < 0 || anchorIdx == rows.lastIndex) return 0
+        val toDelete = rows.subList(anchorIdx + 1, rows.size)
+        for (row in toDelete) {
+            db.partsQueries.deleteByMessage(row.id)
+            db.messagesQueries.delete(row.id)
+            bus.publish(BusEvent.MessageDeleted(sessionId, MessageId(row.id)))
+        }
+        return toDelete.size
+    }
+
     override suspend fun upsertPart(part: Part) {
         db.partsQueries.upsert(
             id = part.id.value,

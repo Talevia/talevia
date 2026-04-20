@@ -35,3 +35,6 @@ UPDATE Parts SET time_compacted = ? WHERE id = ?;
 
 delete:
 DELETE FROM Parts WHERE id = ?;
+
+deleteByMessage:
+DELETE FROM Parts WHERE message_id = ?;

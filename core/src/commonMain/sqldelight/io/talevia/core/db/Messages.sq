@@ -25,3 +25,6 @@ SELECT * FROM Messages WHERE session_id = ? ORDER BY time_created ASC, id ASC;
 
 deleteBySession:
 DELETE FROM Messages WHERE session_id = ?;
+
+delete:
+DELETE FROM Messages WHERE id = ?;

@@ -14,6 +14,12 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
     SlashCommandSpec("/model", "show or override the model id (same provider)", argHint = "[<id>]"),
     SlashCommandSpec("/cost", "token + usd totals for the current session"),
     SlashCommandSpec("/todos", "show the agent's current todo list for this session"),
+    SlashCommandSpec("/history", "list assistant turns with the message ids /revert accepts as anchors"),
+    SlashCommandSpec(
+        "/revert",
+        "rewind session + timeline to an earlier turn (deletes later turns)",
+        argHint = "<messageId-prefix>",
+    ),
     SlashCommandSpec("/clear", "clear the screen (keeps the session)"),
     SlashCommandSpec("/help", "this list"),
     SlashCommandSpec("/exit", "exit"),

@@ -2,6 +2,7 @@ package io.talevia.core.bus
 
 import io.talevia.core.MessageId
 import io.talevia.core.PartId
+import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.session.Message
 import io.talevia.core.session.Part
@@ -27,6 +28,33 @@ sealed interface BusEvent {
         override val sessionId: SessionId,
         val messageId: MessageId,
         val message: Message,
+    ) : SessionEvent
+
+    /**
+     * A message (and all of its parts) was deleted from the session — currently
+     * fired by `SessionRevert.revertToMessage` after truncating later turns.
+     * UI consumers should drop any cached state keyed on [messageId] (rendered
+     * markdown, in-flight tool spinners, etc.) so the on-screen view matches
+     * persistence.
+     */
+    data class MessageDeleted(
+        override val sessionId: SessionId,
+        val messageId: MessageId,
+    ) : SessionEvent
+
+    /**
+     * A [io.talevia.core.session.SessionRevert] pass committed: messages after
+     * [anchorMessageId] have been removed and, if [appliedSnapshotPartId] is
+     * non-null, the project's timeline was rolled back to that snapshot.
+     * Emitted once per revert, after the individual [MessageDeleted] events —
+     * UI can treat it as a signal to refresh the whole turn list.
+     */
+    data class SessionReverted(
+        override val sessionId: SessionId,
+        val projectId: ProjectId,
+        val anchorMessageId: MessageId,
+        val deletedMessages: Int,
+        val appliedSnapshotPartId: PartId?,
     ) : SessionEvent
 
     data class PartUpdated(
