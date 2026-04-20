@@ -51,6 +51,25 @@ interface FileSystem {
      */
     suspend fun glob(pattern: String, maxMatches: Int = DEFAULT_MAX_LIST_ENTRIES): GlobResult
 
+    /**
+     * Regex search over UTF-8 text files under [path]. [path] may be a
+     * directory (walked recursively) or a single regular file. [pattern] is a
+     * Kotlin [Regex] (Java-flavoured on JVM) applied per line. [include], when
+     * non-null, is a simple glob on the file's absolute path that filters
+     * which files are opened (e.g. `**.kt`). Files larger than [maxFileBytes]
+     * or that fail UTF-8 decode are silently skipped — grep should never
+     * error because one file is binary. [maxMatches] caps the returned list;
+     * the caller sees `truncated=true` once that cap trips.
+     */
+    suspend fun grep(
+        path: String,
+        pattern: String,
+        caseInsensitive: Boolean = false,
+        include: String? = null,
+        maxMatches: Int = DEFAULT_MAX_GREP_MATCHES,
+        maxFileBytes: Long = DEFAULT_MAX_READ_BYTES,
+    ): GrepResult
+
     data class DirectoryListing(
         val entries: List<Entry>,
         val truncated: Boolean,
@@ -68,11 +87,41 @@ interface FileSystem {
         val truncated: Boolean,
     )
 
+    data class GrepResult(
+        val matches: List<GrepMatch>,
+        val filesScanned: Int,
+        val truncated: Boolean,
+    )
+
+    /**
+     * A single matching line. `line` is 1-based. `content` is the full line
+     * with trailing newline stripped; impls may truncate overly long lines.
+     */
+    data class GrepMatch(
+        val path: String,
+        val line: Int,
+        val content: String,
+    )
+
     companion object {
         /** 10 MB. Anything larger should go through [MediaStorage] instead. */
         const val DEFAULT_MAX_READ_BYTES: Long = 10L * 1024 * 1024
 
         /** Guard against pathological directories; the LLM has no use for 10k entries. */
         const val DEFAULT_MAX_LIST_ENTRIES: Int = 1000
+
+        /**
+         * Grep cap. Picked to keep one agent turn's tool-result payload bounded:
+         * at ~200 bytes per match line, 200 matches is ~40 KB — comfortably
+         * replayable and still enough signal to drive follow-ups.
+         */
+        const val DEFAULT_MAX_GREP_MATCHES: Int = 200
+
+        /**
+         * Grep line-length cap. Very long lines are almost always minified
+         * bundles or generated binary — we return the first N chars and elide
+         * the rest so one such file can't blow the tool-result budget.
+         */
+        const val DEFAULT_GREP_LINE_CAP: Int = 512
     }
 }

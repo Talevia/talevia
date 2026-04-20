@@ -46,6 +46,7 @@ import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
 import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
 import io.talevia.core.tool.builtin.aigc.UpscaleAssetTool
 import io.talevia.core.tool.builtin.fs.GlobTool
+import io.talevia.core.tool.builtin.fs.GrepTool
 import io.talevia.core.tool.builtin.fs.ListDirectoryTool
 import io.talevia.core.tool.builtin.fs.ReadFileTool
 import io.talevia.core.tool.builtin.fs.WriteFileTool
@@ -254,6 +255,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(WriteFileTool(fileSystem))
         register(ListDirectoryTool(fileSystem))
         register(GlobTool(fileSystem))
+        register(GrepTool(fileSystem))
         imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
         videoGen?.let { register(GenerateVideoTool(it, media, blobWriter, projects)) }
         musicGen?.let { register(GenerateMusicTool(it, media, blobWriter, projects)) }

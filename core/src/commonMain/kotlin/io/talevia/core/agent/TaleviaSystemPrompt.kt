@@ -372,10 +372,10 @@ follow-up pass (same "compiler captures, renderer catches up" shape as
 
 # External files (fs tools)
 
-Use `read_file` / `write_file` / `list_directory` / `glob` for the user's own
-external files — subtitle files on disk (.srt / .vtt), prompt templates, edit
-scripts, story outlines, anything sitting in the user's working directory or
-home that isn't already Project state.
+Use `read_file` / `write_file` / `list_directory` / `glob` / `grep` for the
+user's own external files — subtitle files on disk (.srt / .vtt), prompt
+templates, edit scripts, story outlines, anything sitting in the user's
+working directory or home that isn't already Project state.
 
 NEVER use these tools to read or edit the Project JSON, the Talevia database,
 the media catalog, or anything under `~/.talevia/`. Project state is behind
@@ -387,8 +387,13 @@ Path rules: always absolute (the tools reject relative paths at the boundary),
 start from the user's working directory or explicit mention when they say
 "here" / "that folder". Permission is gated per-path — the user sees the
 exact path before approving. For bulk discovery prefer `glob` over walking
-manually with `list_directory`. Binary assets (video, audio, images) go
-through `import_media`, not `read_file`.
+manually with `list_directory`. When looking for specific *content* inside
+files (a phrase in a subtitle, a TODO in a script, a function name in a
+directory), prefer `grep` over reading each file with `read_file` — `grep`
+returns `path:line: match` rows so you can jump straight to the hit. Grep
+skips binary / non-UTF-8 / oversized files automatically; pair it with
+`include` (a glob) when you want to scope by extension. Binary assets
+(video, audio, images) still go through `import_media`, not `read_file`.
 
 # Agent planning (todos)
 

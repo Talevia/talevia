@@ -124,6 +124,82 @@ class JvmFileSystem : FileSystem {
         }
     }
 
+    override suspend fun grep(
+        path: String,
+        pattern: String,
+        caseInsensitive: Boolean,
+        include: String?,
+        maxMatches: Int,
+        maxFileBytes: Long,
+    ): FileSystem.GrepResult {
+        PathGuard.validate(path, requireAbsolute = true)
+        require(maxMatches > 0) { "maxMatches must be positive (got $maxMatches)" }
+        require(maxFileBytes > 0) { "maxFileBytes must be positive (got $maxFileBytes)" }
+        val regex = try {
+            val opts = mutableSetOf<RegexOption>()
+            if (caseInsensitive) opts += RegexOption.IGNORE_CASE
+            Regex(pattern, opts)
+        } catch (e: IllegalArgumentException) {
+            throw IllegalArgumentException("invalid regex: ${e.message}")
+        }
+        val includeMatcher = include
+            ?.takeIf { it.isNotBlank() }
+            ?.let { FileSystems.getDefault().getPathMatcher("glob:$it") }
+        return withContext(Dispatchers.IO) {
+            val root = Paths.get(path)
+            if (!Files.exists(root)) throw IllegalArgumentException("no such path: $path")
+            val matches = mutableListOf<FileSystem.GrepMatch>()
+            var filesScanned = 0
+            var truncated = false
+
+            val files: Sequence<Path> = when {
+                Files.isRegularFile(root) -> sequenceOf(root)
+                Files.isDirectory(root) -> Files.walk(root).use { stream ->
+                    stream.iterator().asSequence()
+                        .filter { Files.isRegularFile(it) }
+                        .toList()
+                        .asSequence()
+                }
+                else -> throw IllegalArgumentException("not a file or directory: $path")
+            }
+
+            for (file in files) {
+                if (truncated) break
+                if (includeMatcher != null && !includeMatcher.matches(file)) continue
+                if (Files.size(file) > maxFileBytes) continue
+                filesScanned++
+                val lines = try {
+                    Files.readAllLines(file, StandardCharsets.UTF_8)
+                } catch (_: IOException) {
+                    continue
+                } catch (_: CharacterCodingException) {
+                    continue
+                } catch (_: java.nio.charset.MalformedInputException) {
+                    continue
+                }
+                for ((idx, line) in lines.withIndex()) {
+                    if (!regex.containsMatchIn(line)) continue
+                    if (matches.size >= maxMatches) {
+                        truncated = true
+                        break
+                    }
+                    val capped = if (line.length > FileSystem.DEFAULT_GREP_LINE_CAP) {
+                        line.substring(0, FileSystem.DEFAULT_GREP_LINE_CAP) + "…"
+                    } else {
+                        line
+                    }
+                    matches += FileSystem.GrepMatch(
+                        path = file.toString(),
+                        line = idx + 1,
+                        content = capped,
+                    )
+                }
+            }
+
+            FileSystem.GrepResult(matches = matches, filesScanned = filesScanned, truncated = truncated)
+        }
+    }
+
     private fun toEntry(child: Path): FileSystem.Entry {
         val attrs = try {
             Files.readAttributes(child, BasicFileAttributes::class.java)

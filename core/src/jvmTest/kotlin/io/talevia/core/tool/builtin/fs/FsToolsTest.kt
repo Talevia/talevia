@@ -124,5 +124,107 @@ class FsToolsTest {
     @Test fun `fs tools fall back to wildcard pattern on malformed JSON`() {
         assertEquals("*", ReadFileTool(fs).permission.patternFrom("{"))
         assertEquals("*", GlobTool(fs).permission.patternFrom("not-json"))
+        assertEquals("*", GrepTool(fs).permission.patternFrom("not-json"))
+    }
+
+    @Test fun `grep finds matches across files and reports counts`() = runBlocking {
+        File(root, "a.kt").writeText("val x = 1\nval y = 2\n// TODO cleanup\n")
+        File(root, "b.kt").writeText("fun main() {\n    println(\"hello\")\n}\n")
+        File(root, "c.txt").writeText("no matches here\n")
+        val tool = GrepTool(fs)
+
+        val result = tool.execute(
+            GrepTool.Input(path = root.absolutePath, pattern = "val\\s+\\w+"),
+            ctx,
+        )
+
+        assertEquals(2, result.data.matches.size)
+        assertTrue(result.data.matches.all { it.path.endsWith("a.kt") })
+        assertEquals(listOf(1, 2), result.data.matches.map { it.line })
+        assertEquals(3, result.data.filesScanned)
+        assertTrue(result.outputForLlm.contains("val x = 1"))
+    }
+
+    @Test fun `grep include glob scopes files`() = runBlocking {
+        File(root, "a.kt").writeText("TODO in kotlin\n")
+        File(root, "b.txt").writeText("TODO in text\n")
+        val tool = GrepTool(fs)
+
+        val result = tool.execute(
+            GrepTool.Input(
+                path = root.absolutePath,
+                pattern = "TODO",
+                include = "**.kt",
+            ),
+            ctx,
+        )
+        assertEquals(1, result.data.matches.size)
+        assertTrue(result.data.matches.single().path.endsWith("a.kt"))
+    }
+
+    @Test fun `grep caseInsensitive matches regardless of case`() = runBlocking {
+        File(root, "a.txt").writeText("Mei arrived early\nmei was late\nMEI left\n")
+        val tool = GrepTool(fs)
+
+        val ci = tool.execute(
+            GrepTool.Input(path = root.absolutePath, pattern = "mei", caseInsensitive = true),
+            ctx,
+        )
+        assertEquals(3, ci.data.matches.size)
+
+        val cs = tool.execute(
+            GrepTool.Input(path = root.absolutePath, pattern = "mei"),
+            ctx,
+        )
+        assertEquals(1, cs.data.matches.size)
+    }
+
+    @Test fun `grep skips non-utf8 and oversized files silently`() = runBlocking {
+        // Write a file with an invalid UTF-8 byte sequence.
+        val binary = File(root, "blob.bin")
+        binary.writeBytes(byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0x00, 0x7F))
+        val tool = GrepTool(fs)
+
+        // Should not throw — binary file is silently skipped.
+        val result = tool.execute(
+            GrepTool.Input(path = root.absolutePath, pattern = ".*"),
+            ctx,
+        )
+        // binary was scanned attempt but had no matches (or was skipped); just assert no crash.
+        assertTrue(result.data.matches.isEmpty() || result.data.matches.all { !it.path.endsWith("blob.bin") })
+    }
+
+    @Test fun `grep on a single file works`() = runBlocking {
+        val p = File(root, "single.txt").apply { writeText("alpha\nbeta\ngamma\n") }.absolutePath
+        val tool = GrepTool(fs)
+
+        val result = tool.execute(
+            GrepTool.Input(path = p, pattern = "beta"),
+            ctx,
+        )
+        assertEquals(1, result.data.matches.size)
+        assertEquals(2, result.data.matches.single().line)
+        assertEquals("beta", result.data.matches.single().content)
+    }
+
+    @Test fun `grep maxMatches caps result and sets truncated`() = runBlocking {
+        val body = (1..20).joinToString("\n") { "hit on line $it" }
+        File(root, "many.txt").writeText(body)
+        val tool = GrepTool(fs)
+
+        val result = tool.execute(
+            GrepTool.Input(path = root.absolutePath, pattern = "hit", maxMatches = 5),
+            ctx,
+        )
+        assertEquals(5, result.data.matches.size)
+        assertTrue(result.data.truncated)
+        assertTrue(result.outputForLlm.contains("truncated"))
+    }
+
+    @Test fun `grep invalid regex fails with a clear error`(): Unit = runBlocking {
+        val tool = GrepTool(fs)
+        assertFailsWith<IllegalArgumentException> {
+            tool.execute(GrepTool.Input(path = root.absolutePath, pattern = "[unclosed"), ctx)
+        }
     }
 }
