@@ -86,6 +86,7 @@ import io.talevia.core.tool.builtin.shell.BashTool
 import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
 import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
 import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
+import io.talevia.core.tool.builtin.source.DescribeSourceDagTool
 import io.talevia.core.tool.builtin.source.ImportSourceNodeTool
 import io.talevia.core.tool.builtin.source.ListSourceNodesTool
 import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
@@ -275,6 +276,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(UpdateStyleBibleTool(projects))
         register(DefineBrandPaletteTool(projects))
         register(UpdateBrandPaletteTool(projects))
+        register(DescribeSourceDagTool(projects))
         register(ListSourceNodesTool(projects))
         register(RemoveSourceNodeTool(projects))
         register(ImportSourceNodeTool(projects))

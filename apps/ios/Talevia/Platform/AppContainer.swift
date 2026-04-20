@@ -124,6 +124,7 @@ final class AppContainer {
         registry.register(tool: UpdateStyleBibleTool(projects: self.projects))
         registry.register(tool: DefineBrandPaletteTool(projects: self.projects))
         registry.register(tool: UpdateBrandPaletteTool(projects: self.projects))
+        registry.register(tool: DescribeSourceDagTool(projects: self.projects))
         registry.register(tool: ListSourceNodesTool(projects: self.projects))
         registry.register(tool: RemoveSourceNodeTool(projects: self.projects))
         registry.register(tool: ImportSourceNodeTool(projects: self.projects))
