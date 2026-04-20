@@ -65,7 +65,12 @@ class Repl(
         val renderer = Renderer(terminal)
 
         val routerScope = CoroutineScope(coroutineContext + SupervisorJob())
-        val router = EventRouter(container.bus, renderer, activeSessionId = { sessionId })
+        val router = EventRouter(
+            bus = container.bus,
+            sessions = container.sessions,
+            renderer = renderer,
+            activeSessionId = { sessionId },
+        )
         router.start(routerScope)
         val permissionPrompt = StdinPermissionPrompt(
             bus = container.bus,

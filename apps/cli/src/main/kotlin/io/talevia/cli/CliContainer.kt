@@ -254,7 +254,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
             store = sessions,
             permissions = permissions,
             bus = bus,
-            systemPrompt = io.talevia.core.agent.taleviaSystemPrompt(),
+            systemPrompt = io.talevia.core.agent.taleviaSystemPrompt(extraSuffix = cliRuntimeContext()),
             compactor = Compactor(
                 provider = provider,
                 store = sessions,
@@ -262,6 +262,35 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
             ),
             titler = SessionTitler(provider = provider, store = sessions),
         )
+    }
+
+    /**
+     * Runtime context appended to the system prompt. Tells the model which
+     * directory the user launched `talevia` from so natural-language "here" /
+     * "this folder" / "the current dir" resolves correctly when composing fs
+     * tool inputs. Without this the agent has no choice but to ask the user
+     * for an absolute path on every "show me what's here" request.
+     *
+     * CLI-only on purpose — desktop runs in `$HOME` / `/` by default (whichever
+     * the launcher app sets) and server is headless, so a cwd reference would
+     * be misleading there.
+     */
+    private fun cliRuntimeContext(): String {
+        val cwd = System.getProperty("user.dir").orEmpty()
+        val home = System.getProperty("user.home").orEmpty()
+        return buildString {
+            append("# CLI runtime context\n\n")
+            append("You are running inside the Talevia terminal CLI.\n")
+            if (cwd.isNotEmpty()) append("- Current working directory: ").append(cwd).append('\n')
+            if (home.isNotEmpty()) append("- User home: ").append(home).append('\n')
+            append('\n')
+            append(
+                "When the user says \"here\" / \"this folder\" / \"the current dir\" — or gives any " +
+                    "path-like reference without an absolute prefix — resolve it against the current " +
+                    "working directory above before calling any fs tool. The tools still reject relative " +
+                    "paths at the boundary, so always hand them a fully absolute path you derived from cwd.",
+            )
+        }
     }
 
     fun close() {
