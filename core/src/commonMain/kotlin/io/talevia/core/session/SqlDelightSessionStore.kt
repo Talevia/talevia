@@ -164,6 +164,7 @@ class SqlDelightSessionStore(
             is Part.StepStart -> decoded.copy(compactedAt = at)
             is Part.StepFinish -> decoded.copy(compactedAt = at)
             is Part.Compaction -> decoded.copy(compactedAt = at)
+            is Part.Todos -> decoded.copy(compactedAt = at)
         }
     }
 
@@ -229,6 +230,7 @@ class SqlDelightSessionStore(
         is Part.StepStart -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
         is Part.StepFinish -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
         is Part.Compaction -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
+        is Part.Todos -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
     }
 
     private fun kindOf(p: Part): String = when (p) {
@@ -241,5 +243,6 @@ class SqlDelightSessionStore(
         is Part.StepStart -> "step-start"
         is Part.StepFinish -> "step-finish"
         is Part.Compaction -> "compaction"
+        is Part.Todos -> "todos"
     }
 }

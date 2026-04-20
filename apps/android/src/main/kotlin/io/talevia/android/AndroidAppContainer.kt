@@ -42,6 +42,7 @@ import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
 import io.talevia.core.tool.builtin.source.UpdateBrandPaletteTool
 import io.talevia.core.tool.builtin.source.UpdateCharacterRefTool
 import io.talevia.core.tool.builtin.source.UpdateStyleBibleTool
+import io.talevia.core.tool.builtin.TodoWriteTool
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitleTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
@@ -95,6 +96,7 @@ class AndroidAppContainer(context: Context) {
     val httpClient: HttpClient = HttpClient(CIO)
 
     val tools: ToolRegistry = ToolRegistry().apply {
+        register(TodoWriteTool())
         register(ImportMediaTool(media, engine))
         register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))

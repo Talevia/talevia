@@ -69,6 +69,7 @@ final class AppContainer {
         self.permissions = DefaultPermissionService(bus: self.bus)
 
         let registry = ToolRegistry()
+        registry.register(tool: TodoWriteTool(clock: clock))
         registry.register(tool: ImportMediaTool(storage: self.media, engine: self.engine))
         registry.register(tool: ExtractFrameTool(engine: self.engine, storage: self.media, blobWriter: self.blobWriter))
         registry.register(tool: AddClipTool(store: self.projects, media: self.media))

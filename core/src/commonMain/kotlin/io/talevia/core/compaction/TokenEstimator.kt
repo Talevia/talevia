@@ -51,6 +51,7 @@ object TokenEstimator {
         is Part.StepStart -> 4
         is Part.StepFinish -> 8
         is Part.Compaction -> forText(part.summary)
+        is Part.Todos -> 16 + part.todos.sumOf { 8 + forText(it.content) }
     }
 
     /**

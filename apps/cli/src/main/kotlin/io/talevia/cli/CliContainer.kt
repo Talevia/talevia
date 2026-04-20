@@ -38,6 +38,7 @@ import io.talevia.core.provider.replicate.ReplicateMusicGenEngine
 import io.talevia.core.provider.replicate.ReplicateUpscaleEngine
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
+import io.talevia.core.tool.builtin.TodoWriteTool
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import io.talevia.core.tool.builtin.aigc.GenerateMusicTool
 import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
@@ -181,6 +182,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
     val blobWriter: MediaBlobWriter = FileBlobWriter(mediaRootDir)
 
     val tools: ToolRegistry = ToolRegistry().apply {
+        register(TodoWriteTool())
         register(ImportMediaTool(media, engine))
         register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))

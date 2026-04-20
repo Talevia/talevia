@@ -11,6 +11,9 @@ object DefaultPermissionRuleset {
     val rules: List<PermissionRule> = listOf(
         // Trivial / read-only
         PermissionRule(permission = "echo", pattern = "*", action = PermissionAction.ALLOW),
+        // Agent scratchpad — purely local state, zero side effects, prompting
+        // on every todo update would make the tool useless for multi-step intents.
+        PermissionRule(permission = "todowrite", pattern = "*", action = PermissionAction.ALLOW),
         PermissionRule(permission = "media.import", pattern = "*", action = PermissionAction.ALLOW),
         PermissionRule(permission = "timeline.write", pattern = "*", action = PermissionAction.ALLOW),
         // Source-graph reads/writes are local-only state mutations (no I/O, no cost) — silent

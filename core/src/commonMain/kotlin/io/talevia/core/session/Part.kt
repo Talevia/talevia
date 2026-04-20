@@ -118,6 +118,45 @@ sealed class Part {
         val replacedToMessageId: MessageId,
         val summary: String,
     ) : Part()
+
+    /**
+     * Agent scratchpad for multi-step work. Emitted by the `todowrite` tool; each
+     * call supersedes the previous list — the most recent `Part.Todos` in the
+     * session is the current plan. OpenCode stores the same shape in its
+     * `TodoTable` (`packages/opencode/src/session/todo.ts`); we ride the existing
+     * Parts JSON-blob schema instead of minting a new table.
+     */
+    @Serializable @SerialName("todos")
+    data class Todos(
+        override val id: PartId,
+        override val messageId: MessageId,
+        override val sessionId: SessionId,
+        override val createdAt: Instant,
+        override val compactedAt: Instant? = null,
+        val todos: List<TodoInfo>,
+    ) : Part()
+}
+
+@Serializable
+data class TodoInfo(
+    val content: String,
+    val status: TodoStatus = TodoStatus.PENDING,
+    val priority: TodoPriority = TodoPriority.MEDIUM,
+)
+
+@Serializable
+enum class TodoStatus {
+    @SerialName("pending") PENDING,
+    @SerialName("in_progress") IN_PROGRESS,
+    @SerialName("completed") COMPLETED,
+    @SerialName("cancelled") CANCELLED,
+}
+
+@Serializable
+enum class TodoPriority {
+    @SerialName("high") HIGH,
+    @SerialName("medium") MEDIUM,
+    @SerialName("low") LOW,
 }
 
 @Serializable

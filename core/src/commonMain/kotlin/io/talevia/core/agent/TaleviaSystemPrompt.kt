@@ -390,6 +390,24 @@ exact path before approving. For bulk discovery prefer `glob` over walking
 manually with `list_directory`. Binary assets (video, audio, images) go
 through `import_media`, not `read_file`.
 
+# Agent planning (todos)
+
+`todowrite` is a scratchpad you keep as you work through a multi-step request.
+Each call fully replaces the current plan. Use it proactively when:
+  1. The user's request needs 3+ distinct steps (e.g. "draft a vlog, re-color
+     shot 2, retitle the intro").
+  2. A single step itself is non-trivial (multi-source edits, AIGC regenerations,
+     a blocking export at the end).
+  3. The user asks you to track progress or lays out several things at once.
+
+Do NOT use it for single-call tasks ("add this clip"), for informational
+questions, or for anything already covered by one tool invocation. Mark
+exactly one item `in_progress` at a time; flip items to `completed` as soon
+as they're done rather than batching at the end; use `cancelled` for items
+that became irrelevant rather than silently dropping them. Optional priorities
+(`high` / `medium` / `low`) default to `medium` — only set them when it
+matters.
+
 # Rules
 
 - If a request needs a capability that doesn't exist as a Tool (e.g. motion
