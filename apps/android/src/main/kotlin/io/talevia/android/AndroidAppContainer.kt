@@ -136,16 +136,17 @@ class AndroidAppContainer(context: Context) {
     }
 
     /**
-     * LLM provider registry. Reads `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` from
-     * system properties (set via adb shell `setprop` or BuildConfig injection).
-     * Callers should check [providers.default] before calling [agentFor].
+     * LLM provider registry. Reads `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
+     * `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) from system properties (set via
+     * adb shell `setprop` or BuildConfig injection). Callers should check
+     * [providers.default] before calling [agentFor].
      */
     val providers: ProviderRegistry = ProviderRegistry.Builder()
         .addEnv(httpClient, buildMap {
-            System.getProperty("ANTHROPIC_API_KEY")?.takeIf(String::isNotEmpty)?.let { put("ANTHROPIC_API_KEY", it) }
-            System.getProperty("OPENAI_API_KEY")?.takeIf(String::isNotEmpty)?.let { put("OPENAI_API_KEY", it) }
-            System.getenv("ANTHROPIC_API_KEY")?.takeIf(String::isNotEmpty)?.let { put("ANTHROPIC_API_KEY", it) }
-            System.getenv("OPENAI_API_KEY")?.takeIf(String::isNotEmpty)?.let { put("OPENAI_API_KEY", it) }
+            for (key in listOf("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")) {
+                System.getProperty(key)?.takeIf(String::isNotEmpty)?.let { put(key, it) }
+                System.getenv(key)?.takeIf(String::isNotEmpty)?.let { put(key, it) }
+            }
         })
         .build()
 

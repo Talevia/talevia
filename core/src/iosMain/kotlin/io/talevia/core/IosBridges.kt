@@ -420,14 +420,16 @@ fun createIosHttpClient(): HttpClient = HttpClient(Darwin)
 
 /**
  * Build a provider registry from the iOS process environment. Reads
- * `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` via `NSProcessInfo.processInfo.environment`;
- * simulator runs can set these in the Xcode scheme's "Run → Arguments → Environment".
+ * `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GEMINI_API_KEY` (or `GOOGLE_API_KEY`)
+ * via `NSProcessInfo.processInfo.environment`; simulator runs can set these in
+ * the Xcode scheme's "Run → Arguments → Environment".
  */
 fun buildIosProviderRegistry(httpClient: HttpClient): ProviderRegistry {
     val env = NSProcessInfo.processInfo.environment
     val map = buildMap<String, String> {
-        (env["ANTHROPIC_API_KEY"] as? String)?.takeIf { it.isNotBlank() }?.let { put("ANTHROPIC_API_KEY", it) }
-        (env["OPENAI_API_KEY"] as? String)?.takeIf { it.isNotBlank() }?.let { put("OPENAI_API_KEY", it) }
+        for (key in listOf("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")) {
+            (env[key] as? String)?.takeIf { it.isNotBlank() }?.let { put(key, it) }
+        }
     }
     return ProviderRegistry.Builder().addEnv(httpClient, map).build()
 }

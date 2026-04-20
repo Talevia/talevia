@@ -88,6 +88,7 @@ import io.talevia.core.tool.builtin.video.SetClipVolumeTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
 import io.talevia.core.tool.builtin.video.TrimClipTool
 import io.talevia.platform.ffmpeg.FfmpegVideoEngine
+import kotlinx.coroutines.runBlocking
 import java.io.File
 
 /**
@@ -252,9 +253,21 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         vision?.let { register(DescribeAssetTool(it, media)) }
     }
 
-    /** Provider registry built from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env. */
-    val providers: ProviderRegistry =
-        ProviderRegistry.Builder().addEnv(httpClient, env).build()
+    /**
+     * Provider registry. Resolution order (first source wins per provider id):
+     *   1. [FileSecretStore] at `~/.talevia/secrets.properties` — UI-entered /
+     *      persisted keys, canonical for the "paste your key once" flow.
+     *   2. Process environment (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
+     *      `GEMINI_API_KEY` · `GOOGLE_API_KEY`) — useful for dev and CI.
+     * The secret store read is `suspend`; we block on it once at startup so
+     * the rest of the container stays synchronous for Compose.
+     */
+    val providers: ProviderRegistry = runBlocking {
+        ProviderRegistry.Builder()
+            .addSecretStore(httpClient, secrets)
+            .addEnv(httpClient, env)
+            .build()
+    }
 
     /**
      * Build a new Agent if at least one provider is configured, else null —
