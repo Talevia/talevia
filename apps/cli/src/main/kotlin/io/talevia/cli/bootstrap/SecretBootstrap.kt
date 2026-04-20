@@ -1,6 +1,7 @@
 package io.talevia.cli.bootstrap
 
 import io.talevia.cli.FileSecretStore
+import io.talevia.cli.repl.Styles
 import io.talevia.core.provider.ProviderRegistry.SecretKeys
 import org.jline.reader.LineReader
 
@@ -29,9 +30,9 @@ suspend fun ensureProviderKey(env: Map<String, String>, reader: LineReader): Sec
     val store = FileSecretStore()
     if (hasAnyStoredKey(store)) return SecretBootstrapResult.Ready
 
-    reader.printAbove("No LLM provider is configured.")
-    reader.printAbove("Set one now and it will persist to ~/.talevia/secrets.properties.")
-    val which = runCatching { reader.readLine("  provider [anthropic/openai/gemini, empty to skip]: ") }
+    reader.printAbove(Styles.warn("No LLM provider is configured."))
+    reader.printAbove(Styles.meta("Set one now and it will persist to ~/.talevia/secrets.properties."))
+    val which = runCatching { reader.readLine(Styles.prompt("  provider [anthropic/openai/gemini, empty to skip]: ")) }
         .getOrNull()?.trim()?.lowercase()
         .orEmpty()
 
@@ -41,12 +42,12 @@ suspend fun ensureProviderKey(env: Map<String, String>, reader: LineReader): Sec
         "gemini", "g", "google" -> SecretKeys.GEMINI
         else -> return SecretBootstrapResult.Missing
     }
-    val value = runCatching { reader.readLine("  api key (input hidden): ", '*') }
+    val value = runCatching { reader.readLine(Styles.prompt("  api key (input hidden): "), '*') }
         .getOrNull()?.trim()
         .orEmpty()
     if (value.isBlank()) return SecretBootstrapResult.Missing
     store.put(key, value)
-    reader.printAbove("✓ saved $key key")
+    reader.printAbove("${Styles.ok("✓")} saved $key key")
     return SecretBootstrapResult.Ready
 }
 

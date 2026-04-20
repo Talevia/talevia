@@ -53,16 +53,29 @@ class Repl(
         val agent = container.newAgent()
             ?: error("SecretBootstrap reported ready but CliContainer has no default provider")
         val provider = container.providers.default!!
-        println("talevia cli · db=${container.dbPath} · provider=${provider.id}")
+
+        // ANSI is fine in any sane TTY; disable when stdout is piped or when
+        // the user opts out so downstream consumers (logs, scripts) get plain
+        // text. The same flag also gates Phase-2 markdown repaints.
+        val isTty = System.console() != null
+        val mdEnv = System.getenv("TALEVIA_CLI_MARKDOWN").orEmpty().lowercase()
+        val markdownEnabled = isTty && mdEnv != "off" && mdEnv != "0" && mdEnv != "false"
+        Styles.setEnabled(isTty)
+
+        println("${Styles.banner("talevia cli")} ${Styles.meta("· db=${container.dbPath} · provider=${provider.id}")}")
 
         val projectId = bootstrapProject()
         var sessionId = bootstrapSession(projectId)
         var modelId = defaultModelFor(provider.id)
-        println("project=${projectId.value.take(8)} · session=${sessionId.value.take(8)} · model=$modelId")
-        println("type /help for commands, /exit to quit (Ctrl+D also works)")
+        println(
+            Styles.meta(
+                "project=${projectId.value.take(8)} · session=${sessionId.value.take(8)} · model=$modelId",
+            ),
+        )
+        println(Styles.meta("type /help for commands, /exit to quit (Ctrl+D also works)"))
         println()
 
-        val renderer = Renderer(terminal)
+        val renderer = Renderer(terminal, markdownEnabled = markdownEnabled)
 
         val routerScope = CoroutineScope(coroutineContext + SupervisorJob())
         val router = EventRouter(
@@ -94,7 +107,7 @@ class Repl(
                     if (runActive.get()) {
                         routerScope.launch { agent.cancel(sessionId) }
                         System.err.println()
-                        System.err.println("(cancelling — Ctrl+C again to force quit)")
+                        System.err.println(Styles.meta("(cancelling — Ctrl+C again to force quit)"))
                     } else {
                         System.err.println()
                         exitProcess(130)
@@ -106,9 +119,9 @@ class Repl(
         try {
             while (true) {
                 val line = try {
-                    reader.readLine("> ")
+                    reader.readLine(Styles.prompt("> "))
                 } catch (_: UserInterruptException) {
-                    renderer.println("(Ctrl+D or /exit to quit)")
+                    renderer.println(Styles.meta("(Ctrl+D or /exit to quit)"))
                     continue
                 } catch (_: EndOfFileException) {
                     break
@@ -147,10 +160,11 @@ class Repl(
                         )
                         turnAssistant = assistant
                         // Fallback for providers that upsert the final Part.Text without firing deltas;
-                        // Renderer.ensureAssistantText is idempotent, so this no-ops when streaming worked.
+                        // finalizeAssistantText is idempotent and also the path that triggers the
+                        // markdown repaint when streaming did fire — so it's safe either way.
                         container.sessions.listParts(assistant.id)
                             .filterIsInstance<Part.Text>()
-                            .forEach { renderer.ensureAssistantText(it.id, it.text) }
+                            .forEach { renderer.finalizeAssistantText(it.id, it.text) }
                     } catch (t: Throwable) {
                         turnError = t
                     }
@@ -162,10 +176,10 @@ class Repl(
                     runActive.set(false)
                 }
                 turnError?.let { t ->
-                    if (t is CancellationException) renderer.println("(cancelled)")
+                    if (t is CancellationException) renderer.println(Styles.meta("(cancelled)"))
                     else renderer.error("agent failed: ${t.message ?: t::class.simpleName}")
                 }
-                turnAssistant?.let { renderer.println(turnTokenSummary(it.tokens)) }
+                turnAssistant?.let { renderer.println(Styles.meta(turnTokenSummary(it.tokens))) }
                 renderer.endTurn()
             }
         } finally {
@@ -212,48 +226,54 @@ class Repl(
                     ),
                 )
                 onSwitchSession(fresh)
-                renderer.println("✓ new session ${fresh.value.take(8)}")
+                renderer.println("${Styles.ok("✓")} new session ${Styles.accent(fresh.value.take(8))}")
             }
             "sessions" -> renderer.println(sessionsTable(projectId, currentSession))
             "resume" -> {
                 if (args.isBlank()) {
-                    renderer.println("usage: /resume <id-prefix>")
+                    renderer.println(Styles.meta("usage: /resume <id-prefix>"))
                 } else {
                     val matches = container.sessions.listSessions(projectId)
                         .filter { !it.archived && it.id.value.startsWith(args) }
                     when (matches.size) {
-                        0 -> renderer.println("no session id starts with '$args'")
+                        0 -> renderer.println(Styles.meta("no session id starts with '$args'"))
                         1 -> {
                             onSwitchSession(matches.single().id)
-                            renderer.println("✓ switched to ${matches.single().id.value.take(8)} · ${matches.single().title}")
+                            renderer.println(
+                                "${Styles.ok("✓")} switched to ${Styles.accent(matches.single().id.value.take(8))} ${Styles.meta("· ${matches.single().title}")}",
+                            )
                         }
                         else -> {
-                            renderer.println("ambiguous: ${matches.size} sessions match '$args'")
-                            matches.take(5).forEach { renderer.println("  · ${it.id.value.take(12)} · ${it.title}") }
+                            renderer.println(Styles.meta("ambiguous: ${matches.size} sessions match '$args'"))
+                            matches.take(5).forEach {
+                                renderer.println(Styles.meta("  · ${it.id.value.take(12)} · ${it.title}"))
+                            }
                         }
                     }
                 }
             }
             "model" -> {
                 if (args.isBlank()) {
-                    renderer.println("current: ${container.providers.default!!.id}/$currentModel")
+                    renderer.println("${Styles.meta("current:")} ${container.providers.default!!.id}/$currentModel")
                 } else {
                     onSwitchModel(args)
-                    renderer.println("✓ model=${container.providers.default!!.id}/$args (takes effect next turn)")
+                    renderer.println(
+                        "${Styles.ok("✓")} model=${container.providers.default!!.id}/$args ${Styles.meta("(takes effect next turn)")}",
+                    )
                 }
             }
             "cost" -> renderer.println(costSummary(currentSession))
-            else -> renderer.println("unknown command: /$name (try /help)")
+            else -> renderer.println(Styles.meta("unknown command: /$name (try /help)"))
         }
         return Outcome.CONTINUE
     }
 
     private fun helpText(): String = buildString {
-        appendLine("slash commands:")
+        appendLine(Styles.meta("slash commands:"))
         val nameWidth = SLASH_COMMANDS.maxOf { (it.name + " " + it.argHint).trim().length }
         SLASH_COMMANDS.forEach { cmd ->
             val lhs = (cmd.name + " " + cmd.argHint).trim().padEnd(nameWidth)
-            appendLine("  $lhs  ${cmd.help}")
+            appendLine("  ${Styles.toolId(lhs)}  ${Styles.meta(cmd.help)}")
         }
     }.trimEnd()
 
@@ -261,12 +281,14 @@ class Repl(
         val sessions = container.sessions.listSessions(projectId)
             .filter { !it.archived }
             .sortedByDescending { it.updatedAt }
-        if (sessions.isEmpty()) return "no sessions in this project"
+        if (sessions.isEmpty()) return Styles.meta("no sessions in this project")
         return buildString {
-            appendLine("sessions (most recent first):")
+            appendLine(Styles.meta("sessions (most recent first):"))
             sessions.forEach { s ->
-                val marker = if (s.id == current) "*" else " "
-                appendLine("  $marker ${s.id.value.take(12)}  ${s.updatedAt}  ${s.title}")
+                val isCurrent = s.id == current
+                val marker = if (isCurrent) Styles.ok("*") else " "
+                val id = if (isCurrent) Styles.accent(s.id.value.take(12)) else Styles.meta(s.id.value.take(12))
+                appendLine("  $marker $id  ${Styles.meta(s.updatedAt.toString())}  ${s.title}")
             }
         }.trimEnd()
     }

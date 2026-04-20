@@ -50,12 +50,12 @@ class StdinPermissionPrompt(
 
     private suspend fun handle(ev: BusEvent.PermissionAsked) {
         renderer.println("")
-        renderer.println("⚠ permission: ${ev.permission}")
+        renderer.println("${io.talevia.cli.repl.Styles.warn("⚠ permission:")} ${ev.permission}")
         if (ev.patterns.isNotEmpty() && ev.patterns != listOf("*")) {
-            ev.patterns.forEach { renderer.println("  · $it") }
+            ev.patterns.forEach { renderer.println(io.talevia.cli.repl.Styles.meta("  · $it")) }
         }
         val choice = runCatching {
-            lineReader.readLine("  [a]llow once  [A]lways  [r]eject  > ")
+            lineReader.readLine(io.talevia.cli.repl.Styles.prompt("  [a]llow once  [A]lways  [r]eject  > "))
         }.getOrNull()?.trim().orEmpty()
 
         val decision = when (choice.firstOrNull()) {
@@ -70,14 +70,11 @@ class StdinPermissionPrompt(
             else -> PermissionDecision.Reject
         }
         permissions.reply(ev.requestId, decision)
-        renderer.println(
-            "  → ${
-                when (decision) {
-                    is PermissionDecision.Once -> "allowed once"
-                    is PermissionDecision.Always -> "allowed always"
-                    is PermissionDecision.Reject -> "rejected"
-                }
-            }",
-        )
+        val verdict = when (decision) {
+            is PermissionDecision.Once -> "allowed once"
+            is PermissionDecision.Always -> "allowed always"
+            is PermissionDecision.Reject -> "rejected"
+        }
+        renderer.println(io.talevia.cli.repl.Styles.meta("  → $verdict"))
     }
 }

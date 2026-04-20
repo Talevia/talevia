@@ -44,10 +44,13 @@ class EventRouter(
                         is Part.Text -> {
                             // Only render parts that belong to assistant messages — user
                             // messages have Part.Text too (the prompt) and rendering them
-                            // echoes the user's input back into the transcript.
+                            // echoes the user's input back into the transcript. Use the
+                            // finalize path: Agent fires PartUpdated on TextEnd with the
+                            // canonical full text, which is exactly when we want to
+                            // repaint the streamed deltas with rendered markdown.
                             val parent = runCatching { sessions.getMessage(ev.messageId) }.getOrNull()
                             if (parent is Message.Assistant) {
-                                renderer.ensureAssistantText(p.id, p.text)
+                                renderer.finalizeAssistantText(p.id, p.text)
                             }
                         }
                         is Part.Tool -> when (val s = p.state) {
