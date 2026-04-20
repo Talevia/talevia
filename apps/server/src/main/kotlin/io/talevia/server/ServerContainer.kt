@@ -17,9 +17,11 @@ import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.platform.AsrEngine
 import io.talevia.core.platform.FileBlobWriter
 import io.talevia.core.platform.FileMediaStorage
+import io.talevia.core.platform.FileSystem
 import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.InMemorySecretStore
+import io.talevia.core.platform.JvmFileSystem
 import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.MusicGenEngine
@@ -46,6 +48,10 @@ import io.talevia.core.tool.builtin.aigc.GenerateMusicTool
 import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
 import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
 import io.talevia.core.tool.builtin.aigc.UpscaleAssetTool
+import io.talevia.core.tool.builtin.fs.GlobTool
+import io.talevia.core.tool.builtin.fs.ListDirectoryTool
+import io.talevia.core.tool.builtin.fs.ReadFileTool
+import io.talevia.core.tool.builtin.fs.WriteFileTool
 import io.talevia.core.tool.builtin.ml.DescribeAssetTool
 import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
 import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
@@ -139,6 +145,7 @@ class ServerContainer(
         ?.let { FileMediaStorage(File(it)) }
         ?: InMemoryMediaStorage()
     val engine: VideoEngine = FfmpegVideoEngine(pathResolver = media)
+    val fileSystem: FileSystem = JvmFileSystem()
     val permissions = ServerPermissionService(bus)
     val permissionRules = DefaultPermissionRuleset.rules
 
@@ -281,6 +288,10 @@ class ServerContainer(
         register(ListSourceNodesTool(projects))
         register(RemoveSourceNodeTool(projects))
         register(ImportSourceNodeTool(projects))
+        register(ReadFileTool(fileSystem))
+        register(WriteFileTool(fileSystem))
+        register(ListDirectoryTool(fileSystem))
+        register(GlobTool(fileSystem))
         imageGen?.let { register(GenerateImageTool(it, media, blobWriter, projects)) }
         videoGen?.let { register(GenerateVideoTool(it, media, blobWriter, projects)) }
         musicGen?.let { register(GenerateMusicTool(it, media, blobWriter, projects)) }
