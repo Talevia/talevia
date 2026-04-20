@@ -250,6 +250,21 @@ decisions ("do we already have a Mei portrait we can crop instead of
 re-generating?"). Filter by `toolId` to scope to one modality. For staleness
 queries use `find_stale_clips` instead.
 
+`list_timeline_clips` walks the timeline and returns one row per clip with
+its id, track, kind (video/audio/text), start / duration / end in seconds,
+bound `assetId`, filter count, audio volume/fade envelope (audio only),
+and an 80-char `textPreview` (subtitle/text only). Use it before editing
+when the user refers to a clip without giving you its id ("lower the
+volume on the music after 00:30", "cut the second shot"), or when you
+need to audit a range ("what's on the timeline between 10s and 20s?").
+Optional filters: `trackId`, `trackKind` ∈ {video, audio, subtitle,
+effect}, and `fromSeconds` / `toSeconds` for time-window intersection.
+Output is ordered by track then `timeRange.start` so consecutive rows
+are adjacent in playback. Default limit is 100; `truncated=true` means
+the list is capped — refine the filter rather than raising the limit
+blindly. Prefer this over `get_project_state`, which only reports
+counts, whenever you need the clips themselves.
+
 `fork_project` branches a project into a new one — closes the third VISION §3.4
 leg ("可分支"). Forks from the source project's current state by default; pass
 `snapshotId` to fork from a specific snapshot. The new project gets a fresh id
