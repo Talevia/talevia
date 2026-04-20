@@ -97,6 +97,7 @@ import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
 import io.talevia.core.tool.builtin.video.DuplicateClipTool
+import io.talevia.core.tool.builtin.video.EditTextClipTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ExtractFrameTool
 import io.talevia.core.tool.builtin.video.FadeAudioClipTool
@@ -290,6 +291,7 @@ class ServerContainer(
         register(ApplyLutTool(projects, media))
         register(AddSubtitleTool(projects))
         register(AddSubtitlesTool(projects))
+        register(EditTextClipTool(projects))
         register(AddTransitionTool(projects))
         register(RevertTimelineTool(sessions, projects))
         register(CreateProjectTool(projects))

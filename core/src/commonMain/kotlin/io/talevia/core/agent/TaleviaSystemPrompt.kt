@@ -323,6 +323,19 @@ because blanket sequence-wide ripple would drift independent tracks like
 background music. Emits one timeline snapshot (ripple included) so
 `revert_timeline` rolls the whole operation back in one step.
 
+# Editing subtitles / text overlays
+
+`edit_text_clip` patches an existing text clip in place — body and/or
+style fields. Use it for "fix the typo in the subtitle at 0:12",
+"make that caption yellow", "bump the title to 72pt". Every field is
+optional; at least one must be provided. Null = keep; a provided
+value replaces; `""` on `backgroundColor` clears it (transparent).
+Prefer this over `remove_clip + add_subtitle` so the clip id, track,
+transforms, and timeRange are preserved — downstream tool state that
+captured the id (transforms, future reference-by-id edits) stays
+valid. Works on any text clip regardless of which track it sits on
+(Subtitle or Effect). Emits a timeline snapshot.
+
 # Undoing filters
 
 `remove_filter` is the counterpart to `apply_filter`. Use it when the
