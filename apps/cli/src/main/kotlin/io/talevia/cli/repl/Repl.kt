@@ -242,15 +242,12 @@ class Repl(
 
     private fun helpText(): String = buildString {
         appendLine("slash commands:")
-        appendLine("  /new              create a fresh session in this project")
-        appendLine("  /sessions         list sessions in this project")
-        appendLine("  /resume <prefix>  switch to the session whose id starts with <prefix>")
-        appendLine("  /model [<id>]     show or override the model id (same provider)")
-        appendLine("  /cost             token + usd totals for the current session")
-        appendLine("  /clear            clear the screen (keeps the session)")
-        appendLine("  /help             this list")
-        append("  /exit /quit       exit")
-    }
+        val nameWidth = SLASH_COMMANDS.maxOf { (it.name + " " + it.argHint).trim().length }
+        SLASH_COMMANDS.forEach { cmd ->
+            val lhs = (cmd.name + " " + cmd.argHint).trim().padEnd(nameWidth)
+            appendLine("  $lhs  ${cmd.help}")
+        }
+    }.trimEnd()
 
     private suspend fun sessionsTable(projectId: ProjectId, current: SessionId): String {
         val sessions = container.sessions.listSessions(projectId)

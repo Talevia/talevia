@@ -6,8 +6,8 @@ import com.github.ajalt.clikt.parameters.options.option
 import io.talevia.cli.bootstrap.SecretBootstrapResult
 import io.talevia.cli.bootstrap.ensureProviderKey
 import io.talevia.cli.repl.Repl
+import io.talevia.cli.repl.buildInteractiveLineReader
 import kotlinx.coroutines.runBlocking
-import org.jline.reader.LineReaderBuilder
 import org.jline.terminal.TerminalBuilder
 import kotlin.system.exitProcess
 
@@ -21,7 +21,7 @@ private class TaleviaCli : CliktCommand(name = "talevia") {
         val code = runBlocking {
             val env = envWithDefaults()
             val terminal = TerminalBuilder.builder().system(true).build()
-            val reader = LineReaderBuilder.builder().terminal(terminal).build()
+            val reader = buildInteractiveLineReader(terminal)
 
             when (ensureProviderKey(env, reader)) {
                 SecretBootstrapResult.Ready -> Unit
