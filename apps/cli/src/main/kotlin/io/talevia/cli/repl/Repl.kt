@@ -14,15 +14,21 @@ import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
 import io.talevia.core.session.Session
 import io.talevia.core.session.TokenUsage
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import org.jline.reader.EndOfFileException
 import org.jline.reader.LineReader
 import org.jline.reader.UserInterruptException
 import org.jline.terminal.Terminal
 import org.jline.utils.InfoCmp
+import sun.misc.Signal
+import sun.misc.SignalHandler
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.system.exitProcess
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -71,6 +77,27 @@ class Repl(
         )
         permissionPrompt.start(routerScope)
 
+        // Two-stage Ctrl+C: during agent.run we cancel the current turn; otherwise
+        // the handler falls through to `exitProcess(130)`. JLine only throws
+        // UserInterruptException while blocked in readLine, so we also need a
+        // POSIX signal handler for the "run in flight" window.
+        val runActive = AtomicBoolean(false)
+        val previousSigint: SignalHandler? = runCatching {
+            Signal.handle(
+                Signal("INT"),
+                SignalHandler {
+                    if (runActive.get()) {
+                        routerScope.launch { agent.cancel(sessionId) }
+                        System.err.println()
+                        System.err.println("(cancelling — Ctrl+C again to force quit)")
+                    } else {
+                        System.err.println()
+                        exitProcess(130)
+                    }
+                },
+            )
+        }.getOrNull()
+
         try {
             while (true) {
                 val line = try {
@@ -99,26 +126,42 @@ class Repl(
                     continue
                 }
 
-                runCatching {
-                    val assistant = agent.run(
-                        RunInput(
-                            sessionId = sessionId,
-                            text = trimmed,
-                            model = ModelRef(provider.id, modelId),
-                            permissionRules = container.permissionRules.toList(),
-                        ),
-                    )
-                    // Fallback for providers that upsert the final Part.Text without firing deltas;
-                    // Renderer.ensureAssistantText is idempotent, so this no-ops when streaming worked.
-                    container.sessions.listParts(assistant.id)
-                        .filterIsInstance<Part.Text>()
-                        .forEach { renderer.ensureAssistantText(it.id, it.text) }
-                }.onFailure { t ->
-                    renderer.error("agent failed: ${t.message ?: t::class.simpleName}")
+                // Run the turn on a child launch so the SIGINT handler can cancel
+                // just the turn rather than the REPL scope itself.
+                var turnError: Throwable? = null
+                val turnJob = launch {
+                    try {
+                        val assistant = agent.run(
+                            RunInput(
+                                sessionId = sessionId,
+                                text = trimmed,
+                                model = ModelRef(provider.id, modelId),
+                                permissionRules = container.permissionRules.toList(),
+                            ),
+                        )
+                        // Fallback for providers that upsert the final Part.Text without firing deltas;
+                        // Renderer.ensureAssistantText is idempotent, so this no-ops when streaming worked.
+                        container.sessions.listParts(assistant.id)
+                            .filterIsInstance<Part.Text>()
+                            .forEach { renderer.ensureAssistantText(it.id, it.text) }
+                    } catch (t: Throwable) {
+                        turnError = t
+                    }
+                }
+                runActive.set(true)
+                try {
+                    turnJob.join()
+                } finally {
+                    runActive.set(false)
+                }
+                turnError?.let { t ->
+                    if (t is CancellationException) renderer.println("(cancelled)")
+                    else renderer.error("agent failed: ${t.message ?: t::class.simpleName}")
                 }
                 renderer.endTurn()
             }
         } finally {
+            previousSigint?.let { runCatching { Signal.handle(Signal("INT"), it) } }
             permissionPrompt.stop()
             router.stop()
             routerScope.coroutineContext[kotlinx.coroutines.Job]?.cancel()
