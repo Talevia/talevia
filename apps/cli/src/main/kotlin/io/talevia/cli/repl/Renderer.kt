@@ -236,8 +236,17 @@ class Renderer(
         if (text.contains("**")) return true
         if (text.contains("__")) return true
         if (text.contains('`')) return true
+        val lines = text.split('\n')
+        // GFM table — header row, separator, data rows all use `|`.
+        for (i in 0 until lines.size - 1) {
+            val a = lines[i]
+            val b = lines[i + 1]
+            if (a.contains('|') && b.trim().matches(Regex("^\\|?[\\s:|-]+\\|?$")) && b.contains('-')) {
+                return true
+            }
+        }
         // Bullet, numbered list, heading, or block quote at line start.
-        return text.lineSequence().any { line ->
+        return lines.any { line ->
             val trimmed = line.trimStart()
             trimmed.startsWith("- ") ||
                 trimmed.startsWith("* ") ||

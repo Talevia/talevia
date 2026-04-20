@@ -268,6 +268,7 @@ class Repl(
             }
             "cost" -> renderer.println(costSummary(currentSession))
             "todos" -> renderer.println(todosSummary(currentSession))
+            "status" -> renderer.println(statusLine(projectId, currentSession, currentModel))
             "history" -> renderer.println(historyTable(currentSession))
             "revert" -> renderer.println(handleRevert(currentSession, projectId, args))
             "fork" -> {
@@ -275,7 +276,11 @@ class Repl(
                 renderer.println(result.message)
                 result.newSessionId?.let { onSwitchSession(it) }
             }
-            else -> renderer.println(Styles.meta("unknown command: /$name (try /help)"))
+            else -> {
+                val suggestion = suggestSlash("/$name")
+                val hint = suggestion?.let { " · did you mean ${Styles.accent(it.name)}?" } ?: ""
+                renderer.println(Styles.meta("unknown command: /$name (try /help)$hint"))
+            }
         }
         return Outcome.CONTINUE
     }
@@ -398,13 +403,59 @@ class Repl(
     }
 
     private fun helpText(): String = buildString {
-        appendLine(Styles.meta("slash commands:"))
+        appendLine(Styles.meta("slash commands — tab-complete after '/' · also accepts a unique prefix:"))
         val nameWidth = SLASH_COMMANDS.maxOf { (it.name + " " + it.argHint).trim().length }
-        SLASH_COMMANDS.forEach { cmd ->
-            val lhs = (cmd.name + " " + cmd.argHint).trim().padEnd(nameWidth)
-            appendLine("  ${Styles.toolId(lhs)}  ${Styles.meta(cmd.help)}")
+        SlashCategory.entries.forEach { cat ->
+            val group = SLASH_COMMANDS.filter { it.category == cat }
+            if (group.isEmpty()) return@forEach
+            appendLine()
+            appendLine("  ${Styles.accent(cat.title)}")
+            group.forEach { cmd ->
+                val lhs = (cmd.name + " " + cmd.argHint).trim().padEnd(nameWidth)
+                appendLine("    ${Styles.toolId(lhs)}  ${Styles.meta(cmd.help)}")
+            }
         }
     }.trimEnd()
+
+    /**
+     * Single-line `/status` summary. Answers "which session am I in, which
+     * model is queued for the next turn, how much have we spent so far"
+     * without flipping through `/sessions`, `/model`, and `/cost`.
+     */
+    private suspend fun statusLine(
+        projectId: ProjectId,
+        sessionId: SessionId,
+        modelId: String,
+    ): String {
+        val session = container.sessions.getSession(sessionId)
+        val title = session?.title ?: "(unknown)"
+        val assistants = container.sessions.listMessages(sessionId).filterIsInstance<Message.Assistant>()
+        val turns = assistants.size
+        val tokens = assistants.fold(TokenUsage.ZERO) { acc, m ->
+            TokenUsage(
+                input = acc.input + m.tokens.input,
+                output = acc.output + m.tokens.output,
+                reasoning = acc.reasoning + m.tokens.reasoning,
+                cacheRead = acc.cacheRead + m.tokens.cacheRead,
+                cacheWrite = acc.cacheWrite + m.tokens.cacheWrite,
+            )
+        }
+        val usd = assistants.sumOf { it.cost.usd }
+        val providerId = container.providers.default!!.id
+        return buildString {
+            appendLine(
+                "${Styles.accent("project")}=${projectId.value.take(8)} " +
+                    "${Styles.accent("session")}=${sessionId.value.take(8)} " +
+                    "${Styles.meta("·")} $title",
+            )
+            appendLine(
+                "${Styles.accent("model")}=$providerId/$modelId " +
+                    "${Styles.meta("·")} $turns turn(s) " +
+                    "${Styles.meta("·")} in=${tokens.input} out=${tokens.output} " +
+                    "${Styles.meta("·")} usd=${"%.5f".format(usd)}",
+            )
+        }.trimEnd()
+    }
 
     private suspend fun sessionsTable(projectId: ProjectId, current: SessionId): String {
         val sessions = container.sessions.listSessions(projectId)
