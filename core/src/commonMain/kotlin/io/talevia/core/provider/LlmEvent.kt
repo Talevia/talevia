@@ -34,5 +34,17 @@ sealed interface LlmEvent {
     data object StepStart : LlmEvent
     data class StepFinish(val finish: FinishReason, val usage: TokenUsage) : LlmEvent
 
-    data class Error(val message: String, val cause: Throwable? = null, val retriable: Boolean = false) : LlmEvent
+    /**
+     * Terminal error for the current provider stream. [retriable] is the provider's
+     * own hint (e.g. HTTP 5xx, 429 with Retry-After); the Agent's [io.talevia.core.agent.RetryClassifier]
+     * makes the final call — some providers don't bother setting this flag and the
+     * classifier recovers by scanning the message. [retryAfterMs] mirrors the
+     * `Retry-After` / `retry-after-ms` response header when present.
+     */
+    data class Error(
+        val message: String,
+        val cause: Throwable? = null,
+        val retriable: Boolean = false,
+        val retryAfterMs: Long? = null,
+    ) : LlmEvent
 }

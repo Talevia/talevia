@@ -37,6 +37,11 @@ class EventRouter(
                 .collect { ev -> renderer.streamAssistantDelta(ev.partId, ev.delta) }
         }
         jobs += scope.launch {
+            bus.subscribe<BusEvent.AgentRetryScheduled>()
+                .filter { it.sessionId == activeSessionId() }
+                .collect { ev -> renderer.retryNotice(ev.attempt, ev.waitMs, ev.reason) }
+        }
+        jobs += scope.launch {
             bus.subscribe<BusEvent.PartUpdated>()
                 .filter { it.sessionId == activeSessionId() }
                 .collect { ev ->

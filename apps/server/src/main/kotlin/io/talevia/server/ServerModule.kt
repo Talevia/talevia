@@ -411,6 +411,7 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.PermissionAsked -> "permission.asked"
     is BusEvent.PermissionReplied -> "permission.replied"
     is BusEvent.AgentRunFailed -> "agent.run.failed"
+    is BusEvent.AgentRetryScheduled -> "agent.retry.scheduled"
 }
 
 @Serializable data class CreateProjectRequest(val title: String)
@@ -496,6 +497,9 @@ data class BusEventDto(
     val anchorMessageId: String? = null,
     val deletedMessages: Int? = null,
     val appliedSnapshotPartId: String? = null,
+    val attempt: Int? = null,
+    val waitMs: Long? = null,
+    val reason: String? = null,
 ) {
     companion object {
         fun from(e: BusEvent): BusEventDto = when (e) {
@@ -528,6 +532,10 @@ data class BusEventDto(
             is BusEvent.AgentRunFailed -> BusEventDto(
                 "agent.run.failed", e.sessionId.value,
                 correlationId = e.correlationId, message = e.message,
+            )
+            is BusEvent.AgentRetryScheduled -> BusEventDto(
+                "agent.retry.scheduled", e.sessionId.value,
+                attempt = e.attempt, waitMs = e.waitMs, reason = e.reason,
             )
         }
     }

@@ -17,6 +17,7 @@ import io.talevia.core.provider.LlmRequest
 import io.talevia.core.provider.ModelInfo
 import io.talevia.core.provider.ReplayFormatting
 import io.talevia.core.provider.logMalformedSse
+import io.talevia.core.provider.parseRetryAfterMs
 import io.talevia.core.provider.sseEvents
 import io.talevia.core.session.FinishReason
 import io.talevia.core.session.Message
@@ -108,7 +109,19 @@ class AnthropicProvider(
                     val msg = err?.get("message")?.jsonPrimitive?.contentOrNull
                     listOfNotNull(type, msg).joinToString(": ").ifBlank { raw }
                 }.getOrElse { raw }
-                send(LlmEvent.Error("anthropic HTTP ${http.status.value}: $parsed"))
+                val status = http.status.value
+                val retriable = status >= 500 || status == 429 || status == 408
+                val retryAfterMs = parseRetryAfterMs(
+                    ms = http.headers["retry-after-ms"],
+                    seconds = http.headers["retry-after"],
+                )
+                send(
+                    LlmEvent.Error(
+                        message = "anthropic HTTP $status: $parsed",
+                        retriable = retriable,
+                        retryAfterMs = retryAfterMs,
+                    ),
+                )
                 send(LlmEvent.StepFinish(finish = FinishReason.ERROR, usage = TokenUsage.ZERO))
                 return@execute
             }

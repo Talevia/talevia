@@ -186,6 +186,23 @@ class Renderer(
     }
 
     /**
+     * Print a one-line notice that the Agent is about to sleep + retry a
+     * transient provider error. Breaks any open assistant line first so the
+     * notice sits on its own row, then leaves the line buffer unrepaintable
+     * (the assistant text from the next attempt will stream as a fresh part).
+     */
+    suspend fun retryNotice(attempt: Int, waitMs: Long, reason: String) = mutex.withLock {
+        breakAssistantLineLocked()
+        markAllPartsUnrepaintableLocked()
+        val seconds = (waitMs / 1000.0)
+        val formatted = if (seconds >= 1.0) "${seconds}s" else "${waitMs}ms"
+        terminal.writer().println(
+            "  ${Styles.running("⟳")} ${Styles.meta("retry #$attempt in $formatted — $reason")}",
+        )
+        terminal.writer().flush()
+    }
+
+    /**
      * If we're mid-assistant-line (no trailing newline emitted yet), close it
      * so the next printed line starts at column 0. We deliberately do not reset
      * [assistantOpen] — the next delta will still want to flow inline on its

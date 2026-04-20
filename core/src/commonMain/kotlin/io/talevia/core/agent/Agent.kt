@@ -38,6 +38,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -101,6 +102,12 @@ class Agent(
      * under `agent.run.ms` and each tool dispatch under `tool.<id>.ms`.
      */
     private val metrics: MetricsRegistry? = null,
+    /**
+     * Retry policy for transient provider errors (HTTP 5xx, 429, overload, rate limit).
+     * Mirrors OpenCode's `session/retry.ts`. Defaults to [RetryPolicy.Default] —
+     * 4 attempts total with exponential backoff. Set to [RetryPolicy.None] to disable.
+     */
+    private val retryPolicy: RetryPolicy = RetryPolicy.Default,
 ) {
 
     private val log = Loggers.get("agent")
@@ -244,17 +251,52 @@ class Agent(
                 history = store.listMessagesWithParts(input.sessionId, includeCompacted = false)
             }
 
-            val asstMsg = Message.Assistant(
-                id = MessageId(Uuid.random().toString()),
-                sessionId = input.sessionId,
-                createdAt = clock.now(),
-                parentId = userMsg.id,
-                model = input.model,
-            )
-            store.appendMessage(asstMsg)
-            handle.currentAssistantId = asstMsg.id
+            var attempt = 0
+            var asstMsg: Message.Assistant
+            var turnResult: TurnResult
+            while (true) {
+                attempt++
+                asstMsg = Message.Assistant(
+                    id = MessageId(Uuid.random().toString()),
+                    sessionId = input.sessionId,
+                    createdAt = clock.now(),
+                    parentId = userMsg.id,
+                    model = input.model,
+                )
+                store.appendMessage(asstMsg)
+                handle.currentAssistantId = asstMsg.id
 
-            val turnResult = streamTurn(asstMsg, history, input)
+                turnResult = streamTurn(asstMsg, history, input)
+
+                // Only retry when the turn failed and nothing useful was streamed.
+                // Mid-stream errors (rare — an error event after text/tool_calls) are
+                // preserved so the user sees the partial output.
+                if (turnResult.finish != FinishReason.ERROR) break
+                if (turnResult.emittedContent) break
+                if (attempt >= retryPolicy.maxAttempts) break
+                val reason = RetryClassifier.reason(turnResult.error, turnResult.retriable) ?: break
+
+                val wait = retryPolicy.delayFor(attempt, turnResult.retryAfterMs)
+                log.info(
+                    "retry.scheduled",
+                    "session" to input.sessionId.value,
+                    "attempt" to attempt,
+                    "waitMs" to wait,
+                    "reason" to reason,
+                )
+                bus.publish(
+                    BusEvent.AgentRetryScheduled(
+                        sessionId = input.sessionId,
+                        attempt = attempt,
+                        waitMs = wait,
+                        reason = reason,
+                    ),
+                )
+                // Wipe the failed assistant message (+ its StepFinish(ERROR) part)
+                // so the retry produces a clean single message per turn.
+                runCatching { store.deleteMessage(asstMsg.id) }
+                delay(wait)
+            }
 
             val finalised = asstMsg.copy(
                 tokens = turnResult.usage,
@@ -292,11 +334,17 @@ class Agent(
         var finish: FinishReason? = null
         var usage = TokenUsage.ZERO
         var error: String? = null
+        var retriable = false
+        var retryAfterMs: Long? = null
+        var emittedContent = false
         val pending = mutableMapOf<CallId, PendingToolCall>()
 
         provider.stream(request).collect { event ->
             when (event) {
-                is LlmEvent.TextStart -> upsertEmptyText(asstMsg, event.partId)
+                is LlmEvent.TextStart -> {
+                    emittedContent = true
+                    upsertEmptyText(asstMsg, event.partId)
+                }
                 is LlmEvent.TextDelta -> bus.publish(
                     BusEvent.PartDelta(asstMsg.sessionId, asstMsg.id, event.partId, "text", event.text),
                 )
@@ -304,9 +352,12 @@ class Agent(
                     Part.Text(event.partId, asstMsg.id, asstMsg.sessionId, clock.now(), text = event.finalText),
                 )
 
-                is LlmEvent.ReasoningStart -> store.upsertPart(
-                    Part.Reasoning(event.partId, asstMsg.id, asstMsg.sessionId, clock.now(), text = ""),
-                )
+                is LlmEvent.ReasoningStart -> {
+                    emittedContent = true
+                    store.upsertPart(
+                        Part.Reasoning(event.partId, asstMsg.id, asstMsg.sessionId, clock.now(), text = ""),
+                    )
+                }
                 is LlmEvent.ReasoningDelta -> bus.publish(
                     BusEvent.PartDelta(asstMsg.sessionId, asstMsg.id, event.partId, "text", event.text),
                 )
@@ -315,6 +366,7 @@ class Agent(
                 )
 
                 is LlmEvent.ToolCallStart -> {
+                    emittedContent = true
                     pending[event.callId] = PendingToolCall(event.partId, event.toolId)
                     store.upsertPart(
                         Part.Tool(
@@ -364,6 +416,8 @@ class Agent(
                 }
                 is LlmEvent.Error -> {
                     error = event.message
+                    retriable = event.retriable
+                    retryAfterMs = event.retryAfterMs
                     finish = FinishReason.ERROR
                 }
             }
@@ -373,6 +427,9 @@ class Agent(
             finish = finish ?: FinishReason.STOP,
             usage = usage,
             error = error,
+            retriable = retriable,
+            retryAfterMs = retryAfterMs,
+            emittedContent = emittedContent,
         )
     }
 
@@ -471,7 +528,14 @@ class Agent(
         )
     }
 
-    private data class TurnResult(val finish: FinishReason, val usage: TokenUsage, val error: String?)
+    private data class TurnResult(
+        val finish: FinishReason,
+        val usage: TokenUsage,
+        val error: String?,
+        val retriable: Boolean = false,
+        val retryAfterMs: Long? = null,
+        val emittedContent: Boolean = false,
+    )
     private data class PendingToolCall(val partId: PartId, val toolId: String)
 }
 

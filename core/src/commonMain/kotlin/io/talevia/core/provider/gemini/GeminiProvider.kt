@@ -110,7 +110,19 @@ class GeminiProvider(
                     val msg = err?.get("message")?.jsonPrimitive?.contentOrNull
                     listOfNotNull(status, msg).joinToString(": ").ifBlank { raw }
                 }.getOrElse { raw }
-                send(LlmEvent.Error("gemini HTTP ${http.status.value}: $parsed"))
+                val statusCode = http.status.value
+                val retriable = statusCode >= 500 || statusCode == 429 || statusCode == 408
+                val retryAfterMs = io.talevia.core.provider.parseRetryAfterMs(
+                    ms = http.headers["retry-after-ms"],
+                    seconds = http.headers["retry-after"],
+                )
+                send(
+                    LlmEvent.Error(
+                        message = "gemini HTTP $statusCode: $parsed",
+                        retriable = retriable,
+                        retryAfterMs = retryAfterMs,
+                    ),
+                )
                 send(LlmEvent.StepFinish(finish = FinishReason.ERROR, usage = TokenUsage.ZERO))
                 aborted = true
                 return@execute

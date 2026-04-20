@@ -91,6 +91,20 @@ sealed interface BusEvent {
     data class SessionCancelled(override val sessionId: SessionId) : SessionEvent
 
     /**
+     * The Agent caught a transient provider error and scheduled a retry.
+     * [attempt] is 1-based — the upcoming attempt number — and [waitMs] is
+     * the backoff the Agent is about to sleep before re-streaming.
+     * UI can use this to show "Retrying in 4s…" rather than leaving the turn
+     * looking stuck.
+     */
+    data class AgentRetryScheduled(
+        override val sessionId: SessionId,
+        val attempt: Int,
+        val waitMs: Long,
+        val reason: String,
+    ) : SessionEvent
+
+    /**
      * Background agent runs (e.g. the server's fire-and-forget `agent.run` launch)
      * historically swallowed failures, leaving clients stuck on a 202 with no signal
      * that the run died. Publish this event instead so SSE subscribers see the

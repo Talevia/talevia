@@ -114,7 +114,19 @@ class OpenAiProvider(
                     "request.dump",
                     mapOf("body" to encoded),
                 )
-                send(LlmEvent.Error("openai HTTP ${http.status.value}: $parsed"))
+                val status = http.status.value
+                val retriable = status >= 500 || status == 429 || status == 408
+                val retryAfterMs = io.talevia.core.provider.parseRetryAfterMs(
+                    ms = http.headers["retry-after-ms"],
+                    seconds = http.headers["retry-after"],
+                )
+                send(
+                    LlmEvent.Error(
+                        message = "openai HTTP $status: $parsed",
+                        retriable = retriable,
+                        retryAfterMs = retryAfterMs,
+                    ),
+                )
                 send(LlmEvent.StepFinish(finish = FinishReason.ERROR, usage = TokenUsage.ZERO))
                 aborted = true
                 return@execute
