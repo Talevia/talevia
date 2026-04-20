@@ -111,6 +111,7 @@ import io.talevia.core.tool.builtin.video.RemoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveFilterTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
+import io.talevia.core.tool.builtin.video.SetClipSourceBindingTool
 import io.talevia.core.tool.builtin.video.SetClipTransformTool
 import io.talevia.core.tool.builtin.video.SetClipVolumeTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
@@ -249,6 +250,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(RemoveClipTool(projects))
         register(MoveClipTool(projects))
         register(MoveClipToTrackTool(projects))
+        register(SetClipSourceBindingTool(projects))
         register(DuplicateClipTool(projects))
         register(TrimClipTool(projects, media))
         register(SetClipVolumeTool(projects))

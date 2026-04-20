@@ -78,6 +78,7 @@ final class AppContainer {
         registry.register(tool: RemoveClipTool(store: self.projects))
         registry.register(tool: MoveClipTool(store: self.projects))
         registry.register(tool: MoveClipToTrackTool(store: self.projects))
+        registry.register(tool: SetClipSourceBindingTool(store: self.projects))
         registry.register(tool: DuplicateClipTool(store: self.projects))
         registry.register(tool: TrimClipTool(store: self.projects, media: self.media))
         registry.register(tool: SetClipVolumeTool(store: self.projects))
