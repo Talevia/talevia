@@ -13,7 +13,10 @@ import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
 import io.talevia.core.session.Session
+import io.talevia.core.session.TodoInfo
+import io.talevia.core.session.TodoStatus
 import io.talevia.core.session.TokenUsage
+import io.talevia.core.session.currentTodos
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -263,6 +266,7 @@ class Repl(
                 }
             }
             "cost" -> renderer.println(costSummary(currentSession))
+            "todos" -> renderer.println(todosSummary(currentSession))
             else -> renderer.println(Styles.meta("unknown command: /$name (try /help)"))
         }
         return Outcome.CONTINUE
@@ -309,6 +313,41 @@ class Repl(
             else -> " · cache ${"%.1f".format(hitPct)}% (read=${t.cacheRead})"
         }
         return base + reasoning + cache
+    }
+
+    /**
+     * Current todo list for the session. Mirrors [io.talevia.core.tool.builtin.TodoWriteTool]'s
+     * rendering so the on-screen view matches what the model sees in its tool output.
+     * Open items are shown with colour; completed/cancelled dimmed.
+     */
+    private suspend fun todosSummary(sessionId: SessionId): String {
+        val todos = container.sessions.currentTodos(sessionId)
+        if (todos.isEmpty()) return Styles.meta("no todos yet in this session")
+        val open = todos.count { it.status != TodoStatus.COMPLETED && it.status != TodoStatus.CANCELLED }
+        return buildString {
+            appendLine(Styles.meta("todos: $open open · ${todos.size} total"))
+            todos.forEach { appendLine("  ${renderTodo(it)}") }
+        }.trimEnd()
+    }
+
+    private fun renderTodo(t: TodoInfo): String {
+        val marker = when (t.status) {
+            TodoStatus.PENDING -> "[ ]"
+            TodoStatus.IN_PROGRESS -> "[~]"
+            TodoStatus.COMPLETED -> "[x]"
+            TodoStatus.CANCELLED -> "[-]"
+        }
+        val priority = if (t.priority != io.talevia.core.session.TodoPriority.MEDIUM) {
+            Styles.meta(" (${t.priority.name.lowercase()})")
+        } else {
+            ""
+        }
+        val row = "$marker ${t.content}$priority"
+        return when (t.status) {
+            TodoStatus.IN_PROGRESS -> Styles.accent(row)
+            TodoStatus.COMPLETED, TodoStatus.CANCELLED -> Styles.meta(row)
+            TodoStatus.PENDING -> row
+        }
     }
 
     private suspend fun costSummary(sessionId: SessionId): String {
