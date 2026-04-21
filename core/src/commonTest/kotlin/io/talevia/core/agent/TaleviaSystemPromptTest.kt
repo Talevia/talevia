@@ -121,4 +121,56 @@ class TaleviaSystemPromptTest {
         assertEquals(taleviaSystemPrompt(), taleviaSystemPrompt(extraSuffix = ""))
         assertEquals(taleviaSystemPrompt(), taleviaSystemPrompt(extraSuffix = "   "))
     }
+
+    @Test fun sectionsAppearInExpectedOrder() {
+        // The prompt body is sharded across four topical section files (decision
+        // `docs/decisions/2026-04-21-debt-split-taleviasystemprompt.md`). Ordering
+        // matters for LLM priming: mental model first, then consistency + mechanics,
+        // then dual-user + AIGC, then project lifecycle, then editing + externals.
+        // This test is the regression lock — if someone shuffles the composer
+        // joinToString order, it fails loud.
+        val prompt = taleviaSystemPrompt()
+        val anchors = listOf(
+            "# Build-system mental model", // PROMPT_BUILD_SYSTEM opens the body
+            "# Consistency bindings",
+            "# Seed discipline",
+            "# Two kinds of users", // PROMPT_AIGC_LANE starts
+            "# AIGC video (text-to-video)",
+            "# Project lifecycle", // PROMPT_PROJECT starts
+            "# Project snapshots",
+            "# Removing clips", // PROMPT_EDITING_AND_EXTERNAL starts
+            "# External files (fs tools)",
+            "# Session-project binding",
+            "# Rules",
+        )
+        val indices = anchors.map { it to prompt.indexOf(it) }
+        indices.forEach { (anchor, idx) ->
+            assertTrue(idx >= 0, "section anchor not found: '$anchor'")
+        }
+        // Strictly monotonic ordering: each anchor must come after the previous one.
+        for (i in 1 until indices.size) {
+            val (prev, prevIdx) = indices[i - 1]
+            val (curr, currIdx) = indices[i]
+            assertTrue(
+                currIdx > prevIdx,
+                "section '$curr' (idx=$currIdx) must appear after '$prev' (idx=$prevIdx) — composer order drifted?",
+            )
+        }
+    }
+
+    @Test fun sectionsAreSeparatedByExactlyOneBlankLine() {
+        // The composer uses `joinToString("\n\n")` so adjacent sections meet on a
+        // double-newline. Triple-newline would mean a stray blank line sneaked into
+        // one section's body; single-newline would mean the join string drifted.
+        val prompt = taleviaSystemPrompt()
+        val buildToConsistency = "invalidation step.\n\n# Two kinds of users"
+        assertTrue(
+            buildToConsistency in prompt,
+            "section-A → section-B boundary must be a single blank line (got: '${
+                prompt.substringAfter("invalidation step.").take(40)
+            }')",
+        )
+        // Verify no triple-newline exists anywhere in the body.
+        assertTrue("\n\n\n" !in prompt, "prompt must not contain a blank double-line anywhere")
+    }
 }
