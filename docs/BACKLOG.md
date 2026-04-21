@@ -21,6 +21,4 @@
 
 ## P2 — 记债/观望
 
-- **export-variant-deterministic-hash** — 同一 Project + 同 output profile 两次 export 是否 bit-identical？ffmpeg 默认非 deterministic（encoder order、timestamps）。`RenderCache` 假设一致性；如果实际不 bit-identical，cache 命中但产物不完全一样，可能破坏 regression 测试。**方向：** 写一个测试：同项目 export 两次，对比 SHA256。不一致就加 `-fflags +bitexact` 到 ffmpeg 命令、文档化哪些 codec option 必须固定。Rubric §5.2 / §5.3。
-
 - **integration-test-real-provider-smoke** — 当前 provider 测试全 mock，真 API 没 smoke test。Anthropic SSE 格式变动 / OpenAI retire 旧 model 时测试察觉不到。**方向：** 加 `@EnabledIfEnvironmentVariable("ANTHROPIC_API_KEY")` 的一轮端到端 smoke test（创建 session、发一句话、断言返回含 text + stop reason），CI 不跑，本地可选。Rubric 外。
