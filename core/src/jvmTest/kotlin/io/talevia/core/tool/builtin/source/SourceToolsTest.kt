@@ -298,7 +298,7 @@ class SourceToolsTest {
             listOf(SourceNodeId("character-mei"), SourceNodeId("style-warm")),
         )
         val folded = foldConsistencyIntoPrompt("a quiet morning shot", bindings)
-        // Style precedes character precedes base prompt (DECISIONS.md ordering).
+        // Style precedes character precedes base prompt (per docs/decisions/ prompt-folding-order entry).
         assertTrue(folded.effectivePrompt.contains("warm teal/orange"))
         assertTrue(folded.effectivePrompt.contains("teal hair, round glasses"))
         assertTrue(folded.effectivePrompt.endsWith("a quiet morning shot"))

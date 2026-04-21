@@ -14,7 +14,8 @@ import kotlinx.serialization.json.JsonPrimitive
  * so "source changed vs. didn't change" is answerable without diffing JSON blobs at
  * every read.
  *
- * We use **FNV-1a 64-bit**, hex-encoded. Rationale, recorded in `docs/DECISIONS.md`:
+ * We use **FNV-1a 64-bit**, hex-encoded. Rationale, recorded under `docs/decisions/`
+ * (see `2026-04-19-content-hash-for-source-dag-fnv-1a-64-bit-hex.md`):
  *   - Pure Kotlin, zero dependency, stable across JVM / iOS / Android — picking a
  *     stdlib-less hash avoided taking on a crypto dep for the scaffolding commit.
  *   - Not cryptographic. Inside one project (10²–10³ nodes) FNV-1a 64's collision
