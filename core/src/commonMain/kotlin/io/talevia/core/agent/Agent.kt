@@ -159,6 +159,7 @@ class Agent(
             "model" to "${input.model.providerId}/${input.model.modelId}",
             "promptLen" to input.text.length,
         )
+        bus.publish(BusEvent.AgentRunStateChanged(input.sessionId, AgentRunState.Generating))
         try {
             val result = runLoop(input, handle)
             log.info(
@@ -170,14 +171,25 @@ class Agent(
                 "ms" to (clock.now() - runStart).inWholeMilliseconds,
                 "error" to result.error,
             )
+            val terminal = if (result.error != null) AgentRunState.Failed(result.error!!) else AgentRunState.Idle
+            bus.publish(BusEvent.AgentRunStateChanged(input.sessionId, terminal))
             return result
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
                 finalizeCancelled(handle, e.message)
                 bus.publish(BusEvent.SessionCancelled(input.sessionId))
+                bus.publish(BusEvent.AgentRunStateChanged(input.sessionId, AgentRunState.Cancelled))
             }
             log.info("run.cancelled", "session" to input.sessionId.value, "reason" to e.message)
             throw e
+        } catch (t: Throwable) {
+            bus.publish(
+                BusEvent.AgentRunStateChanged(
+                    input.sessionId,
+                    AgentRunState.Failed(t.message ?: t::class.simpleName ?: "unknown"),
+                ),
+            )
+            throw t
         } finally {
             metrics?.observe("agent.run.ms", (clock.now() - runStart).inWholeMilliseconds)
             inflightMutex.withLock { inflight.remove(input.sessionId) }
@@ -260,8 +272,10 @@ class Agent(
                             thresholdTokens = compactionTokenThreshold,
                         ),
                     )
+                    bus.publish(BusEvent.AgentRunStateChanged(input.sessionId, AgentRunState.Compacting))
                     compactor.process(input.sessionId, history, input.model)
                     history = store.listMessagesWithParts(input.sessionId, includeCompacted = false)
+                    bus.publish(BusEvent.AgentRunStateChanged(input.sessionId, AgentRunState.Generating))
                 }
             }
 
@@ -482,9 +496,13 @@ class Agent(
             state = ToolState.Running(event.input),
         )
         store.upsertPart(basePart)
+        // Coarse run-state: the Agent is suspended on a tool call. Fine-grained
+        // per-call progress still flows through PartUpdated on the tool part.
+        bus.publish(BusEvent.AgentRunStateChanged(asstMsg.sessionId, AgentRunState.AwaitingTool))
 
         if (tool == null) {
             store.upsertPart(basePart.copy(state = ToolState.Failed(event.input, "Unknown tool: ${event.toolId}")))
+            bus.publish(BusEvent.AgentRunStateChanged(asstMsg.sessionId, AgentRunState.Generating))
             return
         }
 
@@ -552,6 +570,10 @@ class Agent(
                 )
             },
         )
+        // Tool dispatch (success or failure) hands control back to the LLM —
+        // next turn re-enters Generating. The terminal run-state is published
+        // in run()'s outer try/finally.
+        bus.publish(BusEvent.AgentRunStateChanged(asstMsg.sessionId, AgentRunState.Generating))
     }
 
     /**

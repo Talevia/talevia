@@ -413,6 +413,7 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.AgentRunFailed -> "agent.run.failed"
     is BusEvent.AgentRetryScheduled -> "agent.retry.scheduled"
     is BusEvent.SessionCompactionAuto -> "session.compaction.auto"
+    is BusEvent.AgentRunStateChanged -> "agent.run.state.changed"
 }
 
 @Serializable data class CreateProjectRequest(val title: String)
@@ -503,6 +504,10 @@ data class BusEventDto(
     val reason: String? = null,
     val historyTokensBefore: Int? = null,
     val thresholdTokens: Int? = null,
+    /** `idle | generating | awaiting_tool | compacting | cancelled | failed` for `agent.run.state.changed`. */
+    val runState: String? = null,
+    /** Message-ish cause; set when `runState == "failed"`. */
+    val runStateCause: String? = null,
 ) {
     companion object {
         fun from(e: BusEvent): BusEventDto = when (e) {
@@ -544,6 +549,20 @@ data class BusEventDto(
                 "session.compaction.auto", e.sessionId.value,
                 historyTokensBefore = e.historyTokensBefore, thresholdTokens = e.thresholdTokens,
             )
+            is BusEvent.AgentRunStateChanged -> {
+                val tag = when (val s = e.state) {
+                    is io.talevia.core.agent.AgentRunState.Idle -> "idle" to null
+                    is io.talevia.core.agent.AgentRunState.Generating -> "generating" to null
+                    is io.talevia.core.agent.AgentRunState.AwaitingTool -> "awaiting_tool" to null
+                    is io.talevia.core.agent.AgentRunState.Compacting -> "compacting" to null
+                    is io.talevia.core.agent.AgentRunState.Cancelled -> "cancelled" to null
+                    is io.talevia.core.agent.AgentRunState.Failed -> "failed" to s.cause
+                }
+                BusEventDto(
+                    "agent.run.state.changed", e.sessionId.value,
+                    runState = tag.first, runStateCause = tag.second,
+                )
+            }
         }
     }
 }

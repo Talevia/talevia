@@ -4,6 +4,7 @@ import io.talevia.core.MessageId
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
+import io.talevia.core.agent.AgentRunState
 import io.talevia.core.session.Message
 import io.talevia.core.session.Part
 
@@ -138,5 +139,23 @@ sealed interface BusEvent {
         override val sessionId: SessionId,
         val historyTokensBefore: Int,
         val thresholdTokens: Int,
+    ) : SessionEvent
+
+    /**
+     * Explicit `Agent.run` state transition. See [AgentRunState] for the state
+     * diagram and invariants. Emitted on every transition (including
+     * `Idle → Generating` at run entry and the terminal transition to
+     * `Idle / Cancelled / Failed`), so UI subscribers can render a live
+     * status bar without polling.
+     *
+     * The finer-grained signals — `PartUpdated` for streaming text deltas,
+     * `SessionCompactionAuto` for the token crossing that drove a
+     * `Generating → Compacting` edge, `AgentRetryScheduled` for transient-
+     * error retries — still fire independently. This event is the
+     * "what high-level phase is the agent in?" coarse signal.
+     */
+    data class AgentRunStateChanged(
+        override val sessionId: SessionId,
+        val state: AgentRunState,
     ) : SessionEvent
 }

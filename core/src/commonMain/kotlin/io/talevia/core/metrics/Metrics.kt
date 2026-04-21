@@ -117,5 +117,15 @@ class EventBusMetricsSink(
         is BusEvent.SessionCancelled -> "session.cancelled"
         is BusEvent.AgentRetryScheduled -> "agent.retry.scheduled"
         is BusEvent.SessionCompactionAuto -> "session.compaction.auto"
+        is BusEvent.AgentRunStateChanged -> "agent.run.state.${stateTag(event.state)}"
+    }
+
+    private fun stateTag(state: io.talevia.core.agent.AgentRunState): String = when (state) {
+        is io.talevia.core.agent.AgentRunState.Idle -> "idle"
+        is io.talevia.core.agent.AgentRunState.Generating -> "generating"
+        is io.talevia.core.agent.AgentRunState.AwaitingTool -> "awaiting_tool"
+        is io.talevia.core.agent.AgentRunState.Compacting -> "compacting"
+        is io.talevia.core.agent.AgentRunState.Cancelled -> "cancelled"
+        is io.talevia.core.agent.AgentRunState.Failed -> "failed"
     }
 }
