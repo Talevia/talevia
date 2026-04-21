@@ -15,8 +15,6 @@
 
 - **auto-author-first-project-from-intent** — 小白路径 §5.4 的硬缺口：今天用户必须手动 `create_project` + 手动 `set_character_ref` / `add_source_node` 才能给 agent 投料。北极星是 "一句话意图 → 可看初稿"。**方向：** 新增 `start_project_from_intent(intent: String)` tool：LLM 调 agent 把 intent 解析成 genre（先覆盖 narrative / vlog），生成 skeleton source graph（character / style / shot placeholders），返回 projectId。不产生任何 AIGC 资产——只是搭好骨架让 agent 继续 fill in。Rubric §5.4。
 
-- **debt-consolidate-project-list-queries** — `core/tool/builtin/project/` 下 6 个 `list_*` 工具（`list_clips_bound_to_asset`、`list_clips_for_source`、`list_lockfile_entries`、`list_project_snapshots`、`list_projects`、`list_transitions`）和 `session_query` / `source_query` 同病——每个维度一个 tool，LLM spec token 重复。**方向：** 给 `project_query` 加至少 4 个新 select（`lockfile_entries` / `transitions` / `clips_for_asset` / `clips_for_source`），吸收 4-6 个旧工具。`list_projects` / `list_project_snapshots` 作用域略有差异（前者无 projectId）可延后或并入。Rubric 外 / §R.5.4。
-
 - **bulk-apply-tool-input-default-projectid** — 上轮 `tool-input-default-projectid-from-context` 只给 3 个 tool（`project_query` / `add_clip` / `describe_project`）切成了可选 `projectId`；其余 10+ timeline / AIGC / source 突变工具仍要求 explicit `projectId`。**方向：** 扩展 `ToolContext.resolveProjectId` 的消费面——把至少 `AddTrackTool` / `AddSubtitleTool` / `AddTransitionTool` / `RemoveClipTool` / `ReplaceClipTool` / `TrimClipTool` / `SplitClipTool` / `MoveClipTool` / `SetClipVolumeTool` / `EditTextClipTool` 这类 clipId-scoped timeline write tools 的 `projectId` 改为可选，统一行为。Rubric §5.4。
 
 ## P1 — 中优，做完 P0 再排
