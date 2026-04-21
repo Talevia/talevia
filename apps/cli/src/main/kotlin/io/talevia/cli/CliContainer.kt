@@ -98,6 +98,7 @@ import io.talevia.core.tool.builtin.session.ArchiveSessionTool
 import io.talevia.core.tool.builtin.session.DeleteSessionTool
 import io.talevia.core.tool.builtin.session.DescribeMessageTool
 import io.talevia.core.tool.builtin.session.DescribeSessionTool
+import io.talevia.core.tool.builtin.session.EstimateSessionTokensTool
 import io.talevia.core.tool.builtin.session.ForkSessionTool
 import io.talevia.core.tool.builtin.session.ListMessagesTool
 import io.talevia.core.tool.builtin.session.ListPartsTool
@@ -264,6 +265,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(ListSessionsTool(sessions))
         register(DescribeSessionTool(sessions))
         register(ListMessagesTool(sessions))
+        register(EstimateSessionTokensTool(sessions))
         register(DescribeMessageTool(sessions))
         register(ForkSessionTool(sessions))
         register(RenameSessionTool(sessions))
