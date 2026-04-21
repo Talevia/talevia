@@ -64,6 +64,16 @@ class ToolContext(
                 "Call switch_project to bind a project to the session, or pass projectId explicitly.",
         )
     }
+
+    /**
+     * Session-side mirror of [resolveProjectId]. Session tools whose input
+     * carries an optional `sessionId` default from the owning [sessionId]
+     * when the agent omits the arg. Unlike [resolveProjectId] there is no
+     * error arm — the dispatch always knows which session it is running
+     * under, so a missing explicit input always resolves.
+     */
+    fun resolveSessionId(input: String?): SessionId =
+        if (input != null) SessionId(input) else sessionId
 }
 
 data class ToolResult<O>(

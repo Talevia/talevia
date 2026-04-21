@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.session
 
-import io.talevia.core.SessionId
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.session.Message
 import io.talevia.core.session.Part
@@ -13,7 +12,6 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -47,7 +45,12 @@ class DescribeSessionTool(
 ) : Tool<DescribeSessionTool.Input, DescribeSessionTool.Output> {
 
     @Serializable data class Input(
-        val sessionId: String,
+        /**
+         * Optional — omit to default to the tool's owning session
+         * (`ToolContext.sessionId`). Pass an explicit id only to inspect a
+         * different session than the one currently dispatching.
+         */
+        val sessionId: String? = null,
     )
 
     @Serializable data class Output(
@@ -87,18 +90,21 @@ class DescribeSessionTool(
         putJsonObject("properties") {
             putJsonObject("sessionId") {
                 put("type", "string")
-                put("description", "Session id from session_query(select=sessions).")
+                put(
+                    "description",
+                    "Optional — omit to describe this session (context-resolved). Explicit id from session_query(select=sessions) to inspect a different session.",
+                )
             }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("sessionId"))))
+        put("required", JsonArray(emptyList()))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val sid = SessionId(input.sessionId)
+        val sid = ctx.resolveSessionId(input.sessionId)
         val session = sessions.getSession(sid)
             ?: error(
-                "Session ${input.sessionId} not found. Call session_query(select=sessions) to discover valid session ids.",
+                "Session ${sid.value} not found. Call session_query(select=sessions) to discover valid session ids.",
             )
 
         val messages = sessions.listMessages(sid)

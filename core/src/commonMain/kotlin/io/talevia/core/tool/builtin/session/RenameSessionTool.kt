@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.session
 
-import io.talevia.core.SessionId
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.Tool
@@ -42,7 +41,12 @@ class RenameSessionTool(
 ) : Tool<RenameSessionTool.Input, RenameSessionTool.Output> {
 
     @Serializable data class Input(
-        val sessionId: String,
+        /**
+         * Optional — omit to default to the tool's owning session
+         * (`ToolContext.sessionId`). Pass an explicit id only to act on a
+         * different session than the one currently dispatching.
+         */
+        val sessionId: String? = null,
         val newTitle: String,
     )
 
@@ -66,24 +70,27 @@ class RenameSessionTool(
         putJsonObject("properties") {
             putJsonObject("sessionId") {
                 put("type", "string")
-                put("description", "Id of the session to rename.")
+                put(
+                    "description",
+                    "Optional — omit to rename this session (context-resolved). Explicit id to rename a different session.",
+                )
             }
             putJsonObject("newTitle") {
                 put("type", "string")
                 put("description", "The new title. Must be non-blank.")
             }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("sessionId"), JsonPrimitive("newTitle"))))
+        put("required", JsonArray(listOf(JsonPrimitive("newTitle"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         require(input.newTitle.isNotBlank()) { "newTitle must not be blank" }
 
-        val sid = SessionId(input.sessionId)
+        val sid = ctx.resolveSessionId(input.sessionId)
         val session = sessions.getSession(sid)
             ?: error(
-                "Session ${input.sessionId} not found. Call session_query(select=sessions) to discover valid session ids.",
+                "Session ${sid.value} not found. Call session_query(select=sessions) to discover valid session ids.",
             )
 
         val previousTitle = session.title

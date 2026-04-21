@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.session
 
-import io.talevia.core.SessionId
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.Tool
@@ -11,7 +10,6 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -42,7 +40,12 @@ class ArchiveSessionTool(
 ) : Tool<ArchiveSessionTool.Input, ArchiveSessionTool.Output> {
 
     @Serializable data class Input(
-        val sessionId: String,
+        /**
+         * Optional — omit to default to the tool's owning session
+         * (`ToolContext.sessionId`). Pass an explicit id only to archive a
+         * different session than the one currently dispatching.
+         */
+        val sessionId: String? = null,
     )
 
     @Serializable data class Output(
@@ -64,17 +67,23 @@ class ArchiveSessionTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("sessionId") { put("type", "string") }
+            putJsonObject("sessionId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to archive this session (context-resolved). Explicit id to archive a different session.",
+                )
+            }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("sessionId"))))
+        put("required", JsonArray(emptyList()))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val sid = SessionId(input.sessionId)
+        val sid = ctx.resolveSessionId(input.sessionId)
         val session = sessions.getSession(sid)
             ?: error(
-                "Session ${input.sessionId} not found. Call session_query(select=sessions) to discover valid session ids.",
+                "Session ${sid.value} not found. Call session_query(select=sessions) to discover valid session ids.",
             )
 
         val wasArchived = session.archived
@@ -107,7 +116,13 @@ class UnarchiveSessionTool(
 ) : Tool<UnarchiveSessionTool.Input, UnarchiveSessionTool.Output> {
 
     @Serializable data class Input(
-        val sessionId: String,
+        /**
+         * Optional — omit to default to the tool's owning session
+         * (`ToolContext.sessionId`). On the owning session this is a no-op
+         * (the session must be live to dispatch), but accepting the default
+         * keeps the 5-argument surface uniform.
+         */
+        val sessionId: String? = null,
     )
 
     @Serializable data class Output(
@@ -128,17 +143,23 @@ class UnarchiveSessionTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("sessionId") { put("type", "string") }
+            putJsonObject("sessionId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to unarchive this session (no-op on a live session). Explicit id to restore a different archived session.",
+                )
+            }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("sessionId"))))
+        put("required", JsonArray(emptyList()))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val sid = SessionId(input.sessionId)
+        val sid = ctx.resolveSessionId(input.sessionId)
         val session = sessions.getSession(sid)
             ?: error(
-                "Session ${input.sessionId} not found. The archived-session recovery handle is its " +
+                "Session ${sid.value} not found. The archived-session recovery handle is its " +
                     "id — make sure the caller has the right string.",
             )
 

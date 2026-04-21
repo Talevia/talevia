@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.session
 
 import io.talevia.core.MessageId
-import io.talevia.core.SessionId
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.Tool
@@ -11,7 +10,6 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -56,7 +54,12 @@ class ForkSessionTool(
 ) : Tool<ForkSessionTool.Input, ForkSessionTool.Output> {
 
     @Serializable data class Input(
-        val sessionId: String,
+        /**
+         * Optional — omit to default to the tool's owning session
+         * (`ToolContext.sessionId`). Pass an explicit id only to fork a
+         * different session than the one currently dispatching.
+         */
+        val sessionId: String? = null,
         /** Optional: only copy messages at-or-before this id. Omit to copy everything. */
         val anchorMessageId: String? = null,
         /** Optional new title. Defaults to "<parent title> (fork)". */
@@ -87,7 +90,10 @@ class ForkSessionTool(
         putJsonObject("properties") {
             putJsonObject("sessionId") {
                 put("type", "string")
-                put("description", "Id of the session to branch from.")
+                put(
+                    "description",
+                    "Optional — omit to branch this session (context-resolved). Explicit id to branch a different session.",
+                )
             }
             putJsonObject("anchorMessageId") {
                 put("type", "string")
@@ -103,15 +109,15 @@ class ForkSessionTool(
                 put("description", "Optional title for the branch. Default \"<parent title> (fork)\".")
             }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("sessionId"))))
+        put("required", JsonArray(emptyList()))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val parentId = SessionId(input.sessionId)
+        val parentId = ctx.resolveSessionId(input.sessionId)
         val parent = sessions.getSession(parentId)
             ?: error(
-                "Session ${input.sessionId} not found. Call session_query(select=sessions) to discover valid session ids.",
+                "Session ${parentId.value} not found. Call session_query(select=sessions) to discover valid session ids.",
             )
 
         val anchorId = input.anchorMessageId?.takeIf { it.isNotBlank() }?.let { MessageId(it) }
