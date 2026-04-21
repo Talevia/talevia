@@ -39,7 +39,7 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
-import io.talevia.core.tool.builtin.source.UpdateCharacterRefTool
+import io.talevia.core.tool.builtin.source.SetCharacterRefTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -149,7 +149,7 @@ class RefactorLoopE2ETest {
 
         val registry = ToolRegistry()
         registry.register(GenerateImageTool(imageEngine, storage, writer, store))
-        registry.register(UpdateCharacterRefTool(store))
+        registry.register(SetCharacterRefTool(store))
         registry.register(RegenerateStaleClipsTool(store, registry))
         registry.register(ExportTool(store, videoEngine))
 
@@ -220,7 +220,7 @@ class RefactorLoopE2ETest {
         assertEquals(1, videoEngine.renderCalls)
 
         // --- 2. edit the character — this is the §6 "rename Mei's hair" step
-        registry["update_character_ref"]!!.dispatch(
+        registry["set_character_ref"]!!.dispatch(
             buildJsonObject {
                 put("projectId", pid.value)
                 put("nodeId", "mei")

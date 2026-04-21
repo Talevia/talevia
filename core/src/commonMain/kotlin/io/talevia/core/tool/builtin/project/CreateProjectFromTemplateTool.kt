@@ -63,7 +63,7 @@ import kotlinx.serialization.serializer
 /**
  * Bootstrap a project *pre-populated* with a genre skeleton (VISION §5.4
  * novice path). `create_project` alone leaves a blank source DAG — the
- * agent then has to `define_character_ref` + `define_style_bible` + …
+ * agent then has to `set_character_ref` + `set_style_bible` + …
  * before it can do anything useful with AIGC. This tool inverts the order:
  * pick a genre template, get a working source graph with placeholder
  * character / style / scene stubs, then refine.
@@ -123,8 +123,8 @@ class CreateProjectFromTemplateTool(
         "Create a new project and seed its source DAG with a genre template so the " +
             "agent doesn't start from zero nodes. Templates: narrative / vlog / ad / " +
             "musicmv / tutorial. All seeded nodes use TODO placeholders — replace " +
-            "them via update_source_node_body / update_character_ref / update_style_bible / " +
-            "update_brand_palette before the first AIGC call. The musicmv template does " +
+            "them via update_source_node_body / set_character_ref / set_style_bible / " +
+            "set_brand_palette before the first AIGC call. The musicmv template does " +
             "not seed a musicmv.track node (needs an imported music asset first). " +
             "Resolution + fps options same as create_project."
     override val inputSerializer: KSerializer<Input> = serializer()

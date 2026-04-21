@@ -23,8 +23,8 @@ import kotlinx.serialization.serializer
  * Replace a source node's [io.talevia.core.domain.source.SourceNode.body] wholesale —
  * the generic, kind-agnostic body editor the update_* trio deliberately does not cover.
  *
- * The three `update_character_ref` / `update_style_bible` / `update_brand_palette`
- * tools exist for the consistency kinds because those have typed bodies, field-level
+ * The three `set_character_ref` / `set_style_bible` / `set_brand_palette` tools
+ * exist for the consistency kinds because those have typed bodies, field-level
  * semantics (which field to clear vs patch), and a small enough surface that a
  * partial-patch ergonomic is worth the extra code. Every other kind — narrative.shot,
  * vlog.raw_footage, musicmv.*, tutorial.*, ad.*, or anything the agent created via
@@ -62,12 +62,12 @@ import kotlinx.serialization.serializer
  *
  * **No TimelineSnapshot.** Body edits touch zero [io.talevia.core.domain.Clip]
  * fields (`sourceBinding` is by id, not by hash), so `revert_timeline` would be a
- * no-op anyway. Following the pattern of `update_character_ref` /
+ * no-op anyway. Following the pattern of `set_character_ref` /
  * `set_source_node_parents`, which also don't emit snapshots for pure-source
  * mutations. Project-level undo for source edits lives in
  * `save_project_snapshot` / `restore_project_snapshot`.
  *
- * **Permission.** `source.write` — same tier as `update_character_ref` /
+ * **Permission.** `source.write` — same tier as `set_character_ref` /
  * `set_source_node_parents`.
  */
 class UpdateSourceNodeBodyTool(
@@ -99,8 +99,8 @@ class UpdateSourceNodeBodyTool(
     override val helpText: String =
         "Replace a source node's body wholesale (full replacement — no partial-patch). Kind-agnostic: " +
             "works on any node kind (narrative.shot, vlog.raw_footage, musicmv.*, tutorial.*, ad.*, " +
-            "or any imported/hand-authored node). Use update_character_ref / update_style_bible / " +
-            "update_brand_palette instead for those three consistency kinds when you want partial-patch " +
+            "or any imported/hand-authored node). Use set_character_ref / set_style_bible / " +
+            "set_brand_palette instead for those three consistency kinds when you want partial-patch " +
             "ergonomics. Does NOT touch kind (rebuild the node if the kind must change), parents " +
             "(use set_source_node_parents), or id (use rename_source_node). Bumps contentHash so " +
             "bound clips go stale — run find_stale_clips after editing to surface them."

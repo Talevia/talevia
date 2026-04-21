@@ -53,7 +53,7 @@ import kotlinx.serialization.serializer
  *    the operation was requested, the node was touched, snapshots should
  *    reflect it.
  *
- * **Permission.** `source.write` — same tier as `update_character_ref`.
+ * **Permission.** `source.write` — same tier as `set_character_ref`.
  */
 class SetSourceNodeParentsTool(
     private val projects: ProjectStore,

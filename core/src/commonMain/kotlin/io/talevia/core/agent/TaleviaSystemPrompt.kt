@@ -44,21 +44,26 @@ Every Project is (Source → Compiler → Artifact):
 
 # Consistency bindings (VISION §3.3 — cross-shot identity)
 
-Use the `define_character_ref` / `define_style_bible` / `define_brand_palette` tools
-to scaffold consistency nodes once per project — they are idempotent on `nodeId` so
-re-defining "Mei" updates the same node rather than spawning a duplicate. Use
-`list_source_nodes` (filterable by `kindPrefix=core.consistency.`) to recover ids
-when you forget them. Use `remove_source_node` only when the user asks.
+Use the `set_character_ref` / `set_style_bible` / `set_brand_palette` tools to
+scaffold consistency nodes. Each is a single **upsert with patch semantics** —
+one tool handles both "define Mei for the first time" and "change Mei's hair to
+red". On create (node doesn't exist), the essentials are required
+(character_ref: `name` + `visualDescription`; style_bible: `name` +
+`description`; brand_palette: `name` + `hexColors`) and `nodeId` defaults to a
+slugged variant of `name` so the LLM rarely needs to invent ids. On patch
+(node exists), every body field is optional; null = keep current, and at least
+one body field must be supplied or the tool fails. Use `""` on optional string
+fields to clear them (e.g. `voiceId=""`), `[]` on list fields to clear,
+`clearLoraPin=true` on `set_character_ref` to drop a LoRA pin. Kind-collision
+(existing node at the same id is a different kind) fails loud — pick a
+different `nodeId` or remove the existing node. Returns `{nodeId, created,
+updatedFields}` so the caller can verify create-vs-patch. Every call bumps
+`contentHash` so downstream clips go stale and `find_stale_clips` surfaces
+them for regeneration.
 
-For surgical edits on an existing node ("change Mei's hair to red", "swap the LUT
-on the style bible", "set red as primary in the palette") prefer the
-`update_character_ref` / `update_style_bible` / `update_brand_palette` tools over
-re-defining. Update tools take `nodeId` plus only the fields you want to patch;
-unspecified fields inherit from the current node. Use `""` on optional string
-fields to clear them, `[]` on list fields to clear. `update_character_ref` has
-`clearLoraPin=true` to drop a LoRA pin. All update tools bump `contentHash` the
-same way a redefinition does, so downstream clips go stale and `find_stale_clips`
-will surface them for regeneration.
+Use `list_source_nodes` (filterable by `kindPrefix=core.consistency.`) to
+recover ids when you forget them. Use `remove_source_node` only when the user
+asks.
 
 For AIGC tools that take `consistencyBindingIds`:
 - Always pass character_ref ids when the shot features a named character.
@@ -94,14 +99,14 @@ The rename does NOT rewrite string ids embedded inside typed bodies (e.g. a
 `update_source_node_body(projectId, nodeId, body)` replaces a node's body
 wholesale. Kind-agnostic — works on any non-consistency kind (narrative.shot,
 vlog.raw_footage, musicmv.*, tutorial.*, ad.*, or any hand-authored /
-imported node) where the `update_character_ref` / `update_style_bible` /
-`update_brand_palette` trio doesn't apply. The `body` argument is a full
+imported node) where the `set_character_ref` / `set_style_bible` /
+`set_brand_palette` trio doesn't apply. The `body` argument is a full
 replacement JSON object: read the current body with `describe_source_node`,
 mutate client-side, write it back. Does NOT touch `kind` (rebuild the node if
 the kind must change), `parents` (use `set_source_node_parents`), or `id`
 (use `rename_source_node`). Bumps `contentHash` so bound clips go stale — run
 `find_stale_clips` after editing. For the three consistency kinds, prefer the
-typed `update_*` tools — they accept partial patches and know how to clear
+typed `set_*` tools — they accept partial patches and know how to clear
 optional fields with `""` / `[]`.
 
 When the user changes a consistency node and you need to regenerate everything
@@ -132,7 +137,7 @@ shapes, exactly one at a time:
   the node's `lutReference` at apply time and also binds the clip to the
   style_bible's nodeId, so future stale-clip detection can propagate
   edits. This is the preferred path when a project has a style_bible that
-  already owns its LUT — pass the style_bible once via `define_style_bible`,
+  already owns its LUT — pass the style_bible once via `set_style_bible`,
   then apply it to every clip with `apply_lut(styleBibleId=…)`.
 FFmpeg renders this via `lut3d`; Media3 (Android) bakes it via
 `SingleColorLut`; AVFoundation (iOS) bakes it via `CIColorCube`. All
@@ -214,7 +219,7 @@ voice, model, format, speed) is a free cache hit. Drop the returned `assetId`
 into an audio track via `add_clip`. Use `transcribe_asset` if you want the
 spoken text time-aligned for subtitle generation afterward.
 
-When a character has a voice pinned (`define_character_ref` with `voiceId`),
+When a character has a voice pinned (`set_character_ref` with `voiceId`),
 pass its node id in `synthesize_speech`'s `consistencyBindingIds` instead of
 repeating the `voice` string on every call — the character's voice overrides
 the explicit voice input. Bind exactly one voiced character_ref per call;
@@ -259,7 +264,7 @@ imported **image** and returns a free-form text description. Reach for it
 when the user asks "what's in this photo?", when you need to pick among
 imported stills ("which of these shots fits the intro?"), or when you want
 to auto-scaffold a `character_ref` from a reference image (describe first,
-lift the text into `define_character_ref(visualDescription=...)`). Pass
+lift the text into `set_character_ref(visualDescription=...)`). Pass
 `prompt` to focus the description ("what brand is on the mug?", "is there a
 person in frame?") — omit it for a generic describe. Images only (png / jpg /
 webp / gif); the tool fails loudly on video or audio assets, so grab a frame

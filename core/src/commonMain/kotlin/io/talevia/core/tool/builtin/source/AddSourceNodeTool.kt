@@ -23,14 +23,15 @@ import kotlinx.serialization.serializer
 
 /**
  * Create a source node of any kind — the kind-agnostic counterpart to the
- * typed `define_character_ref` / `define_style_bible` / `define_brand_palette`
- * trio and to `update_source_node_body` (which only *edits* existing nodes).
+ * typed `set_character_ref` / `set_style_bible` / `set_brand_palette` trio
+ * (which are upsert-with-patch for their three consistency kinds) and to
+ * `update_source_node_body` (which only *edits* existing nodes).
  *
  * Motivation. `create_project_from_template` seeds a genre skeleton, and the
- * three `define_*` tools cover consistency nodes. But after bootstrap the
+ * three `set_*` tools cover consistency nodes. But after bootstrap the
  * agent still cannot add a second `narrative.scene`, a fresh
  * `musicmv.performance_shot`, an extra `ad.variant_request`, etc. — none of
- * those genre kinds have dedicated `define_*` tools, and there's a design
+ * those genre kinds have dedicated `set_*` tools, and there's a design
  * choice not to mint 14+ per-kind wrappers (they'd each duplicate the same
  * JSON-schema / permission / commit shape with only the body serializer
  * differing). A single kind-agnostic `add_source_node` matches the shape of
@@ -89,7 +90,7 @@ class AddSourceNodeTool(
     override val id: String = "add_source_node"
     override val helpText: String =
         "Create a source node of any kind with an opaque JSON body and optional parent ids. " +
-            "Kind-agnostic counterpart to define_character_ref / define_style_bible / define_brand_palette " +
+            "Kind-agnostic counterpart to set_character_ref / set_style_bible / set_brand_palette " +
             "(which exist for ergonomic typed-body entry on those three consistency kinds). Use this " +
             "after create_project_from_template to extend the DAG with additional narrative.scene / " +
             "musicmv.performance_shot / ad.variant_request / tutorial.* nodes the template doesn't seed. " +

@@ -128,7 +128,7 @@ class ImportSourceNodeTool(
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         require(input.fromProjectId != input.toProjectId) {
             "fromProjectId and toProjectId are the same (${input.fromProjectId}); " +
-                "use define_character_ref / define_style_bible / define_brand_palette with a fresh nodeId " +
+                "use set_character_ref / set_style_bible / set_brand_palette with a fresh nodeId " +
                 "for within-project copies."
         }
         val fromPid = ProjectId(input.fromProjectId)

@@ -182,7 +182,7 @@ fun SourcePanel(
                         onSave = when (node.kind) {
                             ConsistencyKinds.CHARACTER_REF -> { name, secondary ->
                                 dispatch(
-                                    "update_character_ref",
+                                    "set_character_ref",
                                     buildJsonObject {
                                         put("projectId", projectId.value)
                                         put("nodeId", node.id.value)
@@ -194,7 +194,7 @@ fun SourcePanel(
                             }
                             ConsistencyKinds.STYLE_BIBLE -> { name, secondary ->
                                 dispatch(
-                                    "update_style_bible",
+                                    "set_style_bible",
                                     buildJsonObject {
                                         put("projectId", projectId.value)
                                         put("nodeId", node.id.value)
@@ -207,7 +207,7 @@ fun SourcePanel(
                             ConsistencyKinds.BRAND_PALETTE -> { name, secondary ->
                                 val hexList = secondary.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                                 dispatch(
-                                    "update_brand_palette",
+                                    "set_brand_palette",
                                     buildJsonObject {
                                         put("projectId", projectId.value)
                                         put("nodeId", node.id.value)
@@ -254,36 +254,36 @@ fun SourcePanel(
         AddSourceControls(
             onAddCharacter = { name, desc ->
                 dispatch(
-                    "define_character_ref",
+                    "set_character_ref",
                     buildJsonObject {
                         put("projectId", projectId.value)
                         put("name", name)
                         put("visualDescription", desc)
                     },
-                    "define character_ref $name",
+                    "set character_ref $name",
                 )
             },
             onAddStyle = { name, desc ->
                 dispatch(
-                    "define_style_bible",
+                    "set_style_bible",
                     buildJsonObject {
                         put("projectId", projectId.value)
                         put("name", name)
                         put("description", desc)
                     },
-                    "define style_bible $name",
+                    "set style_bible $name",
                 )
             },
             onAddPalette = { name, hexCsv ->
                 val hexList = hexCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                 dispatch(
-                    "define_brand_palette",
+                    "set_brand_palette",
                     buildJsonObject {
                         put("projectId", projectId.value)
                         put("name", name)
                         put("hexColors", buildJsonArray { hexList.forEach { add(JsonPrimitive(it)) } })
                     },
-                    "define brand_palette $name",
+                    "set brand_palette $name",
                 )
             },
         )

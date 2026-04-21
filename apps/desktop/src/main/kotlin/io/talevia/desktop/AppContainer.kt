@@ -111,9 +111,6 @@ import io.talevia.core.tool.builtin.session.RevertSessionTool
 import io.talevia.core.tool.builtin.session.UnarchiveSessionTool
 import io.talevia.core.tool.builtin.shell.BashTool
 import io.talevia.core.tool.builtin.source.AddSourceNodeTool
-import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
-import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
-import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
 import io.talevia.core.tool.builtin.source.DescribeSourceDagTool
 import io.talevia.core.tool.builtin.source.DescribeSourceNodeTool
 import io.talevia.core.tool.builtin.source.DiffSourceNodesTool
@@ -125,11 +122,11 @@ import io.talevia.core.tool.builtin.source.ListSourceNodesTool
 import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
 import io.talevia.core.tool.builtin.source.RenameSourceNodeTool
 import io.talevia.core.tool.builtin.source.SearchSourceNodesTool
+import io.talevia.core.tool.builtin.source.SetBrandPaletteTool
+import io.talevia.core.tool.builtin.source.SetCharacterRefTool
 import io.talevia.core.tool.builtin.source.SetSourceNodeParentsTool
-import io.talevia.core.tool.builtin.source.UpdateBrandPaletteTool
-import io.talevia.core.tool.builtin.source.UpdateCharacterRefTool
+import io.talevia.core.tool.builtin.source.SetStyleBibleTool
 import io.talevia.core.tool.builtin.source.UpdateSourceNodeBodyTool
-import io.talevia.core.tool.builtin.source.UpdateStyleBibleTool
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitleTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
@@ -372,12 +369,9 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(DiffProjectsTool(projects))
         register(ExportProjectTool(projects))
         register(ImportProjectFromJsonTool(projects))
-        register(DefineCharacterRefTool(projects))
-        register(UpdateCharacterRefTool(projects))
-        register(DefineStyleBibleTool(projects))
-        register(UpdateStyleBibleTool(projects))
-        register(DefineBrandPaletteTool(projects))
-        register(UpdateBrandPaletteTool(projects))
+        register(SetCharacterRefTool(projects))
+        register(SetStyleBibleTool(projects))
+        register(SetBrandPaletteTool(projects))
         register(DescribeSourceDagTool(projects))
         register(DescribeSourceNodeTool(projects))
         register(DiffSourceNodesTool(projects))

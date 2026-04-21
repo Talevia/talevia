@@ -28,7 +28,7 @@ import kotlinx.serialization.serializer
  *
  * Two modes selected by input shape:
  *  - **Within-project**: omit `leftProjectId` / `rightProjectId` → both nodes are
- *    resolved from `projectId`. Useful for diffing a `define_character_ref` against
+ *    resolved from `projectId`. Useful for diffing a `set_character_ref` against
  *    a later `fork_source_node` of it.
  *  - **Cross-project**: set `leftProjectId` and/or `rightProjectId` → either override
  *    `projectId` for that side. Useful post-`fork_project` when comparing a

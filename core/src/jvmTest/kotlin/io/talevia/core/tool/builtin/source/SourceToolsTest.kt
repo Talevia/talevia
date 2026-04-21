@@ -27,9 +27,9 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * End-to-end check that the new define_/list_/remove_ source tools wire all the way
- * through into the consistency fold pipeline AIGC tools depend on. If this passes
- * the agent has the missing leg of VISION §3.3 (defining bindings, then using them).
+ * End-to-end check that the set_* source tools wire all the way through into the
+ * consistency fold pipeline AIGC tools depend on. If this passes the agent has
+ * the missing leg of VISION §3.3 (upserting bindings, then using them).
  */
 class SourceToolsTest {
 
@@ -57,12 +57,12 @@ class SourceToolsTest {
         val ctx: ToolContext,
     )
 
-    @Test fun defineCharacterRefCreatesNodeWithSluggedDefaultId() = runTest {
+    @Test fun setCharacterRefCreatesNodeWithSluggedDefaultId() = runTest {
         val rig = rig()
-        val tool = DefineCharacterRefTool(rig.store)
+        val tool = SetCharacterRefTool(rig.store)
 
         val result = tool.execute(
-            DefineCharacterRefTool.Input(
+            SetCharacterRefTool.Input(
                 projectId = rig.pid.value,
                 name = "Mei",
                 visualDescription = "teal hair, round glasses, yellow raincoat",
@@ -71,18 +71,18 @@ class SourceToolsTest {
         )
 
         assertEquals("character-mei", result.data.nodeId)
-        assertEquals(false, result.data.replaced)
+        assertEquals(true, result.data.created)
         val project = rig.store.get(rig.pid)!!
         val node = assertNotNull(project.source.byId[SourceNodeId("character-mei")])
         assertEquals(ConsistencyKinds.CHARACTER_REF, node.kind)
         assertEquals("Mei", node.asCharacterRef()?.name)
     }
 
-    @Test fun reDefiningSameIdReplacesAndMarksReplaced() = runTest {
+    @Test fun reCallingSameNameHitsPatchPathNotCreate() = runTest {
         val rig = rig()
-        val tool = DefineCharacterRefTool(rig.store)
+        val tool = SetCharacterRefTool(rig.store)
         tool.execute(
-            DefineCharacterRefTool.Input(
+            SetCharacterRefTool.Input(
                 projectId = rig.pid.value,
                 name = "Mei",
                 visualDescription = "v1",
@@ -90,14 +90,14 @@ class SourceToolsTest {
             rig.ctx,
         )
         val second = tool.execute(
-            DefineCharacterRefTool.Input(
+            SetCharacterRefTool.Input(
                 projectId = rig.pid.value,
                 name = "Mei",
                 visualDescription = "v2",
             ),
             rig.ctx,
         )
-        assertEquals(true, second.data.replaced)
+        assertEquals(false, second.data.created)
         val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("character-mei")]!!
         assertEquals("v2", node.asCharacterRef()!!.visualDescription)
         // contentHash must change so downstream cache is correctly invalidated.
@@ -105,12 +105,12 @@ class SourceToolsTest {
         assertTrue(node.revision > 0)
     }
 
-    @Test fun defineCharacterRefPersistsOptionalVoiceId() = runTest {
+    @Test fun setCharacterRefPersistsOptionalVoiceId() = runTest {
         val rig = rig()
-        val tool = DefineCharacterRefTool(rig.store)
+        val tool = SetCharacterRefTool(rig.store)
 
         val result = tool.execute(
-            DefineCharacterRefTool.Input(
+            SetCharacterRefTool.Input(
                 projectId = rig.pid.value,
                 name = "Mei",
                 visualDescription = "x",
@@ -121,12 +121,10 @@ class SourceToolsTest {
         val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId(result.data.nodeId)]!!
         assertEquals("nova", node.asCharacterRef()?.voiceId)
 
-        // Re-define with blank voiceId → normalised to null, not retained verbatim.
+        // Patch with blank voiceId → clears the pin.
         tool.execute(
-            DefineCharacterRefTool.Input(
+            SetCharacterRefTool.Input(
                 projectId = rig.pid.value,
-                name = "Mei",
-                visualDescription = "x",
                 nodeId = result.data.nodeId,
                 voiceId = "   ",
             ),
@@ -138,9 +136,9 @@ class SourceToolsTest {
 
     @Test fun explicitNodeIdOverridesSlug() = runTest {
         val rig = rig()
-        val tool = DefineStyleBibleTool(rig.store)
+        val tool = SetStyleBibleTool(rig.store)
         val result = tool.execute(
-            DefineStyleBibleTool.Input(
+            SetStyleBibleTool.Input(
                 projectId = rig.pid.value,
                 name = "cinematic warm",
                 description = "warm teal/orange, shallow DOF",
@@ -159,9 +157,9 @@ class SourceToolsTest {
 
     @Test fun brandPaletteNormalisesHexAndRejectsBadInput() = runTest {
         val rig = rig()
-        val tool = DefineBrandPaletteTool(rig.store)
+        val tool = SetBrandPaletteTool(rig.store)
         val result = tool.execute(
-            DefineBrandPaletteTool.Input(
+            SetBrandPaletteTool.Input(
                 projectId = rig.pid.value,
                 name = "Talevia Brand",
                 hexColors = listOf("0a84ff", "#ff3b30"),
@@ -175,7 +173,7 @@ class SourceToolsTest {
 
         assertFailsWith<IllegalArgumentException> {
             tool.execute(
-                DefineBrandPaletteTool.Input(
+                SetBrandPaletteTool.Input(
                     projectId = rig.pid.value,
                     name = "broken",
                     hexColors = listOf("#zzzzzz"),
@@ -185,10 +183,10 @@ class SourceToolsTest {
         }
     }
 
-    @Test fun replacingWithDifferentKindFails() = runTest {
+    @Test fun createWithDifferentKindFails() = runTest {
         val rig = rig()
-        DefineCharacterRefTool(rig.store).execute(
-            DefineCharacterRefTool.Input(
+        SetCharacterRefTool(rig.store).execute(
+            SetCharacterRefTool.Input(
                 projectId = rig.pid.value,
                 name = "Mei",
                 visualDescription = "v1",
@@ -198,8 +196,8 @@ class SourceToolsTest {
         )
         // Try to reuse "shared" as a style bible — must fail loudly.
         val ex = assertFailsWith<IllegalArgumentException> {
-            DefineStyleBibleTool(rig.store).execute(
-                DefineStyleBibleTool.Input(
+            SetStyleBibleTool(rig.store).execute(
+                SetStyleBibleTool.Input(
                     projectId = rig.pid.value,
                     name = "house",
                     description = "warm",
@@ -213,12 +211,12 @@ class SourceToolsTest {
 
     @Test fun listFiltersByKindPrefixAndSurfacesContentHash() = runTest {
         val rig = rig()
-        DefineCharacterRefTool(rig.store).execute(
-            DefineCharacterRefTool.Input(rig.pid.value, "Mei", "teal hair"),
+        SetCharacterRefTool(rig.store).execute(
+            SetCharacterRefTool.Input(rig.pid.value, "Mei", "teal hair"),
             rig.ctx,
         )
-        DefineStyleBibleTool(rig.store).execute(
-            DefineStyleBibleTool.Input(rig.pid.value, "house", "warm look"),
+        SetStyleBibleTool(rig.store).execute(
+            SetStyleBibleTool.Input(rig.pid.value, "house", "warm look"),
             rig.ctx,
         )
         val tool = ListSourceNodesTool(rig.store)
@@ -242,8 +240,8 @@ class SourceToolsTest {
 
     @Test fun listIncludeBodySurfacesFullJson() = runTest {
         val rig = rig()
-        DefineCharacterRefTool(rig.store).execute(
-            DefineCharacterRefTool.Input(rig.pid.value, "Mei", "teal hair"),
+        SetCharacterRefTool(rig.store).execute(
+            SetCharacterRefTool.Input(rig.pid.value, "Mei", "teal hair"),
             rig.ctx,
         )
         val list = ListSourceNodesTool(rig.store).execute(
@@ -255,8 +253,8 @@ class SourceToolsTest {
 
     @Test fun removeSourceNodeRemovesAndErrorsOnMissing() = runTest {
         val rig = rig()
-        DefineCharacterRefTool(rig.store).execute(
-            DefineCharacterRefTool.Input(rig.pid.value, "Mei", "v1"),
+        SetCharacterRefTool(rig.store).execute(
+            SetCharacterRefTool.Input(rig.pid.value, "Mei", "v1"),
             rig.ctx,
         )
         val remove = RemoveSourceNodeTool(rig.store)
@@ -274,16 +272,16 @@ class SourceToolsTest {
 
     @Test fun foldedPromptPicksUpDefinedBindingsEndToEnd() = runTest {
         val rig = rig()
-        DefineCharacterRefTool(rig.store).execute(
-            DefineCharacterRefTool.Input(
+        SetCharacterRefTool(rig.store).execute(
+            SetCharacterRefTool.Input(
                 projectId = rig.pid.value,
                 name = "Mei",
                 visualDescription = "teal hair, round glasses",
             ),
             rig.ctx,
         )
-        DefineStyleBibleTool(rig.store).execute(
-            DefineStyleBibleTool.Input(
+        SetStyleBibleTool(rig.store).execute(
+            SetStyleBibleTool.Input(
                 projectId = rig.pid.value,
                 name = "warm",
                 description = "warm teal/orange",
@@ -306,19 +304,19 @@ class SourceToolsTest {
         assertTrue(folded.negativePrompt!!.contains("flat lighting"))
     }
 
-    @Test fun defineCharacterRefThreadsParentIdsIntoNode() = runTest {
+    @Test fun setCharacterRefThreadsParentIdsIntoNode() = runTest {
         val rig = rig()
         // Parent must exist before the child can reference it.
-        DefineStyleBibleTool(rig.store).execute(
-            DefineStyleBibleTool.Input(
+        SetStyleBibleTool(rig.store).execute(
+            SetStyleBibleTool.Input(
                 projectId = rig.pid.value,
                 name = "Warm",
                 description = "warm grain",
             ),
             rig.ctx,
         )
-        DefineCharacterRefTool(rig.store).execute(
-            DefineCharacterRefTool.Input(
+        SetCharacterRefTool(rig.store).execute(
+            SetCharacterRefTool.Input(
                 projectId = rig.pid.value,
                 name = "Mei",
                 visualDescription = "teal hair",
@@ -332,16 +330,16 @@ class SourceToolsTest {
 
     @Test fun parentEditCascadesContentHashDownstream() = runTest {
         val rig = rig()
-        DefineBrandPaletteTool(rig.store).execute(
-            DefineBrandPaletteTool.Input(
+        SetBrandPaletteTool(rig.store).execute(
+            SetBrandPaletteTool.Input(
                 projectId = rig.pid.value,
                 name = "Acme",
                 hexColors = listOf("#0A84FF"),
             ),
             rig.ctx,
         )
-        DefineStyleBibleTool(rig.store).execute(
-            DefineStyleBibleTool.Input(
+        SetStyleBibleTool(rig.store).execute(
+            SetStyleBibleTool.Input(
                 projectId = rig.pid.value,
                 name = "AcmeLook",
                 description = "brand-aligned look",
@@ -351,11 +349,11 @@ class SourceToolsTest {
         )
         val hashBefore = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("style-acmelook")]!!.contentHash
 
-        // Edit the parent brand palette — child style_bible's contentHash should bump
+        // Patch the parent brand palette — child style_bible's contentHash should bump
         // because its *parents* list is part of the hash even though the child body
         // didn't change. Plus, Source.stale() flags the descendant as stale.
-        DefineBrandPaletteTool(rig.store).execute(
-            DefineBrandPaletteTool.Input(
+        SetBrandPaletteTool(rig.store).execute(
+            SetBrandPaletteTool.Input(
                 projectId = rig.pid.value,
                 name = "Acme",
                 hexColors = listOf("#FF3B30"),
@@ -379,8 +377,8 @@ class SourceToolsTest {
     @Test fun parentIdsThatDontExistFailLoudly() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalArgumentException> {
-            DefineCharacterRefTool(rig.store).execute(
-                DefineCharacterRefTool.Input(
+            SetCharacterRefTool(rig.store).execute(
+                SetCharacterRefTool.Input(
                     projectId = rig.pid.value,
                     name = "Mei",
                     visualDescription = "teal hair",
@@ -395,8 +393,8 @@ class SourceToolsTest {
     @Test fun selfParentIsRejectedAtTheToolBoundary() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalArgumentException> {
-            DefineCharacterRefTool(rig.store).execute(
-                DefineCharacterRefTool.Input(
+            SetCharacterRefTool(rig.store).execute(
+                SetCharacterRefTool.Input(
                     projectId = rig.pid.value,
                     name = "Mei",
                     visualDescription = "teal hair",
@@ -409,39 +407,39 @@ class SourceToolsTest {
         assertTrue("character-mei" in ex.message!!, ex.message)
     }
 
-    @Test fun replacingCharacterRefUpdatesParentsToo() = runTest {
+    @Test fun patchingCharacterRefUpdatesParentsToo() = runTest {
         val rig = rig()
-        DefineStyleBibleTool(rig.store).execute(
-            DefineStyleBibleTool.Input(
+        SetStyleBibleTool(rig.store).execute(
+            SetStyleBibleTool.Input(
                 projectId = rig.pid.value,
                 name = "Warm",
                 description = "warm grain",
             ),
             rig.ctx,
         )
-        DefineBrandPaletteTool(rig.store).execute(
-            DefineBrandPaletteTool.Input(
+        SetBrandPaletteTool(rig.store).execute(
+            SetBrandPaletteTool.Input(
                 projectId = rig.pid.value,
                 name = "Acme",
                 hexColors = listOf("#0A84FF"),
             ),
             rig.ctx,
         )
-        // Define once with no parents.
-        DefineCharacterRefTool(rig.store).execute(
-            DefineCharacterRefTool.Input(
+        // Create once with no parents.
+        SetCharacterRefTool(rig.store).execute(
+            SetCharacterRefTool.Input(
                 projectId = rig.pid.value,
                 name = "Mei",
                 visualDescription = "teal hair",
             ),
             rig.ctx,
         )
-        // Replace with parents — the tool must update the parent list on the
+        // Patch with parents — the tool must update the parent list on the
         // existing node, not just the body.
-        DefineCharacterRefTool(rig.store).execute(
-            DefineCharacterRefTool.Input(
+        SetCharacterRefTool(rig.store).execute(
+            SetCharacterRefTool.Input(
                 projectId = rig.pid.value,
-                name = "Mei",
+                nodeId = "character-mei",
                 visualDescription = "teal hair v2",
                 parentIds = listOf("style-warm", "brand-acme"),
             ),

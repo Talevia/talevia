@@ -30,7 +30,7 @@ import kotlinx.serialization.serializer
  * pattern becomes:
  *
  *   1. User: "make Mei's hair red instead of teal"
- *   2. Agent: define_character_ref (idempotent on `mei` → revision++)
+ *   2. Agent: set_character_ref (idempotent on `mei` → revision++)
  *   3. Agent: find_stale_clips → list of clip ids + which source ids changed
  *   4. Agent: regenerate each (calling generate_image with the same
  *      `consistencyBindingIds=["mei"]`) and replace via add_clip / future

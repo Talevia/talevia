@@ -874,7 +874,7 @@ private fun FpsDropdown(selected: FpsPreset, onSelect: (FpsPreset) -> Unit) {
  * asset-id fields (generate_image / _video / _music / extract_frame /
  * upscale_asset / synthesize_speech) and resolves them via MediaStorage.
  * Returns null when the tool output has no natural file artefact (e.g.
- * `apply_filter`, `add_clip`, `define_character_ref`).
+ * `apply_filter`, `add_clip`, `set_character_ref`).
  */
 private suspend fun resolveOpenablePath(
     container: AppContainer,
