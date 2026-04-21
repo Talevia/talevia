@@ -69,6 +69,7 @@ final class AppContainer {
         self.permissions = DefaultPermissionService(bus: self.bus)
 
         let registry = ToolRegistry()
+        registry.register(tool: ListToolsTool(registry: registry))
         registry.register(tool: TodoWriteTool(clock: clock))
         registry.register(tool: ListSessionsTool(sessions: self.sessions))
         registry.register(tool: DescribeSessionTool(sessions: self.sessions))

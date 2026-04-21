@@ -157,6 +157,7 @@ class AndroidAppContainer(context: Context) {
     val httpClient: HttpClient = HttpClient(CIO)
 
     val tools: ToolRegistry = ToolRegistry().apply {
+        register(io.talevia.core.tool.builtin.meta.ListToolsTool(this))
         register(TodoWriteTool())
         register(ListSessionsTool(sessions))
         register(DescribeSessionTool(sessions))

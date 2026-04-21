@@ -39,6 +39,8 @@ object DefaultPermissionRuleset {
         // Provider introspection (list_providers) — pure local container state,
         // no external call. Silent default matches the other `*.read` keywords.
         PermissionRule(permission = "provider.read", pattern = "*", action = PermissionAction.ALLOW),
+        // Tool-registry introspection (list_tools). Pure local state; silent default.
+        PermissionRule(permission = "tool.read", pattern = "*", action = PermissionAction.ALLOW),
 
         // Side-effectful — always confirm
         PermissionRule(permission = "media.export.write", pattern = "*", action = PermissionAction.ASK),
