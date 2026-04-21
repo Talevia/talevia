@@ -16,7 +16,7 @@ import io.talevia.core.domain.source.SourceRef
  *    invariants stay cycle-free at the entry point.
  *  - Every id must resolve to an existing node in [source] — otherwise the
  *    [SourceNode.parents] list would carry a ref to a ghost, which then shows
- *    up as garbage in `list_source_nodes` and corrupts stale-propagation.
+ *    up as garbage in `source_query(select=nodes)` and corrupts stale-propagation.
  *  - Deduplicates while preserving the caller's order — repeats in the parent
  *    list carry no extra meaning.
  */

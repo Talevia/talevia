@@ -163,7 +163,7 @@ class RenameSourceNodeTool(
             if (source.byId[oldId] == null) {
                 error(
                     "Source node ${input.oldId} not found in project ${input.projectId}. " +
-                        "Call list_source_nodes to discover available ids.",
+                        "Call source_query(select=nodes) to discover available ids.",
                 )
             }
             if (source.byId[newId] != null) {

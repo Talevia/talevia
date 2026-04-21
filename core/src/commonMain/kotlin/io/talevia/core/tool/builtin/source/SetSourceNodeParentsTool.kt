@@ -36,13 +36,13 @@ import kotlinx.serialization.serializer
  * **Semantics.**
  *  - `parentIds` is a **full replacement**. Empty list clears all parents.
  *    Partial editing (add-one, remove-one) is up to the caller — pass
- *    `list_source_nodes` output, tweak, write back.
+ *    `source_query(select=nodes)` output, tweak, write back.
  *  - Ids are resolved via the same `resolveParentRefs` helper the
  *    `define_*` tools use: no self-reference, every id exists, duplicates
  *    deduped with insertion-order preserved.
  *  - **Cycles rejected.** Walking transitively, if any proposed parent's
  *    ancestor set contains the node being edited, fail loud. A cycle in
- *    the Source DAG would break stale-propagation and `describe_source_dag`
+ *    the Source DAG would break stale-propagation and `source_query(select=dag_summary)`
  *    rendering.
  *  - Bumps contentHash via `replaceNode` — stale-propagation (VISION §3.2)
  *    picks it up the usual way.
@@ -124,7 +124,7 @@ class SetSourceNodeParentsTool(
             val existing = source.byId[nodeId]
                 ?: error(
                     "node ${nodeId.value} not found in project ${input.projectId}; " +
-                        "call list_source_nodes to find the id.",
+                        "call source_query(select=nodes) to find the id.",
                 )
             previous = existing.parents.map { it.nodeId.value }
             val refs = resolveParentRefs(input.parentIds, source, nodeId)

@@ -151,7 +151,7 @@ class UpdateSourceNodeBodyTool(
             val existing = source.byId[nodeId]
                 ?: error(
                     "Source node ${nodeId.value} not found in project ${input.projectId}. " +
-                        "Call list_source_nodes or describe_source_node to discover available ids.",
+                        "Call source_query(select=nodes) or describe_source_node to discover available ids.",
                 )
             previousHash = existing.contentHash
             kindSeen = existing.kind

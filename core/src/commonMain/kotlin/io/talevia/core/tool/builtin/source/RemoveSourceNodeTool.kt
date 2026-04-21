@@ -44,7 +44,7 @@ class RemoveSourceNodeTool(
     override val id: String = "remove_source_node"
     override val helpText: String =
         "Remove a source node by id. Does not cascade — downstream clips with a binding to this node " +
-            "will be treated as stale on the next render. Use list_source_nodes first to confirm the id."
+            "will be treated as stale on the next render. Use source_query(select=nodes) first to confirm the id."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.write")

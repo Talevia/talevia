@@ -98,7 +98,7 @@ class ListClipsForSourceTool(
         if (nodeId !in project.source.byId) {
             error(
                 "Source node ${input.sourceNodeId} not found in project ${input.projectId} — " +
-                    "call list_source_nodes to discover valid ids.",
+                    "call source_query(select=nodes) to discover valid ids.",
             )
         }
         val reports = project.clipsBoundTo(nodeId).map { r ->

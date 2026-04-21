@@ -2,6 +2,7 @@ package io.talevia.core.tool.builtin.source
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.CallId
+import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
@@ -20,6 +21,7 @@ import io.talevia.core.domain.source.stale
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.builtins.ListSerializer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -219,23 +221,41 @@ class SourceToolsTest {
             SetStyleBibleTool.Input(rig.pid.value, "house", "warm look"),
             rig.ctx,
         )
-        val tool = ListSourceNodesTool(rig.store)
-        val all = tool.execute(ListSourceNodesTool.Input(rig.pid.value), rig.ctx).data
-        assertEquals(2, all.totalCount)
-        val onlyChar = tool.execute(
-            ListSourceNodesTool.Input(rig.pid.value, kind = ConsistencyKinds.CHARACTER_REF),
+        val tool = SourceQueryTool(rig.store)
+        val all = tool.execute(
+            SourceQueryTool.Input(select = "nodes", projectId = rig.pid.value),
             rig.ctx,
         ).data
-        assertEquals(1, onlyChar.returnedCount)
-        assertEquals("character-mei", onlyChar.nodes.first().id)
+        assertEquals(2, all.total)
+        val onlyChar = tool.execute(
+            SourceQueryTool.Input(
+                select = "nodes",
+                projectId = rig.pid.value,
+                kind = ConsistencyKinds.CHARACTER_REF,
+            ),
+            rig.ctx,
+        ).data
+        assertEquals(1, onlyChar.returned)
+        val charRows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SourceQueryTool.NodeRow.serializer()),
+            onlyChar.rows,
+        )
+        assertEquals("character-mei", charRows.first().id)
 
         val byPrefix = tool.execute(
-            ListSourceNodesTool.Input(rig.pid.value, kindPrefix = "core.consistency."),
+            SourceQueryTool.Input(
+                select = "nodes",
+                projectId = rig.pid.value,
+                kindPrefix = "core.consistency.",
+            ),
             rig.ctx,
         ).data
-        assertEquals(2, byPrefix.returnedCount)
-        // contentHash is non-empty (real fingerprint, not the old revision stub).
-        assertTrue(byPrefix.nodes.all { it.contentHash.isNotEmpty() })
+        assertEquals(2, byPrefix.returned)
+        val prefixRows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SourceQueryTool.NodeRow.serializer()),
+            byPrefix.rows,
+        )
+        assertTrue(prefixRows.all { it.contentHash.isNotEmpty() })
     }
 
     @Test fun listIncludeBodySurfacesFullJson() = runTest {
@@ -244,11 +264,15 @@ class SourceToolsTest {
             SetCharacterRefTool.Input(rig.pid.value, "Mei", "teal hair"),
             rig.ctx,
         )
-        val list = ListSourceNodesTool(rig.store).execute(
-            ListSourceNodesTool.Input(rig.pid.value, includeBody = true),
+        val out = SourceQueryTool(rig.store).execute(
+            SourceQueryTool.Input(select = "nodes", projectId = rig.pid.value, includeBody = true),
             rig.ctx,
         ).data
-        assertNotNull(list.nodes.first().body)
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SourceQueryTool.NodeRow.serializer()),
+            out.rows,
+        )
+        assertNotNull(rows.first().body)
     }
 
     @Test fun removeSourceNodeRemovesAndErrorsOnMissing() = runTest {

@@ -56,9 +56,8 @@ updatedFields}` so the caller can verify create-vs-patch. Every call bumps
 `contentHash` so downstream clips go stale and `find_stale_clips` surfaces
 them for regeneration.
 
-Use `list_source_nodes` (filterable by `kindPrefix=core.consistency.`) to
-recover ids when you forget them. Use `remove_source_node` only when the user
-asks.
+Use `source_query(select=nodes, kindPrefix=core.consistency.)` to recover
+ids when you forget them. Use `remove_source_node` only when the user asks.
 
 For AIGC tools that take `consistencyBindingIds`:
 - Always pass character_ref ids when the shot features a named character.

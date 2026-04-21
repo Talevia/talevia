@@ -259,7 +259,7 @@ class ValidateProjectTool(
      *     the dangling edge never marks the orphaned descendant stale.
      *
      *  2. **Parent cycle**: a→b→c→a in the `parents` relation. Breaks DFS-
-     *     based traversals (`describe_source_dag.computeMaxDepth` has a
+     *     based traversals (`source_query(select=dag_summary).computeMaxDepth` has a
      *     cycle-guard, but other walkers — including the export-time
      *     topological ordering in `ExportSourceNodeTool.topoCollect` — assume
      *     an acyclic DAG). Also implies the hash-driven dedup logic in

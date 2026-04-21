@@ -26,14 +26,14 @@ import kotlinx.serialization.serializer
 /**
  * Focused single-node read — the missing "zoom in" tool for the Source DAG.
  *
- * `describe_source_dag` gives the bird's-eye structural summary. `list_source_nodes`
+ * `source_query(select=dag_summary)` gives the bird's-eye structural summary. `source_query(select=nodes)`
  * paginates rows. Neither answers the common agent question "tell me everything
  * about *this one node* so I can decide how to edit it": its typed body, its
  * parents and their kinds, its direct child nodes in the DAG, which clips on the
  * timeline it binds, and whether those clips are direct or transitively bound.
  *
  * Pulling this into `get_project_state` bloats every caller; pulling it per-field
- * (`list_source_nodes includeBody=true` for body, then `list_clips_for_source` for
+ * (`source_query(select=nodes) includeBody=true` for body, then `list_clips_for_source` for
  * bindings, then a third call to resolve parent kinds) is three round-trips.
  * This tool is the cheap single read.
  *
@@ -44,7 +44,7 @@ import kotlinx.serialization.serializer
  *    transitive-downstream closure; flag `directly` for clips that name this
  *    node exactly in their binding, `false` for clips bound via a descendant.
  *  - `summary`: one-line humanised summary (reuses the same humaniser as
- *    `list_source_nodes`) for terse LLM readback.
+ *    `source_query(select=nodes)`) for terse LLM readback.
  *
  * Read-only, `project.read` — cheap to call at any planning step.
  */
@@ -123,7 +123,7 @@ class DescribeSourceNodeTool(
         val node = project.source.byId[nodeId]
             ?: error(
                 "Source node ${input.nodeId} not found in project ${input.projectId}. " +
-                    "Call list_source_nodes to discover valid ids.",
+                    "Call source_query(select=nodes) to discover valid ids.",
             )
 
         val byId = project.source.byId

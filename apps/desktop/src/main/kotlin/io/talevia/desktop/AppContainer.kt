@@ -105,18 +105,16 @@ import io.talevia.core.tool.builtin.session.SwitchProjectTool
 import io.talevia.core.tool.builtin.session.UnarchiveSessionTool
 import io.talevia.core.tool.builtin.shell.BashTool
 import io.talevia.core.tool.builtin.source.AddSourceNodeTool
-import io.talevia.core.tool.builtin.source.DescribeSourceDagTool
 import io.talevia.core.tool.builtin.source.DescribeSourceNodeTool
 import io.talevia.core.tool.builtin.source.DiffSourceNodesTool
 import io.talevia.core.tool.builtin.source.ExportSourceNodeTool
 import io.talevia.core.tool.builtin.source.ForkSourceNodeTool
 import io.talevia.core.tool.builtin.source.ImportSourceNodeFromJsonTool
 import io.talevia.core.tool.builtin.source.ImportSourceNodeTool
-import io.talevia.core.tool.builtin.source.ListSourceNodesTool
 import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
 import io.talevia.core.tool.builtin.source.RenameSourceNodeTool
-import io.talevia.core.tool.builtin.source.SearchSourceNodesTool
 import io.talevia.core.tool.builtin.source.SetBrandPaletteTool
+import io.talevia.core.tool.builtin.source.SourceQueryTool
 import io.talevia.core.tool.builtin.source.SetCharacterRefTool
 import io.talevia.core.tool.builtin.source.SetSourceNodeParentsTool
 import io.talevia.core.tool.builtin.source.SetStyleBibleTool
@@ -360,16 +358,14 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(SetCharacterRefTool(projects))
         register(SetStyleBibleTool(projects))
         register(SetBrandPaletteTool(projects))
-        register(DescribeSourceDagTool(projects))
+        register(SourceQueryTool(projects))
         register(DescribeSourceNodeTool(projects))
         register(DiffSourceNodesTool(projects))
-        register(ListSourceNodesTool(projects))
         register(RemoveSourceNodeTool(projects))
         register(ImportSourceNodeTool(projects))
         register(ExportSourceNodeTool(projects))
         register(ImportSourceNodeFromJsonTool(projects))
         register(AddSourceNodeTool(projects))
-        register(SearchSourceNodesTool(projects))
         register(ForkSourceNodeTool(projects))
         register(SetSourceNodeParentsTool(projects))
         register(RenameSourceNodeTool(projects))
