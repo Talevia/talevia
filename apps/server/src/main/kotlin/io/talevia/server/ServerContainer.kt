@@ -459,6 +459,7 @@ class ServerContainer(
 
     init {
         tools.register(io.talevia.core.tool.builtin.provider.ListProvidersTool(providers))
+        tools.register(io.talevia.core.tool.builtin.provider.ListProviderModelsTool(providers))
     }
 
     /** Counter registry scraped by GET /metrics. See [EventBusMetricsSink]. */

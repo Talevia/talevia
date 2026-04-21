@@ -396,6 +396,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         // is initialised — the property-initialiser ordering puts them
         // past the main `tools` block.
         tools.register(io.talevia.core.tool.builtin.provider.ListProvidersTool(providers))
+        tools.register(io.talevia.core.tool.builtin.provider.ListProviderModelsTool(providers))
     }
 
     fun newAgent(): Agent? {
