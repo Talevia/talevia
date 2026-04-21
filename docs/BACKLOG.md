@@ -21,8 +21,6 @@
 
 ## P2 — 记债/观望
 
-- **message-v2-schema-versioning** — `Message` / `Part` 当前没有 `schemaVersion` 字段。OpenCode `session/message-v2.ts` 是显式 v2 迁移产物。未来任何字段重构（譬如 Part 的 `MediaAttachment` shape 变化）会踩 §3a.7 序列化向前兼容。**方向：** 加 `schemaVersion: Int = 1` 到 Message + Part，decode 时 detect 版本 → route 到对应 migrator。现在不迁移，只为未来准备。Rubric 外 / §3a.7。
-
 - **rate-limit-aigc-per-session** — 防止长跑 session 失控消耗 AIGC 额度。当前无上限。**方向：** 先记债：加 `SessionRateLimits` 占位类 + `rate_limit_aigc-per-session-recorded.md` 触发条件（cost/session 超 $X、每分钟 >Y calls）。暂不实现。Rubric 外 / 操作债务。
 
 - **export-variant-deterministic-hash** — 同一 Project + 同 output profile 两次 export 是否 bit-identical？ffmpeg 默认非 deterministic（encoder order、timestamps）。`RenderCache` 假设一致性；如果实际不 bit-identical，cache 命中但产物不完全一样，可能破坏 regression 测试。**方向：** 写一个测试：同项目 export 两次，对比 SHA256。不一致就加 `-fflags +bitexact` 到 ffmpeg 命令、文档化哪些 codec option 必须固定。Rubric §5.2 / §5.3。
