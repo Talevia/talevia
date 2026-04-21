@@ -66,6 +66,7 @@ import io.talevia.core.tool.builtin.source.ImportSourceNodeTool
 import io.talevia.core.tool.builtin.source.ListSourceNodesTool
 import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
 import io.talevia.core.tool.builtin.source.RenameSourceNodeTool
+import io.talevia.core.tool.builtin.source.SearchSourceNodesTool
 import io.talevia.core.tool.builtin.source.SetSourceNodeParentsTool
 import io.talevia.core.tool.builtin.source.UpdateBrandPaletteTool
 import io.talevia.core.tool.builtin.source.UpdateCharacterRefTool
@@ -211,6 +212,7 @@ class AndroidAppContainer(context: Context) {
         register(ExportSourceNodeTool(projects))
         register(ImportSourceNodeFromJsonTool(projects))
         register(AddSourceNodeTool(projects))
+        register(SearchSourceNodesTool(projects))
         register(ForkSourceNodeTool(projects))
         register(SetSourceNodeParentsTool(projects))
         register(RenameSourceNodeTool(projects))
