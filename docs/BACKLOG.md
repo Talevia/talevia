@@ -21,8 +21,6 @@
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
 
-- **debt-merge-move-clip-pair** — `MoveClipTool` + `MoveClipToTrackTool` 一对 —— 前者 same-track 移动、后者跨 track。典型 §3a.2 singular/variant 分裂。**方向：** 合并为 `move_clip(clipId, toTrackId?: String, timelineStartSeconds?: Double)`：`toTrackId` null = 原 track 内移动，非 null = 跨 track；`timelineStartSeconds` null = 保持相对位置。Rubric 外 / §R.5.4。
-
 - **debt-merge-apply-filter-pair** — `ApplyFilterTool` + `ApplyFilterToClipsTool`（单 clip vs 多 clip 批量）同样是 §3a.2 单/批分裂。**方向：** 合并为 `apply_filter(clipIds: List<String>, filter: ...)`，单 clip 传一元素 list 即可。Rubric 外 / §R.5.4。
 
 - **debt-merge-add-subtitle-pair** — `AddSubtitleTool` + `AddSubtitlesTool`（单条 vs 批量）同病。**方向：** 合并为 `add_subtitles(subtitles: List<SubtitleSpec>)`，单条 = 一元素 list。Rubric 外 / §R.5.4。
