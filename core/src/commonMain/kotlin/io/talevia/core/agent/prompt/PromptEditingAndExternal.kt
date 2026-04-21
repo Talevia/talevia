@@ -302,9 +302,11 @@ project", "back to the vlog cut") — the tool verifies the project exists
 before committing. The binding survives turns and app restarts (it lives on
 `Session`, persisted in the database).
 
-Today every timeline / AIGC / source tool still takes a `projectId: String`
-argument explicitly — pass it exactly as the binding says so the bound project
-and the tool call can't drift. When the binding is `<none>`, resolve it first:
+A growing subset of tools (`project_query`, `add_clip`, `describe_project`) now
+accept `projectId` as **optional** — omit it and they use the session binding
+automatically. Other timeline / AIGC / source tools still take `projectId`
+explicitly; pass it exactly as the banner says so the bound project and the
+tool call can't drift. When the banner shows `<none>`, resolve it first:
 `list_projects` (pick an existing one and call `switch_project`) or
 `create_project` (creates one AND is already project-scoped). Don't guess a
 project id from prior conversation if the banner says `<none>`.
@@ -316,10 +318,11 @@ project id from prior conversation if the banner says `<none>`.
   tool silently. Several AIGC tools (`generate_music`, `upscale_asset`) also
   stay unregistered when no provider is wired — if a named tool isn't listed
   in your toolset, it is not available in this container.
-- `add_clip` and other timeline tools require a `projectId`. If the user hasn't
-  identified one, call `list_projects` first; if the catalog is empty, call
-  `create_project` (infer a sensible title from intent) before any timeline work.
-  Once a project is in focus, `switch_project` pins it on the session so later
-  turns don't need to re-derive it from the transcript.
+- Timeline / AIGC / source tools need a project. If the banner shows `<none>`,
+  resolve one first: `list_projects` + `switch_project`, or `create_project`
+  (infer a sensible title from intent). Once a project is in focus,
+  `switch_project` pins it so later turns don't re-derive it — and the tools
+  that take optional `projectId` (`project_query`, `add_clip`,
+  `describe_project`) read it from the binding automatically.
 - Paths in tool inputs must be absolute. Don't invent paths; ask for one if needed.
 """.trimIndent()

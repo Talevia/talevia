@@ -352,4 +352,31 @@ class DescribeProjectToolTest {
         assertTrue(text.contains("1 source nodes") || text.contains("source"), text)
         assertTrue(text.contains("1 lockfile") || text.contains("generate_image"), text)
     }
+
+    @Test fun projectIdOmittedFallsBackToSessionBinding() = runTest {
+        val rig = rig()
+        rig.store.upsert("empty", Project(id = ProjectId("p"), timeline = Timeline()))
+        val ctxBound = ToolContext(
+            sessionId = SessionId("s"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { PermissionDecision.Once },
+            emitPart = { },
+            messages = emptyList(),
+            currentProjectId = ProjectId("p"),
+        )
+        val out = DescribeProjectTool(rig.store).execute(
+            DescribeProjectTool.Input(), // projectId omitted
+            ctxBound,
+        ).data
+        assertEquals("p", out.projectId)
+    }
+
+    @Test fun unboundSessionAndOmittedProjectIdFailsLoud() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalStateException> {
+            DescribeProjectTool(rig.store).execute(DescribeProjectTool.Input(), rig.ctx)
+        }
+        assertTrue(ex.message!!.contains("switch_project"), ex.message)
+    }
 }

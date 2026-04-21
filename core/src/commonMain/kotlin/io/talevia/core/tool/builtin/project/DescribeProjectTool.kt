@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.project
 
-import io.talevia.core.ProjectId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.ProjectStore
@@ -13,7 +12,6 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -48,7 +46,14 @@ class DescribeProjectTool(
     private val projects: ProjectStore,
 ) : Tool<DescribeProjectTool.Input, DescribeProjectTool.Output> {
 
-    @Serializable data class Input(val projectId: String)
+    @Serializable data class Input(
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
+    )
 
     @Serializable data class ProfileSummary(
         val resolutionWidth: Int,
@@ -98,17 +103,23 @@ class DescribeProjectTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("projectId"))))
+        put("required", JsonArray(emptyList()))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val pid = ProjectId(input.projectId)
-        val project = projects.get(pid) ?: error("Project ${input.projectId} not found")
+        val pid = ctx.resolveProjectId(input.projectId)
+        val project = projects.get(pid) ?: error("Project ${pid.value} not found")
         val meta = projects.summary(pid)
-            ?: error("Project ${input.projectId} has no catalog row — store inconsistency")
+            ?: error("Project ${pid.value} has no catalog row — store inconsistency")
 
         // Track kinds: emit all four so downstream can rely on presence (zeros are informative).
         val tracksByKind = linkedMapOf(

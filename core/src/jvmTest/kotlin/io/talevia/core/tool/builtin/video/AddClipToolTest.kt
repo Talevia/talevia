@@ -157,4 +157,45 @@ class AddClipToolTest {
         val refreshed = rig.store.get(rig.projectId)!!
         assertEquals(listOf("s1", "v1", "a1"), refreshed.timeline.tracks.map { it.id.value })
     }
+
+    @Test fun projectIdOmittedFallsBackToSessionBinding() = runTest {
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1")))),
+            ),
+        )
+        val assetId = rig.importAsset("/tmp/new.mp4", durationSeconds = 3.0)
+        val ctxBound = ToolContext(
+            sessionId = SessionId("s"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { PermissionDecision.Once },
+            emitPart = { },
+            messages = emptyList(),
+            currentProjectId = rig.projectId,
+        )
+
+        val result = rig.tool.execute(
+            AddClipTool.Input(assetId = assetId.value), // projectId omitted
+            ctxBound,
+        )
+
+        assertEquals("v1", result.data.trackId)
+        val refreshed = rig.store.get(rig.projectId)!!
+        val videoTrack = refreshed.timeline.tracks.filterIsInstance<Track.Video>().single { it.id.value == "v1" }
+        assertEquals(1, videoTrack.clips.size)
+    }
+
+    @Test fun unboundSessionAndOmittedProjectIdFailsLoud() = runTest {
+        val rig = newRig(
+            Project(id = ProjectId("p"), timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"))))),
+        )
+        val assetId = rig.importAsset("/tmp/new.mp4", durationSeconds = 3.0)
+        // rig.ctx has no currentProjectId.
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(AddClipTool.Input(assetId = assetId.value), rig.ctx)
+        }
+        assertTrue(ex.message!!.contains("switch_project"), ex.message)
+    }
 }

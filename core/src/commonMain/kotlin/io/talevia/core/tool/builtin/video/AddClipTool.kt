@@ -2,7 +2,6 @@ package io.talevia.core.tool.builtin.video
 
 import io.talevia.core.AssetId
 import io.talevia.core.ClipId
-import io.talevia.core.ProjectId
 import io.talevia.core.TrackId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
@@ -35,7 +34,12 @@ class AddClipTool(
 ) : Tool<AddClipTool.Input, AddClipTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
         val assetId: String,
         val timelineStartSeconds: Double? = null,
         val sourceStartSeconds: Double = 0.0,
@@ -58,14 +62,20 @@ class AddClipTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
             putJsonObject("assetId") { put("type", "string") }
             putJsonObject("timelineStartSeconds") { put("type", "number"); put("description", "If omitted, append after the last clip on the track.") }
             putJsonObject("sourceStartSeconds") { put("type", "number"); put("description", "Trim offset into the source media.") }
             putJsonObject("durationSeconds") { put("type", "number"); put("description", "If omitted, use the asset's full remaining duration.") }
             putJsonObject("trackId") { put("type", "string"); put("description", "Optional track to add to; otherwise the first Video track (created if absent).") }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("assetId"))))
+        put("required", JsonArray(listOf(JsonPrimitive("assetId"))))
         put("additionalProperties", false)
     }
 
@@ -90,7 +100,8 @@ class AddClipTool(
         require(clipDuration > Duration.ZERO) { "clip duration must be > 0" }
         val clipId = ClipId(Uuid.random().toString())
 
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
+        val pid = ctx.resolveProjectId(input.projectId)
+        val updated = store.mutate(pid) { project ->
             val videoTrack = pickVideoTrack(project.timeline.tracks, input.trackId)
             val tlStart = input.timelineStartSeconds?.seconds ?: videoTrack.clips.maxOfOrNull { it.timeRange.end } ?: Duration.ZERO
             require(tlStart >= Duration.ZERO) { "timelineStartSeconds must be >= 0" }

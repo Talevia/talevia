@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.project
 
 import io.talevia.core.JsonConfig
-import io.talevia.core.ProjectId
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
@@ -53,7 +52,12 @@ class ProjectQueryTool(
 ) : Tool<ProjectQueryTool.Input, ProjectQueryTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud directs the agent at `switch_project`.
+         */
+        val projectId: String? = null,
         /** One of [SELECT_TRACKS] / [SELECT_TIMELINE_CLIPS] / [SELECT_ASSETS] (case-insensitive). */
         val select: String,
         // ---- tracks / timeline_clips filter ----
@@ -163,7 +167,13 @@ class ProjectQueryTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
             putJsonObject("select") {
                 put("type", "string")
                 put(
@@ -233,7 +243,7 @@ class ProjectQueryTool(
         }
         put(
             "required",
-            JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("select"))),
+            JsonArray(listOf(JsonPrimitive("select"))),
         )
         put("additionalProperties", false)
     }
@@ -245,8 +255,9 @@ class ProjectQueryTool(
         }
         rejectIncompatibleFilters(select, input)
 
-        val project = projects.get(ProjectId(input.projectId))
-            ?: error("Project ${input.projectId} not found")
+        val pid = ctx.resolveProjectId(input.projectId)
+        val project = projects.get(pid)
+            ?: error("Project ${pid.value} not found")
 
         val limit = (input.limit ?: DEFAULT_LIMIT).coerceIn(MIN_LIMIT, MAX_LIMIT)
         val offset = (input.offset ?: 0).coerceAtLeast(0)

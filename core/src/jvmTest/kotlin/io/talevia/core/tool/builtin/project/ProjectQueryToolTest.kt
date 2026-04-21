@@ -472,4 +472,49 @@ class ProjectQueryToolTest {
         assertTrue("spanSeconds" !in emptyRow)
         assertTrue("lastClipEndSeconds" !in emptyRow)
     }
+
+    // -------- optional projectId — defaults from ToolContext.currentProjectId --------
+
+    private fun ctxWithBinding(pid: ProjectId): ToolContext = ToolContext(
+        sessionId = SessionId("s"),
+        messageId = MessageId("m"),
+        callId = CallId("c"),
+        askPermission = { PermissionDecision.Once },
+        emitPart = {},
+        messages = emptyList(),
+        currentProjectId = pid,
+    )
+
+    @Test fun projectIdOmittedDefaultsToSessionBinding() = runTest {
+        val (store, pid) = fixture()
+        // Null projectId → ctx.currentProjectId is used.
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(select = "tracks"),
+            ctxWithBinding(pid),
+        ).data
+        assertEquals(pid.value, out.projectId)
+        assertTrue(out.total > 0)
+    }
+
+    @Test fun explicitProjectIdWinsOverSessionBinding() = runTest {
+        val (store, pid) = fixture()
+        // Explicit projectId always wins, even when ctx has a different binding.
+        val other = ProjectId("other-binding")
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(projectId = pid.value, select = "tracks"),
+            ctxWithBinding(other),
+        ).data
+        assertEquals(pid.value, out.projectId)
+    }
+
+    @Test fun unboundSessionAndOmittedProjectIdFailsLoud() = runTest {
+        val (store, _) = fixture()
+        val ex = assertFailsWith<IllegalStateException> {
+            ProjectQueryTool(store).execute(
+                ProjectQueryTool.Input(select = "tracks"),
+                ctx(), // no currentProjectId
+            )
+        }
+        assertTrue(ex.message!!.contains("switch_project"), ex.message)
+    }
 }

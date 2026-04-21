@@ -42,13 +42,29 @@ class ToolContext(
     /**
      * The session's `currentProjectId` at dispatch time, or `null` if the
      * session isn't yet bound to a project (VISION §5.4). Tools whose input
-     * carries a `projectId` can default from this when the agent omits the
-     * arg — this cycle keeps tool input shapes unchanged, so this is purely
-     * informational for now. Defaulted to `null` so existing `ToolContext(…)`
-     * call sites keep compiling without change.
+     * carries an optional `projectId` default from this when the agent
+     * omits the arg — see [resolveProjectId]. Defaulted to `null` so
+     * existing `ToolContext(…)` call sites keep compiling without change.
      */
     val currentProjectId: ProjectId? = null,
-)
+) {
+    /**
+     * Resolve a project id for a tool that accepts an optional explicit
+     * `projectId` input. Explicit `input` wins; otherwise fall back to the
+     * session's [currentProjectId]; otherwise fail loud with a
+     * session-binding hint. Centralises the same 4-line block that used to
+     * live in every `projectId`-taking tool's `execute` path (see
+     * `docs/decisions/2026-04-21-tool-input-default-projectid-from-context.md`).
+     */
+    fun resolveProjectId(input: String?): ProjectId = when {
+        input != null -> ProjectId(input)
+        currentProjectId != null -> currentProjectId
+        else -> error(
+            "No projectId provided and this session has no current project binding. " +
+                "Call switch_project to bind a project to the session, or pass projectId explicitly.",
+        )
+    }
+}
 
 data class ToolResult<O>(
     val title: String,
