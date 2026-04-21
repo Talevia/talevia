@@ -10,10 +10,22 @@ import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.source.Source
 import io.talevia.core.domain.source.SourceRef
+import io.talevia.core.domain.source.consistency.BrandPaletteBody
 import io.talevia.core.domain.source.consistency.CharacterRefBody
 import io.talevia.core.domain.source.consistency.StyleBibleBody
+import io.talevia.core.domain.source.consistency.addBrandPalette
 import io.talevia.core.domain.source.consistency.addCharacterRef
 import io.talevia.core.domain.source.consistency.addStyleBible
+import io.talevia.core.domain.source.genre.ad.AdBrandBriefBody
+import io.talevia.core.domain.source.genre.ad.AdProductSpecBody
+import io.talevia.core.domain.source.genre.ad.AdVariantRequestBody
+import io.talevia.core.domain.source.genre.ad.addAdBrandBrief
+import io.talevia.core.domain.source.genre.ad.addAdProductSpec
+import io.talevia.core.domain.source.genre.ad.addAdVariantRequest
+import io.talevia.core.domain.source.genre.musicmv.MusicMvPerformanceShotBody
+import io.talevia.core.domain.source.genre.musicmv.MusicMvVisualConceptBody
+import io.talevia.core.domain.source.genre.musicmv.addMusicMvPerformanceShot
+import io.talevia.core.domain.source.genre.musicmv.addMusicMvVisualConcept
 import io.talevia.core.domain.source.genre.narrative.NarrativeSceneBody
 import io.talevia.core.domain.source.genre.narrative.NarrativeShotBody
 import io.talevia.core.domain.source.genre.narrative.NarrativeStorylineBody
@@ -22,6 +34,12 @@ import io.talevia.core.domain.source.genre.narrative.addNarrativeScene
 import io.talevia.core.domain.source.genre.narrative.addNarrativeShot
 import io.talevia.core.domain.source.genre.narrative.addNarrativeStoryline
 import io.talevia.core.domain.source.genre.narrative.addNarrativeWorld
+import io.talevia.core.domain.source.genre.tutorial.TutorialBrandSpecBody
+import io.talevia.core.domain.source.genre.tutorial.TutorialBrollLibraryBody
+import io.talevia.core.domain.source.genre.tutorial.TutorialScriptBody
+import io.talevia.core.domain.source.genre.tutorial.addTutorialBrandSpec
+import io.talevia.core.domain.source.genre.tutorial.addTutorialBrollLibrary
+import io.talevia.core.domain.source.genre.tutorial.addTutorialScript
 import io.talevia.core.domain.source.genre.vlog.VlogEditIntentBody
 import io.talevia.core.domain.source.genre.vlog.VlogRawFootageBody
 import io.talevia.core.domain.source.genre.vlog.VlogStylePresetBody
@@ -50,12 +68,21 @@ import kotlinx.serialization.serializer
  * pick a genre template, get a working source graph with placeholder
  * character / style / scene stubs, then refine.
  *
- * Two templates today, matching the two genre schemas that ship in
+ * Five templates, one per genre schema that ships in
  * `core/domain/source/genre/`:
  *   - `narrative` → world + storyline + one scene stub + one shot stub +
  *     one character_ref + one style_bible. Wired together via `parents`
  *     so DAG propagation works from day zero.
  *   - `vlog` → raw_footage + edit_intent + style_preset + one style_bible.
+ *   - `ad` → brand_brief + product_spec + variant_request + brand_palette.
+ *     Variant is parented on both brief and product so edits to either
+ *     flow down to every downstream cut.
+ *   - `musicmv` → visual_concept + performance_shot + character_ref
+ *     (performer) + brand_palette. The `musicmv.track` node is **not**
+ *     seeded because it requires an imported music asset id — the output
+ *     message nudges the user to `import_media` then define a track node.
+ *   - `tutorial` → tutorial_script + tutorial_broll_library (empty) +
+ *     tutorial_brand_spec + style_bible.
  *
  * Both templates put stringly-typed placeholders ("TODO: …") in the
  * descriptive fields so the agent / expert user can tell what still needs
@@ -94,11 +121,12 @@ class CreateProjectFromTemplateTool(
     override val id: String = "create_project_from_template"
     override val helpText: String =
         "Create a new project and seed its source DAG with a genre template so the " +
-            "agent doesn't start from zero nodes. Templates: narrative (world + " +
-            "storyline + scene + shot + character_ref + style_bible) or vlog (raw_" +
-            "footage + edit_intent + style_preset + style_bible). All seeded nodes " +
-            "use TODO placeholders — replace them via define_/update_ tools before " +
-            "the first AIGC call. Resolution + fps options same as create_project."
+            "agent doesn't start from zero nodes. Templates: narrative / vlog / ad / " +
+            "musicmv / tutorial. All seeded nodes use TODO placeholders — replace " +
+            "them via update_source_node_body / update_character_ref / update_style_bible / " +
+            "update_brand_palette before the first AIGC call. The musicmv template does " +
+            "not seed a musicmv.track node (needs an imported music asset first). " +
+            "Resolution + fps options same as create_project."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.write")
@@ -109,7 +137,11 @@ class CreateProjectFromTemplateTool(
             putJsonObject("title") { put("type", "string"); put("description", "Human-readable project title.") }
             putJsonObject("template") {
                 put("type", "string")
-                put("description", "Genre template: 'narrative' or 'vlog'. Both seed the source DAG with placeholder nodes the agent / user then fills in.")
+                put(
+                    "description",
+                    "Genre template: 'narrative', 'vlog', 'ad', 'musicmv', or 'tutorial'. " +
+                        "All seed the source DAG with placeholder nodes the agent / user then fills in.",
+                )
             }
             putJsonObject("projectId") {
                 put("type", "string")
@@ -143,8 +175,11 @@ class CreateProjectFromTemplateTool(
         val (source, seededIds) = when (input.template.lowercase()) {
             "narrative" -> seedNarrative()
             "vlog" -> seedVlog()
+            "ad" -> seedAd()
+            "musicmv" -> seedMusicMv()
+            "tutorial" -> seedTutorial()
             else -> throw IllegalArgumentException(
-                "unknown template '${input.template}'; accepted: narrative, vlog",
+                "unknown template '${input.template}'; accepted: narrative, vlog, ad, musicmv, tutorial",
             )
         }
 
@@ -246,6 +281,121 @@ class CreateProjectFromTemplateTool(
                 VlogStylePresetBody(name = "style-preset"),
             )
         return s to listOf(styleId.value, footageId.value, intentId.value, presetId.value)
+    }
+
+    private fun seedAd(): Pair<Source, List<String>> {
+        val paletteId = SourceNodeId("brand-palette")
+        val briefId = SourceNodeId("brand-brief")
+        val productId = SourceNodeId("product")
+        val variantId = SourceNodeId("variant-1")
+
+        val s: Source = Source.EMPTY
+            .addBrandPalette(
+                paletteId,
+                BrandPaletteBody(name = "brand-palette", hexColors = listOf("#000000")),
+            )
+            .addAdBrandBrief(
+                briefId,
+                AdBrandBriefBody(
+                    brandName = "TODO: brand name",
+                    tagline = "TODO: campaign tagline",
+                    audience = "TODO: target audience",
+                    callToAction = "TODO: call to action",
+                ),
+                parents = listOf(SourceRef(paletteId)),
+            )
+            .addAdProductSpec(
+                productId,
+                AdProductSpecBody(
+                    productName = "TODO: product name",
+                    description = "TODO: product description",
+                ),
+            )
+            .addAdVariantRequest(
+                variantId,
+                AdVariantRequestBody(
+                    variantName = "variant-1",
+                    targetDurationSeconds = 15,
+                    aspectRatio = "16:9",
+                    notes = "TODO: variant-specific creative notes",
+                ),
+                parents = listOf(SourceRef(briefId), SourceRef(productId)),
+            )
+        return s to listOf(paletteId.value, briefId.value, productId.value, variantId.value)
+    }
+
+    private fun seedMusicMv(): Pair<Source, List<String>> {
+        val paletteId = SourceNodeId("brand-palette")
+        val performerId = SourceNodeId("performer")
+        val conceptId = SourceNodeId("visual-concept")
+        val shotId = SourceNodeId("performance-1")
+
+        val s: Source = Source.EMPTY
+            .addBrandPalette(
+                paletteId,
+                BrandPaletteBody(name = "brand-palette", hexColors = listOf("#000000")),
+            )
+            .addCharacterRef(
+                performerId,
+                CharacterRefBody(name = "performer", visualDescription = "TODO: describe the performer's look"),
+            )
+            .addMusicMvVisualConcept(
+                conceptId,
+                MusicMvVisualConceptBody(
+                    logline = "TODO: one-sentence MV concept",
+                    mood = "TODO: mood",
+                    paletteRef = paletteId.value,
+                ),
+                parents = listOf(SourceRef(paletteId)),
+            )
+            .addMusicMvPerformanceShot(
+                shotId,
+                MusicMvPerformanceShotBody(
+                    performer = "performer",
+                    action = "TODO: describe the performance beat this shot covers",
+                ),
+                parents = listOf(SourceRef(conceptId), SourceRef(performerId)),
+            )
+        // musicmv.track deliberately not seeded — it requires an imported music asset id.
+        return s to listOf(paletteId.value, performerId.value, conceptId.value, shotId.value)
+    }
+
+    private fun seedTutorial(): Pair<Source, List<String>> {
+        val styleId = SourceNodeId("style")
+        val brandId = SourceNodeId("brand-spec")
+        val scriptId = SourceNodeId("script")
+        val brollId = SourceNodeId("broll")
+
+        val s: Source = Source.EMPTY
+            .addStyleBible(
+                styleId,
+                StyleBibleBody(name = "style", description = "TODO: describe the visual style"),
+            )
+            .addTutorialBrandSpec(
+                brandId,
+                TutorialBrandSpecBody(
+                    productName = "TODO: product name",
+                    brandColors = emptyList(),
+                    lowerThirdStyle = "TODO: lower-third treatment",
+                ),
+            )
+            .addTutorialScript(
+                scriptId,
+                TutorialScriptBody(
+                    title = "TODO: tutorial title",
+                    spokenText = "TODO: voiceover script",
+                    segments = listOf("intro", "demo", "wrap"),
+                ),
+                parents = listOf(SourceRef(styleId), SourceRef(brandId)),
+            )
+            .addTutorialBrollLibrary(
+                brollId,
+                TutorialBrollLibraryBody(
+                    assetIds = emptyList(),
+                    notes = "TODO: import screen-capture / demo clips and bind assetIds here",
+                ),
+            )
+        return s to listOf(styleId.value, brandId.value, scriptId.value, brollId.value)
     }
 
     private fun parseResolution(preset: String?): Resolution = when (preset?.lowercase()) {

@@ -9,7 +9,10 @@ import io.talevia.core.SourceNodeId
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.domain.source.consistency.ConsistencyKinds
+import io.talevia.core.domain.source.genre.ad.AdNodeKinds
+import io.talevia.core.domain.source.genre.musicmv.MusicMvNodeKinds
 import io.talevia.core.domain.source.genre.narrative.NarrativeNodeKinds
+import io.talevia.core.domain.source.genre.tutorial.TutorialNodeKinds
 import io.talevia.core.domain.source.genre.vlog.VlogNodeKinds
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
@@ -151,6 +154,95 @@ class CreateProjectFromTemplateToolTest {
         assertTrue(out.projectId.isNotBlank(), "auto-slug must not be blank")
         assertTrue(out.projectId.contains("graduation") || out.projectId.contains("my"), "slug must embed title words")
         assertNotNull(store.get(ProjectId(out.projectId)), "project must be persisted under the auto-slug id")
+    }
+
+    @Test fun adSeedsFourNodesAndWiresParents() = runTest {
+        val store = newStore()
+        val tool = CreateProjectFromTemplateTool(store)
+        val out = tool.execute(
+            CreateProjectFromTemplateTool.Input(
+                title = "Spring Sale",
+                template = "ad",
+                projectId = "ad-1",
+            ),
+            ctx(),
+        ).data
+
+        assertEquals("ad", out.template)
+        assertEquals(4, out.seededNodeIds.size)
+
+        val project = store.get(ProjectId("ad-1"))!!
+        val kinds = project.source.nodes.associate { it.id.value to it.kind }
+        assertEquals(ConsistencyKinds.BRAND_PALETTE, kinds["brand-palette"])
+        assertEquals(AdNodeKinds.BRAND_BRIEF, kinds["brand-brief"])
+        assertEquals(AdNodeKinds.PRODUCT_SPEC, kinds["product"])
+        assertEquals(AdNodeKinds.VARIANT_REQUEST, kinds["variant-1"])
+
+        // variant depends on brief + product so DAG propagates edits to either.
+        val variant = project.source.byId[SourceNodeId("variant-1")]!!
+        val parentIds = variant.parents.map { it.nodeId.value }.toSet()
+        assertTrue("brand-brief" in parentIds, "variant must depend on brand-brief")
+        assertTrue("product" in parentIds, "variant must depend on product")
+    }
+
+    @Test fun musicMvSeedsFourNodesAndSkipsTrack() = runTest {
+        val store = newStore()
+        val tool = CreateProjectFromTemplateTool(store)
+        val out = tool.execute(
+            CreateProjectFromTemplateTool.Input(
+                title = "Neon Dreams",
+                template = "musicmv",
+                projectId = "mv-1",
+            ),
+            ctx(),
+        ).data
+
+        assertEquals("musicmv", out.template)
+        assertEquals(4, out.seededNodeIds.size)
+
+        val project = store.get(ProjectId("mv-1"))!!
+        val kinds = project.source.nodes.map { it.kind }.toSet()
+        assertTrue(ConsistencyKinds.BRAND_PALETTE in kinds)
+        assertTrue(ConsistencyKinds.CHARACTER_REF in kinds)
+        assertTrue(MusicMvNodeKinds.VISUAL_CONCEPT in kinds)
+        assertTrue(MusicMvNodeKinds.PERFORMANCE_SHOT in kinds)
+        // track is intentionally not seeded — needs an imported music asset.
+        assertTrue(MusicMvNodeKinds.TRACK !in kinds, "musicmv.track must not be seeded without an asset")
+
+        // performance_shot depends on both concept + performer.
+        val perf = project.source.byId[SourceNodeId("performance-1")]!!
+        val parentIds = perf.parents.map { it.nodeId.value }.toSet()
+        assertTrue("visual-concept" in parentIds)
+        assertTrue("performer" in parentIds)
+    }
+
+    @Test fun tutorialSeedsFourNodes() = runTest {
+        val store = newStore()
+        val tool = CreateProjectFromTemplateTool(store)
+        val out = tool.execute(
+            CreateProjectFromTemplateTool.Input(
+                title = "Setup Guide",
+                template = "tutorial",
+                projectId = "tut-1",
+            ),
+            ctx(),
+        ).data
+
+        assertEquals("tutorial", out.template)
+        assertEquals(4, out.seededNodeIds.size)
+
+        val project = store.get(ProjectId("tut-1"))!!
+        val kinds = project.source.nodes.associate { it.id.value to it.kind }
+        assertEquals(ConsistencyKinds.STYLE_BIBLE, kinds["style"])
+        assertEquals(TutorialNodeKinds.BRAND_SPEC, kinds["brand-spec"])
+        assertEquals(TutorialNodeKinds.SCRIPT, kinds["script"])
+        assertEquals(TutorialNodeKinds.BROLL_LIBRARY, kinds["broll"])
+
+        // script depends on style + brand-spec.
+        val script = project.source.byId[SourceNodeId("script")]!!
+        val parentIds = script.parents.map { it.nodeId.value }.toSet()
+        assertTrue("style" in parentIds)
+        assertTrue("brand-spec" in parentIds)
     }
 
     @Test fun titlePreservedInProjectRecord() = runTest {
