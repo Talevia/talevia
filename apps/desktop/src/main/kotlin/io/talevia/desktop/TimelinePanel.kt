@@ -144,7 +144,7 @@ fun TimelinePanel(
         if (selected.isEmpty()) return
         val snapshot = selected.toList()
         dispatch(
-            "apply_filter_to_clips",
+            "apply_filter",
             buildJsonObject {
                 put("projectId", projectId.value)
                 put("filterName", name)

@@ -125,7 +125,6 @@ import io.talevia.core.tool.builtin.video.AddSubtitleTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.AddTrackTool
 import io.talevia.core.tool.builtin.video.AddTransitionTool
-import io.talevia.core.tool.builtin.video.ApplyFilterToClipsTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
@@ -360,7 +359,6 @@ class ServerContainer(
         register(ExportTool(projects, engine))
         register(ExportDryRunTool(projects))
         register(ApplyFilterTool(projects))
-        register(ApplyFilterToClipsTool(projects))
         register(RemoveFilterTool(projects))
         register(ApplyLutTool(projects, media))
         register(AddSubtitleTool(projects))

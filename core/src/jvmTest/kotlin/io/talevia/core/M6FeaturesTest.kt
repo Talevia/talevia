@@ -31,8 +31,10 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -67,7 +69,7 @@ class M6FeaturesTest {
         r["apply_filter"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("clipId", clipId)
+                putJsonArray("clipIds") { add(clipId) }
                 put("filterName", "blur")
                 put("params", buildJsonObject { put("radius", 4.0) })
             },

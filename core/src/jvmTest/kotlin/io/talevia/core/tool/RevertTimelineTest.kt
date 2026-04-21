@@ -135,7 +135,7 @@ class RevertTimelineTest {
 
         val applyFilter = ApplyFilterTool(projects)
         applyFilter.execute(
-            ApplyFilterTool.Input(projectId = projectId.value, clipId = clipId, filterName = "blur"),
+            ApplyFilterTool.Input(projectId = projectId.value, clipIds = listOf(clipId), filterName = "blur"),
             ctxFor("c2", "m2"),
         )
         // After the filter: one clip with one filter.

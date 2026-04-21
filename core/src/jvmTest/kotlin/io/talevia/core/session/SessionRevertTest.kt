@@ -105,7 +105,7 @@ class SessionRevertTest {
             Message.Assistant(a2, sessionId, t0.plus(4.milliseconds), u2, ModelRef("anthropic", "claude-opus-4-7")),
         )
         ApplyFilterTool(projects).execute(
-            ApplyFilterTool.Input(projectId = projectId.value, clipId = clipId, filterName = "blur"),
+            ApplyFilterTool.Input(projectId = projectId.value, clipIds = listOf(clipId), filterName = "blur"),
             ctxFor("c-filt", a2),
         )
         assertEquals(

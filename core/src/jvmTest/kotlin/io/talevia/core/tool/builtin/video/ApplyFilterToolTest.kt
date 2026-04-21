@@ -25,7 +25,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-class ApplyFilterToClipsToolTest {
+class ApplyFilterToolTest {
 
     private fun ctx(parts: MutableList<Part>): ToolContext = ToolContext(
         sessionId = SessionId("s"),
@@ -78,10 +78,10 @@ class ApplyFilterToClipsToolTest {
 
     @Test fun allVideoClipsAppliesUniformly() = runTest {
         val (store, pid) = fixture()
-        val tool = ApplyFilterToClipsTool(store)
+        val tool = ApplyFilterTool(store)
         val parts = mutableListOf<Part>()
         val out = tool.execute(
-            ApplyFilterToClipsTool.Input(
+            ApplyFilterTool.Input(
                 projectId = pid.value,
                 filterName = "vignette",
                 params = mapOf("intensity" to 0.5f),
@@ -102,9 +102,9 @@ class ApplyFilterToClipsToolTest {
 
     @Test fun clipIdsHonorsExplicitList() = runTest {
         val (store, pid) = fixture()
-        val tool = ApplyFilterToClipsTool(store)
+        val tool = ApplyFilterTool(store)
         val out = tool.execute(
-            ApplyFilterToClipsTool.Input(
+            ApplyFilterTool.Input(
                 projectId = pid.value,
                 filterName = "blur",
                 params = mapOf("radius" to 4f),
@@ -123,9 +123,9 @@ class ApplyFilterToClipsToolTest {
 
     @Test fun audioClipIdListedAsSkipped() = runTest {
         val (store, pid) = fixture()
-        val tool = ApplyFilterToClipsTool(store)
+        val tool = ApplyFilterTool(store)
         val out = tool.execute(
-            ApplyFilterToClipsTool.Input(
+            ApplyFilterTool.Input(
                 projectId = pid.value,
                 filterName = "brightness",
                 clipIds = listOf("c-1", "c-audio", "nope"),
@@ -140,10 +140,10 @@ class ApplyFilterToClipsToolTest {
 
     @Test fun multipleSelectorsFailLoud() = runTest {
         val (store, pid) = fixture()
-        val tool = ApplyFilterToClipsTool(store)
+        val tool = ApplyFilterTool(store)
         val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(
-                ApplyFilterToClipsTool.Input(
+                ApplyFilterTool.Input(
                     projectId = pid.value,
                     filterName = "blur",
                     allVideoClips = true,
@@ -157,9 +157,9 @@ class ApplyFilterToClipsToolTest {
 
     @Test fun trackIdScopesToTrack() = runTest {
         val (store, pid) = fixture()
-        val tool = ApplyFilterToClipsTool(store)
+        val tool = ApplyFilterTool(store)
         val out = tool.execute(
-            ApplyFilterToClipsTool.Input(
+            ApplyFilterTool.Input(
                 projectId = pid.value,
                 filterName = "saturation",
                 params = mapOf("amount" to 0.3f),
@@ -168,5 +168,35 @@ class ApplyFilterToClipsToolTest {
             ctx(mutableListOf()),
         ).data
         assertEquals(2, out.appliedCount, "both video clips on track v should be targeted")
+    }
+
+    @Test fun singleClipViaOneElementList() = runTest {
+        // Primary merge validation: single-clip is just `clipIds=[id]` — no second
+        // tool required. Closes the old apply_filter + apply_filter_to_clips split.
+        val (store, pid) = fixture()
+        val tool = ApplyFilterTool(store)
+        val out = tool.execute(
+            ApplyFilterTool.Input(
+                projectId = pid.value,
+                filterName = "blur",
+                params = mapOf("radius" to 4f),
+                clipIds = listOf("c-1"),
+            ),
+            ctx(mutableListOf()),
+        ).data
+        assertEquals(1, out.appliedCount)
+        assertEquals(listOf("c-1"), out.appliedClipIds)
+        assertTrue(out.skipped.isEmpty())
+        val refreshed = store.get(pid)!!
+        val c1 = refreshed.timeline.tracks
+            .flatMap { it.clips }
+            .first { it.id.value == "c-1" } as Clip.Video
+        assertEquals(1, c1.filters.size)
+        assertEquals("blur", c1.filters.single().name)
+        // c-2 untouched.
+        val c2 = refreshed.timeline.tracks
+            .flatMap { it.clips }
+            .first { it.id.value == "c-2" } as Clip.Video
+        assertTrue(c2.filters.isEmpty())
     }
 }
