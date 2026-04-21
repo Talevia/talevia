@@ -5,7 +5,7 @@ description: 自主挑选仓库与 VISION.md 之间优先级最高的 gap，plan
 
 # iterate-gap — 自主补齐愿景 gap 的循环
 
-挑当前仓库与北极星之间优先级最高的 gap，plan → 在 `main` 上实现 → 归档决策 → 推送。**执行期间不向用户提任何问题** —— 每一个决策都按 `docs/VISION.md` 与业界共识自主做出，理由落到 `docs/DECISIONS.md`，由用户事后异步审阅。
+挑当前仓库与北极星之间优先级最高的 gap，plan → 在 `main` 上实现 → 归档决策 → 推送。**执行期间不向用户提任何问题** —— 每一个决策都按 `docs/VISION.md` 与业界共识自主做出，理由作为**一个新文件**落到 `docs/decisions/`（一次 iteration 一个文件，绝不 append 到其它文件），由用户事后异步审阅。
 
 ## 参数
 
@@ -20,9 +20,9 @@ description: 自主挑选仓库与 VISION.md 之间优先级最高的 gap，plan
 ## 操作约束（两种模式都适用）
 
 - **分支目标**：`main`。不开 feature branch，不开 PR。（并行模式内部用临时 worktree 分支，但本次调用内部必须通过 merge+push 落回 `main`。）
-- **提问**：零次。遇到决策点按 VISION + 业界共识自行决定，理由写进 `docs/DECISIONS.md`。如果真的卡在只有用户能回答的问题（专有 key、产品抉择、品牌偏好），**换一个 gap**，不要干等，也不要问。
+- **提问**：零次。遇到决策点按 VISION + 业界共识自行决定，理由写成一份 `docs/decisions/<yyyy-mm-dd>-<slug>.md` 新文件。如果真的卡在只有用户能回答的问题（专有 key、产品抉择、品牌偏好），**换一个 gap**，不要干等，也不要问。
 - **先 plan 再实现**：每个 gap 必须有独立的 plan 步骤之后再动代码。
-- **决策强制归档**：每次推送的 commit pair 都是 `feat(...)` + `docs(decisions): record choices for <feature> (<feat-hash>)`。
+- **决策强制归档**：每次推送的 commit pair 都是 `feat(...)` + `docs(decisions): record choices for <feature> (<feat-hash>)`；后者**新建**一个 `docs/decisions/<yyyy-mm-dd>-<slug>.md` 文件，**不得** append 或编辑已有 decisions 文件。
 
 ---
 
@@ -45,7 +45,7 @@ git pull --rebase origin main
 
 1. `docs/VISION.md` §5（Gap-finding rubric）—— 5 个 rubric 小节就是打分轴。
 2. `CLAUDE.md` 的「Platform priority — 当前阶段」小节定优先级；「Known incomplete」小节列出已承认的非回归项，别把它们当缺口重复报。
-3. `docs/DECISIONS.md` 最近 ~15 条 —— 近期已做决策约束了不该再做一遍的内容。
+3. `docs/decisions/` 最近 ~15 个文件（`ls docs/decisions | sort -r | head -15`）—— 近期已做决策约束了不该再做一遍的内容。
 4. `git log --oneline -20` —— 看最近落地了什么。
 
 然后走读 `core/domain`、`core/tool/builtin`、`core/agent`、`core/session`、`core/compaction`、`core/permission`、`core/provider`、`core/bus` 以及各 app 的装配点，对每个 rubric 轴打分为 有 / 部分 / 无。
@@ -103,7 +103,13 @@ git pull --rebase origin main
 
 ### 7. 归档决策
 
-按仓库既有格式（最新的放最顶）把新条目 prepend 到 `docs/DECISIONS.md`：
+在 `docs/decisions/` 下**新建**一个文件：`docs/decisions/<YYYY-MM-DD>-<slug>.md`。**不要** 编辑或 prepend 到已有文件。
+
+- 日期用当天（UTC 本地即可），与 commit 日期对齐。
+- `<slug>` 从标题生成：`[^a-zA-Z0-9]+` 替换成 `-`、小写、截断到 ~60 字符。保持能一眼看出改了什么（例：`set-clip-volume-tool`、`fnv1a-content-hash`）。
+- 命名冲突（同日同 slug）时加后缀 `-2`、`-3`。可用 `ls docs/decisions | grep <yyyy-mm-dd>-<slug>` 确认唯一。
+
+文件内容保持既有 decisions 格式（内部 `## YYYY-MM-DD — 短标题` 头一仍要写，便于跨文件 grep / 聚合视图）：
 
 ```markdown
 ## YYYY-MM-DD — 短标题（VISION §X.Y rubric 轴）
@@ -130,7 +136,7 @@ Commit: `<shorthash>`
 - Commit 前缀按 `git log --oneline -20` 的惯例（当前：`feat(core):`、`docs(decisions):`、`fix(...)`、`refactor(...)`）。
 - 两条 commit：
   1. `feat(...): <内容>`（或 `fix` / `refactor`）—— 代码改动。
-  2. `docs(decisions): record choices for <feature> (<feat-commit-shorthash>)` —— DECISIONS.md 条目。
+  2. `docs(decisions): record choices for <feature> (<feat-commit-shorthash>)` —— 新建的 `docs/decisions/<yyyy-mm-dd>-<slug>.md` 文件。
 - `git push origin main`。
 - 推送被拒（有人同时推过）→ `git pull --rebase origin main` → 如果 rebase 动了你的文件就再跑一遍验证 → 再推。rebase 冲突解不开 → **停下来报告**。绝不 `--force`、绝不对已推送的 commit `--amend`。
 
@@ -155,7 +161,7 @@ Commit: `<shorthash>`
 同顺序模式第 1-2 步，但第 3 步挑 **N 个互不重叠的 gap** 而非 1 个：
 
 - 全部必须通过平台优先级过滤（第一个非 Core gap 进入批次的前提是前面每一个 Core 轴都已经「有」）。
-- 「互不重叠」的定义：两个 gap 预期改动的文件集合除了 DECISIONS 以外不相交。主调度器在第 4 步 plan 里枚举每个 gap 的预期改动文件集，两两核查不相交。互不重叠的数量 < N → **静默缩减 N** 到最大的不重叠子集，最后报告提到缩减。（DECISIONS.md 会重叠，合理冲突会在 P4 机械化解决。）
+- 「互不重叠」的定义：两个 gap 预期改动的文件集合两两不相交。主调度器在第 4 步 plan 里枚举每个 gap 的预期改动文件集，两两核查不相交。互不重叠的数量 < N → **静默缩减 N** 到最大的不重叠子集，最后报告提到缩减。（`docs/decisions/` 天然不冲突 —— 每个 gap 写自己 slug 的新文件。）
 - 如果只有 1 个互不重叠的 gap，**剩余名额 fallback 到顺序模式**。
 
 ### P2. 派发 N 个并行 agent
@@ -165,11 +171,11 @@ Commit: `<shorthash>`
 每个 sub-agent 的 prompt 自包含（它看不到本次对话上下文）。必须包含：
 
 1. 分配给它的具体 gap —— rubric 轴 + 一句话 diff 摘要 + P1 plan 里给出的预期改动文件清单。
-2. 复制顺序模式第 4-8 步（plan → 实现 → 验证 → 归档决策 → commit），并做两处调整：
+2. 复制顺序模式第 4-8 步（plan → 实现 → 验证 → 归档决策 → commit），仅一处调整：
    - **分支名**：在自动创建的 worktree 分支上 commit —— 不要改名、不要 checkout `main`、**不要 push**。分支保持未推送状态，由主调度器来合。
-   - **决策文件路径**：sub-agent 把决策条目写到 staging 文件 `docs/decisions-pending/<yyyy-mm-dd>-<slug>.md`（目录不存在就创建），而不是直接编辑 `docs/DECISIONS.md`。这是消除并行分支之间唯一系统性冲突的关键。主调度器在 P4 步把这些 staging 折回 `DECISIONS.md`。
+   - 决策文件照常写进 `docs/decisions/<yyyy-mm-dd>-<slug>.md`（**新文件**，不编辑已有文件）。因为每个 sub-agent 都用自己的 slug，平行分支彼此不会在这里冲突 —— 这是把 DECISIONS 拆成多文件的关键收益。
 3. 它必须跑的 gradle 测试（从第 6 步的表选）。
-4. 输出契约：最终消息必须包含 commit SHA、staging 决策文件名、一句话结果摘要、测试是否绿。失败时不要 commit，把错误返回。
+4. 输出契约：最终消息必须包含 commit SHA（feat + docs pair）、决策文件名、一句话结果摘要、测试是否绿。失败时不要 commit，把错误返回。
 
 并行度上限 4。N > 4 时**静默 clamp 到 4**。
 
@@ -188,15 +194,14 @@ Agent 工具会返回每个 sub-agent 的分支 + 路径。分流：
 
 1. `git checkout main`
 2. `git pull --rebase origin main`
-3. `git rebase main <branch>` —— 有代码冲突在这里解决。
-4. **把该分支的 staging 决策文件内联折进 DECISIONS.md**。把 `docs/decisions-pending/<yyyy-mm-dd>-<slug>.md` 的内容 prepend 到 `docs/DECISIONS.md` 顶部，删掉 staging 文件，然后在已 rebase 好的分支上追加一条 `docs(decisions): record choices for <feature> (<feat-hash>)` commit。（short-hash 指的是刚刚 rebase 到 main 的那条 feature commit。）
-5. Fast-forward 合入 main：`git checkout main && git merge --ff-only <branch>`。
-6. **立刻 `git push origin main`** —— 开始下一个分支之前就推。每个功能的 feat+decision commit pair 在下一次合并开始前已经在远端。
-7. 冲突处理：
-   - `docs/decisions-pending/*.md` —— 每个文件名唯一，理论上不冲突；真冲突就两个都留。
+3. `git rebase main <branch>` —— 有代码冲突在这里解决。`docs/decisions/<...>.md` 文件本身不会冲突（各 slug 独立新文件），这是拆分到 `docs/decisions/` 的主要收益。
+4. Fast-forward 合入 main：`git checkout main && git merge --ff-only <branch>`。
+5. **立刻 `git push origin main`** —— 开始下一个分支之前就推。每个功能的 feat+decision commit pair 在下一次合并开始前已经在远端。
+6. 冲突处理：
+   - `docs/decisions/*.md` —— 预期不冲突，真冲突（同日同 slug）→ 给其中一个加 `-2` 后缀并把 commit 里的文件名改过来，再继续。
    - 代码冲突 —— **停下来报告**。不强行解。剩余没合的分支保留原状让用户检查。
-8. 推送被拒 → `git pull --rebase origin main` → 再推。解不开 → **停下来报告**。
-9. 下一个分支：回到第 1 步。直到队列空。
+7. 推送被拒 → `git pull --rebase origin main` → 再推。解不开 → **停下来报告**。
+8. 下一个分支：回到第 1 步。直到队列空。
 
 ### P5. 清理
 
@@ -220,7 +225,7 @@ Agent 工具会返回每个 sub-agent 的分支 + 路径。分流：
 2. 最终状态落在 `main`。并行模式的中间分支要么合入、要么作为遗留项报告，绝不静默丢弃。
 3. **Commit → push，永远配对**。本地 `main` 一出现新 commit（顺序模式的 commit pair / 并行模式合并完的一个分支），**立刻** `git push origin main` 再开下一个 cycle / 下一个合并。绝不能让本次调用结束时本地 `main` 有未推送 commit。
 4. 绝不跳过 `./gradlew ktlintCheck`。lint profile 只做 hygiene，报错就是真有问题。
-5. 不带 DECISIONS.md 条目不准 commit（顺序模式直接写进去，并行模式写 staging）—— 极少数纯 typo 修复除外，而这类改动几乎不会成为「本轮第一 gap」。
+5. 不带 `docs/decisions/<yyyy-mm-dd>-<slug>.md` 新文件不准 commit —— **新建**，不得 append / 编辑已有条目。极少数纯 typo 修复除外，而这类改动几乎不会成为「本轮第一 gap」。
 6. 绝不用 `--no-verify`，绝不用 `--force`，已推送的 commit 绝不 `--amend`，绝不用 `git add -A`。
 7. 绝不绕过 CLAUDE.md 架构规则或反需求清单。如果一个 gap 必须绕才能做，**换一个 gap**。
 8. 绝不把 OpenCode 的 Effect.js 结构搬过来。只抽行为。
