@@ -45,6 +45,12 @@ class ListLockfileEntriesTool(
         val toolId: String? = null,
         /** Cap on returned entries (most recent first). Defaults to 20. */
         val limit: Int? = null,
+        /**
+         * When `true`, restrict the result to entries flagged via `pin_lockfile_entry`.
+         * `null` or `false` keeps the default behaviour of returning every entry.
+         * Composes with [toolId] — both filters apply.
+         */
+        val onlyPinned: Boolean? = null,
     )
 
     @Serializable data class Entry(
@@ -72,7 +78,8 @@ class ListLockfileEntriesTool(
         "List AIGC lockfile entries on a project, most recent first. Use this for orientation " +
             "(\"what have I generated?\") and reuse decisions (\"do we have a Mei portrait already?\"). " +
             "Filter by toolId to scope to one modality (e.g. \"generate_image\", \"synthesize_speech\"). " +
-            "Defaults to 20 most recent. For staleness use find_stale_clips instead."
+            "Pass onlyPinned=true to restrict to hero-shot entries flagged via pin_lockfile_entry " +
+            "(composes with toolId). Defaults to 20 most recent. For staleness use find_stale_clips instead."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.read")
@@ -92,6 +99,14 @@ class ListLockfileEntriesTool(
                 put("type", "integer")
                 put("description", "Cap on returned entries (default 20, max 200).")
             }
+            putJsonObject("onlyPinned") {
+                put("type", "boolean")
+                put(
+                    "description",
+                    "When true, only return entries flagged via pin_lockfile_entry. " +
+                        "Composes with toolId — both filters apply. Defaults to false.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("projectId"))))
         put("additionalProperties", false)
@@ -103,7 +118,8 @@ class ListLockfileEntriesTool(
 
         val limit = (input.limit ?: DEFAULT_LIMIT).coerceIn(1, MAX_LIMIT)
         val all = project.lockfile.entries
-        val filtered = if (input.toolId.isNullOrBlank()) all else all.filter { it.toolId == input.toolId }
+        val byToolId = if (input.toolId.isNullOrBlank()) all else all.filter { it.toolId == input.toolId }
+        val filtered = if (input.onlyPinned == true) byToolId.filter { it.pinned } else byToolId
         // entries is append-only / insertion-ordered; reverse so most-recent is first,
         // *then* take the cap so a "show me the last 5" call gets the actual tail.
         val recent = filtered.asReversed().take(limit)
@@ -129,11 +145,15 @@ class ListLockfileEntriesTool(
             entries = mapped,
         )
 
+        val scopeParts = buildList {
+            input.toolId?.takeIf { it.isNotBlank() }?.let { add("toolId=$it") }
+            if (input.onlyPinned == true) add("pinned")
+        }
         val summary = if (mapped.isEmpty()) {
-            val scope = input.toolId?.let { " (toolId=$it)" } ?: ""
+            val scope = if (scopeParts.isEmpty()) "" else " (${scopeParts.joinToString(", ")})"
             "No lockfile entries on project ${pid.value}$scope."
         } else {
-            val scope = input.toolId?.let { " toolId=$it," } ?: ""
+            val scope = if (scopeParts.isEmpty()) "" else " ${scopeParts.joinToString(", ")},"
             "${mapped.size} of ${filtered.size} entries$scope most recent first: " +
                 mapped.take(5).joinToString("; ") { "${it.toolId}/${it.assetId} (model=${it.modelId})" } +
                 if (mapped.size > 5) "; …" else ""

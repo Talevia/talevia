@@ -184,4 +184,68 @@ class ListLockfileEntriesToolTest {
         assertTrue(byAsset.getValue("hero").pinned)
         assertTrue(!byAsset.getValue("other").pinned)
     }
+
+    @Test fun onlyPinnedTrueReturnsOnlyPinnedEntries() = runTest {
+        val rig = rig()
+        seed(
+            rig,
+            entry("generate_image", "hero-1", pinned = true),
+            entry("synthesize_speech", "tts-unpinned", pinned = false),
+            entry("generate_image", "hero-2", pinned = true),
+            entry("generate_image", "plain", pinned = false),
+        )
+        val out = ListLockfileEntriesTool(rig.store).execute(
+            ListLockfileEntriesTool.Input(projectId = "p", onlyPinned = true),
+            rig.ctx,
+        )
+        assertEquals(2, out.data.totalEntries)
+        assertEquals(2, out.data.returnedEntries)
+        assertEquals(setOf("hero-1", "hero-2"), out.data.entries.map { it.assetId }.toSet())
+        assertTrue(out.data.entries.all { it.pinned })
+    }
+
+    @Test fun onlyPinnedComposesWithToolIdFilter() = runTest {
+        val rig = rig()
+        seed(
+            rig,
+            entry("generate_image", "img-hero", pinned = true),
+            entry("generate_image", "img-plain", pinned = false),
+            entry("synthesize_speech", "tts-hero", pinned = true),
+            entry("synthesize_speech", "tts-plain", pinned = false),
+        )
+        val out = ListLockfileEntriesTool(rig.store).execute(
+            ListLockfileEntriesTool.Input(
+                projectId = "p",
+                toolId = "generate_image",
+                onlyPinned = true,
+            ),
+            rig.ctx,
+        )
+        assertEquals(1, out.data.totalEntries)
+        assertEquals(1, out.data.returnedEntries)
+        assertEquals("img-hero", out.data.entries.single().assetId)
+        assertTrue(out.data.entries.single().pinned)
+    }
+
+    @Test fun onlyPinnedFalseAndNullMatchDefaultBehaviour() = runTest {
+        val rig = rig()
+        seed(
+            rig,
+            entry("generate_image", "hero", pinned = true),
+            entry("generate_image", "plain", pinned = false),
+        )
+        val tool = ListLockfileEntriesTool(rig.store)
+        val outFalse = tool.execute(
+            ListLockfileEntriesTool.Input(projectId = "p", onlyPinned = false),
+            rig.ctx,
+        )
+        val outNull = tool.execute(
+            ListLockfileEntriesTool.Input(projectId = "p", onlyPinned = null),
+            rig.ctx,
+        )
+        assertEquals(2, outFalse.data.totalEntries)
+        assertEquals(setOf("hero", "plain"), outFalse.data.entries.map { it.assetId }.toSet())
+        assertEquals(2, outNull.data.totalEntries)
+        assertEquals(setOf("hero", "plain"), outNull.data.entries.map { it.assetId }.toSet())
+    }
 }
