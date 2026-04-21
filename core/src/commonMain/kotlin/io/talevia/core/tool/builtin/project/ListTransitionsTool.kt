@@ -40,7 +40,9 @@ import kotlin.time.Duration.Companion.milliseconds
  * the clips whose boundaries meet at the transition's midpoint).
  * `fromClipId` / `toClipId` may be null when the flanking clips were
  * later removed, leaving the transition orphaned — useful signal for
- * the agent to GC with `remove_transition`.
+ * the agent to GC with `remove_transition`. Pass [Input.onlyOrphaned]
+ * to restrict the result to the GC-interesting subset without
+ * client-side filtering; pair with [Input.limit] to cap long timelines.
  *
  * Read-only, `project.read` — cheap to call during planning.
  */
@@ -50,6 +52,20 @@ class ListTransitionsTool(
 
     @Serializable data class Input(
         val projectId: String,
+        /**
+         * When `true`, restrict the result to rows with `orphaned == true`
+         * (both flanking clips missing — the GC candidates). `null` or
+         * `false` keeps the default behaviour of returning every row.
+         * Composes with [limit] — filter is applied first, then the cap.
+         */
+        val onlyOrphaned: Boolean? = null,
+        /**
+         * Cap on returned rows after the [onlyOrphaned] filter. Defaults
+         * to 50, silently clamped to `[1, 500]`. Chronological order
+         * (by `startSeconds`) is preserved so the cap takes the earliest
+         * transitions first.
+         */
+        val limit: Int? = null,
     )
 
     @Serializable data class TransitionInfo(
@@ -79,7 +95,9 @@ class ListTransitionsTool(
         "List transitions on the project's timeline. Each row: transitionClipId, name, start/duration, " +
             "and the fromClipId/toClipId pair it joins (null when the flanking clips are missing — " +
             "flagged as orphaned for GC). Use this to answer 'where are the fades?' and to find stale " +
-            "transitions whose video clips were later removed."
+            "transitions whose video clips were later removed. Pass onlyOrphaned=true for the GC " +
+            "subset ('which fades can I remove?'); limit caps long timelines (default 50, max 500). " +
+            "totalTransitionCount / orphanedCount stay pre-filter so the LLM can see scope."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.read")
@@ -88,6 +106,21 @@ class ListTransitionsTool(
         put("type", "object")
         putJsonObject("properties") {
             putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("onlyOrphaned") {
+                put("type", "boolean")
+                put(
+                    "description",
+                    "When true, only return orphaned transitions (both flanking clips missing) — the " +
+                        "GC candidates. Composes with limit. Defaults to false.",
+                )
+            }
+            putJsonObject("limit") {
+                put("type", "integer")
+                put(
+                    "description",
+                    "Cap on returned rows after filtering (default 50, max 500). Silently clamped.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("projectId"))))
         put("additionalProperties", false)
@@ -128,18 +161,31 @@ class ListTransitionsTool(
             }
         }.sortedBy { it.startSeconds }
 
+        val totalCount = rows.size
         val orphanCount = rows.count { it.orphaned }
+
+        val filtered = if (input.onlyOrphaned == true) rows.filter { it.orphaned } else rows
+        val limit = (input.limit ?: DEFAULT_LIMIT).coerceIn(MIN_LIMIT, MAX_LIMIT)
+        val capped = filtered.take(limit)
+
+        // totalTransitionCount / orphanedCount stay pre-filter — matches the
+        // `totalEntries` semantics in `list_lockfile_entries` so the agent can
+        // see "3 returned of 8 total (2 orphaned)" and reason about scope.
         val out = Output(
             projectId = input.projectId,
-            totalTransitionCount = rows.size,
+            totalTransitionCount = totalCount,
             orphanedCount = orphanCount,
-            transitions = rows,
+            transitions = capped,
         )
 
-        val body = if (rows.isEmpty()) {
-            "No transitions on this timeline."
+        val body = if (capped.isEmpty()) {
+            if (totalCount == 0) {
+                "No transitions on this timeline."
+            } else {
+                "No transitions matched the filter."
+            }
         } else {
-            rows.joinToString("\n") { r ->
+            capped.joinToString("\n") { r ->
                 val pair = when {
                     r.orphaned -> "orphaned"
                     r.fromClipId != null && r.toClipId != null -> "${r.fromClipId} → ${r.toClipId}"
@@ -151,9 +197,16 @@ class ListTransitionsTool(
             }
         }
 
+        val scopeParts = buildList {
+            if (input.onlyOrphaned == true) add("onlyOrphaned")
+        }
+        val scopeSuffix = if (scopeParts.isEmpty()) "" else " (${scopeParts.joinToString(", ")})"
+        val summary = "Project ${input.projectId}: ${capped.size} returned of $totalCount total " +
+            "($orphanCount orphaned)$scopeSuffix."
+
         return ToolResult(
-            title = "list transitions (${rows.size})",
-            outputForLlm = "Project ${input.projectId}: ${rows.size} transition(s), $orphanCount orphaned.\n$body",
+            title = "list transitions (${capped.size}/$totalCount)",
+            outputForLlm = "$summary\n$body",
             data = out,
         )
     }
@@ -182,6 +235,9 @@ class ListTransitionsTool(
 
     companion object {
         private const val TRANSITION_ASSET_PREFIX = "transition:"
+        private const val DEFAULT_LIMIT = 50
+        private const val MIN_LIMIT = 1
+        private const val MAX_LIMIT = 500
 
         /** One frame at 30fps ≈ 33ms. Covers AddTransition's midpoint rounding without false positives. */
         private val EPSILON: Duration = 34.milliseconds
