@@ -93,6 +93,7 @@ import io.talevia.core.tool.builtin.project.SetOutputProfileTool
 import io.talevia.core.tool.builtin.project.UnpinClipAssetTool
 import io.talevia.core.tool.builtin.project.UnpinLockfileEntryTool
 import io.talevia.core.tool.builtin.project.ValidateProjectTool
+import io.talevia.core.tool.builtin.session.DescribeMessageTool
 import io.talevia.core.tool.builtin.session.DescribeSessionTool
 import io.talevia.core.tool.builtin.session.ListMessagesTool
 import io.talevia.core.tool.builtin.session.ListSessionsTool
@@ -278,6 +279,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(ListSessionsTool(sessions))
         register(DescribeSessionTool(sessions))
         register(ListMessagesTool(sessions))
+        register(DescribeMessageTool(sessions))
         register(ImportMediaTool(media, engine))
         register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))
