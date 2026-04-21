@@ -92,7 +92,7 @@ class ListSessionsToolTest {
         assertEquals(setOf("s-a", "s-a2"), out.sessions.map { it.id }.toSet())
     }
 
-    @Test fun archivedSessionsAreFilteredByTheStore() = runTest {
+    @Test fun archivedSessionsAreFilteredByDefault() = runTest {
         val rig = rig()
         session(rig.store, "s-live", "p")
         session(rig.store, "s-archived", "p", archived = true)
@@ -102,9 +102,38 @@ class ListSessionsToolTest {
             rig.ctx,
         ).data
 
-        // Store's SQL excludes archived rows from listSessions, so the tool can never surface them.
         assertEquals(1, out.totalSessions)
         assertEquals("s-live", out.sessions.single().id)
+    }
+
+    @Test fun includeArchivedFlagSurfacesArchivedSessions() = runTest {
+        val rig = rig()
+        session(rig.store, "s-live", "p", updatedAtMs = 2_000L)
+        session(rig.store, "s-archived", "p", updatedAtMs = 1_000L, archived = true)
+
+        val out = ListSessionsTool(rig.store).execute(
+            ListSessionsTool.Input(includeArchived = true),
+            rig.ctx,
+        ).data
+
+        assertEquals(2, out.totalSessions)
+        val byId = out.sessions.associateBy { it.id }
+        assertTrue(byId.getValue("s-archived").archived)
+        assertTrue(!byId.getValue("s-live").archived)
+    }
+
+    @Test fun includeArchivedRespectsProjectFilter() = runTest {
+        val rig = rig()
+        session(rig.store, "s-a", "p-a", archived = true)
+        session(rig.store, "s-b", "p-b", archived = true)
+
+        val out = ListSessionsTool(rig.store).execute(
+            ListSessionsTool.Input(projectId = "p-a", includeArchived = true),
+            rig.ctx,
+        ).data
+
+        assertEquals(1, out.totalSessions)
+        assertEquals("s-a", out.sessions.single().id)
     }
 
     @Test fun parentIdIsSurfaced() = runTest {

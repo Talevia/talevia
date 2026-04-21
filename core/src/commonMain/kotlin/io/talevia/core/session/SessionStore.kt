@@ -25,6 +25,15 @@ interface SessionStore {
      */
     suspend fun listSessions(projectId: ProjectId? = null): List<Session>
 
+    /**
+     * Like [listSessions] but includes archived rows. Distinct query so the
+     * common non-archived path stays index-covered and the archived-inclusive
+     * path is explicit at the call site. Archived sessions intersperse with
+     * live ones in the returned list — callers filter by `Session.archived`
+     * if they need to distinguish.
+     */
+    suspend fun listSessionsIncludingArchived(projectId: ProjectId? = null): List<Session>
+
     suspend fun appendMessage(message: Message)
     suspend fun updateMessage(message: Message)
     suspend fun getMessage(id: MessageId): Message?

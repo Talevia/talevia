@@ -79,6 +79,15 @@ class SqlDelightSessionStore(
         return rows.map { json.decodeFromString(Session.serializer(), it.data_) }
     }
 
+    override suspend fun listSessionsIncludingArchived(projectId: ProjectId?): List<Session> {
+        val rows = if (projectId == null) {
+            db.sessionsQueries.selectAllIncludingArchived().executeAsList()
+        } else {
+            db.sessionsQueries.selectByProjectIncludingArchived(projectId.value).executeAsList()
+        }
+        return rows.map { json.decodeFromString(Session.serializer(), it.data_) }
+    }
+
     override suspend fun appendMessage(message: Message) {
         db.messagesQueries.insert(
             id = message.id.value,

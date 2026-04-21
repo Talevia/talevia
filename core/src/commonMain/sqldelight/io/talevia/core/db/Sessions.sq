@@ -27,6 +27,12 @@ SELECT * FROM Sessions WHERE archived = 0 ORDER BY time_updated DESC;
 selectByProject:
 SELECT * FROM Sessions WHERE project_id = ? AND archived = 0 ORDER BY time_updated DESC;
 
+selectAllIncludingArchived:
+SELECT * FROM Sessions ORDER BY time_updated DESC;
+
+selectByProjectIncludingArchived:
+SELECT * FROM Sessions WHERE project_id = ? ORDER BY time_updated DESC;
+
 selectChildren:
 SELECT * FROM Sessions WHERE parent_id = ? ORDER BY time_created ASC;
 

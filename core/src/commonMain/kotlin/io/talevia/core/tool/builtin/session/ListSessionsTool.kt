@@ -29,9 +29,9 @@ import kotlinx.serialization.serializer
  * Optional project filter — when `projectId` is set, only sessions with
  * that `projectId` are returned. When omitted, every session across
  * every project is returned (most-recent first). Archived sessions are
- * excluded from every result today — the store's `listSessions` filters
- * them at the SQL layer and exposing them to the agent would require a
- * separate SQL query we don't have yet.
+ * excluded by default; set `includeArchived=true` to see them alongside
+ * live sessions (the `archived` flag on each `Summary` lets callers
+ * distinguish).
  *
  * Return a trimmed summary — id, title, projectId, parentId, timestamps,
  * archived state. The Agent's own running session is included like any
@@ -51,6 +51,8 @@ class ListSessionsTool(
     @Serializable data class Input(
         /** Optional project filter. Null returns every session across all projects. */
         val projectId: String? = null,
+        /** Include archived sessions in the result? Default false. */
+        val includeArchived: Boolean = false,
         /** Cap on returned sessions. Default 50, max 500. */
         val limit: Int? = null,
     )
@@ -74,9 +76,10 @@ class ListSessionsTool(
     override val id: String = "list_sessions"
     override val helpText: String =
         "List agent sessions, optionally filtered by projectId. Most recent first (by updatedAt). " +
-            "Archived sessions are not returned — the store filters them at the SQL layer. Use to " +
-            "find a session to fork from, revert, or reference when the user says \"the session " +
-            "where we did X\"."
+            "Archived sessions are excluded by default — set includeArchived=true to see them " +
+            "alongside live sessions (each Summary carries the archived flag). Use to find a " +
+            "session to fork from, revert, or reference when the user says \"the session where we " +
+            "did X\"."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.read")
@@ -91,6 +94,10 @@ class ListSessionsTool(
                     "Optional project filter. Null returns sessions across every project.",
                 )
             }
+            putJsonObject("includeArchived") {
+                put("type", "boolean")
+                put("description", "Include archived sessions in the result? Default false.")
+            }
             putJsonObject("limit") {
                 put("type", "integer")
                 put("description", "Cap on returned sessions (default 50, max 500).")
@@ -102,7 +109,11 @@ class ListSessionsTool(
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         val pid = input.projectId?.takeIf { it.isNotBlank() }?.let { ProjectId(it) }
-        val all: List<Session> = sessions.listSessions(pid)
+        val all: List<Session> = if (input.includeArchived) {
+            sessions.listSessionsIncludingArchived(pid)
+        } else {
+            sessions.listSessions(pid)
+        }
         // Sort by updatedAt descending so most-recent-touched session leads; store
         // ordering is implementation-defined so we sort explicitly for stability.
         val sorted = all.sortedByDescending { it.updatedAt.toEpochMilliseconds() }
