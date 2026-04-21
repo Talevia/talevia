@@ -4,6 +4,7 @@ import io.talevia.core.AssetId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.platform.GenerationProvenance
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -19,22 +20,46 @@ import kotlinx.serialization.json.JsonObject
  *
  * Ordered [List] rather than a [Map] so entries have a stable insertion order (useful
  * for UI rendering of "recent generations") and the serialized shape is append-only.
- * Lookups go through [findByInputHash], which is O(n) — at project scale (~100s of
- * entries) this is fine; if we ever blow that number we add a `byHash` transient
- * index the same way [io.talevia.core.domain.source.Source.byId] works.
+ * Lookups go through [findByInputHash] / [findByAssetId], which are O(1): both consult
+ * the [byInputHash] / [byAssetId] transient indexes reconstructed from [entries] on
+ * deserialize via the default-init pattern used by [io.talevia.core.domain.source.Source.byId].
+ *
+ * The append-only ledger allows duplicate hashes (a provider re-runs and happens to
+ * produce the same hash twice). [findByInputHash] must return the **most recent** match
+ * — Kotlin's [List.associateBy] overwrites duplicate keys with the later element, so
+ * the last-wins semantic is preserved by the map.
  */
 @Serializable
 data class Lockfile(
     val entries: List<LockfileEntry> = emptyList(),
 ) {
-    fun findByInputHash(hash: String): LockfileEntry? = entries.lastOrNull { it.inputHash == hash }
+    /**
+     * Hash → most recent [LockfileEntry] with that [LockfileEntry.inputHash].
+     *
+     * Reconstructed from [entries] on deserialize via the default lazy-init pattern
+     * used by [io.talevia.core.domain.source.Source.byId]. `associateBy` overwrites
+     * on duplicate keys, so the resulting entry is the last one in insertion order —
+     * matching the original `entries.lastOrNull { … }` semantic.
+     */
+    @Transient
+    val byInputHash: Map<String, LockfileEntry> = entries.associateBy { it.inputHash }
+
+    /**
+     * Asset id → most recent [LockfileEntry] that produced that asset.
+     *
+     * Same reconstruction + last-wins guarantee as [byInputHash].
+     */
+    @Transient
+    val byAssetId: Map<AssetId, LockfileEntry> = entries.associateBy { it.assetId }
+
+    fun findByInputHash(hash: String): LockfileEntry? = byInputHash[hash]
 
     /**
      * Look up the most recent entry that produced [assetId]. Used by stale-clip
      * detection to walk Clip → Asset → conditioning source nodes without
      * requiring `Clip.sourceBinding` to be threaded through `add_clip`.
      */
-    fun findByAssetId(assetId: AssetId): LockfileEntry? = entries.lastOrNull { it.assetId == assetId }
+    fun findByAssetId(assetId: AssetId): LockfileEntry? = byAssetId[assetId]
 
     fun append(entry: LockfileEntry): Lockfile = copy(entries = entries + entry)
 
