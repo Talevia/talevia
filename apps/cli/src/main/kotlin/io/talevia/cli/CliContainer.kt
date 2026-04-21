@@ -66,6 +66,7 @@ import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
 import io.talevia.core.tool.builtin.project.FindUnreferencedAssetsTool
 import io.talevia.core.tool.builtin.project.ForkProjectTool
+import io.talevia.core.tool.builtin.project.GcLockfileTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
 import io.talevia.core.tool.builtin.project.ListAssetsTool
 import io.talevia.core.tool.builtin.project.ListClipsBoundToAssetTool
@@ -281,6 +282,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(RegenerateStaleClipsTool(projects, this))
         register(ListLockfileEntriesTool(projects))
         register(PruneLockfileTool(projects))
+        register(GcLockfileTool(projects))
         register(SaveProjectSnapshotTool(projects))
         register(ListProjectSnapshotsTool(projects))
         register(RestoreProjectSnapshotTool(projects))

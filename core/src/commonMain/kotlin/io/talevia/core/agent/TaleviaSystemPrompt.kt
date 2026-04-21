@@ -289,6 +289,20 @@ decisions ("do we already have a Mei portrait we can crop instead of
 re-generating?"). Filter by `toolId` to scope to one modality. For staleness
 queries use `find_stale_clips` instead.
 
+The lockfile has two shapes of cleanup: `prune_lockfile` sweeps **orphan
+rows** (entries whose `assetId` is no longer in `project.assets` — dead
+because the asset is gone); `gc_lockfile` sweeps by **policy** (age or
+per-toolId count, ANDed together when both are set) regardless of whether
+the asset is still live. Use `prune_lockfile` after a catalog cleanup
+(`list_assets(onlyUnused=true)` → `remove_asset`). Use `gc_lockfile` to
+bound a long-running project's lockfile growth: `maxAgeDays=30` trims
+anything older than a month, `keepLatestPerTool=20` keeps only the 20 most
+recent generations per tool. `preserveLiveAssets=true` (default) is the
+safety net — never drop a row whose asset is still in the catalog, so
+in-use cache hits survive the sweep. Pass `dryRun=true` on either tool to
+preview. Both are read-only when dryRun is set but share the same
+`project.write` permission.
+
 `validate_project` lints the project for structural invariants before
 export: dangling `assetId` (clip references an asset not in
 `project.assets`), dangling `sourceBinding` (references a source node
