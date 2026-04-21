@@ -1,0 +1,180 @@
+package io.talevia.core.tool.builtin.session
+
+import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import io.talevia.core.CallId
+import io.talevia.core.JsonConfig
+import io.talevia.core.MessageId
+import io.talevia.core.SessionId
+import io.talevia.core.agent.AgentRunState
+import io.talevia.core.agent.AgentRunStateTracker
+import io.talevia.core.bus.BusEvent
+import io.talevia.core.bus.EventBus
+import io.talevia.core.db.TaleviaDb
+import io.talevia.core.permission.PermissionDecision
+import io.talevia.core.session.SqlDelightSessionStore
+import io.talevia.core.tool.ToolContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
+import kotlinx.serialization.builtins.ListSerializer
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/**
+ * Coverage for `session_query(select=status)` + `AgentRunStateTracker`.
+ * Covers the reverse-gap cases §3a.9 calls out: no prior run at all
+ * (neverRan=true), mid-run Generating, terminal Failed-with-cause.
+ */
+class SessionQueryStatusTest {
+
+    private data class Rig(
+        val bus: EventBus,
+        val tracker: AgentRunStateTracker,
+        val scopeJob: Job,
+        val tool: SessionQueryTool,
+        val ctx: ToolContext,
+    )
+
+    private fun rig(): Rig {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val db = TaleviaDb(driver)
+        val bus = EventBus()
+        val job = SupervisorJob()
+        val scope = CoroutineScope(job + Dispatchers.Unconfined)
+        val tracker = AgentRunStateTracker(bus, scope)
+        val sessions = SqlDelightSessionStore(db, bus)
+        val tool = SessionQueryTool(sessions, tracker)
+        val ctx = ToolContext(
+            sessionId = SessionId("s"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { PermissionDecision.Once },
+            emitPart = {},
+            messages = emptyList(),
+        )
+        return Rig(bus, tracker, job, tool, ctx)
+    }
+
+    @Test fun neverRanReturnsIdleWithNeverRanFlag() = runTest {
+        val rig = rig()
+        val out = rig.tool.execute(
+            SessionQueryTool.Input(select = "status", sessionId = "s-never"),
+            rig.ctx,
+        ).data
+
+        assertEquals(SessionQueryTool.SELECT_STATUS, out.select)
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SessionQueryTool.StatusRow.serializer()),
+            out.rows,
+        )
+        assertEquals(1, rows.size)
+        assertEquals("s-never", rows[0].sessionId)
+        assertEquals("idle", rows[0].state)
+        assertTrue(rows[0].neverRan)
+        assertNull(rows[0].cause)
+        rig.scopeJob.cancel()
+    }
+
+    @Test fun generatingStateSnapshotAfterPublish() = runTest {
+        val rig = rig()
+        rig.bus.publish(BusEvent.AgentRunStateChanged(SessionId("s-1"), AgentRunState.Generating))
+        yield() // let the collector run
+
+        val out = rig.tool.execute(
+            SessionQueryTool.Input(select = "status", sessionId = "s-1"),
+            rig.ctx,
+        ).data
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SessionQueryTool.StatusRow.serializer()),
+            out.rows,
+        )
+        assertEquals("generating", rows[0].state)
+        assertEquals(false, rows[0].neverRan)
+        rig.scopeJob.cancel()
+    }
+
+    @Test fun failedStateCarriesCause() = runTest {
+        val rig = rig()
+        rig.bus.publish(
+            BusEvent.AgentRunStateChanged(
+                SessionId("s-f"),
+                AgentRunState.Failed("provider 503"),
+            ),
+        )
+        yield()
+
+        val out = rig.tool.execute(
+            SessionQueryTool.Input(select = "status", sessionId = "s-f"),
+            rig.ctx,
+        ).data
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SessionQueryTool.StatusRow.serializer()),
+            out.rows,
+        )
+        assertEquals("failed", rows[0].state)
+        assertEquals("provider 503", rows[0].cause)
+        rig.scopeJob.cancel()
+    }
+
+    @Test fun latestStateOverridesEarlierTransitions() = runTest {
+        val rig = rig()
+        rig.bus.publish(BusEvent.AgentRunStateChanged(SessionId("s-x"), AgentRunState.Generating))
+        yield()
+        rig.bus.publish(BusEvent.AgentRunStateChanged(SessionId("s-x"), AgentRunState.AwaitingTool))
+        yield()
+        rig.bus.publish(BusEvent.AgentRunStateChanged(SessionId("s-x"), AgentRunState.Idle))
+        yield()
+
+        val out = rig.tool.execute(
+            SessionQueryTool.Input(select = "status", sessionId = "s-x"),
+            rig.ctx,
+        ).data
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SessionQueryTool.StatusRow.serializer()),
+            out.rows,
+        )
+        // Post-run Idle: state=idle, neverRan=false (distinguishable from the never-ran case).
+        assertEquals("idle", rows[0].state)
+        assertEquals(false, rows[0].neverRan)
+        rig.scopeJob.cancel()
+    }
+
+    @Test fun missingSessionIdFailsLoud() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                SessionQueryTool.Input(select = "status"),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("requires sessionId"), ex.message)
+        rig.scopeJob.cancel()
+    }
+
+    @Test fun noTrackerWiredFailsLoud() = runTest {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val db = TaleviaDb(driver)
+        val sessions = SqlDelightSessionStore(db, EventBus())
+        val tool = SessionQueryTool(sessions) // agentStates=null
+        val ctx = ToolContext(
+            sessionId = SessionId("s"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { PermissionDecision.Once },
+            emitPart = {},
+            messages = emptyList(),
+        )
+        val ex = assertFailsWith<IllegalArgumentException> {
+            tool.execute(SessionQueryTool.Input(select = "status", sessionId = "s-1"), ctx)
+        }
+        assertTrue(ex.message!!.contains("AgentRunStateTracker"), ex.message)
+    }
+}

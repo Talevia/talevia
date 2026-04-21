@@ -5,6 +5,7 @@ import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.talevia.core.agent.Agent
+import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
 import io.talevia.core.db.TaleviaDb
@@ -107,6 +108,9 @@ import io.talevia.core.tool.builtin.video.SetClipTransformTool
 import io.talevia.core.tool.builtin.video.SetClipVolumeTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
 import io.talevia.core.tool.builtin.video.TrimClipTool
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 
 /**
  * Composition root for the Android app. Mirrors `apps/desktop/AppContainer.kt` and
@@ -117,6 +121,10 @@ class AndroidAppContainer(context: Context) {
     val driver = AndroidSqliteDriver(TaleviaDb.Schema, context, "talevia.db")
     val db = TaleviaDb(driver)
     val bus = EventBus()
+    val agentStates = AgentRunStateTracker(
+        bus,
+        CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    )
     val sessions: SessionStore = SqlDelightSessionStore(db, bus)
     val projects: ProjectStore = SqlDelightProjectStore(db)
     val media: MediaStorage = AndroidPersistentMediaStorage(
@@ -145,7 +153,7 @@ class AndroidAppContainer(context: Context) {
         register(io.talevia.core.tool.builtin.meta.ListToolsTool(this))
         register(io.talevia.core.tool.builtin.meta.EstimateTokensTool())
         register(TodoWriteTool())
-        register(SessionQueryTool(sessions))
+        register(SessionQueryTool(sessions, agentStates))
         register(DescribeSessionTool(sessions))
         register(EstimateSessionTokensTool(sessions))
         register(DescribeMessageTool(sessions))

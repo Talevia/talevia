@@ -15,6 +15,7 @@ final class AppContainer {
     let driver: RuntimeSqlDriver
     let db: any TaleviaDb
     let bus: EventBus
+    let agentStates: AgentRunStateTracker
     let sessions: SqlDelightSessionStore
     let projects: SqlDelightProjectStore
     /// [InMemoryMediaStorage] already implements [MediaPathResolver], so we
@@ -59,6 +60,7 @@ final class AppContainer {
         self.driver = factory.createInMemoryDriver()
         self.db = TaleviaDbCompanion.shared.invoke(driver: self.driver)
         self.bus = EventBus(extraBufferCapacity: 0)
+        self.agentStates = AgentRunStateTrackerCompanion.shared.withSupervisor(bus: self.bus)
         let clock = ClockSystem.shared
         let json = JsonConfig.shared.default
         self.sessions = SqlDelightSessionStore(db: self.db, bus: self.bus, clock: clock, json: json)
@@ -72,7 +74,7 @@ final class AppContainer {
         registry.register(tool: ListToolsTool(registry: registry))
         registry.register(tool: EstimateTokensTool())
         registry.register(tool: TodoWriteTool(clock: clock))
-        registry.register(tool: SessionQueryTool(sessions: self.sessions))
+        registry.register(tool: SessionQueryTool(sessions: self.sessions, agentStates: self.agentStates))
         registry.register(tool: DescribeSessionTool(sessions: self.sessions))
         registry.register(tool: EstimateSessionTokensTool(sessions: self.sessions))
         registry.register(tool: DescribeMessageTool(sessions: self.sessions))

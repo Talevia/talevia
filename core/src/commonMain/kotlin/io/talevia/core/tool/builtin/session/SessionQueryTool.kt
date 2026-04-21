@@ -1,6 +1,7 @@
 package io.talevia.core.tool.builtin.session
 
 import io.talevia.core.JsonConfig
+import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.Tool
@@ -11,6 +12,7 @@ import io.talevia.core.tool.builtin.session.query.runForksQuery
 import io.talevia.core.tool.builtin.session.query.runMessagesQuery
 import io.talevia.core.tool.builtin.session.query.runPartsQuery
 import io.talevia.core.tool.builtin.session.query.runSessionsQuery
+import io.talevia.core.tool.builtin.session.query.runStatusQuery
 import io.talevia.core.tool.builtin.session.query.runToolCallsQuery
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -52,6 +54,13 @@ import kotlinx.serialization.serializer
  */
 class SessionQueryTool(
     private val sessions: SessionStore,
+    /**
+     * Optional agent-state snapshot source. Required when `select=status` is
+     * requested — callers pass null to keep the rest of the selects
+     * functional in non-Agent rigs (pure session store tests). Wired by each
+     * production AppContainer from the same bus every Agent publishes on.
+     */
+    private val agentStates: AgentRunStateTracker? = null,
 ) : Tool<SessionQueryTool.Input, SessionQueryTool.Output> {
 
     @Serializable data class Input(
@@ -156,6 +165,20 @@ class SessionQueryTool(
         val compactedAtEpochMs: Long? = null,
     )
 
+    @Serializable data class StatusRow(
+        val sessionId: String,
+        /** `"idle"` | `"generating"` | `"awaiting_tool"` | `"compacting"` | `"cancelled"` | `"failed"`. */
+        val state: String,
+        /** Non-null only when `state="failed"`. */
+        val cause: String? = null,
+        /**
+         * True when the tracker has never seen any [io.talevia.core.agent.AgentRunState]
+         * transition for this session. `state` still reports `"idle"` in that
+         * case (distinct from "ran and terminated back to idle" only via this flag).
+         */
+        val neverRan: Boolean = false,
+    )
+
     override val id: String = "session_query"
     override val helpText: String =
         "Unified read-only query over sessions + messages + parts + forks (replaces list_sessions / " +
@@ -171,6 +194,9 @@ class SessionQueryTool(
             "  • ancestors — parent chain up to root (child→root). requires sessionId. Depth-bounded.\n" +
             "  • tool_calls — Part.Tool only. filter: toolId, includeCompacted. requires sessionId. " +
             "Most-recent first.\n" +
+            "  • status — snapshot of the agent's most recent run state (idle | generating | " +
+            "awaiting_tool | compacting | cancelled | failed). requires sessionId. neverRan=true " +
+            "means the tracker has not seen any run on this session yet.\n" +
             "Common: limit (default 100, clamped 1..1000), offset (default 0). Setting a filter " +
             "that doesn't apply to the chosen select fails loud so typos surface instead of silently " +
             "returning an empty list. Describe-style single-entity drilldown stays in describe_session " +
@@ -186,7 +212,7 @@ class SessionQueryTool(
                 put("type", "string")
                 put(
                     "description",
-                    "What to query: sessions | messages | parts | forks | ancestors | tool_calls " +
+                    "What to query: sessions | messages | parts | forks | ancestors | tool_calls | status " +
                         "(case-insensitive).",
                 )
             }
@@ -194,7 +220,7 @@ class SessionQueryTool(
                 put("type", "string")
                 put(
                     "description",
-                    "Session id. Required for messages/parts/forks/ancestors/tool_calls. " +
+                    "Session id. Required for messages/parts/forks/ancestors/tool_calls/status. " +
                         "Rejected for select=sessions.",
                 )
             }
@@ -266,6 +292,7 @@ class SessionQueryTool(
             SELECT_FORKS -> runForksQuery(sessions, input, limit, offset)
             SELECT_ANCESTORS -> runAncestorsQuery(sessions, input, limit, offset)
             SELECT_TOOL_CALLS -> runToolCallsQuery(sessions, input, limit, offset)
+            SELECT_STATUS -> runStatusQuery(agentStates, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -311,9 +338,10 @@ class SessionQueryTool(
         const val SELECT_FORKS = "forks"
         const val SELECT_ANCESTORS = "ancestors"
         const val SELECT_TOOL_CALLS = "tool_calls"
+        const val SELECT_STATUS = "status"
         private val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
-            SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS,
+            SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_STATUS,
         )
 
         private const val DEFAULT_LIMIT = 100

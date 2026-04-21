@@ -3,6 +3,7 @@ package io.talevia.desktop
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.talevia.core.agent.Agent
+import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.agent.SessionTitler
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
@@ -150,6 +151,9 @@ import io.talevia.core.tool.builtin.video.TrimClipTool
 import io.talevia.core.tool.builtin.web.WebFetchTool
 import io.talevia.core.tool.builtin.web.WebSearchTool
 import io.talevia.platform.ffmpeg.FfmpegVideoEngine
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
 import java.io.File
 
@@ -168,6 +172,14 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
     /** Resolved DB location — `":memory:"` or an absolute filesystem path. Useful for logs. */
     val dbPath: String = opened.path
     val bus: EventBus = EventBus()
+    /**
+     * Tracks the most recent [io.talevia.core.agent.AgentRunState] per session
+     * by subscribing to the bus. `session_query(select=status)` reads from it.
+     */
+    val agentStates: AgentRunStateTracker = AgentRunStateTracker(
+        bus,
+        CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    )
 
     val sessions = SqlDelightSessionStore(db, bus)
     val projects: ProjectStore = SqlDelightProjectStore(db)
@@ -269,7 +281,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(io.talevia.core.tool.builtin.meta.ListToolsTool(this))
         register(io.talevia.core.tool.builtin.meta.EstimateTokensTool())
         register(TodoWriteTool())
-        register(SessionQueryTool(sessions))
+        register(SessionQueryTool(sessions, agentStates))
         register(DescribeSessionTool(sessions))
         register(EstimateSessionTokensTool(sessions))
         register(DescribeMessageTool(sessions))
