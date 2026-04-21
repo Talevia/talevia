@@ -17,8 +17,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **session-projector-views** — `Session` 当前只暴露一份 linear message list，UI 自己拼 "tool-call tree" / "artifact timeline" view。OpenCode `session/projectors.ts` 把投影下沉到 session 层。**方向：** `core.session.SessionProjector` 接口 + 2 个实现：`ToolCallTreeProjector`（把嵌套 tool-call 展开成树）、`ArtifactTimelineProjector`（扫 lockfile entries 按时间聚合）。UI 按需选投影。Rubric §5.4。
-
 - **generate-project-variant** — VISION §6 叙事 / vlog 例子明确点 "30s / 竖版 variant"，但当前没有一等抽象生成变体；用户必须手动 `fork_project` + `set_output_profile` + re-export。**方向：** `generate_variant(projectId, variantSpec: {aspectRatio?, durationSeconds?, language?})`：fork project、按 spec 调整 timeline（比例裁剪 / 按 key-shot 浓缩 / 重生成 TTS 变体）、write a child project id pointing back to parent。Rubric §5.2。
 
 - **provider-auth-state** — 5 个 AppContainer 各自 `env["OPENAI_API_KEY"]?.takeIf(...)` 判断是否注册 OpenAI 相关 tool。逻辑散落 + UI 没法展示 "哪些 key 缺了"。OpenCode `provider/auth.ts` 集中管理。**方向：** `core.provider.ProviderAuth` 单点，暴露 `authStatus(providerId): Present | Missing | Invalid`，container 按 status 决定注册；UI 能显示具体缺什么。Rubric §5.2。
