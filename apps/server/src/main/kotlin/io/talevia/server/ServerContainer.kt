@@ -82,6 +82,7 @@ import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.project.ListTimelineClipsTool
 import io.talevia.core.tool.builtin.project.ListTracksTool
 import io.talevia.core.tool.builtin.project.ListTransitionsTool
+import io.talevia.core.tool.builtin.project.PinClipAssetTool
 import io.talevia.core.tool.builtin.project.PinLockfileEntryTool
 import io.talevia.core.tool.builtin.project.PruneLockfileTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
@@ -90,6 +91,7 @@ import io.talevia.core.tool.builtin.project.RenameProjectTool
 import io.talevia.core.tool.builtin.project.RestoreProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.SaveProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.SetOutputProfileTool
+import io.talevia.core.tool.builtin.project.UnpinClipAssetTool
 import io.talevia.core.tool.builtin.project.UnpinLockfileEntryTool
 import io.talevia.core.tool.builtin.project.ValidateProjectTool
 import io.talevia.core.tool.builtin.shell.BashTool
@@ -360,6 +362,8 @@ class ServerContainer(
         register(GcLockfileTool(projects))
         register(PinLockfileEntryTool(projects))
         register(UnpinLockfileEntryTool(projects))
+        register(PinClipAssetTool(projects))
+        register(UnpinClipAssetTool(projects))
         register(SaveProjectSnapshotTool(projects))
         register(ListProjectSnapshotsTool(projects))
         register(RestoreProjectSnapshotTool(projects))
