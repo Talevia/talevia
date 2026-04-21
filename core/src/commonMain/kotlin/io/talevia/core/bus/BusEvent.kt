@@ -115,4 +115,28 @@ sealed interface BusEvent {
         val correlationId: String,
         val message: String,
     ) : SessionEvent
+
+    /**
+     * The Agent auto-triggered context compaction at the start of a turn because
+     * the estimated token footprint of the surviving history crossed the
+     * configured threshold. Emitted exactly once per auto-compaction pass,
+     * **before** the Compactor re-reads the session. UI consumers can show
+     * "compacting…" instead of letting the next turn look stuck while the
+     * summarisation call is in flight.
+     *
+     * Manual compaction calls (e.g. an explicit `/compact` from the operator)
+     * do **not** emit this event — it's specifically the overflow-auto-trigger
+     * signal. Pair with [AgentRetryScheduled]: together they cover the two
+     * visible pauses a long session can exhibit before a turn's streaming
+     * resumes.
+     *
+     * @property historyTokensBefore TokenEstimator.forHistory result that
+     *   crossed the threshold and caused the trigger.
+     * @property thresholdTokens The threshold the estimate exceeded.
+     */
+    data class SessionCompactionAuto(
+        override val sessionId: SessionId,
+        val historyTokensBefore: Int,
+        val thresholdTokens: Int,
+    ) : SessionEvent
 }

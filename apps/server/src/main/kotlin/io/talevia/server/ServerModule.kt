@@ -412,6 +412,7 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.PermissionReplied -> "permission.replied"
     is BusEvent.AgentRunFailed -> "agent.run.failed"
     is BusEvent.AgentRetryScheduled -> "agent.retry.scheduled"
+    is BusEvent.SessionCompactionAuto -> "session.compaction.auto"
 }
 
 @Serializable data class CreateProjectRequest(val title: String)
@@ -500,6 +501,8 @@ data class BusEventDto(
     val attempt: Int? = null,
     val waitMs: Long? = null,
     val reason: String? = null,
+    val historyTokensBefore: Int? = null,
+    val thresholdTokens: Int? = null,
 ) {
     companion object {
         fun from(e: BusEvent): BusEventDto = when (e) {
@@ -536,6 +539,10 @@ data class BusEventDto(
             is BusEvent.AgentRetryScheduled -> BusEventDto(
                 "agent.retry.scheduled", e.sessionId.value,
                 attempt = e.attempt, waitMs = e.waitMs, reason = e.reason,
+            )
+            is BusEvent.SessionCompactionAuto -> BusEventDto(
+                "session.compaction.auto", e.sessionId.value,
+                historyTokensBefore = e.historyTokensBefore, thresholdTokens = e.thresholdTokens,
             )
         }
     }

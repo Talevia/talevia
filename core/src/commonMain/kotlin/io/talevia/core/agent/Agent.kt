@@ -247,9 +247,22 @@ class Agent(
             // token usage and let the Compactor prune + summarise if we are over budget.
             // The post-process history is re-read from the store because Compactor
             // writes a new CompactionPart and marks older parts compacted.
-            if (compactor != null && TokenEstimator.forHistory(history) > compactionTokenThreshold) {
-                compactor.process(input.sessionId, history, input.model)
-                history = store.listMessagesWithParts(input.sessionId, includeCompacted = false)
+            if (compactor != null) {
+                val estimated = TokenEstimator.forHistory(history)
+                if (estimated > compactionTokenThreshold) {
+                    // Publish before kicking off compaction — subscribers (UI, SSE clients)
+                    // can render "compacting…" while the summarisation call is in flight,
+                    // instead of watching the next turn look stuck.
+                    bus.publish(
+                        BusEvent.SessionCompactionAuto(
+                            sessionId = input.sessionId,
+                            historyTokensBefore = estimated,
+                            thresholdTokens = compactionTokenThreshold,
+                        ),
+                    )
+                    compactor.process(input.sessionId, history, input.model)
+                    history = store.listMessagesWithParts(input.sessionId, includeCompacted = false)
+                }
             }
 
             // Re-read the session every step so a `switch_project` invoked in the

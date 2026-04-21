@@ -6,6 +6,7 @@ import io.talevia.core.MessageId
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
 import io.talevia.core.db.TaleviaDb
@@ -20,7 +21,12 @@ import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.session.TokenUsage
 import io.talevia.core.session.ToolState
 import io.talevia.core.tool.ToolRegistry
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
@@ -104,6 +110,106 @@ class AgentCompactionTest {
 
         val active = store.listSessionParts(sid, includeCompacted = false)
         assertTrue(active.none { it.id == PartId("heavy-tool") }, "pruned parts excluded from active view")
+    }
+
+    /**
+     * Overflow-auto trigger visibility: when the Agent notices the history is
+     * above the configured token threshold and calls Compactor.process, it
+     * must also publish [BusEvent.SessionCompactionAuto] *before* the summarise
+     * call kicks off, so UI subscribers can render "compacting…" rather than
+     * leaving the next turn looking stuck. Without this event the user has no
+     * signal distinguishing "agent is slow" from "agent is compacting".
+     */
+    @Test
+    fun autoCompactionPublishesSessionCompactionAutoEvent() = runTest {
+        val (store, bus) = newStore()
+        val sid = primeSession(store)
+        val now = Clock.System.now()
+
+        // Same seed as the round-trip test — enough heavy history to cross the
+        // 100-token threshold TokenEstimator estimates on the surviving parts.
+        val mUser = Message.User(
+            id = MessageId("u-auto"), sessionId = sid, createdAt = now,
+            agent = "default", model = ModelRef("fake", "x"),
+        )
+        store.appendMessage(mUser)
+        store.upsertPart(Part.Text(PartId("u-auto-text"), mUser.id, sid, now, text = "old prompt"))
+        val mAsst = Message.Assistant(
+            id = MessageId("a-auto"), sessionId = sid, createdAt = now,
+            parentId = mUser.id, model = ModelRef("fake", "x"),
+            finish = FinishReason.TOOL_CALLS,
+        )
+        store.appendMessage(mAsst)
+        store.upsertPart(
+            Part.Tool(
+                id = PartId("heavy-auto"), messageId = mAsst.id, sessionId = sid, createdAt = now,
+                callId = CallId("c-auto"), toolId = "echo",
+                state = ToolState.Completed(
+                    input = JsonObject(emptyMap()),
+                    outputForLlm = "x".repeat(2_000),
+                    data = JsonObject(emptyMap()),
+                ),
+            ),
+        )
+
+        val summaryTurn = listOf(
+            LlmEvent.TextStart(PartId("sum-auto")),
+            LlmEvent.TextEnd(PartId("sum-auto"), "Goal: …"),
+            LlmEvent.StepFinish(FinishReason.END_TURN, TokenUsage(input = 10, output = 5)),
+        )
+        val agentTurn = listOf(
+            LlmEvent.TextStart(PartId("reply-auto")),
+            LlmEvent.TextEnd(PartId("reply-auto"), "ok"),
+            LlmEvent.StepFinish(FinishReason.END_TURN, TokenUsage(input = 5, output = 1)),
+        )
+        val provider = FakeProvider(listOf(summaryTurn, agentTurn))
+
+        val compactor = Compactor(
+            provider = provider,
+            store = store,
+            bus = bus,
+            protectUserTurns = 1,
+            pruneProtectTokens = 50,
+        )
+
+        // Capture SessionCompactionAuto events published while the Agent runs.
+        // Subscribe BEFORE calling agent.run so the collector is hot — SharedFlow
+        // without replay drops events emitted before the collector is active.
+        val captured = mutableListOf<BusEvent.SessionCompactionAuto>()
+        val job = bus.events
+            .filterIsInstance<BusEvent.SessionCompactionAuto>()
+            .onEach { captured += it }
+            .launchIn(this)
+        // Ensure the collector is scheduled and actively collecting before the
+        // publisher runs; without this the StandardTestDispatcher can put the
+        // agent's publish ahead of the collector's first resumption.
+        yield()
+
+        val agent = Agent(
+            provider = provider,
+            registry = ToolRegistry(),
+            store = store,
+            permissions = AllowAllPermissionService(),
+            bus = bus,
+            compactor = compactor,
+            compactionTokenThreshold = 100,
+        )
+
+        agent.run(RunInput(sid, "continue please", ModelRef("fake", "test")))
+        advanceUntilIdle()
+        job.cancel()
+
+        assertEquals(
+            1, captured.size,
+            "auto-compaction must emit exactly one SessionCompactionAuto event per trigger pass",
+        )
+        val evt = captured.single()
+        assertEquals(sid, evt.sessionId)
+        assertEquals(100, evt.thresholdTokens)
+        assertTrue(
+            evt.historyTokensBefore > evt.thresholdTokens,
+            "event must report a historyTokensBefore that actually crossed the threshold",
+        )
     }
 
     private fun newStore(): Pair<SqlDelightSessionStore, EventBus> {

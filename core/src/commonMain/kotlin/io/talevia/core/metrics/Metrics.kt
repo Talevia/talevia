@@ -116,5 +116,6 @@ class EventBusMetricsSink(
         is BusEvent.AgentRunFailed -> "agent.run.failed"
         is BusEvent.SessionCancelled -> "session.cancelled"
         is BusEvent.AgentRetryScheduled -> "agent.retry.scheduled"
+        is BusEvent.SessionCompactionAuto -> "session.compaction.auto"
     }
 }
