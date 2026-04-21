@@ -19,6 +19,8 @@ sealed class Message {
         override val createdAt: Instant,
         val agent: String,
         val model: ModelRef,
+        /** Forward-compat discriminator. See [MessageSchema]. */
+        val schemaVersion: Int = MessageSchema.CURRENT,
     ) : Message()
 
     @Serializable @SerialName("assistant")
@@ -32,6 +34,8 @@ sealed class Message {
         val tokens: TokenUsage = TokenUsage.ZERO,
         val finish: FinishReason? = null,
         val error: String? = null,
+        /** Forward-compat discriminator. See [MessageSchema]. */
+        val schemaVersion: Int = MessageSchema.CURRENT,
     ) : Message()
 }
 

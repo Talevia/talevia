@@ -28,6 +28,8 @@ sealed class Part {
         override val compactedAt: Instant? = null,
         val text: String,
         val synthetic: Boolean = false,
+        /** Forward-compat discriminator. See [PartSchema]. */
+        val schemaVersion: Int = PartSchema.CURRENT,
     ) : Part()
 
     @Serializable @SerialName("reasoning")
@@ -38,6 +40,8 @@ sealed class Part {
         override val createdAt: Instant,
         override val compactedAt: Instant? = null,
         val text: String,
+        /** Forward-compat discriminator. See [PartSchema]. */
+        val schemaVersion: Int = PartSchema.CURRENT,
     ) : Part()
 
     @Serializable @SerialName("tool")
@@ -51,6 +55,8 @@ sealed class Part {
         val toolId: String,
         val state: ToolState,
         val title: String? = null,
+        /** Forward-compat discriminator. See [PartSchema]. */
+        val schemaVersion: Int = PartSchema.CURRENT,
     ) : Part()
 
     @Serializable @SerialName("media")
@@ -61,6 +67,8 @@ sealed class Part {
         override val createdAt: Instant,
         override val compactedAt: Instant? = null,
         val assetId: AssetId,
+        /** Forward-compat discriminator. See [PartSchema]. */
+        val schemaVersion: Int = PartSchema.CURRENT,
     ) : Part()
 
     @Serializable @SerialName("timeline-snapshot")
@@ -73,6 +81,8 @@ sealed class Part {
         val timeline: Timeline,
         // null = "before tool", non-null = "after tool callId"
         val producedByCallId: CallId? = null,
+        /** Forward-compat discriminator. See [PartSchema]. */
+        val schemaVersion: Int = PartSchema.CURRENT,
     ) : Part()
 
     @Serializable @SerialName("render-progress")
@@ -85,6 +95,8 @@ sealed class Part {
         val jobId: String,
         val ratio: Float,
         val message: String? = null,
+        /** Forward-compat discriminator. See [PartSchema]. */
+        val schemaVersion: Int = PartSchema.CURRENT,
     ) : Part()
 
     @Serializable @SerialName("step-start")
@@ -94,6 +106,8 @@ sealed class Part {
         override val sessionId: SessionId,
         override val createdAt: Instant,
         override val compactedAt: Instant? = null,
+        /** Forward-compat discriminator. See [PartSchema]. */
+        val schemaVersion: Int = PartSchema.CURRENT,
     ) : Part()
 
     @Serializable @SerialName("step-finish")
@@ -105,6 +119,8 @@ sealed class Part {
         override val compactedAt: Instant? = null,
         val tokens: TokenUsage,
         val finish: FinishReason,
+        /** Forward-compat discriminator. See [PartSchema]. */
+        val schemaVersion: Int = PartSchema.CURRENT,
     ) : Part()
 
     @Serializable @SerialName("compaction")
@@ -117,6 +133,8 @@ sealed class Part {
         val replacedFromMessageId: MessageId,
         val replacedToMessageId: MessageId,
         val summary: String,
+        /** Forward-compat discriminator. See [PartSchema]. */
+        val schemaVersion: Int = PartSchema.CURRENT,
     ) : Part()
 
     /**
@@ -134,6 +152,8 @@ sealed class Part {
         override val createdAt: Instant,
         override val compactedAt: Instant? = null,
         val todos: List<TodoInfo>,
+        /** Forward-compat discriminator. See [PartSchema]. */
+        val schemaVersion: Int = PartSchema.CURRENT,
     ) : Part()
 }
 
