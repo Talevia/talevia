@@ -66,6 +66,7 @@ import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
+import io.talevia.core.tool.builtin.project.DescribeLockfileEntryTool
 import io.talevia.core.tool.builtin.project.DescribeProjectTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.FindPinnedClipsTool
@@ -361,6 +362,7 @@ class ServerContainer(
         register(ValidateProjectTool(projects))
         register(RegenerateStaleClipsTool(projects, this))
         register(ListLockfileEntriesTool(projects))
+        register(DescribeLockfileEntryTool(projects))
         register(PruneLockfileTool(projects))
         register(GcLockfileTool(projects))
         register(PinLockfileEntryTool(projects))

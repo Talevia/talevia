@@ -118,6 +118,7 @@ final class AppContainer {
         registry.register(tool: FindPinnedClipsTool(projects: self.projects))
         registry.register(tool: FindUnreferencedAssetsTool(projects: self.projects))
         registry.register(tool: ListLockfileEntriesTool(projects: self.projects))
+        registry.register(tool: DescribeLockfileEntryTool(projects: self.projects))
         registry.register(tool: PruneLockfileTool(projects: self.projects))
         registry.register(tool: GcLockfileTool(projects: self.projects, clock: clock))
         registry.register(tool: PinLockfileEntryTool(projects: self.projects))
