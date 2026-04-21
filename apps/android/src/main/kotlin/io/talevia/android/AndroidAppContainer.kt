@@ -38,6 +38,7 @@ import io.talevia.core.tool.builtin.project.ListLockfileEntriesTool
 import io.talevia.core.tool.builtin.project.ListProjectSnapshotsTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.project.ListTimelineClipsTool
+import io.talevia.core.tool.builtin.project.ListTracksTool
 import io.talevia.core.tool.builtin.project.PruneLockfileTool
 import io.talevia.core.tool.builtin.project.RemoveAssetTool
 import io.talevia.core.tool.builtin.project.RenameProjectTool
@@ -152,6 +153,7 @@ class AndroidAppContainer(context: Context) {
         register(GetProjectStateTool(projects))
         register(DescribeProjectTool(projects))
         register(ListTimelineClipsTool(projects))
+        register(ListTracksTool(projects))
         register(ListClipsBoundToAssetTool(projects))
         register(ListAssetsTool(projects))
         register(RemoveAssetTool(projects))

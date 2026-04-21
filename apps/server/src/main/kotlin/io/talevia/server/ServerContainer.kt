@@ -79,6 +79,7 @@ import io.talevia.core.tool.builtin.project.ListLockfileEntriesTool
 import io.talevia.core.tool.builtin.project.ListProjectSnapshotsTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.project.ListTimelineClipsTool
+import io.talevia.core.tool.builtin.project.ListTracksTool
 import io.talevia.core.tool.builtin.project.PruneLockfileTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
 import io.talevia.core.tool.builtin.project.RemoveAssetTool
@@ -330,6 +331,7 @@ class ServerContainer(
         register(ListClipsForSourceTool(projects))
         register(ListClipsBoundToAssetTool(projects))
         register(ListTimelineClipsTool(projects))
+        register(ListTracksTool(projects))
         register(ListAssetsTool(projects))
         register(RemoveAssetTool(projects))
         register(SetOutputProfileTool(projects))
