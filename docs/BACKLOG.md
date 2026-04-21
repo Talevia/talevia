@@ -15,8 +15,6 @@
 
 - **auto-author-first-project-from-intent** — 小白路径 §5.4 的硬缺口：今天用户必须手动 `create_project` + 手动 `set_character_ref` / `add_source_node` 才能给 agent 投料。北极星是 "一句话意图 → 可看初稿"。**方向：** 新增 `start_project_from_intent(intent: String)` tool：LLM 调 agent 把 intent 解析成 genre（先覆盖 narrative / vlog），生成 skeleton source graph（character / style / shot placeholders），返回 projectId。不产生任何 AIGC 资产——只是搭好骨架让 agent 继续 fill in。Rubric §5.4。
 
-- **streaming-tool-output-parts** — 长跑 tool（`generate_video` 30s+、`export` 可能 1min+）没有中间进度回传，UI 看到的是 "等待 → 突然完成"。`ToolContext.emitPart` 已存在但几乎没 tool 用。OpenCode `session/processor.ts` 流式消费 intermediate parts。**方向：** 给 `generate_video` / `generate_image` / `export_project` / `export` 4 个关键 tool 加 `ctx.emitPart(RenderProgress(...))` 调用点，bus 把 Part 发出去，UI 能画 progress bar。Rubric §5.2。
-
 ## P1 — 中优，做完 P0 再排
 
 - **debt-split-taleviasystemprompt** — `core/agent/TaleviaSystemPrompt.kt` 743 行。每个 LLM turn 都要重算 + 传输全量 system prompt，长文件也阻碍维护。**方向：** 拆成 composable 片段（build-system / consistency / export / lockfile / session-project / permissions 各一段），`Agent` 按需组装（未来可以按当前 session 的 project 类型选片段）。Rubric 外 / R.5.3 长文件。
