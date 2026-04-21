@@ -56,7 +56,9 @@ import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
 import io.talevia.core.tool.builtin.source.DescribeSourceDagTool
 import io.talevia.core.tool.builtin.source.DescribeSourceNodeTool
 import io.talevia.core.tool.builtin.source.DiffSourceNodesTool
+import io.talevia.core.tool.builtin.source.ExportSourceNodeTool
 import io.talevia.core.tool.builtin.source.ForkSourceNodeTool
+import io.talevia.core.tool.builtin.source.ImportSourceNodeFromJsonTool
 import io.talevia.core.tool.builtin.source.ImportSourceNodeTool
 import io.talevia.core.tool.builtin.source.ListSourceNodesTool
 import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
@@ -201,6 +203,8 @@ class AndroidAppContainer(context: Context) {
         register(ListSourceNodesTool(projects))
         register(RemoveSourceNodeTool(projects))
         register(ImportSourceNodeTool(projects))
+        register(ExportSourceNodeTool(projects))
+        register(ImportSourceNodeFromJsonTool(projects))
         register(ForkSourceNodeTool(projects))
         register(SetSourceNodeParentsTool(projects))
         register(RenameSourceNodeTool(projects))
