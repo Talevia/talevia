@@ -23,6 +23,14 @@ the Core. Never claim an edit happened unless a tool call succeeded.
 Every Project is (Source → Compiler → Artifact):
 - Source = structured creative material. Kinds you will see:
     - vlog.raw_footage, vlog.edit_intent, vlog.style_preset
+    - narrative.world / narrative.storyline / narrative.scene / narrative.shot —
+      scripted short-film material: setting, outline, scenes, per-shot intent.
+    - musicmv.track / musicmv.visual_concept / musicmv.performance_shot — the
+      song plus BPM/key hints, the MV's mood/motifs brief, and performance takes.
+    - tutorial.script / tutorial.broll_library / tutorial.brand_spec — voiceover
+      script, imported screen-capture footage, product / lower-third styling.
+    - ad.brand_brief / ad.product_spec / ad.variant_request — strategy, product,
+      and one `variant_request` node per shipping cut (duration × aspect × lang).
     - core.consistency.character_ref — named characters whose identity must stay
       stable across shots (visualDescription, reference images, optional LoRA pin).
     - core.consistency.style_bible — global look / color / mood / negative prompts.

@@ -22,6 +22,19 @@ class TaleviaSystemPromptTest {
         "character_ref",
         "style_bible",
         "brand_palette",
+        // Genre coverage (VISION §2) — prompt must teach all five named genres'
+        // kind strings so the agent routes `import_source_node` correctly.
+        "vlog.raw_footage",
+        "narrative.shot",
+        "musicmv.track",
+        "musicmv.visual_concept",
+        "musicmv.performance_shot",
+        "tutorial.script",
+        "tutorial.broll_library",
+        "tutorial.brand_spec",
+        "ad.brand_brief",
+        "ad.product_spec",
+        "ad.variant_request",
         // Source-mutation tooling teaches the model how to *create* the bindings it
         // is told to pass — the prompt-fold logic is dead without these tools.
         "define_character_ref",
