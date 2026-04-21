@@ -202,6 +202,109 @@ class ListTimelineClipsToolTest {
         assertTrue("vfx" in ex.message!!, ex.message)
     }
 
+    @Test fun onlySourceBoundReturnsOnlyAigcDerivedClips() = runTest {
+        val imported = videoClip("imported", Duration.ZERO, 2.seconds)
+        val aigc = Clip.Video(
+            id = ClipId("aigc"),
+            timeRange = TimeRange(2.seconds, 3.seconds),
+            sourceRange = TimeRange(Duration.ZERO, 3.seconds),
+            assetId = AssetId("gen"),
+            sourceBinding = setOf(SourceNodeId("n1")),
+        )
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(imported, aigc)))),
+            ),
+        )
+
+        val out = rig.tool.execute(
+            ListTimelineClipsTool.Input("p", onlySourceBound = true),
+            rig.ctx,
+        )
+        assertEquals(1, out.data.totalClipCount)
+        assertEquals(listOf("aigc"), out.data.clips.map { it.clipId })
+        assertEquals(listOf("n1"), out.data.clips.single().sourceBindingNodeIds)
+    }
+
+    @Test fun onlySourceBoundComposesWithTrackKind() = runTest {
+        val videoAigc = Clip.Video(
+            id = ClipId("vc-aigc"),
+            timeRange = TimeRange(Duration.ZERO, 2.seconds),
+            sourceRange = TimeRange(Duration.ZERO, 2.seconds),
+            assetId = AssetId("gen-v"),
+            sourceBinding = setOf(SourceNodeId("nv")),
+        )
+        val videoImported = videoClip("vc-imp", 2.seconds, 2.seconds)
+        val audioAigc = Clip.Audio(
+            id = ClipId("ac-aigc"),
+            timeRange = TimeRange(Duration.ZERO, 3.seconds),
+            sourceRange = TimeRange(Duration.ZERO, 3.seconds),
+            assetId = AssetId("gen-a"),
+            sourceBinding = setOf(SourceNodeId("na")),
+        )
+        val audioImported = Clip.Audio(
+            id = ClipId("ac-imp"),
+            timeRange = TimeRange(3.seconds, 2.seconds),
+            sourceRange = TimeRange(Duration.ZERO, 2.seconds),
+            assetId = AssetId("imp-a"),
+        )
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(
+                    tracks = listOf(
+                        Track.Video(TrackId("vt"), listOf(videoAigc, videoImported)),
+                        Track.Audio(TrackId("at"), listOf(audioAigc, audioImported)),
+                    ),
+                ),
+            ),
+        )
+
+        val out = rig.tool.execute(
+            ListTimelineClipsTool.Input("p", trackKind = "audio", onlySourceBound = true),
+            rig.ctx,
+        )
+        // Orthogonal composition: only the AIGC audio clip survives both filters.
+        assertEquals(1, out.data.totalClipCount)
+        assertEquals(listOf("ac-aigc"), out.data.clips.map { it.clipId })
+    }
+
+    @Test fun onlySourceBoundFalseOrNullMatchesDefaultBehaviour() = runTest {
+        val imported = videoClip("imported", Duration.ZERO, 2.seconds)
+        val aigc = Clip.Video(
+            id = ClipId("aigc"),
+            timeRange = TimeRange(2.seconds, 3.seconds),
+            sourceRange = TimeRange(Duration.ZERO, 3.seconds),
+            assetId = AssetId("gen"),
+            sourceBinding = setOf(SourceNodeId("n1")),
+        )
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(imported, aigc)))),
+            ),
+        )
+
+        val baseline = rig.tool.execute(ListTimelineClipsTool.Input("p"), rig.ctx)
+        val explicitNull = rig.tool.execute(
+            ListTimelineClipsTool.Input("p", onlySourceBound = null),
+            rig.ctx,
+        )
+        val explicitFalse = rig.tool.execute(
+            ListTimelineClipsTool.Input("p", onlySourceBound = false),
+            rig.ctx,
+        )
+
+        val ids = listOf("imported", "aigc")
+        assertEquals(ids, baseline.data.clips.map { it.clipId })
+        assertEquals(ids, explicitNull.data.clips.map { it.clipId })
+        assertEquals(ids, explicitFalse.data.clips.map { it.clipId })
+        assertEquals(2, baseline.data.totalClipCount)
+        assertEquals(2, explicitNull.data.totalClipCount)
+        assertEquals(2, explicitFalse.data.totalClipCount)
+    }
+
     @Test fun filtersByTrackId() = runTest {
         val a = videoClip("c1", Duration.ZERO, 2.seconds)
         val b = videoClip("c2", Duration.ZERO, 2.seconds)

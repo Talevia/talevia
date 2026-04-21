@@ -56,6 +56,14 @@ class ListTimelineClipsTool(
         val trackKind: String? = null,
         val fromSeconds: Double? = null,
         val toSeconds: Double? = null,
+        /**
+         * When `true`, only return clips whose `sourceBinding` set is non-empty —
+         * i.e. AIGC-derived clips that were compiled from a source-DAG node.
+         * `null` / `false` include every clip (imported + AIGC). This is the
+         * single most useful discriminator for stale-clip / regeneration flows:
+         * imported footage has no sourceBinding, AIGC output does.
+         */
+        val onlySourceBound: Boolean? = null,
         /** Max clips to return. Default 100; clips past the cap flip `truncated=true`. */
         val limit: Int = 100,
     )
@@ -96,10 +104,12 @@ class ListTimelineClipsTool(
     override val helpText: String =
         "List clips on the project's timeline with structured metadata (track, kind, start, " +
             "duration, assetId, filters, audio volume/fade, text preview, source bindings). " +
-            "Filter by trackId, trackKind ('video'|'audio'|'subtitle'|'effect'), or a time " +
-            "window. Use this whenever the user refers to 'that clip', 'the intro', 'track 2' — " +
-            "it's cheaper than dumping the whole project. Capped at `limit` (default 100); the " +
-            "`truncated` flag tells you to refine the filter."
+            "Filter by trackId, trackKind ('video'|'audio'|'subtitle'|'effect'), a time " +
+            "window, or `onlySourceBound=true` to keep only AIGC-derived clips (non-empty " +
+            "sourceBinding) — useful for stale-clip / regeneration flows. Use this whenever " +
+            "the user refers to 'that clip', 'the intro', 'track 2' — it's cheaper than " +
+            "dumping the whole project. Capped at `limit` (default 100); the `truncated` " +
+            "flag tells you to refine the filter."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.read")
@@ -123,6 +133,14 @@ class ListTimelineClipsTool(
             putJsonObject("toSeconds") {
                 put("type", "number")
                 put("description", "Upper bound of the time window. Clips whose timeRange starts after this are excluded.")
+            }
+            putJsonObject("onlySourceBound") {
+                put("type", "boolean")
+                put(
+                    "description",
+                    "If true, only return clips with a non-empty sourceBinding (AIGC-derived). " +
+                        "Null or false returns all clips. Composes with the other filters.",
+                )
             }
             putJsonObject("limit") {
                 put("type", "integer")
@@ -158,6 +176,7 @@ class ListTimelineClipsTool(
             for (clip in ordered) {
                 if (fromDuration != null && clip.timeRange.end < fromDuration) continue
                 if (toDuration != null && clip.timeRange.start > toDuration) continue
+                if (input.onlySourceBound == true && clip.sourceBinding.isEmpty()) continue
                 totalMatched += 1
                 if (collected.size < limit) collected += clipInfoOf(clip, track, trackKind)
             }
