@@ -84,6 +84,7 @@ final class AppContainer {
         registry.register(tool: ListSessionAncestorsTool(sessions: self.sessions))
         registry.register(tool: ReadPartTool(sessions: self.sessions))
         registry.register(tool: ListToolCallsTool(sessions: self.sessions))
+        registry.register(tool: ListPartsTool(sessions: self.sessions))
         registry.register(tool: ImportMediaTool(storage: self.media, engine: self.engine))
         registry.register(tool: ExtractFrameTool(engine: self.engine, storage: self.media, blobWriter: self.blobWriter))
         registry.register(tool: AddClipTool(store: self.projects, media: self.media))
