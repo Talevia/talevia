@@ -170,12 +170,29 @@ import io.talevia.platform.ffmpeg.FfmpegVideoEngine
 import java.io.File
 
 /**
- * Composition root for the server, mirrors `apps/desktop/AppContainer.kt`. Single
- * shared graph because v0 is single-tenant; multi-tenant isolation is a later concern.
+ * Composition root for the server, mirrors `apps/desktop/AppContainer.kt`.
+ *
+ * **Assumes single-tenant.** The whole graph — [sessions], [projects], [media]
+ * catalog, [secrets] (API keys from the host env), [permissions] — is process-
+ * global and shared across every HTTP request. Trigger conditions for
+ * upgrading to a multi-tenant model are recorded in
+ * `docs/decisions/2026-04-21-server-auth-multiuser-isolation-recorded.md`;
+ * do NOT expose this server to untrusted remote users without first
+ * reading that note and implementing the per-tenant isolation it
+ * prescribes.
+ *
+ * Concretely, today's shape that's unsafe to publicly expose:
+ *  - `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `REPLICATE_API_TOKEN` are
+ *    process-wide — every session spends the same billed account.
+ *  - `TALEVIA_MEDIA_DIR` is a single directory; every session reads/writes
+ *    the same asset catalog and blob pool.
+ *  - SQLite at `TALEVIA_DB_PATH` holds every user's sessions / projects /
+ *    snapshots in the same tables without tenant column or row-level ACL.
  *
  * Auth: if the `TALEVIA_SERVER_TOKEN` env var is non-empty, every HTTP request
  * must carry `Authorization: Bearer <token>`; otherwise the server runs open
- * (intended for local development only).
+ * (intended for local development only). The token gives access to the whole
+ * single-tenant graph — it's an on/off switch, not per-user auth.
  *
  * Permissions: [ServerPermissionService] rejects any tool that would otherwise
  * need to ASK the user — callers must grant the right permissions up-front via

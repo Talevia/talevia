@@ -16,5 +16,3 @@
 ## P1 — 中优，做完 P0 再排
 
 ## P2 — 记债/观望
-
-- **server-auth-multiuser-isolation** — `apps/server` 从环境变量读 API key，`TALEVIA_MEDIA_DIR` 是单全局目录，catalog 全局共享。当前是"可选 headless"单用户，**暂不修**。升级到真多用户前在 server 模块里加显式"assumes single-tenant"的注释 + 在此条登记触发条件。
