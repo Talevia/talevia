@@ -100,6 +100,7 @@ import io.talevia.core.tool.builtin.source.RenameSourceNodeTool
 import io.talevia.core.tool.builtin.source.SetSourceNodeParentsTool
 import io.talevia.core.tool.builtin.source.UpdateBrandPaletteTool
 import io.talevia.core.tool.builtin.source.UpdateCharacterRefTool
+import io.talevia.core.tool.builtin.source.UpdateSourceNodeBodyTool
 import io.talevia.core.tool.builtin.source.UpdateStyleBibleTool
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitleTool
@@ -304,6 +305,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(ForkSourceNodeTool(projects))
         register(SetSourceNodeParentsTool(projects))
         register(RenameSourceNodeTool(projects))
+        register(UpdateSourceNodeBodyTool(projects))
         register(ReadFileTool(fileSystem))
         register(WriteFileTool(fileSystem))
         register(EditTool(fileSystem))

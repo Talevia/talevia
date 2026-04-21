@@ -91,6 +91,19 @@ The rename does NOT rewrite string ids embedded inside typed bodies (e.g. a
 `narrative.shot.body.sceneId`) — update those separately via the kind-specific
 `update_*` tool.
 
+`update_source_node_body(projectId, nodeId, body)` replaces a node's body
+wholesale. Kind-agnostic — works on any non-consistency kind (narrative.shot,
+vlog.raw_footage, musicmv.*, tutorial.*, ad.*, or any hand-authored /
+imported node) where the `update_character_ref` / `update_style_bible` /
+`update_brand_palette` trio doesn't apply. The `body` argument is a full
+replacement JSON object: read the current body with `describe_source_node`,
+mutate client-side, write it back. Does NOT touch `kind` (rebuild the node if
+the kind must change), `parents` (use `set_source_node_parents`), or `id`
+(use `rename_source_node`). Bumps `contentHash` so bound clips go stale — run
+`find_stale_clips` after editing. For the three consistency kinds, prefer the
+typed `update_*` tools — they accept partial patches and know how to clear
+optional fields with `""` / `[]`.
+
 When the user changes a consistency node and you need to regenerate everything
 that depended on it, call `regenerate_stale_clips` — one tool that handles the
 full find_stale_clips → regenerate → replace_clip chain in one atomic batch.
