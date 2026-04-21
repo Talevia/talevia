@@ -75,6 +75,7 @@ Operational red lines. If a task seems to require any of these, stop and challen
 - **Core 放在所有平台之前**：agent loop、provider 抽象、tool registry、session/compaction、domain model、permission、bus 等 KMP 共享逻辑的迭代高于任何单一平台的 UI/集成工作。上层平台缺的能力，多半来自 Core 缺口 —— 先补 Core，平台再消费。
 - **Core gap-finding 的首选参照是 OpenCode**：`/Volumes/Code/CodingAgent/opencode`（见下方 "OpenCode as a 'runnable spec'" 章节的模块索引）是当前最成熟的行为参考。梳理 Core 任务时，把 OpenCode 对应模块当作行为 spec 对照，找出我们缺的机制（例：流式 tool 输出、compaction 细节、permission 粒度、bus 事件覆盖等）。只抄行为，不抄 Effect.js 结构。
 - 在 Core 之后，平台顺序：先把 Mac CLI 打磨到"相对完善可用"再动 desktop GUI；desktop GUI 达到同一及格线之前，iOS / Android 只维持**不退化**（能编译、已有 E2E 测试继续通过），不主动扩新特性。
+- **iOS / Android 的"不退化底线"已经到位**（2026-04 现状）：`Media3VideoEngine`（Android）、AVFoundation engine（iOS）、FFmpeg engine（JVM）在 **vignette / transitions / subtitles / LUT** 四类能力上已三平台对齐（见下方 "Known incomplete" 首条）。`Every target` gradle 命令显式把 `:apps:android:assembleDebug` 纳入，iOS 也有 xcodegen + framework link 路径。**底线定义**：Core 新增的渲染能力（新 filter 种类 / 新 transition / 新 overlay 基元）如果已经在 FFmpeg 引擎落地，默认要求 Android + iOS 同步对齐；只在 FFmpeg 上做单平台特性视同破坏底线。反向：**超出底线的主动扩展**（iOS 专属手势、Android 专属 UI 组件、Android 端独立的 AIGC 管线等）仍然不做 —— 有具体 driver 再动。
 - "相对完善可用"的判断：当前优先级平台上 VISION §5 rubric 的每一节都至少达到"部分"及格线 —— source 层可用、工具集覆盖主要编辑意图、AIGC 产物可 pin、agent 能跑出可看初稿、专家能接管。
 - Server 作为 CLI / desktop 的无头孪生同步演进，属于 "Others" —— 只在 CLI / desktop 需要其作为后端或测试目标时才推进。
 - 跨平台抽象（`core/platform` 接口、`ToolRegistry` 注册等）**不得**因为 CLI / desktop 赶进度而省略 —— 红线仍是 CommonMain 零平台依赖。
