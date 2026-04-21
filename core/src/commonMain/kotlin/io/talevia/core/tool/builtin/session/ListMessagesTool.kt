@@ -51,6 +51,14 @@ class ListMessagesTool(
         val sessionId: String,
         /** Cap on returned messages (default 50, max 500). */
         val limit: Int? = null,
+        /**
+         * Optional role filter — `"user"` narrows to user rows, `"assistant"` to
+         * assistant rows. `null` (default) returns both. Common audit flows:
+         * "show me just the user prompts from session X" or "show me just what
+         * the assistant produced". Value is lowercased + trimmed before matching,
+         * so `"USER"` / `" user "` equal `"user"`.
+         */
+        val role: String? = null,
     )
 
     @Serializable data class Summary(
@@ -82,8 +90,10 @@ class ListMessagesTool(
         "List messages on a session, most recent first. Assistant rows surface tokens / finish " +
             "reason / error; user rows surface agent + model. The message *content* (text, tool " +
             "calls, tool results) is not returned — use a part-level tool to drill in. Default " +
-            "limit 50, max 500. Use before session_fork to find an anchor messageId, or for " +
-            "cross-session audit when the user asks \"what did we do in session X?\"."
+            "limit 50, max 500. Pass role=\"user\" or role=\"assistant\" to narrow to one side " +
+            "(null = both); the filter is applied before the limit, so totalMessages reflects " +
+            "the true filtered total. Use before session_fork to find an anchor messageId, or " +
+            "for cross-session audit when the user asks \"what did we do in session X?\"."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.read")
@@ -99,6 +109,15 @@ class ListMessagesTool(
                 put("type", "integer")
                 put("description", "Cap on returned messages (default 50, max 500).")
             }
+            putJsonObject("role") {
+                put("type", "string")
+                put("enum", JsonArray(listOf(JsonPrimitive("user"), JsonPrimitive("assistant"))))
+                put(
+                    "description",
+                    "Optional role filter — \"user\" or \"assistant\". Omit to return both. " +
+                        "Applied before the limit, so totalMessages reflects the filtered total.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("sessionId"))))
         put("additionalProperties", false)
@@ -110,10 +129,23 @@ class ListMessagesTool(
             ?: error(
                 "Session ${input.sessionId} not found. Call list_sessions to discover valid session ids.",
             )
+        val normalisedRole = input.role?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }
+        if (normalisedRole != null) {
+            require(normalisedRole in VALID_ROLES) {
+                "role must be one of ${VALID_ROLES.joinToString(", ")} (got '${input.role}')"
+            }
+        }
         val all = sessions.listMessages(sid)
+        // Filter BEFORE sort + take so the cap composes correctly and totalMessages
+        // reflects the true filtered total (not the pre-filter store size).
+        val filtered = when (normalisedRole) {
+            "user" -> all.filterIsInstance<Message.User>()
+            "assistant" -> all.filterIsInstance<Message.Assistant>()
+            else -> all
+        }
         val cap = (input.limit ?: DEFAULT_LIMIT).coerceIn(1, MAX_LIMIT)
         // Most-recent first so "last N" queries land naturally on the tail.
-        val ordered = all.sortedByDescending { it.createdAt.toEpochMilliseconds() }.take(cap)
+        val ordered = filtered.sortedByDescending { it.createdAt.toEpochMilliseconds() }.take(cap)
 
         val summaries = ordered.map { m ->
             when (m) {
@@ -142,14 +174,19 @@ class ListMessagesTool(
 
         val out = Output(
             sessionId = session.id.value,
-            totalMessages = all.size,
+            totalMessages = filtered.size,
             returnedMessages = summaries.size,
             messages = summaries,
         )
+        val scopeParts = buildList {
+            normalisedRole?.let { add("role=$it") }
+        }
         val summary = if (summaries.isEmpty()) {
-            "Session ${session.id.value} '${session.title}' has no messages."
+            val scope = if (scopeParts.isEmpty()) "" else " (${scopeParts.joinToString(", ")})"
+            "Session ${session.id.value} '${session.title}' has no messages$scope."
         } else {
-            "${summaries.size} of ${all.size} message(s) on ${session.id.value} '${session.title}', " +
+            val scope = if (scopeParts.isEmpty()) "" else " ${scopeParts.joinToString(", ")},"
+            "${summaries.size} of ${filtered.size} message(s) on ${session.id.value} '${session.title}',$scope " +
                 "most recent first: " +
                 summaries.take(5).joinToString("; ") { "${it.role}/${it.id}" } +
                 if (summaries.size > 5) "; …" else ""
@@ -164,5 +201,6 @@ class ListMessagesTool(
     private companion object {
         const val DEFAULT_LIMIT = 50
         const val MAX_LIMIT = 500
+        val VALID_ROLES = setOf("user", "assistant")
     }
 }

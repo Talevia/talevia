@@ -199,6 +199,121 @@ class ListMessagesToolTest {
         assertTrue(ex.message!!.contains("list_sessions"), ex.message)
     }
 
+    @Test fun roleUserReturnsOnlyUserRows() = runTest {
+        val rig = rig()
+        newSession(rig.store)
+        appendUser(rig.store, "s-1", "u-1", atMs = 1_000L)
+        appendAssistant(rig.store, "s-1", "a-1", parentId = "u-1", atMs = 2_000L)
+        appendUser(rig.store, "s-1", "u-2", atMs = 3_000L)
+        appendAssistant(rig.store, "s-1", "a-2", parentId = "u-2", atMs = 4_000L)
+
+        val out = ListMessagesTool(rig.store).execute(
+            ListMessagesTool.Input(sessionId = "s-1", role = "user"),
+            rig.ctx,
+        ).data
+
+        assertEquals(2, out.totalMessages)
+        assertEquals(2, out.returnedMessages)
+        assertTrue(out.messages.all { it.role == "user" }, "expected only user rows, got ${out.messages}")
+        assertEquals(listOf("u-2", "u-1"), out.messages.map { it.id })
+    }
+
+    @Test fun roleAssistantReturnsOnlyAssistantRows() = runTest {
+        val rig = rig()
+        newSession(rig.store)
+        appendUser(rig.store, "s-1", "u-1", atMs = 1_000L)
+        appendAssistant(rig.store, "s-1", "a-1", parentId = "u-1", atMs = 2_000L)
+        appendUser(rig.store, "s-1", "u-2", atMs = 3_000L)
+        appendAssistant(rig.store, "s-1", "a-2", parentId = "u-2", atMs = 4_000L)
+
+        val out = ListMessagesTool(rig.store).execute(
+            ListMessagesTool.Input(sessionId = "s-1", role = "assistant"),
+            rig.ctx,
+        ).data
+
+        assertEquals(2, out.totalMessages)
+        assertEquals(2, out.returnedMessages)
+        assertTrue(out.messages.all { it.role == "assistant" }, "expected only assistant rows, got ${out.messages}")
+        assertEquals(listOf("a-2", "a-1"), out.messages.map { it.id })
+    }
+
+    @Test fun roleNullReturnsAllRows() = runTest {
+        val rig = rig()
+        newSession(rig.store)
+        appendUser(rig.store, "s-1", "u-1", atMs = 1_000L)
+        appendAssistant(rig.store, "s-1", "a-1", parentId = "u-1", atMs = 2_000L)
+        appendUser(rig.store, "s-1", "u-2", atMs = 3_000L)
+        appendAssistant(rig.store, "s-1", "a-2", parentId = "u-2", atMs = 4_000L)
+
+        val out = ListMessagesTool(rig.store).execute(
+            ListMessagesTool.Input(sessionId = "s-1"),
+            rig.ctx,
+        ).data
+
+        assertEquals(4, out.totalMessages)
+        assertEquals(4, out.returnedMessages)
+        assertEquals(listOf("a-2", "u-2", "a-1", "u-1"), out.messages.map { it.id })
+    }
+
+    @Test fun roleUppercaseIsNormalized() = runTest {
+        val rig = rig()
+        newSession(rig.store)
+        appendUser(rig.store, "s-1", "u-1", atMs = 1_000L)
+        appendAssistant(rig.store, "s-1", "a-1", parentId = "u-1", atMs = 2_000L)
+
+        val lower = ListMessagesTool(rig.store).execute(
+            ListMessagesTool.Input(sessionId = "s-1", role = "user"),
+            rig.ctx,
+        ).data
+        val upper = ListMessagesTool(rig.store).execute(
+            ListMessagesTool.Input(sessionId = "s-1", role = "USER"),
+            rig.ctx,
+        ).data
+
+        assertEquals(lower.messages.map { it.id }, upper.messages.map { it.id })
+        assertEquals(1, upper.totalMessages)
+        assertEquals("user", upper.messages.single().role)
+    }
+
+    @Test fun roleInvalidFailsLoudly() = runTest {
+        val rig = rig()
+        newSession(rig.store)
+        appendUser(rig.store, "s-1", "u-1", atMs = 1_000L)
+
+        val ex = assertFailsWith<IllegalArgumentException> {
+            ListMessagesTool(rig.store).execute(
+                ListMessagesTool.Input(sessionId = "s-1", role = "ghost"),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("user"), ex.message)
+        assertTrue(ex.message!!.contains("assistant"), ex.message)
+        assertTrue(ex.message!!.contains("ghost"), ex.message)
+    }
+
+    @Test fun roleFilterComposesWithLimit() = runTest {
+        val rig = rig()
+        newSession(rig.store)
+        // 4 user + 4 assistant, interleaved in time.
+        repeat(4) { i ->
+            appendUser(rig.store, "s-1", "u-$i", atMs = 1_000L + i * 10)
+            appendAssistant(rig.store, "s-1", "a-$i", parentId = "u-$i", atMs = 1_005L + i * 10)
+        }
+
+        val out = ListMessagesTool(rig.store).execute(
+            ListMessagesTool.Input(sessionId = "s-1", role = "user", limit = 2),
+            rig.ctx,
+        ).data
+
+        // totalMessages should reflect the filtered total (4 users), not the 8 pre-filter.
+        assertEquals(4, out.totalMessages)
+        assertEquals(2, out.returnedMessages)
+        assertEquals(2, out.messages.size)
+        assertTrue(out.messages.all { it.role == "user" }, "expected only user rows, got ${out.messages}")
+        // Most recent two users.
+        assertEquals(listOf("u-3", "u-2"), out.messages.map { it.id })
+    }
+
     @Test fun errorFieldRoundTrips() = runTest {
         val rig = rig()
         newSession(rig.store)
