@@ -98,6 +98,7 @@ import io.talevia.core.tool.builtin.session.DescribeSessionTool
 import io.talevia.core.tool.builtin.session.ForkSessionTool
 import io.talevia.core.tool.builtin.session.ListMessagesTool
 import io.talevia.core.tool.builtin.session.ListSessionsTool
+import io.talevia.core.tool.builtin.session.RenameSessionTool
 import io.talevia.core.tool.builtin.shell.BashTool
 import io.talevia.core.tool.builtin.source.AddSourceNodeTool
 import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
@@ -282,6 +283,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(ListMessagesTool(sessions))
         register(DescribeMessageTool(sessions))
         register(ForkSessionTool(sessions))
+        register(RenameSessionTool(sessions))
         register(ImportMediaTool(media, engine))
         register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))
