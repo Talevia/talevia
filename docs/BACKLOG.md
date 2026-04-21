@@ -19,6 +19,4 @@
 
 ## P2 — 记债/观望
 
-- **process-level-project-mutex** — `SqlDelightProjectStore` 用进程内 `Mutex` 保护 `mutate`。Desktop / CLI / 单副本 server 够用，多副本 server 或多进程共享 DB 会丢写。当前 server 是"可选 headless"，**暂不修**，但在本文件里记一笔，等 server 真要走生产路径时提前搜索此条。
-
 - **server-auth-multiuser-isolation** — `apps/server` 从环境变量读 API key，`TALEVIA_MEDIA_DIR` 是单全局目录，catalog 全局共享。当前是"可选 headless"单用户，**暂不修**。升级到真多用户前在 server 模块里加显式"assumes single-tenant"的注释 + 在此条登记触发条件。

@@ -84,6 +84,14 @@ class SqlDelightProjectStore(
     private val clock: Clock = Clock.System,
     private val json: Json = JsonConfig.default,
 ) : ProjectStore {
+    /**
+     * Process-scoped Mutex — serialises `mutate` within this JVM. Safe for
+     * single-process Desktop / CLI / single-replica server. When multiple JVM
+     * processes share the same `TALEVIA_DB_PATH` (unusual), writes can interleave
+     * — upgrade to SQLite-level serialisation (`BEGIN IMMEDIATE` or
+     * `PRAGMA locking_mode = EXCLUSIVE`) at that point. Triggers + rationale:
+     * `docs/decisions/2026-04-21-process-level-project-mutex-recorded.md`.
+     */
     private val mutex = Mutex()
 
     override suspend fun get(id: ProjectId): Project? {
