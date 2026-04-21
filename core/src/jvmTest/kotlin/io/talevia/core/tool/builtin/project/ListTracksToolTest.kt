@@ -204,4 +204,152 @@ class ListTracksToolTest {
         assertEquals(0, out.tracks.first { it.trackId == "v-bg" }.index)
         assertEquals(1, out.tracks.first { it.trackId == "v-fg" }.index)
     }
+
+    private suspend fun mixedEmptyAndPopulatedFixture(): Pair<SqlDelightProjectStore, ProjectId> {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val pid = ProjectId("p-mixed")
+
+        val emptyVideo = Track.Video(id = TrackId("v-empty"), clips = emptyList())
+        val populatedVideo = Track.Video(
+            id = TrackId("v-full"),
+            clips = listOf(
+                Clip.Video(
+                    id = ClipId("c-v"),
+                    timeRange = TimeRange(0.seconds, 3.seconds),
+                    sourceRange = TimeRange(0.seconds, 3.seconds),
+                    assetId = AssetId("a-v"),
+                ),
+            ),
+        )
+        val emptyAudio = Track.Audio(id = TrackId("a-empty"), clips = emptyList())
+        val populatedAudio = Track.Audio(
+            id = TrackId("a-full"),
+            clips = listOf(
+                Clip.Audio(
+                    id = ClipId("c-a"),
+                    timeRange = TimeRange(0.seconds, 5.seconds),
+                    sourceRange = TimeRange(0.seconds, 5.seconds),
+                    assetId = AssetId("a-audio"),
+                ),
+            ),
+        )
+
+        val project = Project(
+            id = pid,
+            timeline = Timeline(
+                tracks = listOf(emptyVideo, populatedVideo, emptyAudio, populatedAudio),
+                duration = 5.seconds,
+            ),
+        )
+        store.upsert("demo-mixed", project)
+        return store to pid
+    }
+
+    @Test fun onlyNonEmptyTrueSkipsEmptyTracks() = runTest {
+        val (store, pid) = mixedEmptyAndPopulatedFixture()
+        val tool = ListTracksTool(store)
+        val out = tool.execute(
+            ListTracksTool.Input(projectId = pid.value, onlyNonEmpty = true),
+            ctx(),
+        ).data
+        assertEquals(4, out.totalTrackCount)
+        assertEquals(2, out.returnedTrackCount)
+        assertEquals(listOf("v-full", "a-full"), out.tracks.map { it.trackId })
+        assertTrue(out.tracks.none { it.isEmpty })
+    }
+
+    @Test fun onlyNonEmptyFalseIsSameAsDefault() = runTest {
+        val (store, pid) = mixedEmptyAndPopulatedFixture()
+        val tool = ListTracksTool(store)
+        val explicitFalse = tool.execute(
+            ListTracksTool.Input(projectId = pid.value, onlyNonEmpty = false),
+            ctx(),
+        ).data
+        val default = tool.execute(
+            ListTracksTool.Input(projectId = pid.value),
+            ctx(),
+        ).data
+        assertEquals(4, explicitFalse.returnedTrackCount)
+        assertEquals(default.tracks.map { it.trackId }, explicitFalse.tracks.map { it.trackId })
+    }
+
+    @Test fun onlyNonEmptyComposesWithKindFilter() = runTest {
+        val (store, pid) = mixedEmptyAndPopulatedFixture()
+        val tool = ListTracksTool(store)
+        val out = tool.execute(
+            ListTracksTool.Input(projectId = pid.value, trackKind = "video", onlyNonEmpty = true),
+            ctx(),
+        ).data
+        // 4 total tracks in the project (pre-filter count is preserved).
+        assertEquals(4, out.totalTrackCount)
+        assertEquals(1, out.returnedTrackCount)
+        assertEquals("v-full", out.tracks.single().trackId)
+        assertEquals("video", out.tracks.single().trackKind)
+    }
+
+    private suspend fun fivePopulatedTracksFixture(): Pair<SqlDelightProjectStore, ProjectId> {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val pid = ProjectId("p-five")
+
+        val tracks = (1..5).map { i ->
+            Track.Video(
+                id = TrackId("v-$i"),
+                clips = listOf(
+                    Clip.Video(
+                        id = ClipId("c-$i"),
+                        timeRange = TimeRange(0.seconds, 2.seconds),
+                        sourceRange = TimeRange(0.seconds, 2.seconds),
+                        assetId = AssetId("a-$i"),
+                    ),
+                ),
+            )
+        }
+        val project = Project(
+            id = pid,
+            timeline = Timeline(tracks = tracks, duration = 2.seconds),
+        )
+        store.upsert("demo-five", project)
+        return store to pid
+    }
+
+    @Test fun limitCapsResponse() = runTest {
+        val (store, pid) = fivePopulatedTracksFixture()
+        val tool = ListTracksTool(store)
+        val out = tool.execute(
+            ListTracksTool.Input(projectId = pid.value, limit = 2),
+            ctx(),
+        ).data
+        assertEquals(5, out.totalTrackCount)
+        assertEquals(2, out.returnedTrackCount)
+        assertEquals(listOf("v-1", "v-2"), out.tracks.map { it.trackId })
+    }
+
+    @Test fun limitClampedToMax() = runTest {
+        val (store, pid) = fivePopulatedTracksFixture()
+        val tool = ListTracksTool(store)
+        // 999_999 is well above MAX_LIMIT (500); should silently clamp and still return all 5.
+        val out = tool.execute(
+            ListTracksTool.Input(projectId = pid.value, limit = 999_999),
+            ctx(),
+        ).data
+        assertEquals(5, out.totalTrackCount)
+        assertEquals(5, out.returnedTrackCount)
+    }
+
+    @Test fun limitWithZeroIsClampedToMin() = runTest {
+        val (store, pid) = fivePopulatedTracksFixture()
+        val tool = ListTracksTool(store)
+        // limit=0 is below MIN_LIMIT (1); should silently clamp up to 1 and return exactly one track.
+        val out = tool.execute(
+            ListTracksTool.Input(projectId = pid.value, limit = 0),
+            ctx(),
+        ).data
+        assertEquals(5, out.totalTrackCount)
+        assertEquals(1, out.returnedTrackCount)
+        assertEquals("v-1", out.tracks.single().trackId)
+    }
 }
