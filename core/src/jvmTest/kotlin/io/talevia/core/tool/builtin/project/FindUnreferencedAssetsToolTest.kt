@@ -54,11 +54,16 @@ class FindUnreferencedAssetsToolTest {
         return SqlDelightProjectStore(TaleviaDb(driver))
     }
 
-    private fun videoAsset(id: String, width: Int = 1920, height: Int = 1080): MediaAsset = MediaAsset(
+    private fun videoAsset(
+        id: String,
+        width: Int = 1920,
+        height: Int = 1080,
+        duration: kotlin.time.Duration = 5.seconds,
+    ): MediaAsset = MediaAsset(
         id = AssetId(id),
         source = MediaSource.File("/tmp/$id.mp4"),
         metadata = MediaMetadata(
-            duration = 5.seconds,
+            duration = duration,
             resolution = Resolution(width, height),
             videoCodec = "h264",
         ),
@@ -278,5 +283,193 @@ class FindUnreferencedAssetsToolTest {
                 .execute(FindUnreferencedAssetsTool.Input("does-not-exist"), ctx())
         }
         assertTrue(ex.message!!.contains("does-not-exist"), ex.message)
+    }
+
+    // --- sortBy / limit (added 2026-04-21) ---
+
+    @Test fun defaultSortIsDurationDesc() = runTest {
+        val store = newStore()
+        val pid = ProjectId("p-sort-default")
+        val a10 = videoAsset("a-10s", duration = 10.seconds)
+        val a30 = videoAsset("a-30s", duration = 30.seconds)
+        val a20 = videoAsset("a-20s", duration = 20.seconds)
+        seed(store, pid, assets = listOf(a10, a30, a20), clips = emptyList())
+
+        val out = FindUnreferencedAssetsTool(store)
+            .execute(FindUnreferencedAssetsTool.Input(pid.value), ctx()).data
+
+        assertEquals(listOf("a-30s", "a-20s", "a-10s"), out.unreferenced.map { it.assetId })
+    }
+
+    @Test fun sortByDurationAscReverses() = runTest {
+        val store = newStore()
+        val pid = ProjectId("p-sort-asc")
+        val a10 = videoAsset("a-10s", duration = 10.seconds)
+        val a30 = videoAsset("a-30s", duration = 30.seconds)
+        val a20 = videoAsset("a-20s", duration = 20.seconds)
+        seed(store, pid, assets = listOf(a10, a30, a20), clips = emptyList())
+
+        val out = FindUnreferencedAssetsTool(store)
+            .execute(
+                FindUnreferencedAssetsTool.Input(pid.value, sortBy = "duration-asc"),
+                ctx(),
+            ).data
+
+        assertEquals(listOf("a-10s", "a-20s", "a-30s"), out.unreferenced.map { it.assetId })
+    }
+
+    @Test fun sortByIdIsAlphanumeric() = runTest {
+        val store = newStore()
+        val pid = ProjectId("p-sort-id")
+        seed(
+            store,
+            pid,
+            assets = listOf(videoAsset("z"), videoAsset("a"), videoAsset("m")),
+            clips = emptyList(),
+        )
+
+        val out = FindUnreferencedAssetsTool(store)
+            .execute(
+                FindUnreferencedAssetsTool.Input(pid.value, sortBy = "id"),
+                ctx(),
+            ).data
+
+        assertEquals(listOf("a", "m", "z"), out.unreferenced.map { it.assetId })
+    }
+
+    @Test fun sortByInvalidFailsLoudly() = runTest {
+        val store = newStore()
+        val pid = ProjectId("p-sort-bad")
+        seed(store, pid, assets = listOf(videoAsset("a-1")), clips = emptyList())
+
+        val ex = assertFailsWith<IllegalArgumentException> {
+            FindUnreferencedAssetsTool(store)
+                .execute(
+                    FindUnreferencedAssetsTool.Input(pid.value, sortBy = "ghost"),
+                    ctx(),
+                )
+        }
+        // Message must list the accepted vocabulary so the agent can self-correct.
+        val msg = ex.message!!
+        assertTrue(msg.contains("duration-desc"), msg)
+        assertTrue(msg.contains("duration-asc"), msg)
+        assertTrue(msg.contains("id"), msg)
+    }
+
+    @Test fun limitCapsResponse() = runTest {
+        val store = newStore()
+        val pid = ProjectId("p-limit")
+        val assets = (1..5).map { videoAsset("a-$it", duration = it.seconds) }
+        seed(store, pid, assets = assets, clips = emptyList())
+
+        val out = FindUnreferencedAssetsTool(store)
+            .execute(
+                FindUnreferencedAssetsTool.Input(pid.value, limit = 2),
+                ctx(),
+            ).data
+
+        assertEquals(5, out.totalAssets)
+        assertEquals(0, out.referencedCount)
+        // Pre-limit total is preserved — limit never rewrites the headline orphan count.
+        assertEquals(5, out.unreferencedCount)
+        assertEquals(2, out.returnedCount)
+        assertEquals(2, out.unreferenced.size)
+    }
+
+    @Test fun limitClampedToMax() = runTest {
+        val store = newStore()
+        val pid = ProjectId("p-limit-max")
+        val assets = (1..5).map { videoAsset("a-$it", duration = it.seconds) }
+        seed(store, pid, assets = assets, clips = emptyList())
+
+        val out = FindUnreferencedAssetsTool(store)
+            .execute(
+                FindUnreferencedAssetsTool.Input(pid.value, limit = 999_999),
+                ctx(),
+            ).data
+
+        // Silent clamp to MAX_LIMIT=500 — all 5 orphans fit, returnedCount == total.
+        assertEquals(5, out.unreferencedCount)
+        assertEquals(5, out.returnedCount)
+        assertEquals(5, out.unreferenced.size)
+    }
+
+    @Test fun limitAtZeroClampsToOne() = runTest {
+        val store = newStore()
+        val pid = ProjectId("p-limit-zero")
+        val assets = (1..3).map { videoAsset("a-$it", duration = it.seconds) }
+        seed(store, pid, assets = assets, clips = emptyList())
+
+        val out = FindUnreferencedAssetsTool(store)
+            .execute(
+                FindUnreferencedAssetsTool.Input(pid.value, limit = 0),
+                ctx(),
+            ).data
+
+        // Silent clamp to MIN_LIMIT=1; pre-limit total still 3.
+        assertEquals(3, out.unreferencedCount)
+        assertEquals(1, out.returnedCount)
+        assertEquals(1, out.unreferenced.size)
+    }
+
+    @Test fun sortComposesWithLimit() = runTest {
+        val store = newStore()
+        val pid = ProjectId("p-sort-limit")
+        val assets = listOf(
+            videoAsset("a-10s", duration = 10.seconds),
+            videoAsset("a-50s", duration = 50.seconds),
+            videoAsset("a-30s", duration = 30.seconds),
+            videoAsset("a-40s", duration = 40.seconds),
+            videoAsset("a-20s", duration = 20.seconds),
+        )
+        seed(store, pid, assets = assets, clips = emptyList())
+
+        val out = FindUnreferencedAssetsTool(store)
+            .execute(
+                FindUnreferencedAssetsTool.Input(
+                    pid.value,
+                    sortBy = "duration-desc",
+                    limit = 2,
+                ),
+                ctx(),
+            ).data
+
+        assertEquals(5, out.unreferencedCount)
+        assertEquals(2, out.returnedCount)
+        // Top-2 of duration-desc on the 5 orphans: a-50s, a-40s.
+        assertEquals(listOf("a-50s", "a-40s"), out.unreferenced.map { it.assetId })
+    }
+
+    @Test fun referencedAssetsStillExcluded() = runTest {
+        val store = newStore()
+        val pid = ProjectId("p-ref-excluded")
+        val refA = videoAsset("a-ref-1", duration = 100.seconds)
+        val refB = videoAsset("a-ref-2", duration = 200.seconds)
+        val orphan1 = videoAsset("a-orphan-1", duration = 1.seconds)
+        val orphan2 = videoAsset("a-orphan-2", duration = 2.seconds)
+        val orphan3 = videoAsset("a-orphan-3", duration = 3.seconds)
+        seed(
+            store,
+            pid,
+            assets = listOf(refA, refB, orphan1, orphan2, orphan3),
+            clips = listOf(videoClip("c-1", refA.id), videoClip("c-2", refB.id)),
+        )
+
+        // Exercise every sortBy — referenced assets must never leak through,
+        // regardless of ordering (they'd otherwise top duration-desc by a wide margin).
+        for (sort in listOf(null, "duration-desc", "duration-asc", "id")) {
+            val out = FindUnreferencedAssetsTool(store)
+                .execute(
+                    FindUnreferencedAssetsTool.Input(pid.value, sortBy = sort),
+                    ctx(),
+                ).data
+            val ids = out.unreferenced.map { it.assetId }
+            assertEquals(5, out.totalAssets, "sortBy=$sort")
+            assertEquals(2, out.referencedCount, "sortBy=$sort")
+            assertEquals(3, out.unreferencedCount, "sortBy=$sort")
+            assertTrue("a-ref-1" !in ids, "sortBy=$sort leaked ref-1: $ids")
+            assertTrue("a-ref-2" !in ids, "sortBy=$sort leaked ref-2: $ids")
+            assertEquals(setOf("a-orphan-1", "a-orphan-2", "a-orphan-3"), ids.toSet(), "sortBy=$sort")
+        }
     }
 }
