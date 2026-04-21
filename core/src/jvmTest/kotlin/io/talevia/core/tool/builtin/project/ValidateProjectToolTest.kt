@@ -23,6 +23,7 @@ import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.domain.source.Source
 import io.talevia.core.domain.source.SourceNode
+import io.talevia.core.domain.source.SourceRef
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
@@ -254,6 +255,92 @@ class ValidateProjectToolTest {
         val issue = out.data.issues.single { it.code == "duration-mismatch" }
         assertEquals("warn", issue.severity)
         assertTrue(out.data.passed) // warnings do not block
+    }
+
+    @Test fun flagsDanglingParentRef() = runTest {
+        val child = SourceNode(
+            id = SourceNodeId("child"),
+            kind = "narrative.scene",
+            body = JsonObject(emptyMap()),
+            parents = listOf(SourceRef(SourceNodeId("ghost-parent"))),
+        )
+        val project = baseProject(source = Source(nodes = listOf(child)))
+        val rig = newRig(project)
+        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
+        assertFalse(out.data.passed)
+        val issue = out.data.issues.single { it.code == "source-parent-dangling" }
+        assertEquals("error", issue.severity)
+        assertTrue("child" in issue.message, issue.message)
+        assertTrue("ghost-parent" in issue.message, issue.message)
+    }
+
+    @Test fun flagsSourceCycle() = runTest {
+        // a → b → c → a
+        val a = SourceNode(
+            id = SourceNodeId("a"),
+            kind = "narrative.scene",
+            body = JsonObject(emptyMap()),
+            parents = listOf(SourceRef(SourceNodeId("c"))),
+        )
+        val b = SourceNode(
+            id = SourceNodeId("b"),
+            kind = "narrative.scene",
+            body = JsonObject(emptyMap()),
+            parents = listOf(SourceRef(SourceNodeId("a"))),
+        )
+        val c = SourceNode(
+            id = SourceNodeId("c"),
+            kind = "narrative.scene",
+            body = JsonObject(emptyMap()),
+            parents = listOf(SourceRef(SourceNodeId("b"))),
+        )
+        val project = baseProject(source = Source(nodes = listOf(a, b, c)))
+        val rig = newRig(project)
+        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
+        assertFalse(out.data.passed)
+        val cycleIssues = out.data.issues.filter { it.code == "source-parent-cycle" }
+        assertTrue(cycleIssues.isNotEmpty(), "must emit at least one source-parent-cycle issue")
+        // The rendered message should mention all three nodes in the cycle.
+        val combined = cycleIssues.joinToString { it.message }
+        assertTrue("a" in combined && "b" in combined && "c" in combined, combined)
+    }
+
+    @Test fun acceptsAcyclicDag() = runTest {
+        val world = SourceNode(
+            id = SourceNodeId("world"),
+            kind = "narrative.world",
+            body = JsonObject(emptyMap()),
+        )
+        val scene = SourceNode(
+            id = SourceNodeId("scene"),
+            kind = "narrative.scene",
+            body = JsonObject(emptyMap()),
+            parents = listOf(SourceRef(SourceNodeId("world"))),
+        )
+        val shot = SourceNode(
+            id = SourceNodeId("shot"),
+            kind = "narrative.shot",
+            body = JsonObject(emptyMap()),
+            parents = listOf(SourceRef(SourceNodeId("scene"))),
+        )
+        val project = baseProject(source = Source(nodes = listOf(world, scene, shot)))
+        val rig = newRig(project)
+        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
+        assertTrue(out.data.passed)
+        assertTrue(out.data.issues.none { it.code.startsWith("source-") })
+    }
+
+    @Test fun selfLoopIsCycle() = runTest {
+        val self = SourceNode(
+            id = SourceNodeId("self"),
+            kind = "narrative.scene",
+            body = JsonObject(emptyMap()),
+            parents = listOf(SourceRef(SourceNodeId("self"))),
+        )
+        val project = baseProject(source = Source(nodes = listOf(self)))
+        val rig = newRig(project)
+        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
+        assertTrue(out.data.issues.any { it.code == "source-parent-cycle" })
     }
 
     @Test fun collectsMultipleIssuesPerClip() = runTest {
