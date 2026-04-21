@@ -106,6 +106,7 @@ import io.talevia.core.tool.builtin.session.ListMessagesTool
 import io.talevia.core.tool.builtin.session.ListSessionAncestorsTool
 import io.talevia.core.tool.builtin.session.ListSessionForksTool
 import io.talevia.core.tool.builtin.session.ListSessionsTool
+import io.talevia.core.tool.builtin.session.ListToolCallsTool
 import io.talevia.core.tool.builtin.session.ReadPartTool
 import io.talevia.core.tool.builtin.session.RenameSessionTool
 import io.talevia.core.tool.builtin.session.RevertSessionTool
@@ -337,6 +338,7 @@ class ServerContainer(
         register(ListSessionForksTool(sessions))
         register(ListSessionAncestorsTool(sessions))
         register(ReadPartTool(sessions))
+        register(ListToolCallsTool(sessions))
         register(ImportMediaTool(media, engine))
         register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))
