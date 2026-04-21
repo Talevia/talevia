@@ -23,8 +23,6 @@
 
 ## P2 — 记债/观望
 
-- **consistency-genre-neutrality-debt** — `core/domain/source/consistency/` 把 `character_ref` / `style_bible` / `brand_palette` 假设成普适一等概念（`ConsistencyKinds.kt`、`PromptFolding.kt`、`VoiceFolding.kt`），对广告 / 教程 genre 不一定合适。VISION §2 承诺 "Core 不硬编码 genre schema" —— 这是已经出现的裂缝。**方向：** 这一轮不动代码，写一篇 `docs/decisions/<today>-consistency-genre-neutrality-debt-recorded.md`，显式记录：哪些 kind 当前在 Core 被一等化、下次第二 genre 真接入时的拆分方案（比如 consistency folding 下沉为 per-genre extension）、触发重构的硬信号（例："第二个 genre 的 folding 逻辑和 character_ref 不同构时"）。Rubric §5.1。
-
 - **process-level-project-mutex** — `SqlDelightProjectStore` 用进程内 `Mutex` 保护 `mutate`。Desktop / CLI / 单副本 server 够用，多副本 server 或多进程共享 DB 会丢写。当前 server 是"可选 headless"，**暂不修**，但在本文件里记一笔，等 server 真要走生产路径时提前搜索此条。
 
 - **server-auth-multiuser-isolation** — `apps/server` 从环境变量读 API key，`TALEVIA_MEDIA_DIR` 是单全局目录，catalog 全局共享。当前是"可选 headless"单用户，**暂不修**。升级到真多用户前在 server 模块里加显式"assumes single-tenant"的注释 + 在此条登记触发条件。
