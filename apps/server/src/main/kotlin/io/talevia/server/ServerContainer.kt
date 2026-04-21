@@ -94,6 +94,7 @@ import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
 import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
 import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
 import io.talevia.core.tool.builtin.source.DescribeSourceDagTool
+import io.talevia.core.tool.builtin.source.DescribeSourceNodeTool
 import io.talevia.core.tool.builtin.source.ForkSourceNodeTool
 import io.talevia.core.tool.builtin.source.ImportSourceNodeTool
 import io.talevia.core.tool.builtin.source.ListSourceNodesTool
@@ -360,6 +361,7 @@ class ServerContainer(
         register(DefineBrandPaletteTool(projects))
         register(UpdateBrandPaletteTool(projects))
         register(DescribeSourceDagTool(projects))
+        register(DescribeSourceNodeTool(projects))
         register(ListSourceNodesTool(projects))
         register(RemoveSourceNodeTool(projects))
         register(ImportSourceNodeTool(projects))

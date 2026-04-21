@@ -180,9 +180,6 @@ class ListTransitionsTool(
 
     private fun Duration.toSecondsDouble(): Double = inWholeMilliseconds / 1000.0
 
-    private val Duration.absoluteValue: Duration
-        get() = if (this.isNegative()) -this else this
-
     companion object {
         private const val TRANSITION_ASSET_PREFIX = "transition:"
 
