@@ -21,8 +21,6 @@
 
 ## P2 — 记债/观望
 
-- **session-status-events-on-bus** — OpenCode 有 `session/status.ts` 把 session 状态变化发到 bus。Talevia 只在 Agent loop 内用局部变量追状态，UI 拿不到 "currently generating" / "awaiting tool" / "compacting" 这类信号（只能轮询 messages）。**方向：** 加 `SessionStatusEvent` 子类（BusEvent），状态转移时发到 `EventBus`。和 `agent-run-state-machine` 是配对关系——P0 做完那条后再做这个才有意义。Rubric §5.4。
-
 - **message-v2-schema-versioning** — `Message` / `Part` 当前没有 `schemaVersion` 字段。OpenCode `session/message-v2.ts` 是显式 v2 迁移产物。未来任何字段重构（譬如 Part 的 `MediaAttachment` shape 变化）会踩 §3a.7 序列化向前兼容。**方向：** 加 `schemaVersion: Int = 1` 到 Message + Part，decode 时 detect 版本 → route 到对应 migrator。现在不迁移，只为未来准备。Rubric 外 / §3a.7。
 
 - **rate-limit-aigc-per-session** — 防止长跑 session 失控消耗 AIGC 额度。当前无上限。**方向：** 先记债：加 `SessionRateLimits` 占位类 + `rate_limit_aigc-per-session-recorded.md` 触发条件（cost/session 超 $X、每分钟 >Y calls）。暂不实现。Rubric 外 / 操作债务。
