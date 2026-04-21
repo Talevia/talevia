@@ -397,6 +397,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         // past the main `tools` block.
         tools.register(io.talevia.core.tool.builtin.provider.ListProvidersTool(providers))
         tools.register(io.talevia.core.tool.builtin.provider.ListProviderModelsTool(providers))
+        tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
     }
 
     fun newAgent(): Agent? {

@@ -277,6 +277,7 @@ class AndroidAppContainer(context: Context) {
     init {
         tools.register(io.talevia.core.tool.builtin.provider.ListProvidersTool(providers))
         tools.register(io.talevia.core.tool.builtin.provider.ListProviderModelsTool(providers))
+        tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
     }
 
     private val agents = mutableMapOf<String, Agent>()

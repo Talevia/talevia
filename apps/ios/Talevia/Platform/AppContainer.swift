@@ -177,5 +177,6 @@ final class AppContainer {
         // Provider-dependent tools land after providers is initialised.
         registry.register(tool: ListProvidersTool(providers: self.providers))
         registry.register(tool: ListProviderModelsTool(providers: self.providers))
+        registry.register(tool: CompactSessionTool(providers: self.providers, sessions: self.sessions, bus: self.bus))
     }
 }

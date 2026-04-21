@@ -433,6 +433,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
     init {
         tools.register(io.talevia.core.tool.builtin.provider.ListProvidersTool(providers))
         tools.register(io.talevia.core.tool.builtin.provider.ListProviderModelsTool(providers))
+        tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
     }
 
     /**
