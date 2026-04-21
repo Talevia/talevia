@@ -46,11 +46,33 @@ internal fun runAssetsQuery(
         }
     }
 
+    // Broader "any reference" set — includes clip refs, LUT filter refs,
+    // and lockfile provenance. Matches the old `find_unreferenced_assets`
+    // tool's safe-to-delete semantics when onlyReferenced=false.
+    val anyRef: Set<String> = buildSet {
+        addAll(refCount.keys)
+        project.timeline.tracks.forEach { track ->
+            track.clips.forEach { clip ->
+                if (clip is Clip.Video) {
+                    clip.filters.forEach { f -> f.assetId?.value?.let { add(it) } }
+                }
+            }
+        }
+        project.lockfile.entries.forEach { add(it.assetId.value) }
+    }
+
     val filtered = project.assets.asSequence()
         .map { asset -> asset to classifyAsset(asset) }
         .filter { (_, kind) -> kindFilter == "all" || kind == kindFilter }
         .map { (asset, kind) -> buildAssetRow(asset, kind, refCount[asset.id.value] ?: 0) }
         .filter { input.onlyUnused != true || it.inUseByClips == 0 }
+        .filter {
+            when (input.onlyReferenced) {
+                null -> true
+                true -> it.assetId in anyRef
+                false -> it.assetId !in anyRef
+            }
+        }
         .toList()
 
     val sorted = when (sortBy) {
@@ -66,6 +88,11 @@ internal fun runAssetsQuery(
     val scopeBits = buildList {
         add("kind=$kindFilter")
         if (input.onlyUnused == true) add("unused-only")
+        when (input.onlyReferenced) {
+            true -> add("only-referenced")
+            false -> add("only-orphans")
+            null -> Unit
+        }
         sortBy?.let { add("sort=$it") }
     }.joinToString(", ")
     return ToolResult(

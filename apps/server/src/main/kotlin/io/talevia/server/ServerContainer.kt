@@ -73,9 +73,7 @@ import io.talevia.core.tool.builtin.project.DescribeLockfileEntryTool
 import io.talevia.core.tool.builtin.project.DescribeProjectTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.ExportProjectTool
-import io.talevia.core.tool.builtin.project.FindPinnedClipsTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
-import io.talevia.core.tool.builtin.project.FindUnreferencedAssetsTool
 import io.talevia.core.tool.builtin.project.ForkProjectTool
 import io.talevia.core.tool.builtin.project.GcLockfileTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
@@ -382,8 +380,6 @@ class ServerContainer(
         register(DeleteProjectTool(projects))
         register(RenameProjectTool(projects))
         register(FindStaleClipsTool(projects))
-        register(FindPinnedClipsTool(projects))
-        register(FindUnreferencedAssetsTool(projects))
         register(ListClipsForSourceTool(projects))
         register(ListClipsBoundToAssetTool(projects))
         register(ProjectQueryTool(projects))

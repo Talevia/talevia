@@ -73,11 +73,28 @@ class ProjectQueryTool(
         val onlyNonEmpty: Boolean? = null,
         /** Keep only clips with non-empty `sourceBinding`. `select=timeline_clips` only. */
         val onlySourceBound: Boolean? = null,
+        /**
+         * Tri-state pin filter. `true` = keep only clips whose backing lockfile
+         * entry is pinned (the old `find_pinned_clips` tool's "hero-shot audit").
+         * `false` = keep only clips NOT pinned (text clips + imported media without
+         * lockfile entries + AIGC clips whose entry.pinned=false). `null` = no
+         * filter. `select=timeline_clips` only.
+         */
+        val onlyPinned: Boolean? = null,
         // ---- assets filter ----
         /** `"video"` | `"audio"` | `"image"` | `"all"`. `select=assets` only. */
         val kind: String? = null,
         /** Keep only assets referenced by zero clips. `select=assets` only. */
         val onlyUnused: Boolean? = null,
+        /**
+         * Tri-state reference filter (broader than [onlyUnused]). Considers a
+         * reference from any of: Video/Audio clip asset, Video clip's LUT
+         * filter asset, lockfile entry. `true` = keep only referenced assets.
+         * `false` = keep only un-referenced assets (the old
+         * `find_unreferenced_assets` tool's "safe-to-delete" report). `null` =
+         * no filter. `select=assets` only.
+         */
+        val onlyReferenced: Boolean? = null,
         // ---- common ----
         /** Sort key — interpretation depends on [select]. See [helpText]. */
         val sortBy: String? = null,
@@ -152,11 +169,13 @@ class ProjectQueryTool(
             "startSeconds, durationSeconds, endSeconds, assetId, sourceStartSeconds, " +
             "sourceDurationSeconds, filterCount, volume, fadeInSeconds, fadeOutSeconds, " +
             "textPreview, sourceBindingNodeIds}. filter: trackKind, trackId, fromSeconds, " +
-            "toSeconds, onlySourceBound. sortBy: startSeconds (default) | durationSeconds.\n" +
+            "toSeconds, onlySourceBound, onlyPinned (true=hero-shot audit / false=everything " +
+            "except pinned). sortBy: startSeconds (default) | durationSeconds.\n" +
             "  • assets — rows: {assetId, kind, durationSeconds, width, height, " +
             "hasVideoTrack, hasAudioTrack, sourceKind, inUseByClips}. filter: kind " +
-            "(video|audio|image|all), onlyUnused. sortBy: insertion (default) | duration | " +
-            "duration-asc | id.\n" +
+            "(video|audio|image|all), onlyUnused, onlyReferenced (true=referenced by clip / " +
+            "filter / lockfile, false=orphan / safe-to-delete). sortBy: insertion (default) | " +
+            "duration | duration-asc | id.\n" +
             "Common: limit (default 100, clamped 1..500), offset (default 0). Setting a " +
             "filter that doesn't apply to the chosen select fails loud so typos surface " +
             "instead of silently returning an empty list."
@@ -213,6 +232,15 @@ class ProjectQueryTool(
                         "select=timeline_clips only.",
                 )
             }
+            putJsonObject("onlyPinned") {
+                put("type", "boolean")
+                put(
+                    "description",
+                    "true = keep only clips whose backing lockfile entry is pinned " +
+                        "(hero-shot audit). false = keep only clips NOT pinned. " +
+                        "select=timeline_clips only.",
+                )
+            }
             putJsonObject("kind") {
                 put("type", "string")
                 put("description", "video|audio|image|all (default all). select=assets only.")
@@ -220,6 +248,15 @@ class ProjectQueryTool(
             putJsonObject("onlyUnused") {
                 put("type", "boolean")
                 put("description", "Keep only assets with zero clip references. select=assets only.")
+            }
+            putJsonObject("onlyReferenced") {
+                put("type", "boolean")
+                put(
+                    "description",
+                    "true = keep only assets referenced by clip/filter/lockfile. " +
+                        "false = keep only un-referenced assets (safe-to-delete orphans). " +
+                        "select=assets only.",
+                )
             }
             putJsonObject("sortBy") {
                 put("type", "string")
@@ -283,10 +320,12 @@ class ProjectQueryTool(
                 if (input.fromSeconds != null) add("fromSeconds (select=timeline_clips only)")
                 if (input.toSeconds != null) add("toSeconds (select=timeline_clips only)")
                 if (input.onlySourceBound != null) add("onlySourceBound (select=timeline_clips only)")
+                if (input.onlyPinned != null) add("onlyPinned (select=timeline_clips only)")
             }
             if (select != SELECT_ASSETS) {
                 if (input.kind != null) add("kind (select=assets only)")
                 if (input.onlyUnused != null) add("onlyUnused (select=assets only)")
+                if (input.onlyReferenced != null) add("onlyReferenced (select=assets only)")
             }
             if (select == SELECT_ASSETS && input.trackKind != null) {
                 add("trackKind (select=tracks or timeline_clips only)")

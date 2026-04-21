@@ -35,7 +35,7 @@ import kotlinx.serialization.serializer
  * The present workaround was a loop of:
  *  - `project_query(select=timeline_clips)` to find the clip + track ids,
  *  - `list_lockfile_entries` to find the lockfile row by assetId,
- *  - `find_stale_clips` / `find_pinned_clips` to check lane status,
+ *  - `find_stale_clips` / `project_query(select=timeline_clips, onlyPinned=true)` to check lane status,
  *  - manual cross-ref.
  * This tool does the resolution once and returns the composite.
  *

@@ -46,6 +46,7 @@ internal fun runTimelineClipsQuery(
             if (fromDuration != null && clip.timeRange.end < fromDuration) continue
             if (toDuration != null && clip.timeRange.start > toDuration) continue
             if (input.onlySourceBound == true && clip.sourceBinding.isEmpty()) continue
+            if (input.onlyPinned != null && !matchesPinned(clip, project, input.onlyPinned)) continue
             filtered += buildClipRow(clip, track, trackKind)
         }
     }
@@ -92,6 +93,22 @@ internal fun runTimelineClipsQuery(
             rows = rows,
         ),
     )
+}
+
+/**
+ * Tri-state pin match — covers the semantics [ProjectQueryTool.Input.onlyPinned]
+ * documents plus the `find_pinned_clips` legacy behavior. A clip counts as
+ * "pinned" when its backing lockfile entry exists AND is pinned. Text clips
+ * and clips whose asset has no lockfile row (imported media) are NOT pinned.
+ */
+private fun matchesPinned(clip: Clip, project: Project, onlyPinned: Boolean): Boolean {
+    val assetId = when (clip) {
+        is Clip.Video -> clip.assetId
+        is Clip.Audio -> clip.assetId
+        is Clip.Text -> null
+    }
+    val isPinned = if (assetId == null) false else project.lockfile.findByAssetId(assetId)?.pinned == true
+    return isPinned == onlyPinned
 }
 
 private fun buildClipRow(clip: Clip, track: Track, trackKind: String): ProjectQueryTool.ClipRow {

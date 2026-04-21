@@ -21,6 +21,7 @@ import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
+import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
@@ -516,5 +517,196 @@ class ProjectQueryToolTest {
             )
         }
         assertTrue(ex.message!!.contains("switch_project"), ex.message)
+    }
+
+    // -------- onlyPinned / onlyReferenced filters (folded from find_* tools) --------
+
+    private suspend fun lockfileFixture(): Pair<SqlDelightProjectStore, ProjectId> {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val pid = ProjectId("p")
+
+        val videoTrack = Track.Video(
+            id = TrackId("v"),
+            clips = listOf(
+                Clip.Video(
+                    id = ClipId("c-pinned"),
+                    timeRange = TimeRange(0.seconds, 5.seconds),
+                    sourceRange = TimeRange(0.seconds, 5.seconds),
+                    assetId = AssetId("a-pinned"),
+                ),
+                Clip.Video(
+                    id = ClipId("c-unpinned"),
+                    timeRange = TimeRange(5.seconds, 3.seconds),
+                    sourceRange = TimeRange(0.seconds, 3.seconds),
+                    assetId = AssetId("a-unpinned"),
+                ),
+                Clip.Video(
+                    id = ClipId("c-imported"),
+                    timeRange = TimeRange(8.seconds, 2.seconds),
+                    sourceRange = TimeRange(0.seconds, 2.seconds),
+                    assetId = AssetId("a-imported"),
+                ),
+            ),
+        )
+        val subTrack = Track.Subtitle(
+            id = TrackId("sub"),
+            clips = listOf(
+                Clip.Text(
+                    id = ClipId("c-text"),
+                    timeRange = TimeRange(1.seconds, 2.seconds),
+                    text = "Hello",
+                ),
+            ),
+        )
+
+        // Two lockfile entries: one pinned (a-pinned), one unpinned (a-unpinned).
+        // "a-imported" has no lockfile entry (pre-existing / imported media).
+        // "a-lockfile-only" is an orphan — in lockfile but never in a clip + filter.
+        val lockfile = Lockfile.EMPTY
+            .append(entry("h-pinned", "a-pinned", pinned = true))
+            .append(entry("h-unpinned", "a-unpinned", pinned = false))
+            .append(entry("h-orphan", "a-lockfile-only", pinned = false))
+
+        store.upsert(
+            "demo",
+            Project(
+                id = pid,
+                timeline = Timeline(
+                    tracks = listOf(videoTrack, subTrack),
+                    duration = 10.seconds,
+                ),
+                assets = listOf(
+                    asset("a-pinned", videoCodec = "h264", durationSec = 5),
+                    asset("a-unpinned", videoCodec = "h264", durationSec = 3),
+                    asset("a-imported", videoCodec = "h264", durationSec = 2),
+                    asset("a-lockfile-only", videoCodec = "h264", durationSec = 4),
+                    asset("a-truly-orphan", videoCodec = "h264", durationSec = 7),
+                ),
+                lockfile = lockfile,
+            ),
+        )
+        return store to pid
+    }
+
+    private fun entry(
+        inputHash: String,
+        assetId: String,
+        pinned: Boolean,
+    ): io.talevia.core.domain.lockfile.LockfileEntry = io.talevia.core.domain.lockfile.LockfileEntry(
+        inputHash = inputHash,
+        toolId = "generate_image",
+        assetId = AssetId(assetId),
+        provenance = io.talevia.core.platform.GenerationProvenance(
+            providerId = "fake",
+            modelId = "fake-model",
+            modelVersion = null,
+            seed = 1L,
+            parameters = kotlinx.serialization.json.JsonObject(emptyMap()),
+            createdAtEpochMs = 1_700_000_000_000L,
+        ),
+        pinned = pinned,
+    )
+
+    @Test fun onlyPinnedTrueReturnsOnlyPinnedClips() = runTest {
+        val (store, pid) = lockfileFixture()
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(
+                projectId = pid.value,
+                select = "timeline_clips",
+                onlyPinned = true,
+            ),
+            ctx(),
+        ).data
+        assertEquals(1, out.total)
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(ProjectQueryTool.ClipRow.serializer()),
+            out.rows,
+        )
+        assertEquals("c-pinned", rows.single().clipId)
+    }
+
+    @Test fun onlyPinnedFalseReturnsEverythingExceptPinned() = runTest {
+        val (store, pid) = lockfileFixture()
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(
+                projectId = pid.value,
+                select = "timeline_clips",
+                onlyPinned = false,
+            ),
+            ctx(),
+        ).data
+        // c-unpinned (entry.pinned=false), c-imported (no entry), c-text (text clip, no entry)
+        assertEquals(3, out.total)
+    }
+
+    @Test fun onlyPinnedRejectedOnNonTimelineClipsSelect() = runTest {
+        val (store, pid) = lockfileFixture()
+        val ex = assertFailsWith<IllegalStateException> {
+            ProjectQueryTool(store).execute(
+                ProjectQueryTool.Input(
+                    projectId = pid.value,
+                    select = "assets",
+                    onlyPinned = true,
+                ),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("onlyPinned"), ex.message)
+    }
+
+    @Test fun onlyReferencedFalseReturnsOnlyOrphans() = runTest {
+        val (store, pid) = lockfileFixture()
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(
+                projectId = pid.value,
+                select = "assets",
+                onlyReferenced = false,
+            ),
+            ctx(),
+        ).data
+        // a-pinned / a-unpinned / a-imported → referenced by clips.
+        // a-lockfile-only → referenced by lockfile.
+        // a-truly-orphan → referenced by nothing. Only this one qualifies.
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(ProjectQueryTool.AssetRow.serializer()),
+            out.rows,
+        )
+        assertEquals(listOf("a-truly-orphan"), rows.map { it.assetId })
+    }
+
+    @Test fun onlyReferencedTrueSkipsTrulyOrphanedOnly() = runTest {
+        val (store, pid) = lockfileFixture()
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(
+                projectId = pid.value,
+                select = "assets",
+                onlyReferenced = true,
+            ),
+            ctx(),
+        ).data
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(ProjectQueryTool.AssetRow.serializer()),
+            out.rows,
+        )
+        val ids = rows.map { it.assetId }
+        assertTrue("a-pinned" in ids && "a-lockfile-only" in ids, ids.toString())
+        assertTrue("a-truly-orphan" !in ids, ids.toString())
+    }
+
+    @Test fun onlyReferencedRejectedOnNonAssetsSelect() = runTest {
+        val (store, pid) = lockfileFixture()
+        val ex = assertFailsWith<IllegalStateException> {
+            ProjectQueryTool(store).execute(
+                ProjectQueryTool.Input(
+                    projectId = pid.value,
+                    select = "timeline_clips",
+                    onlyReferenced = true,
+                ),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("onlyReferenced"), ex.message)
     }
 }
