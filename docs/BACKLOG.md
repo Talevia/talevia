@@ -15,8 +15,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **session-project-binding** — 当前 `Session` 和 `Project` 解耦，agent 靠对话上下文记住当前在操作哪个 project id（tool 参数一个个手传）。多项目并行时（用户同时剪 vlog + 叙事片）体验会崩。**方向：** 在 `Session` 里加一等字段 `currentProjectId: ProjectId?`，`Agent.run` 把它注入到 system prompt 里作为 cwd-analogue；提供 `switch_project` tool 让 agent / 用户显式切换。ToolContext 暴露 `currentProjectId` 便于工具默认注入。Rubric §5.4。
-
 ## P2 — 记债/观望
 
 - **server-auth-multiuser-isolation** — `apps/server` 从环境变量读 API key，`TALEVIA_MEDIA_DIR` 是单全局目录，catalog 全局共享。当前是"可选 headless"单用户，**暂不修**。升级到真多用户前在 server 模块里加显式"assumes single-tenant"的注释 + 在此条登记触发条件。
