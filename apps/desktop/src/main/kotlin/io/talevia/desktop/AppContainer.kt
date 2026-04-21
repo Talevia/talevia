@@ -89,6 +89,7 @@ import io.talevia.core.tool.builtin.project.SetOutputProfileTool
 import io.talevia.core.tool.builtin.project.UnpinLockfileEntryTool
 import io.talevia.core.tool.builtin.project.ValidateProjectTool
 import io.talevia.core.tool.builtin.shell.BashTool
+import io.talevia.core.tool.builtin.source.AddSourceNodeTool
 import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
 import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
 import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
@@ -340,6 +341,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(ImportSourceNodeTool(projects))
         register(ExportSourceNodeTool(projects))
         register(ImportSourceNodeFromJsonTool(projects))
+        register(AddSourceNodeTool(projects))
         register(ForkSourceNodeTool(projects))
         register(SetSourceNodeParentsTool(projects))
         register(RenameSourceNodeTool(projects))
