@@ -100,7 +100,7 @@ class RegenerateStaleClipsTool(
             "graph so the regenerations pick up the edit that made them stale. Swaps each new asset " +
             "onto its clip's timeline slot. Use after editing a character_ref / style_bible / " +
             "brand_palette; one call replaces the find_stale_clips → generate_* → replace_clip " +
-            "chain. Clips whose lockfile entry is pinned (pin_lockfile_entry) are skipped with " +
+            "chain. Clips whose lockfile entry is pinned (set_lockfile_entry_pinned) are skipped with " +
             "reason 'pinned' — a pin is user intent and overrides regeneration."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
@@ -159,7 +159,7 @@ class RegenerateStaleClipsTool(
             if (entry.pinned) {
                 // VISION §3.1 "产物可 pin" — user marked this generation as a hero
                 // shot. Leave the clip stale-but-frozen until the user explicitly
-                // unpins it (via unpin_lockfile_entry) or replaces the clip.
+                // unpins it (via set_lockfile_entry_pinned pinned=false) or replaces the clip.
                 skipped += Skipped(report.clipId.value, "pinned")
                 continue
             }

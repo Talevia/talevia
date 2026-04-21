@@ -17,14 +17,15 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 
 /**
- * Mark an AIGC lockfile entry as a hero shot (VISION §3.1 "产物可 pin").
+ * Upsert a lockfile entry's pinned flag — hero-shot escape hatch for VISION
+ * §3.1 "产物可 pin".
  *
- * The lockfile is the random compiler's `package-lock.json`; by default every
- * entry is fair game for GC policy sweeps and for `regenerate_stale_clips` when a
- * bound source node changes. Users creating deliberate hero shots — "this exact
- * Mei portrait is the one, keep it" — need a one-bit escape hatch.
+ * Replaces the pre-split `pin_lockfile_entry` + `unpin_lockfile_entry` pair
+ * with a single [Input.pinned]-driven upsert. Two mutually-exclusive tool
+ * specs for a boolean toggle are pure LLM token overhead (§3a.2). See
+ * `docs/decisions/2026-04-21-debt-merge-pin-unpin-tool-pairs.md`.
  *
- * Once pinned:
+ * When `pinned=true`:
  *  - [GcLockfileTool] rescues the entry regardless of `maxAgeDays` /
  *    `keepLatestPerTool` / `preserveLiveAssets=false` verdicts.
  *  - [RegenerateStaleClipsTool] skips any clip whose current lockfile entry is
@@ -33,16 +34,15 @@ import kotlinx.serialization.serializer
  *  - [PruneLockfileTool] still drops orphan pinned entries — a pin with no
  *    surviving asset protects nothing and is dead weight.
  *
- * Idempotent: re-pinning an already-pinned entry is a no-op with
- * `alreadyPinned=true` in the output. Unknown inputHash fails loudly rather than
- * silently succeeding — we'd rather the agent see "no such entry" than think the
- * pin took and act on that assumption downstream.
+ * When `pinned=false`: entry is again subject to gc_lockfile policy and
+ * regenerate_stale_clips can re-dispatch its clip on the next stale run.
  *
- * Sibling [UnpinLockfileEntryTool] is the inverse operation.
+ * Idempotent: calling with the same pinned state is a no-op; [Output.changed]
+ * is `false`. Unknown inputHash fails loudly rather than silently succeeding.
  */
-class PinLockfileEntryTool(
+class SetLockfileEntryPinnedTool(
     private val projects: ProjectStore,
-) : Tool<PinLockfileEntryTool.Input, PinLockfileEntryTool.Output> {
+) : Tool<SetLockfileEntryPinnedTool.Input, SetLockfileEntryPinnedTool.Output> {
 
     @Serializable data class Input(
         val projectId: String,
@@ -53,6 +53,8 @@ class PinLockfileEntryTool(
          * reasons in terms of "that generation" not "that asset").
          */
         val inputHash: String,
+        /** `true` freezes the entry as a hero shot; `false` clears the pin. */
+        val pinned: Boolean,
     )
 
     @Serializable data class Output(
@@ -60,16 +62,22 @@ class PinLockfileEntryTool(
         val inputHash: String,
         val toolId: String,
         val assetId: String,
-        val alreadyPinned: Boolean,
+        /** Pinned flag before the call (for idempotency inspection). */
+        val pinnedBefore: Boolean,
+        /** Pinned flag after the call — always equals [Input.pinned]. */
+        val pinnedAfter: Boolean,
+        /** True when the call actually flipped the flag (`pinnedBefore != pinnedAfter`). */
+        val changed: Boolean,
     )
 
-    override val id: String = "pin_lockfile_entry"
+    override val id: String = "set_lockfile_entry_pinned"
     override val helpText: String =
-        "Mark an AIGC lockfile entry as a hero shot — gc_lockfile skips it regardless of " +
-            "policy, and regenerate_stale_clips leaves its clip stale-but-frozen instead of " +
-            "re-dispatching the tool. Use after the user approves a key generation (\"this exact " +
-            "Mei portrait is the one\"). Idempotent. Find the inputHash via list_lockfile_entries. " +
-            "Inverse: unpin_lockfile_entry."
+        "Upsert the pinned flag on an AIGC lockfile entry — a hero-shot escape hatch. With " +
+            "pinned=true, gc_lockfile skips the entry regardless of policy and " +
+            "regenerate_stale_clips leaves its clip stale-but-frozen instead of re-dispatching. " +
+            "With pinned=false, the entry is again subject to policy. Use after the user approves " +
+            "(or disavows) a key generation — \"this exact Mei portrait is the one\" / \"go " +
+            "ahead and re-roll this one\". Idempotent. Find the inputHash via list_lockfile_entries."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.write")
@@ -85,8 +93,18 @@ class PinLockfileEntryTool(
                     "Lockfile entry identifier from list_lockfile_entries.",
                 )
             }
+            putJsonObject("pinned") {
+                put("type", "boolean")
+                put(
+                    "description",
+                    "true to freeze the entry as a hero shot; false to clear the pin.",
+                )
+            }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("inputHash"))))
+        put(
+            "required",
+            JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("inputHash"), JsonPrimitive("pinned"))),
+        )
         put("additionalProperties", false)
     }
 
@@ -99,25 +117,33 @@ class PinLockfileEntryTool(
                     "${input.projectId}. Call list_lockfile_entries to see valid hashes.",
             )
 
-        val alreadyPinned = entry.pinned
-        if (!alreadyPinned) {
+        val pinnedBefore = entry.pinned
+        val changed = pinnedBefore != input.pinned
+        if (changed) {
             projects.mutate(pid) { p ->
-                p.copy(lockfile = p.lockfile.withEntryPinned(input.inputHash, pinned = true))
+                p.copy(lockfile = p.lockfile.withEntryPinned(input.inputHash, pinned = input.pinned))
             }
         }
 
-        val verb = if (alreadyPinned) "was already pinned" else "pinned"
+        val verbNow = if (input.pinned) "pinned" else "unpinned"
+        val verbBefore = if (changed) "" else "(was already $verbNow) "
+        val gcHint = if (input.pinned) {
+            "gc_lockfile will skip it and regenerate_stale_clips will leave its clip frozen."
+        } else {
+            "gc_lockfile can drop it by policy and regenerate_stale_clips will re-dispatch if its clip goes stale."
+        }
         return ToolResult(
-            title = "pin lockfile entry ${entry.toolId}/${entry.assetId.value}",
-            outputForLlm = "Entry ${input.inputHash} ($verb). Asset ${entry.assetId.value} " +
-                "produced by ${entry.toolId} is now a hero shot — gc_lockfile will skip it and " +
-                "regenerate_stale_clips will leave its clip frozen. Use unpin_lockfile_entry to reverse.",
+            title = "${if (input.pinned) "pin" else "unpin"} lockfile entry ${entry.toolId}/${entry.assetId.value}",
+            outputForLlm = "Entry ${input.inputHash} ${verbBefore}$verbNow. " +
+                "Asset ${entry.assetId.value} produced by ${entry.toolId} — $gcHint",
             data = Output(
                 projectId = pid.value,
                 inputHash = input.inputHash,
                 toolId = entry.toolId,
                 assetId = entry.assetId.value,
-                alreadyPinned = alreadyPinned,
+                pinnedBefore = pinnedBefore,
+                pinnedAfter = input.pinned,
+                changed = changed,
             ),
         )
     }

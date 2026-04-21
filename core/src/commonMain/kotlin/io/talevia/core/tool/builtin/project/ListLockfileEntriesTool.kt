@@ -46,7 +46,7 @@ class ListLockfileEntriesTool(
         /** Cap on returned entries (most recent first). Defaults to 20. */
         val limit: Int? = null,
         /**
-         * When `true`, restrict the result to entries flagged via `pin_lockfile_entry`.
+         * When `true`, restrict the result to entries flagged via `set_lockfile_entry_pinned`.
          * `null` or `false` keeps the default behaviour of returning every entry.
          * Composes with [toolId] — both filters apply.
          */
@@ -62,7 +62,7 @@ class ListLockfileEntriesTool(
         val seed: Long,
         val createdAtEpochMs: Long,
         val sourceBindingIds: List<String>,
-        /** True when the entry was marked a hero shot via `pin_lockfile_entry`. */
+        /** True when the entry was marked a hero shot via `set_lockfile_entry_pinned`. */
         val pinned: Boolean,
     )
 
@@ -78,7 +78,7 @@ class ListLockfileEntriesTool(
         "List AIGC lockfile entries on a project, most recent first. Use this for orientation " +
             "(\"what have I generated?\") and reuse decisions (\"do we have a Mei portrait already?\"). " +
             "Filter by toolId to scope to one modality (e.g. \"generate_image\", \"synthesize_speech\"). " +
-            "Pass onlyPinned=true to restrict to hero-shot entries flagged via pin_lockfile_entry " +
+            "Pass onlyPinned=true to restrict to hero-shot entries flagged via set_lockfile_entry_pinned " +
             "(composes with toolId). Defaults to 20 most recent. For staleness use find_stale_clips instead."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
@@ -103,7 +103,7 @@ class ListLockfileEntriesTool(
                 put("type", "boolean")
                 put(
                     "description",
-                    "When true, only return entries flagged via pin_lockfile_entry. " +
+                    "When true, only return entries flagged via set_lockfile_entry_pinned. " +
                         "Composes with toolId — both filters apply. Defaults to false.",
                 )
             }

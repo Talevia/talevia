@@ -113,7 +113,7 @@ class GcLockfileTool(
             "prune_lockfile: prune drops orphan rows (assetId gone from project.assets); gc " +
             "drops rows by age (maxAgeDays) and/or per-toolId count (keepLatestPerTool). " +
             "Policies AND together: an entry must pass both to survive. Pinned rows " +
-            "(pin_lockfile_entry) are always rescued — a pin is user intent and overrides policy. " +
+            "(set_lockfile_entry_pinned) are always rescued — a pin is user intent and overrides policy. " +
             "preserveLiveAssets=true (default) additionally rescues rows whose asset is still in " +
             "project.assets so live-cache hits aren't invalidated by policy sweeps. Pass " +
             "dryRun=true to preview without mutating. Both policies null is a no-op — use " +

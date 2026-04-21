@@ -29,7 +29,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-class PinClipAssetToolTest {
+class SetClipAssetPinnedToolTest {
 
     private data class Rig(
         val store: SqlDelightProjectStore,
@@ -108,8 +108,8 @@ class PinClipAssetToolTest {
         val rig = rig()
         seedWithVideoClipAndEntry(rig)
 
-        val out = PinClipAssetTool(rig.store).execute(
-            PinClipAssetTool.Input(projectId = "p", clipId = "c-hero"),
+        val out = SetClipAssetPinnedTool(rig.store).execute(
+            SetClipAssetPinnedTool.Input(projectId = "p", clipId = "c-hero", pinned = true),
             rig.ctx,
         ).data
 
@@ -117,7 +117,9 @@ class PinClipAssetToolTest {
         assertEquals("a-hero", out.assetId)
         assertEquals("h-hero", out.inputHash)
         assertEquals("generate_image", out.toolId)
-        assertFalse(out.alreadyPinned)
+        assertFalse(out.pinnedBefore)
+        assertTrue(out.pinnedAfter)
+        assertTrue(out.changed)
 
         val refreshed = rig.store.get(ProjectId("p"))!!
         assertTrue(refreshed.lockfile.findByInputHash("h-hero")!!.pinned)
@@ -127,12 +129,14 @@ class PinClipAssetToolTest {
         val rig = rig()
         seedWithVideoClipAndEntry(rig, pinned = true)
 
-        val out = PinClipAssetTool(rig.store).execute(
-            PinClipAssetTool.Input(projectId = "p", clipId = "c-hero"),
+        val out = SetClipAssetPinnedTool(rig.store).execute(
+            SetClipAssetPinnedTool.Input(projectId = "p", clipId = "c-hero", pinned = true),
             rig.ctx,
         ).data
 
-        assertTrue(out.alreadyPinned)
+        assertTrue(out.pinnedBefore)
+        assertTrue(out.pinnedAfter)
+        assertFalse(out.changed)
         val refreshed = rig.store.get(ProjectId("p"))!!
         assertTrue(refreshed.lockfile.findByInputHash("h-hero")!!.pinned)
     }
@@ -141,12 +145,14 @@ class PinClipAssetToolTest {
         val rig = rig()
         seedWithVideoClipAndEntry(rig, pinned = true)
 
-        val out = UnpinClipAssetTool(rig.store).execute(
-            UnpinClipAssetTool.Input(projectId = "p", clipId = "c-hero"),
+        val out = SetClipAssetPinnedTool(rig.store).execute(
+            SetClipAssetPinnedTool.Input(projectId = "p", clipId = "c-hero", pinned = false),
             rig.ctx,
         ).data
 
-        assertFalse(out.wasUnpinned)
+        assertTrue(out.pinnedBefore)
+        assertFalse(out.pinnedAfter)
+        assertTrue(out.changed)
         val refreshed = rig.store.get(ProjectId("p"))!!
         assertFalse(refreshed.lockfile.findByInputHash("h-hero")!!.pinned)
     }
@@ -155,11 +161,13 @@ class PinClipAssetToolTest {
         val rig = rig()
         seedWithVideoClipAndEntry(rig, pinned = false)
 
-        val out = UnpinClipAssetTool(rig.store).execute(
-            UnpinClipAssetTool.Input(projectId = "p", clipId = "c-hero"),
+        val out = SetClipAssetPinnedTool(rig.store).execute(
+            SetClipAssetPinnedTool.Input(projectId = "p", clipId = "c-hero", pinned = false),
             rig.ctx,
         ).data
-        assertTrue(out.wasUnpinned)
+        assertFalse(out.pinnedBefore)
+        assertFalse(out.pinnedAfter)
+        assertFalse(out.changed)
     }
 
     @Test fun textClipFailsLoud() = runTest {
@@ -186,8 +194,8 @@ class PinClipAssetToolTest {
         )
 
         val ex = assertFailsWith<IllegalStateException> {
-            PinClipAssetTool(rig.store).execute(
-                PinClipAssetTool.Input(projectId = "p", clipId = "t-1"),
+            SetClipAssetPinnedTool(rig.store).execute(
+                SetClipAssetPinnedTool.Input(projectId = "p", clipId = "t-1", pinned = true),
                 rig.ctx,
             )
         }
@@ -199,8 +207,8 @@ class PinClipAssetToolTest {
         seedWithVideoClipAndEntry(rig)
 
         val ex = assertFailsWith<IllegalStateException> {
-            PinClipAssetTool(rig.store).execute(
-                PinClipAssetTool.Input(projectId = "p", clipId = "ghost"),
+            SetClipAssetPinnedTool(rig.store).execute(
+                SetClipAssetPinnedTool.Input(projectId = "p", clipId = "ghost", pinned = true),
                 rig.ctx,
             )
         }
@@ -236,13 +244,13 @@ class PinClipAssetToolTest {
         )
 
         val ex = assertFailsWith<IllegalStateException> {
-            PinClipAssetTool(rig.store).execute(
-                PinClipAssetTool.Input(projectId = "p", clipId = "c-imported"),
+            SetClipAssetPinnedTool(rig.store).execute(
+                SetClipAssetPinnedTool.Input(projectId = "p", clipId = "c-imported", pinned = true),
                 rig.ctx,
             )
         }
         assertTrue(ex.message!!.contains("no lockfile entry"), ex.message)
-        assertTrue(ex.message!!.contains("pin_lockfile_entry"), ex.message)
+        assertTrue(ex.message!!.contains("set_lockfile_entry_pinned"), ex.message)
     }
 
     @Test fun audioClipAssetIsPinned() = runTest {
@@ -273,8 +281,8 @@ class PinClipAssetToolTest {
             ),
         )
 
-        PinClipAssetTool(rig.store).execute(
-            PinClipAssetTool.Input(projectId = "p", clipId = "c-aud"),
+        SetClipAssetPinnedTool(rig.store).execute(
+            SetClipAssetPinnedTool.Input(projectId = "p", clipId = "c-aud", pinned = true),
             rig.ctx,
         )
 

@@ -32,7 +32,7 @@ import kotlinx.serialization.serializer
  *
  * Idempotent: archiving an already-archived session is a no-op that
  * returns `wasArchived=true` without mutating. Matches the
- * `pin_lockfile_entry` / `rename_session` style.
+ * `set_lockfile_entry_pinned` / `rename_session` style.
  *
  * Permission: reuses `session.write`.
  */

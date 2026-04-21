@@ -23,7 +23,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class PinLockfileEntryToolTest {
+class SetLockfileEntryPinnedToolTest {
 
     private data class Rig(
         val store: SqlDelightProjectStore,
@@ -75,14 +75,16 @@ class PinLockfileEntryToolTest {
         val rig = rig()
         seed(rig, entry("h-1"))
 
-        val out = PinLockfileEntryTool(rig.store).execute(
-            PinLockfileEntryTool.Input(projectId = "p", inputHash = "h-1"),
+        val out = SetLockfileEntryPinnedTool(rig.store).execute(
+            SetLockfileEntryPinnedTool.Input(projectId = "p", inputHash = "h-1", pinned = true),
             rig.ctx,
         )
 
         assertEquals("h-1", out.data.inputHash)
         assertEquals("generate_image", out.data.toolId)
-        assertFalse(out.data.alreadyPinned)
+        assertFalse(out.data.pinnedBefore)
+        assertTrue(out.data.pinnedAfter)
+        assertTrue(out.data.changed)
 
         val refreshed = rig.store.get(ProjectId("p"))!!
         assertTrue(refreshed.lockfile.findByInputHash("h-1")!!.pinned)
@@ -92,12 +94,14 @@ class PinLockfileEntryToolTest {
         val rig = rig()
         seed(rig, entry("h-1", pinned = true))
 
-        val out = PinLockfileEntryTool(rig.store).execute(
-            PinLockfileEntryTool.Input(projectId = "p", inputHash = "h-1"),
+        val out = SetLockfileEntryPinnedTool(rig.store).execute(
+            SetLockfileEntryPinnedTool.Input(projectId = "p", inputHash = "h-1", pinned = true),
             rig.ctx,
         )
 
-        assertTrue(out.data.alreadyPinned)
+        assertTrue(out.data.pinnedBefore)
+        assertTrue(out.data.pinnedAfter)
+        assertFalse(out.data.changed)
         // Still pinned after the no-op call.
         val refreshed = rig.store.get(ProjectId("p"))!!
         assertTrue(refreshed.lockfile.findByInputHash("h-1")!!.pinned)
@@ -107,8 +111,8 @@ class PinLockfileEntryToolTest {
         val rig = rig()
         seed(rig, entry("h-1"), entry("h-2"), entry("h-3"))
 
-        PinLockfileEntryTool(rig.store).execute(
-            PinLockfileEntryTool.Input(projectId = "p", inputHash = "h-2"),
+        SetLockfileEntryPinnedTool(rig.store).execute(
+            SetLockfileEntryPinnedTool.Input(projectId = "p", inputHash = "h-2", pinned = true),
             rig.ctx,
         )
 
@@ -123,8 +127,8 @@ class PinLockfileEntryToolTest {
         seed(rig, entry("h-1"))
 
         val ex = assertFailsWith<IllegalStateException> {
-            PinLockfileEntryTool(rig.store).execute(
-                PinLockfileEntryTool.Input(projectId = "p", inputHash = "ghost"),
+            SetLockfileEntryPinnedTool(rig.store).execute(
+                SetLockfileEntryPinnedTool.Input(projectId = "p", inputHash = "ghost", pinned = true),
                 rig.ctx,
             )
         }
@@ -136,8 +140,8 @@ class PinLockfileEntryToolTest {
     @Test fun missingProjectFailsLoudly() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            PinLockfileEntryTool(rig.store).execute(
-                PinLockfileEntryTool.Input(projectId = "ghost", inputHash = "h-1"),
+            SetLockfileEntryPinnedTool(rig.store).execute(
+                SetLockfileEntryPinnedTool.Input(projectId = "ghost", inputHash = "h-1", pinned = true),
                 rig.ctx,
             )
         }
@@ -148,12 +152,14 @@ class PinLockfileEntryToolTest {
         val rig = rig()
         seed(rig, entry("h-1", pinned = true))
 
-        val out = UnpinLockfileEntryTool(rig.store).execute(
-            UnpinLockfileEntryTool.Input(projectId = "p", inputHash = "h-1"),
+        val out = SetLockfileEntryPinnedTool(rig.store).execute(
+            SetLockfileEntryPinnedTool.Input(projectId = "p", inputHash = "h-1", pinned = false),
             rig.ctx,
         )
 
-        assertFalse(out.data.wasUnpinned)
+        assertTrue(out.data.pinnedBefore)
+        assertFalse(out.data.pinnedAfter)
+        assertTrue(out.data.changed)
         val refreshed = rig.store.get(ProjectId("p"))!!
         assertFalse(refreshed.lockfile.findByInputHash("h-1")!!.pinned)
     }
@@ -162,20 +168,22 @@ class PinLockfileEntryToolTest {
         val rig = rig()
         seed(rig, entry("h-1", pinned = false))
 
-        val out = UnpinLockfileEntryTool(rig.store).execute(
-            UnpinLockfileEntryTool.Input(projectId = "p", inputHash = "h-1"),
+        val out = SetLockfileEntryPinnedTool(rig.store).execute(
+            SetLockfileEntryPinnedTool.Input(projectId = "p", inputHash = "h-1", pinned = false),
             rig.ctx,
         )
 
-        assertTrue(out.data.wasUnpinned)
+        assertFalse(out.data.pinnedBefore)
+        assertFalse(out.data.pinnedAfter)
+        assertFalse(out.data.changed)
     }
 
     @Test fun unpinMissingHashFailsLoudly() = runTest {
         val rig = rig()
         seed(rig, entry("h-1"))
         val ex = assertFailsWith<IllegalStateException> {
-            UnpinLockfileEntryTool(rig.store).execute(
-                UnpinLockfileEntryTool.Input(projectId = "p", inputHash = "ghost"),
+            SetLockfileEntryPinnedTool(rig.store).execute(
+                SetLockfileEntryPinnedTool.Input(projectId = "p", inputHash = "ghost", pinned = false),
                 rig.ctx,
             )
         }

@@ -43,17 +43,15 @@ import io.talevia.core.tool.builtin.project.ListLockfileEntriesTool
 import io.talevia.core.tool.builtin.project.ListProjectSnapshotsTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.project.ListTransitionsTool
-import io.talevia.core.tool.builtin.project.PinClipAssetTool
-import io.talevia.core.tool.builtin.project.PinLockfileEntryTool
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
 import io.talevia.core.tool.builtin.project.PruneLockfileTool
 import io.talevia.core.tool.builtin.project.RemoveAssetTool
 import io.talevia.core.tool.builtin.project.RenameProjectTool
 import io.talevia.core.tool.builtin.project.RestoreProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.SaveProjectSnapshotTool
+import io.talevia.core.tool.builtin.project.SetClipAssetPinnedTool
+import io.talevia.core.tool.builtin.project.SetLockfileEntryPinnedTool
 import io.talevia.core.tool.builtin.project.SetOutputProfileTool
-import io.talevia.core.tool.builtin.project.UnpinClipAssetTool
-import io.talevia.core.tool.builtin.project.UnpinLockfileEntryTool
 import io.talevia.core.tool.builtin.project.ValidateProjectTool
 import io.talevia.core.tool.builtin.session.ArchiveSessionTool
 import io.talevia.core.tool.builtin.session.DeleteSessionTool
@@ -224,10 +222,8 @@ class AndroidAppContainer(context: Context) {
         register(DescribeLockfileEntryTool(projects))
         register(PruneLockfileTool(projects))
         register(GcLockfileTool(projects))
-        register(PinLockfileEntryTool(projects))
-        register(UnpinLockfileEntryTool(projects))
-        register(PinClipAssetTool(projects))
-        register(UnpinClipAssetTool(projects))
+        register(SetLockfileEntryPinnedTool(projects))
+        register(SetClipAssetPinnedTool(projects))
         register(SaveProjectSnapshotTool(projects))
         register(ListProjectSnapshotsTool(projects))
         register(RestoreProjectSnapshotTool(projects))
