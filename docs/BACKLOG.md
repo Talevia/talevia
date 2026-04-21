@@ -15,8 +15,6 @@
 
 - **auto-author-first-project-from-intent** — 小白路径 §5.4 的硬缺口：今天用户必须手动 `create_project` + 手动 `set_character_ref` / `add_source_node` 才能给 agent 投料。北极星是 "一句话意图 → 可看初稿"。**方向：** 新增 `start_project_from_intent(intent: String)` tool：LLM 调 agent 把 intent 解析成 genre（先覆盖 narrative / vlog），生成 skeleton source graph（character / style / shot placeholders），返回 projectId。不产生任何 AIGC 资产——只是搭好骨架让 agent 继续 fill in。Rubric §5.4。
 
-- **bulk-apply-tool-input-default-projectid** — 上轮 `tool-input-default-projectid-from-context` 只给 3 个 tool（`project_query` / `add_clip` / `describe_project`）切成了可选 `projectId`；其余 10+ timeline / AIGC / source 突变工具仍要求 explicit `projectId`。**方向：** 扩展 `ToolContext.resolveProjectId` 的消费面——把至少 `AddTrackTool` / `AddSubtitleTool` / `AddTransitionTool` / `RemoveClipTool` / `ReplaceClipTool` / `TrimClipTool` / `SplitClipTool` / `MoveClipTool` / `SetClipVolumeTool` / `EditTextClipTool` 这类 clipId-scoped timeline write tools 的 `projectId` 改为可选，统一行为。Rubric §5.4。
-
 ## P1 — 中优，做完 P0 再排
 
 - **generate-project-variant** — VISION §6 叙事 / vlog 例子明确点 "30s / 竖版 variant"，但当前没有一等抽象生成变体；用户必须手动 `fork_project` + `set_output_profile` + re-export。**方向：** `generate_variant(projectId, variantSpec: {aspectRatio?, durationSeconds?, language?})`：fork project、按 spec 调整 timeline（比例裁剪 / 按 key-shot 浓缩 / 重生成 TTS 变体）、write a child project id pointing back to parent。Rubric §5.2。
