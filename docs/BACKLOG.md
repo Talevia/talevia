@@ -21,8 +21,6 @@
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
 
-- **tool-input-default-sessionid-from-context** — `bulk-apply-tool-input-default-projectid` 的 session 侧镜像：session 相关 tool（`compact_session` / `rename_session` / `fork_session` / `archive_session` / `describe_session` / ...）大多 `sessionId: String` explicit。`ToolContext.sessionId` 已经有了；让常用的 3-5 个 session tool 把 `sessionId` 改为可选，null → `ctx.sessionId`。Rubric §5.4。
-
 - **session-project-bind-bus-event** — `SwitchProjectTool` 改 `Session.currentProjectId` 后没有 `BusEvent` 通知；UI / metrics subscriber 要么轮询 `getSession`，要么错过 binding 变化。**方向：** 加 `BusEvent.SessionProjectBindingChanged(sessionId, previousProjectId, newProjectId)` 子类，`SwitchProjectTool` 和 `fork_session`（若显式改绑定）发出事件；ServerContainer SSE DTO 同步暴露。Rubric §5.4。
 
 - **session-status-snapshot-query** — 当前 Agent 状态只通过 `BusEvent.AgentRunStateChanged` 流式广播；新 subscriber（UI 冷启动、新进程 attach）拿不到当前态。**方向：** 让 `Agent` 维护 per-session `lastState: Map<SessionId, AgentRunState>`（每次 publish 时更新）+ 暴露 `Agent.currentState(sessionId): AgentRunState?`；新增 `session_query(select=status, sessionId=X)` 让 LLM / UI 都能 snapshot 当前态。Rubric §5.4。
