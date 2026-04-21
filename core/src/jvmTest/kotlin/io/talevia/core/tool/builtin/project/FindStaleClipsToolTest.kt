@@ -296,4 +296,107 @@ class FindStaleClipsToolTest {
         assertEquals(0, out.totalClipCount)
         assertTrue(out.reports.isEmpty())
     }
+
+    /**
+     * Seeds a project with `clipCount` AIGC clips all bound to a single character
+     * ref, then drifts the character so every clip goes stale. Returns the project
+     * id for further assertions.
+     */
+    private suspend fun seedManyStale(
+        store: SqlDelightProjectStore,
+        pid: ProjectId,
+        clipCount: Int,
+    ) {
+        // Intentionally insert clips in non-sorted order (reverse + zero-padded) so the
+        // store / detector cannot accidentally hand us a pre-sorted stream — ordering
+        // has to come from the tool itself.
+        val clips = (clipCount - 1 downTo 0).map { i ->
+            val idx = i.toString().padStart(3, '0')
+            videoClip(
+                id = "c-$idx",
+                asset = AssetId("a-$idx"),
+                binding = setOf(SourceNodeId("mei")),
+            )
+        }
+        val track = Track.Video(id = TrackId("v0"), clips = clips)
+        store.upsert(
+            "demo",
+            Project(id = pid, timeline = Timeline(tracks = listOf(track))),
+        )
+        store.mutateSource(pid) {
+            it.addCharacterRef(
+                SourceNodeId("mei"),
+                CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
+            )
+        }
+        val originalHash = store.get(pid)!!.source.byId[SourceNodeId("mei")]!!.contentHash
+        clips.forEach { clip ->
+            appendLockfile(
+                store,
+                pid,
+                LockfileEntry(
+                    inputHash = "h-${clip.assetId.value}",
+                    toolId = "generate_image",
+                    assetId = clip.assetId,
+                    provenance = fakeProvenance(),
+                    sourceBinding = setOf(SourceNodeId("mei")),
+                    sourceContentHashes = mapOf(SourceNodeId("mei") to originalHash),
+                ),
+            )
+        }
+        // Drift the character → every bound clip becomes stale.
+        store.mutateSource(pid) { source ->
+            source.replaceNode(SourceNodeId("mei")) { node ->
+                node.copy(
+                    body = JsonConfig.default.encodeToJsonElement(
+                        CharacterRefBody.serializer(),
+                        CharacterRefBody(name = "Mei", visualDescription = "red hair"),
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test fun limitCapsReportsButKeepsTrueStaleCount() = runTest {
+        val (store, _) = newStore()
+        val pid = ProjectId("p-capped")
+        seedManyStale(store, pid, clipCount = 12)
+
+        val tool = FindStaleClipsTool(store)
+        val out = tool.execute(FindStaleClipsTool.Input(pid.value, limit = 5), ctx()).data
+
+        // True total preserved.
+        assertEquals(12, out.staleClipCount)
+        assertEquals(12, out.totalClipCount)
+        // Reports trimmed to the cap.
+        assertEquals(5, out.reports.size)
+    }
+
+    @Test fun reportOrderIsDeterministicAcrossCalls() = runTest {
+        val (store, _) = newStore()
+        val pid = ProjectId("p-ordered")
+        seedManyStale(store, pid, clipCount = 8)
+
+        val tool = FindStaleClipsTool(store)
+        val first = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data.reports
+        val second = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data.reports
+
+        assertEquals(first, second)
+        // And the order is specifically ascending-by-clipId.
+        assertEquals(first.map { it.clipId }, first.map { it.clipId }.sorted())
+    }
+
+    @Test fun omittedLimitFallsBackToDefault50() = runTest {
+        val (store, _) = newStore()
+        val pid = ProjectId("p-default")
+        // 60 stale clips > default cap of 50.
+        seedManyStale(store, pid, clipCount = 60)
+
+        val tool = FindStaleClipsTool(store)
+        // Null / omitted limit (uses the `limit: Int? = null` default).
+        val out = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data
+
+        assertEquals(60, out.staleClipCount)
+        assertEquals(FindStaleClipsTool.DEFAULT_LIMIT, out.reports.size)
+    }
 }

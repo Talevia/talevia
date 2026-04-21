@@ -39,12 +39,21 @@ import kotlinx.serialization.serializer
  * Read-only: permission `project.read`. Imported (non-AIGC) media is excluded
  * from the report — there's no lockfile entry to compare against, so we can't
  * meaningfully call it stale.
+ *
+ * Bounded output: reports are sorted by `clipId` ASC (deterministic across
+ * repeated calls against the same project state) and capped at `limit` rows
+ * (default 50, max 500). `staleClipCount` always reflects the *true* total
+ * even when `reports` is truncated, so the agent can tell when it's looking
+ * at a partial view.
  */
 class FindStaleClipsTool(
     private val projects: ProjectStore,
 ) : Tool<FindStaleClipsTool.Input, FindStaleClipsTool.Output> {
 
-    @Serializable data class Input(val projectId: String)
+    @Serializable data class Input(
+        val projectId: String,
+        val limit: Int? = null,
+    )
 
     @Serializable data class Report(
         val clipId: String,
@@ -64,7 +73,9 @@ class FindStaleClipsTool(
         "List clips whose conditioning source nodes have changed since the asset was generated. " +
             "Use after editing a character_ref / style_bible / brand_palette to plan which AIGC " +
             "clips to regenerate. Returns one report per stale clip with the source-node ids that " +
-            "drifted."
+            "drifted, sorted by clipId (ascending) so repeated calls are reproducible. Optional " +
+            "limit caps returned reports (default $DEFAULT_LIMIT, max $MAX_LIMIT); staleClipCount " +
+            "always reports the true total even when the reports list is truncated."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.read")
@@ -73,6 +84,16 @@ class FindStaleClipsTool(
         put("type", "object")
         putJsonObject("properties") {
             putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("limit") {
+                put("type", "integer")
+                put("minimum", 1)
+                put("maximum", MAX_LIMIT)
+                put(
+                    "description",
+                    "Cap on returned reports (default $DEFAULT_LIMIT, max $MAX_LIMIT). " +
+                        "staleClipCount stays the true count even when reports is truncated.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("projectId"))))
         put("additionalProperties", false)
@@ -80,34 +101,50 @@ class FindStaleClipsTool(
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         val pid = ProjectId(input.projectId)
-        val project = projects.get(pid) ?: error("Project ${input.projectId} not found")
-        val reports = project.staleClipsFromLockfile().map { r ->
-            Report(
-                clipId = r.clipId.value,
-                assetId = r.assetId.value,
-                changedSourceIds = r.changedSourceIds.map { it.value },
-            )
+        input.limit?.let {
+            require(it in 1..MAX_LIMIT) { "limit must be in 1..$MAX_LIMIT (got $it)" }
         }
+        val cap = input.limit ?: DEFAULT_LIMIT
+        val project = projects.get(pid) ?: error("Project ${input.projectId} not found")
+        val allReports = project.staleClipsFromLockfile()
+            .map { r ->
+                Report(
+                    clipId = r.clipId.value,
+                    assetId = r.assetId.value,
+                    changedSourceIds = r.changedSourceIds.map { it.value },
+                )
+            }
+            .sortedBy { it.clipId }
+        val totalStale = allReports.size
+        val truncated = totalStale > cap
+        val trimmed = if (truncated) allReports.take(cap) else allReports
         val totalClips = project.timeline.tracks.sumOf { it.clips.size }
         val out = Output(
             projectId = pid.value,
-            staleClipCount = reports.size,
+            staleClipCount = totalStale,
             totalClipCount = totalClips,
-            reports = reports,
+            reports = trimmed,
         )
-        val summary = if (reports.isEmpty()) {
+        val summary = if (totalStale == 0) {
             "All AIGC clips fresh ($totalClips clip(s) total; nothing to regenerate)."
         } else {
-            "${reports.size} of $totalClips clip(s) stale. " +
-                reports.take(5).joinToString("; ") {
-                    "${it.clipId} (changed: ${it.changedSourceIds.joinToString(",")})"
-                } +
-                if (reports.size > 5) "; …" else ""
+            val head = "$totalStale of $totalClips clip(s) stale"
+            val truncNote = if (truncated) " (showing first $cap of $totalStale — raise limit to see more)" else ""
+            val preview = trimmed.take(5).joinToString("; ") {
+                "${it.clipId} (changed: ${it.changedSourceIds.joinToString(",")})"
+            }
+            val tail = if (trimmed.size > 5) "; …" else ""
+            "$head$truncNote. $preview$tail"
         }
         return ToolResult(
             title = "find stale clips",
             outputForLlm = summary,
             data = out,
         )
+    }
+
+    companion object {
+        const val DEFAULT_LIMIT: Int = 50
+        const val MAX_LIMIT: Int = 500
     }
 }
