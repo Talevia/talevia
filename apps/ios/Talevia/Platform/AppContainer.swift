@@ -132,6 +132,7 @@ final class AppContainer {
         registry.register(tool: ListSourceNodesTool(projects: self.projects))
         registry.register(tool: RemoveSourceNodeTool(projects: self.projects))
         registry.register(tool: ImportSourceNodeTool(projects: self.projects))
+        registry.register(tool: ForkSourceNodeTool(projects: self.projects))
         self.tools = registry
 
         self.httpClient = createIosHttpClient()

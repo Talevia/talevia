@@ -89,6 +89,7 @@ import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
 import io.talevia.core.tool.builtin.source.DefineCharacterRefTool
 import io.talevia.core.tool.builtin.source.DefineStyleBibleTool
 import io.talevia.core.tool.builtin.source.DescribeSourceDagTool
+import io.talevia.core.tool.builtin.source.ForkSourceNodeTool
 import io.talevia.core.tool.builtin.source.ImportSourceNodeTool
 import io.talevia.core.tool.builtin.source.ListSourceNodesTool
 import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
@@ -318,6 +319,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(ListSourceNodesTool(projects))
         register(RemoveSourceNodeTool(projects))
         register(ImportSourceNodeTool(projects))
+        register(ForkSourceNodeTool(projects))
         register(ReadFileTool(fileSystem))
         register(WriteFileTool(fileSystem))
         register(EditTool(fileSystem))
