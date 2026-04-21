@@ -9,11 +9,22 @@ import io.talevia.core.domain.source.stale
  * Project-layer half of the stale-propagation lane (VISION §3.2). Given a set of
  * source-node ids that changed, return the set of clip ids that must be re-rendered.
  *
- * A clip is stale iff its [Clip.sourceBinding] intersects the source-layer transitive
- * closure ([io.talevia.core.domain.source.stale]). Clips with an empty binding are
- * *always* considered stale — they opted out of incremental compilation. The
- * `ExportTool` incremental-render path reads this; non-incremental callers can ignore
- * it.
+ * A clip is reported stale iff its [Clip.sourceBinding] is **non-empty** and
+ * intersects the source-layer transitive closure
+ * ([io.talevia.core.domain.source.stale]). Clips with an empty binding — imported
+ * media, hand-authored text, and every clip added before the source-binding
+ * protocol was threaded through `add_clip` — are **out of scope for incremental
+ * tracking** and returned in neither [staleClips] nor [freshClips]. The
+ * "either / or" split deliberately leaves a third "unknown / not-tracked"
+ * bucket: these clips don't oppose in the incremental-compile decision, so
+ * callers downstream (`regenerate_stale_clips`, the `find_stale_clips` report)
+ * leave them alone unless the user explicitly opts them in by binding a source
+ * node.
+ *
+ * This mirrors [staleClipsFromLockfile], which likewise silently skips clips
+ * without a lockfile anchor. The prior "empty binding → always stale" fallback
+ * polluted the stale signal on every small-white project, noising up UI
+ * reports with clips that had no `baseInputs` to regenerate from anyway.
  */
 fun Project.staleClips(changed: Set<SourceNodeId>): Set<ClipId> {
     if (changed.isEmpty()) return emptySet()
@@ -22,10 +33,7 @@ fun Project.staleClips(changed: Set<SourceNodeId>): Set<ClipId> {
     val out = LinkedHashSet<ClipId>()
     for (track in timeline.tracks) {
         for (clip in track.clips) {
-            if (clip.sourceBinding.isEmpty()) {
-                out.add(clip.id) // unbound clip: can't prove fresh → treat as stale
-                continue
-            }
+            if (clip.sourceBinding.isEmpty()) continue // unbound → out of scope for incremental tracking
             if (clip.sourceBinding.any { it in staleNodes }) {
                 out.add(clip.id)
             }
@@ -106,9 +114,13 @@ fun Project.clipsBoundTo(sourceNodeId: SourceNodeId): List<ClipsForSourceReport>
 /**
  * Fresh clips = clips known to still be valid after [changed] propagated.
  *
- * Complement of [staleClips] on the set of clips with a non-empty [Clip.sourceBinding].
- * Clips without a binding are excluded from "fresh" because we cannot prove they're
- * valid — they simply aren't part of the incremental-compile decision.
+ * Complement of [staleClips] on the set of clips with a non-empty
+ * [Clip.sourceBinding]. Clips without a binding are in neither set (the
+ * "unknown / not-tracked" bucket) — we can neither prove they're valid nor
+ * assert they're stale, and they aren't part of the incremental-compile
+ * decision at all. Any clip returned in [freshClips] is known-fresh and safe
+ * to skip; any clip returned in [staleClips] is known-stale and must be
+ * re-rendered; everything else is outside the stale-propagation system.
  */
 fun Project.freshClips(changed: Set<SourceNodeId>): Set<ClipId> {
     val stale = staleClips(changed)

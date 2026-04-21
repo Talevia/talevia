@@ -95,9 +95,13 @@ class ProjectStalenessTest {
         assertEquals(setOf(ClipId("c2")), project.freshClips(setOf(SourceNodeId("n1"))))
     }
 
-    @Test fun clipWithEmptyBindingIsAlwaysStale() {
-        // Unbound clips can't prove they're fresh. That's the whole contract — opt out
-        // of binding = opt out of incremental compilation.
+    @Test fun clipWithEmptyBindingIsOutOfScopeForIncrementalTracking() {
+        // Unbound clips (imported media, hand-authored text, legacy clips added
+        // before the binding protocol) don't participate in incremental tracking
+        // at all — they appear in NEITHER staleClips NOR freshClips. The third
+        // "unknown" bucket is encoded as "absent from both sets". Prior behavior
+        // that flagged them as always-stale polluted the signal (see
+        // docs/decisions/2026-04-21-unbound-clip-stale-semantics.md).
         val project = Project(
             id = ProjectId("p"),
             timeline = Timeline(
@@ -111,9 +115,67 @@ class ProjectStalenessTest {
             source = Source.EMPTY.addNode(node("n1")),
         )
 
-        val stale = project.staleClips(setOf(SourceNodeId("n1")))
-        assertEquals(setOf(ClipId("c1")), stale)
-        assertTrue(project.freshClips(setOf(SourceNodeId("n1"))).isEmpty())
+        val changed = setOf(SourceNodeId("n1"))
+        assertTrue(project.staleClips(changed).isEmpty(), "unbound clip must not be reported stale")
+        assertTrue(project.freshClips(changed).isEmpty(), "unbound clip must not be reported fresh either")
+    }
+
+    @Test fun mixedBoundAndUnboundOnlyReportsBoundStale() {
+        // The practical regression case: a project with AIGC clips and imported
+        // b-roll. Editing a character_ref should only mark the AIGC clips that
+        // depend on it — the imported footage must NOT end up in the stale set
+        // (there's no `baseInputs` to regenerate from, and the agent has no
+        // meaningful action to take).
+        val project = Project(
+            id = ProjectId("p"),
+            timeline = Timeline(
+                tracks = listOf(
+                    Track.Video(
+                        id = TrackId("v"),
+                        clips = listOf(
+                            clipBoundTo("c-aigc-1", "n1"),
+                            clipBoundTo("c-imported" /* no nodes */, start = 5),
+                            clipBoundTo("c-aigc-2", "n1", start = 10),
+                        ),
+                    ),
+                ),
+            ),
+            source = Source.EMPTY.addNode(node("n1")),
+        )
+
+        val changed = setOf(SourceNodeId("n1"))
+        assertEquals(setOf(ClipId("c-aigc-1"), ClipId("c-aigc-2")), project.staleClips(changed))
+        assertEquals(emptySet(), project.freshClips(changed))
+        // c-imported appears in neither.
+        val unionOfTracked = project.staleClips(changed) + project.freshClips(changed)
+        assertTrue(ClipId("c-imported") !in unionOfTracked)
+    }
+
+    @Test fun unboundClipAbsentEvenWhenNoNodesChanged() {
+        // Even when `changed` is empty, an unbound clip must not sneak into
+        // freshClips either. The "not-tracked" bucket is absolute, not
+        // contingent on whether any source edit happened.
+        val project = Project(
+            id = ProjectId("p"),
+            timeline = Timeline(
+                tracks = listOf(
+                    Track.Video(
+                        id = TrackId("v"),
+                        clips = listOf(
+                            clipBoundTo("bound", "n1"),
+                            clipBoundTo("unbound"),
+                        ),
+                    ),
+                ),
+            ),
+            source = Source.EMPTY.addNode(node("n1")),
+        )
+
+        val changedNothing = emptySet<SourceNodeId>()
+        assertTrue(project.staleClips(changedNothing).isEmpty())
+        // freshClips only reports clips with a binding; empty changed-set means
+        // no nodes are stale, so the bound clip is fresh; unbound still absent.
+        assertEquals(setOf(ClipId("bound")), project.freshClips(changedNothing))
     }
 
     @Test fun emptyChangedSetProducesEmptyStaleSet() {
