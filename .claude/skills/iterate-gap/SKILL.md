@@ -80,7 +80,59 @@ git pull --rebase origin main
 2. **一等抽象 > patch** —— 可复用抽象归 P0 / P1；单 genre / 单特效的 patch 归 P2 或直接舍去。
 3. **短周期能闭环** —— 同一档内，能闭环的排在前面。
 
-分档建议比例（非硬性，按真实分布调整）：P0 约 3-5 条，P1 约 8-10 条，P2 余数。如果真找不出 20 条值得做的 gap，可以少写（最少 8 条），在报告里说明。
+**Debt 占比硬性要求**：20 条里**至少 6 条（30%）**必须是从下面 **R.5 技术债扫描**里出来的 `debt-*` 任务。没有做 debt 扫描 / 扫描出来不到 6 条 → 必须把 debt 档按扫描结果如实加，宁可 feature gap 减少也不能砍 debt 名额。这是防止系统因为只做新功能而持续劣化的硬闸门。
+
+分档建议比例（非硬性）：P0 约 3-5 条（含 1-2 条 debt）、P1 约 8-10 条（含 3-4 条 debt）、P2 余数。如果真找不出 20 条值得做的 gap，可以少写（最少 8 条，其中 debt 至少 3 条），在报告里说明。
+
+### R.5 技术债扫描（repopulate 必做）
+
+Rubric 分析完之后，再显式扫一遍下面 7 类信号。每类命中都产出一条 slug 以 `debt-` 开头的 backlog 任务，和 feature gap 一起按优先级排档。信号不是"建议看看"，是**客观指标**，和 `main` 前一次 `docs(backlog)` commit 所在的快照对比：
+
+1. **Tool 数量膨胀** —
+   ```
+   find core/src/commonMain/kotlin/io/talevia/core/tool/builtin -name "*Tool.kt" | wc -l
+   ```
+   对比 `git show <prev-backlog-commit>:core/.../tool/builtin`。增幅 > 5% 或绝对增长 ≥ 5 → 出一条 `debt-tool-consolidation-<area>`（area 用增长最快的子目录名）。**这是最容易劣化的地方**，必须每次 repopulate 都扫。
+
+2. **Project 字段膨胀** —
+   ```
+   grep -cE '^\s*val ' core/src/commonMain/kotlin/io/talevia/core/domain/Project.kt
+   ```
+   和上次快照对比。新增字段如果类型是 `List<X>` / `Map<K, V>`（= append-only / grow-over-time 语义）→ 必出一条 `debt-extract-<field>-table`（把它拆到独立 SQLDelight 表）。
+
+3. **长文件** —
+   ```
+   find core/src/commonMain/kotlin -name "*.kt" -exec wc -l {} + | sort -rn | head -10
+   ```
+   > 500 行的文件自动进入 debt 候选，slug `debt-split-<filename>`。超 800 行是强制 P0 / P1。
+
+4. **近似工具群** —
+   逐个扫 `core/tool/builtin/<area>/` 目录，如果同一 area 下有 2+ 个同前缀工具（`list_X*` / `find_X*` / `describe_X*` / `Define*` + `Update*` 成对），出一条 `debt-consolidate-<area>-queries`。这是过去几个月最频繁的劣化信号。
+
+5. **被跳过的测试** —
+   ```
+   grep -rnE '@Ignore|@Disabled|\.skip\(' core/src/*Test/kotlin platform-impls apps
+   ```
+   每个 skip / @Ignore 都是一条 debt（要么修要么删），slug `debt-unskip-<test-name>`。
+
+6. **TODO / FIXME 累积** —
+   ```
+   grep -rnE 'TODO|FIXME|HACK|XXX' core/src/commonMain/kotlin | wc -l
+   ```
+   和上次快照对比。只要净增长 > 0 就出一条 `debt-clean-todos`，decision 里列出新增的行号让下次有据可查。
+
+7. **Deprecated 标记** —
+   ```
+   grep -rn '@Deprecated' core/src/commonMain/kotlin
+   ```
+   任何存在 > 1 轮 repopulate 周期的 `@Deprecated` → 出 `debt-remove-deprecated-<symbol>`。Deprecated 永不清理 = 代码里有两份实现，比保留还差。
+
+**扫描产出的 debt 任务按严重度进入对应档**：
+- 强制 P0：长文件 ≥ 800 行、被跳过的测试 ≥ 3 条、tool 绝对增长 ≥ 10。
+- 默认 P1：长文件 500–800、近似工具群、Project 字段膨胀。
+- 默认 P2：TODO 净增长、单个 Deprecated、小幅 tool 增长。
+
+扫描结果也写进 `docs(backlog)` 这次 commit 的 message body（简洁列出各指标对比数字），这样 `git log` 本身就是劣化监控曲线。
 
 写入 `docs/BACKLOG.md` 的格式与当前文件保持一致：
 
@@ -105,8 +157,35 @@ docs(backlog): repopulate <N> tasks from rubric analysis
 - 这次改动必须守住哪些 CLAUDE.md 架构规则（`core/commonMain` 零平台依赖、Timeline 归 Core、`Tool<I, O>` 带 serializer + JSON Schema、`MediaPathResolver` 管路径、provider 中立的 `LlmEvent`、禁止 Effect.js 模式）。
 - 跑哪个 `./gradlew` target 证明正确性（从 CLAUDE.md 的 Build & run 表里选最贴的那一个）。
 - **反需求核查** —— 扫一遍 CLAUDE.md 的「Anti-requirements」清单。如果 plan 踩红线，**丢掉这个 plan 换下一条 backlog**，不要反过来 challenge 用户。
+- **设计约束自查** —— 过一遍下面 **3a 清单**的 10 条。任意一条命中"是 / 可能"，要么在 plan 里显式说明怎么避开，要么**换下一条 backlog**（优先这个，"这次就例外一下"是系统劣化的主要路径）。
 
 如果 plan 需要只有用户能给的信息（专有 key、产品抉择等），**换下一条 backlog bullet**。被跳过的 bullet 保留在文件里不动，留给用户决定。
+
+### 3a. 设计约束自查清单（Plan 必跑）
+
+这 10 条是从 Talevia 至今已经交过"学费"的设计反模式里提取出来的。每条都对应仓库里真实出现过的劣化信号。Plan 阶段必须逐条过，任何一条命中都是换 backlog 的充分理由。
+
+1. **工具数量不净增** — 本轮会新增几个 `Tool.kt`？先问：能在现有工具上加 filter / sort / limit 参数覆盖吗？能预留给未来 `project_query` 原语吗？如果仍要新增，**必须同时删/合至少一个近似工具**。净增长 ≥ +2 要在 decision 里显式辩护。LLM 每轮都要付 tool spec 的 token，这是累积成本。
+
+2. **Define* / Update* 不成对** — 如果是"创建 + 编辑某种 source 概念"，只做一个 `set_<concept>` upsert 工具。对 LLM 来说两个互斥分支等于两倍 spec 成本换零收益。
+
+3. **Project blob 不膨胀** — 本轮会在 `Project` data class 上加新字段吗？如果是 append-only 语义（历史 / 日志 / 每次生成追一条），**必须独立 SQLDelight 表**，外键 projectId。直接加到 `Project` 上每次 tool 调用都要整块 re-encode，写放大会随项目寿命非线性恶化。
+
+4. **状态字段不做二元** — 引入新的 `stale` / `fresh` / `pinned` / `dirty` / `bound` 标志位前，先想清楚有没有第三态 `Unknown` / `NotApplicable`。二元默认会惩罚不参与该机制的用户（历史教训：`Clip.sourceBinding` 空 → 恒 stale）。
+
+5. **Core 不硬编码 genre 概念** — 新 tool / 新类型 / 新 helper 里如果出现 `character_ref` / `style_bible` / `brand_palette` / `product_shot` / `script` 这类 genre-specific 名词作为一等类型或工具 id 的一部分，停下来：这是 `SourceNode.body` 的不透明内容，还是 Core 的一等概念？默认前者。新增 folding / 一致性传播逻辑默认放 `source/<genre>/consistency/`，不往 `source/consistency/` 里加新 kind。
+
+6. **Session ↔ Project 绑定隐含** — 新 tool 的 input 里如果有 `projectId: ProjectId`，检查：等 `session-project-binding` 落地后这个参数应当从 session context 拿。现在可以暂接参数，但要在 decision 里标一行"待 session-project-binding 后切 context"。
+
+7. **序列化向前兼容** — 新加 `@Serializable` 字段必须有 default 值（否则旧 JSON / SQLite blob 解不出来，迁移成本高得离谱）。删字段前 `grep` `docs/decisions/` 看有没有依赖。`kotlin.time.Duration` 不加自定义 serializer（历史名字碰撞事故）。
+
+8. **五端装配不能漏** — 新 tool 必须在 CLI / Desktop / Server / Android / iOS 五个 `AppContainer` 都注册。一个漏掉 = 该平台默默丢失功能，用户很难发现。Plan 里列全这 5 个文件。
+
+9. **测试覆盖语义而非 happy path** — 本轮如果引入条件分支 / 状态机 / 缓存失效 / 增量计算，测试里要至少一个"反直觉边界"case：空输入、重复调用、并发、版本漂移、stale 穿透。只跑 happy path 的测试对系统保护约等于 0。
+
+10. **LLM context 成本可见** — 本轮加的 tool spec + helpText + system prompt 片段，给每一次 turn 加多少 token？粗估 ≥ 500 token 需要在 decision 里说明必要性、以及后续是否会并入更大的 query primitive 被吸收掉。
+
+**命中任何一条不是"想办法绕过"的信号，是"换下一条 backlog"的信号**。本项目已经踩过的坑不会自动绕第二次 —— 必须显式拒绝。
 
 ### 4. 实现
 
@@ -142,7 +221,19 @@ docs(backlog): repopulate <N> tasks from rubric analysis
 
 - 只删这一条 bullet（整行，含前导 `- ` 和可能的紧跟空行），**不要**重写整个文件、不要修改顶部操作说明段落、不要调整剩余 bullet 的顺序。
 - 被跳过的 bullet（plan 阶段判定踩红线或缺用户输入）保留不动。
-- 用 `git diff docs/BACKLOG.md` 确认只减不增：diff 里只有被删那几行，没有 reorder / 重排。
+- 用 `git diff docs/BACKLOG.md` 确认只减不增：diff 里只有被删那几行，没有 reorder / 重排 —— **除了**下面这种情况：
+
+**顺手记 debt（本 cycle 唯一允许的 bullet 新增）**：实现 / 验证过程里如果发现一条与本任务无关的技术债（某个文件突然长到 600 行、测试里发现一个 skip、撞上两个近似 tool），**不要修**（会把本 PR 变大 / 偏离 plan），而是在 `docs/BACKLOG.md` 的 **P2 档末尾 append** 一条：
+
+```
+- **debt-<slug>** — <发现了什么>。**方向：** <建议的修法>。Rubric 外 / 顺手记录。
+```
+
+规则：
+- 只能 append 到 P2 末尾，不能插队到 P0 / P1，不能重排既有 bullet。
+- 一次 cycle 最多 append 2 条（发现更多说明跑偏了，用报告提醒用户）。
+- 和本轮处理的 bullet 删除一起进 `docs(decisions)` 那次 commit，不单独 commit。
+- **只记不修**。把它当成"观察笔记"，下次 repopulate 或专门调度时处理。这是让系统持续自省而不打乱本轮节奏的机制。
 
 文件内容保持既有 decisions 格式（内部 `## YYYY-MM-DD — 短标题` 头一仍要写，便于跨文件 grep / 聚合视图）：
 
@@ -275,3 +366,5 @@ Agent 工具会返回每个 sub-agent 的分支 + 路径。分流：
 9. 并行模式并发度永远 ≤ 4。超了静默 clamp。
 10. 并行模式只选**互不重叠**的 bullet。重叠就静默缩减 N 并在报告里说明。
 11. **Backlog 是权威任务源**。不凭空发明临时任务，不跳过 P0 直接做 P2。空 backlog → repopulate，不要绕过。
+12. **设计约束 §3a 10 条是硬性否决**。任意一条命中"是 / 可能"→ 换 backlog 下一条。不允许"这次就例外一下"—— 历史上系统劣化几乎全部来自连续的"一次例外"。
+13. **Repopulate 必须 ≥ 30% debt 任务**（详见 R.5）。Debt 扫描是硬性动作不是可选项。跳过 debt 扫描 / debt 占比不足的 repopulate commit 不合法，下一 cycle 发现立刻回滚该 repopulate 并重做。
