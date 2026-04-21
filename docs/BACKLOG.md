@@ -17,8 +17,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **debt-consolidate-session-reads-via-session-query** — `core/tool/builtin/session/` 下 8 个 List* / Describe* tool（`list_sessions`、`list_messages`、`list_parts`、`list_session_forks`、`list_session_ancestors`、`list_tool_calls`、`describe_session`、`describe_message`）。和 project 域犯同一个"每个维度一个工具"病。**方向：** 参考 `project_query` 模式引入 `session_query(select ∈ {sessions, messages, parts, forks, ancestors, tool_calls}, filter, sort, limit)`，按 select 吸收至少 6 个旧工具。Rubric 外 / §5.2。
-
 - **debt-consolidate-source-reads-via-source-query** — `core/tool/builtin/source/` 下 `list_source_nodes` + `search_source_nodes` + `describe_source_node` + `describe_source_dag` 4 个 read tool。**方向：** 引入 `source_query(select ∈ {nodes, dag_summary}, filter ∈ {kind, kindPrefix, contentSubstring, id}, limit)`，吸收 list + search，describe_source_node 留作单实体深看。Rubric 外。
 
 - **session-projector-views** — `Session` 当前只暴露一份 linear message list，UI 自己拼 "tool-call tree" / "artifact timeline" view。OpenCode `session/projectors.ts` 把投影下沉到 session 层。**方向：** `core.session.SessionProjector` 接口 + 2 个实现：`ToolCallTreeProjector`（把嵌套 tool-call 展开成树）、`ArtifactTimelineProjector`（扫 lockfile entries 按时间聚合）。UI 按需选投影。Rubric §5.4。
