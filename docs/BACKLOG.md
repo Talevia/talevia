@@ -13,8 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **agent-run-state-machine** — `Agent.kt` 里的状态是隐式的（running / awaiting tool / emitting text 散落在 when/if）。revert session 拿不到 "上次在哪一步"。OpenCode `session/run-state.ts` 是显式状态机 + 持久化。**方向：** 加 `sealed class AgentRunState { Idle; Generating; AwaitingTool; Compacting; Cancelled; Failed(cause) }`，每次状态转移写入 session（或 bus 事件），revert 能恢复到最近的 Idle / AwaitingTool 边界。Rubric §5.4。
-
 - **auto-author-first-project-from-intent** — 小白路径 §5.4 的硬缺口：今天用户必须手动 `create_project` + 手动 `set_character_ref` / `add_source_node` 才能给 agent 投料。北极星是 "一句话意图 → 可看初稿"。**方向：** 新增 `start_project_from_intent(intent: String)` tool：LLM 调 agent 把 intent 解析成 genre（先覆盖 narrative / vlog），生成 skeleton source graph（character / style / shot placeholders），返回 projectId。不产生任何 AIGC 资产——只是搭好骨架让 agent 继续 fill in。Rubric §5.4。
 
 - **streaming-tool-output-parts** — 长跑 tool（`generate_video` 30s+、`export` 可能 1min+）没有中间进度回传，UI 看到的是 "等待 → 突然完成"。`ToolContext.emitPart` 已存在但几乎没 tool 用。OpenCode `session/processor.ts` 流式消费 intermediate parts。**方向：** 给 `generate_video` / `generate_image` / `export_project` / `export` 4 个关键 tool 加 `ctx.emitPart(RenderProgress(...))` 调用点，bus 把 Part 发出去，UI 能画 progress bar。Rubric §5.2。
