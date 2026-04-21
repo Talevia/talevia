@@ -147,6 +147,8 @@ final class AppContainer {
         registry.register(tool: DeleteProjectSnapshotTool(projects: self.projects))
         registry.register(tool: ForkProjectTool(projects: self.projects))
         registry.register(tool: DiffProjectsTool(projects: self.projects))
+        registry.register(tool: ExportProjectTool(projects: self.projects))
+        registry.register(tool: ImportProjectFromJsonTool(projects: self.projects))
         registry.register(tool: DefineCharacterRefTool(projects: self.projects))
         registry.register(tool: UpdateCharacterRefTool(projects: self.projects))
         registry.register(tool: DefineStyleBibleTool(projects: self.projects))
