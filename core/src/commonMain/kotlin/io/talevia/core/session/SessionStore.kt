@@ -34,6 +34,18 @@ interface SessionStore {
      */
     suspend fun listSessionsIncludingArchived(projectId: ProjectId? = null): List<Session>
 
+    /**
+     * Return sessions whose [Session.parentId] equals [parentId] — the
+     * immediate forks of the given session. Oldest-first by `createdAt`
+     * (the tree is usually walked depth-first from the root, so a stable
+     * chronological ordering lets the caller render parent→child flow).
+     *
+     * Archived children are included — a fork that was later archived is
+     * still part of the lineage. Callers that want to filter can check
+     * `Session.archived` on each row.
+     */
+    suspend fun listChildSessions(parentId: SessionId): List<Session>
+
     suspend fun appendMessage(message: Message)
     suspend fun updateMessage(message: Message)
     suspend fun getMessage(id: MessageId): Message?

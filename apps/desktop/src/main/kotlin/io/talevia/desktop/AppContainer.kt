@@ -99,6 +99,7 @@ import io.talevia.core.tool.builtin.session.DescribeMessageTool
 import io.talevia.core.tool.builtin.session.DescribeSessionTool
 import io.talevia.core.tool.builtin.session.ForkSessionTool
 import io.talevia.core.tool.builtin.session.ListMessagesTool
+import io.talevia.core.tool.builtin.session.ListSessionForksTool
 import io.talevia.core.tool.builtin.session.ListSessionsTool
 import io.talevia.core.tool.builtin.session.RenameSessionTool
 import io.talevia.core.tool.builtin.session.RevertSessionTool
@@ -292,6 +293,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(ArchiveSessionTool(sessions))
         register(UnarchiveSessionTool(sessions))
         register(DeleteSessionTool(sessions))
+        register(ListSessionForksTool(sessions))
         register(ImportMediaTool(media, engine))
         register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))

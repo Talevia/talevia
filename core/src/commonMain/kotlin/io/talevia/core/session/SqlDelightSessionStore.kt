@@ -88,6 +88,10 @@ class SqlDelightSessionStore(
         return rows.map { json.decodeFromString(Session.serializer(), it.data_) }
     }
 
+    override suspend fun listChildSessions(parentId: SessionId): List<Session> =
+        db.sessionsQueries.selectChildren(parentId.value).executeAsList()
+            .map { json.decodeFromString(Session.serializer(), it.data_) }
+
     override suspend fun appendMessage(message: Message) {
         db.messagesQueries.insert(
             id = message.id.value,
