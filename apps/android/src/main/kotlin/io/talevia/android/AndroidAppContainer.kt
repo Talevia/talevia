@@ -57,6 +57,7 @@ import io.talevia.core.tool.builtin.project.UnpinLockfileEntryTool
 import io.talevia.core.tool.builtin.project.ValidateProjectTool
 import io.talevia.core.tool.builtin.session.DescribeMessageTool
 import io.talevia.core.tool.builtin.session.DescribeSessionTool
+import io.talevia.core.tool.builtin.session.ForkSessionTool
 import io.talevia.core.tool.builtin.session.ListMessagesTool
 import io.talevia.core.tool.builtin.session.ListSessionsTool
 import io.talevia.core.tool.builtin.source.AddSourceNodeTool
@@ -149,6 +150,7 @@ class AndroidAppContainer(context: Context) {
         register(DescribeSessionTool(sessions))
         register(ListMessagesTool(sessions))
         register(DescribeMessageTool(sessions))
+        register(ForkSessionTool(sessions))
         register(ImportMediaTool(media, engine))
         register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))
