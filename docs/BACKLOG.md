@@ -21,4 +21,3 @@
 
 ## P2 — 记债/观望
 
-- **integration-test-real-provider-smoke** — 当前 provider 测试全 mock，真 API 没 smoke test。Anthropic SSE 格式变动 / OpenAI retire 旧 model 时测试察觉不到。**方向：** 加 `@EnabledIfEnvironmentVariable("ANTHROPIC_API_KEY")` 的一轮端到端 smoke test（创建 session、发一句话、断言返回含 text + stop reason），CI 不跑，本地可选。Rubric 外。
