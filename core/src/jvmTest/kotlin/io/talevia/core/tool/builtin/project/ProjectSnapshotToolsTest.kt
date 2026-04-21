@@ -180,6 +180,137 @@ class ProjectSnapshotToolsTest {
         assertTrue(out.data.snapshots.isEmpty())
     }
 
+    @Test fun listMaxAgeDaysDropsOlderSnapshots() = runTest {
+        val rig = rig()
+        val msPerDay = 24L * 60L * 60L * 1000L
+        // Clock "now" is day 10.
+        val now = 10L * msPerDay
+        val clock = FixedClock(Instant.fromEpochMilliseconds(now))
+        val base = seedProject("p")
+        val captured = base.copy(snapshots = emptyList())
+        rig.store.upsert(
+            "test",
+            base.copy(
+                snapshots = listOf(
+                    // Ancient (8 days before now).
+                    ProjectSnapshot(ProjectSnapshotId("old"), "ancient", now - 8L * msPerDay, captured),
+                    // 3 days before now — inside a 5-day window.
+                    ProjectSnapshot(ProjectSnapshotId("mid"), "recent", now - 3L * msPerDay, captured),
+                    // Right now.
+                    ProjectSnapshot(ProjectSnapshotId("new"), "newest", now, captured),
+                ),
+            ),
+        )
+
+        val out = ListProjectSnapshotsTool(rig.store, clock).execute(
+            ListProjectSnapshotsTool.Input(projectId = "p", maxAgeDays = 5),
+            rig.ctx,
+        )
+
+        // "old" dropped (strictly older than now-5d); "mid" + "new" kept, newest-first.
+        assertEquals(2, out.data.snapshotCount)
+        assertEquals(listOf("new", "mid"), out.data.snapshots.map { it.snapshotId })
+    }
+
+    @Test fun listMaxAgeDaysZeroKeepsOnlyNowOrFuture() = runTest {
+        val rig = rig()
+        val now = 1_700_000_000_000L
+        val clock = FixedClock(Instant.fromEpochMilliseconds(now))
+        val base = seedProject("p")
+        val captured = base.copy(snapshots = emptyList())
+        rig.store.upsert(
+            "test",
+            base.copy(
+                snapshots = listOf(
+                    ProjectSnapshot(ProjectSnapshotId("a"), "a", now - 1L, captured),
+                    ProjectSnapshot(ProjectSnapshotId("b"), "b", now, captured),
+                ),
+            ),
+        )
+
+        val out = ListProjectSnapshotsTool(rig.store, clock).execute(
+            ListProjectSnapshotsTool.Input(projectId = "p", maxAgeDays = 0),
+            rig.ctx,
+        )
+
+        // Age 0 means the cutoff is "now"; anything strictly older drops.
+        assertEquals(listOf("b"), out.data.snapshots.map { it.snapshotId })
+    }
+
+    @Test fun listLimitCapsOutputAfterNewestFirstSort() = runTest {
+        val rig = rig()
+        val base = seedProject("p")
+        val captured = base.copy(snapshots = emptyList())
+        // 5 snapshots with ascending timestamps so id -> order is obvious.
+        val snaps = (1..5).map { i ->
+            ProjectSnapshot(
+                ProjectSnapshotId("s-$i"),
+                "label-$i",
+                i.toLong() * 1_000L,
+                captured,
+            )
+        }
+        rig.store.upsert("test", base.copy(snapshots = snaps))
+
+        val out = ListProjectSnapshotsTool(rig.store).execute(
+            ListProjectSnapshotsTool.Input(projectId = "p", limit = 2),
+            rig.ctx,
+        )
+
+        // Newest-first then take 2 -> s-5, s-4.
+        assertEquals(2, out.data.snapshotCount)
+        assertEquals(listOf("s-5", "s-4"), out.data.snapshots.map { it.snapshotId })
+    }
+
+    @Test fun listDefaultSortIsNewestFirst() = runTest {
+        val rig = rig()
+        val base = seedProject("p")
+        val captured = base.copy(snapshots = emptyList())
+        // Store in ascending-captured order; the tool must still return descending.
+        rig.store.upsert(
+            "test",
+            base.copy(
+                snapshots = listOf(
+                    ProjectSnapshot(ProjectSnapshotId("a"), "a", 1_000L, captured),
+                    ProjectSnapshot(ProjectSnapshotId("b"), "b", 2_000L, captured),
+                    ProjectSnapshot(ProjectSnapshotId("c"), "c", 3_000L, captured),
+                ),
+            ),
+        )
+
+        val out = ListProjectSnapshotsTool(rig.store).execute(
+            ListProjectSnapshotsTool.Input(projectId = "p"),
+            rig.ctx,
+        )
+
+        assertEquals(listOf("c", "b", "a"), out.data.snapshots.map { it.snapshotId })
+    }
+
+    @Test fun listNegativeMaxAgeDaysRejected() = runTest {
+        val rig = rig()
+        rig.store.upsert("test", seedProject("p"))
+        val ex = assertFailsWith<IllegalArgumentException> {
+            ListProjectSnapshotsTool(rig.store).execute(
+                ListProjectSnapshotsTool.Input(projectId = "p", maxAgeDays = -1),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("maxAgeDays"), ex.message)
+    }
+
+    @Test fun listRejectsLimitOutsideRange() = runTest {
+        val rig = rig()
+        rig.store.upsert("test", seedProject("p"))
+        val tool = ListProjectSnapshotsTool(rig.store)
+
+        assertFailsWith<IllegalArgumentException> {
+            tool.execute(ListProjectSnapshotsTool.Input(projectId = "p", limit = 0), rig.ctx)
+        }
+        assertFailsWith<IllegalArgumentException> {
+            tool.execute(ListProjectSnapshotsTool.Input(projectId = "p", limit = 501), rig.ctx)
+        }
+    }
+
     @Test fun restoreReplacesPayloadButPreservesSnapshotsListAndProjectId() = runTest {
         val rig = rig()
         val clock = FixedClock(Instant.fromEpochMilliseconds(1_700_000_000_000L))
