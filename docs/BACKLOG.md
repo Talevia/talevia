@@ -13,8 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **unbound-clip-stale-semantics** — `ProjectStaleness.staleClips()` 里 `sourceBinding.isEmpty() → 恒 stale` —— 手工 clip 被标成 "永远 stale"，但又无法 `regenerate_stale_clips`（它们没有 `baseInputs` 可以重放），stale 信号被污染。小白路径尤其不友好。**方向：** 要么语义翻转为 "unbound → 恒 fresh（用户明示放弃增量）"，要么引入三态 `Fresh / Stale / Unknown`，让 UI 和 `regenerate_stale_clips` 区分"真 stale"和"无法判断"。写 decision 时明确选择背后的权衡。Rubric §5.3 / §5.5。
-
 ## P1 — 中优，做完 P0 再排
 
 - **merge-define-update-tool-pairs** — `DefineCharacterRefTool` / `UpdateCharacterRefTool`、`DefineStyleBibleTool` / `UpdateStyleBibleTool`、`DefineBrandPaletteTool` / `UpdateBrandPaletteTool` 成对存在。对 LLM 是两个互斥分支（"存在就 update，不存在就 define"），徒增 spec 数量。**方向：** 合并为单一 `set_character_ref` / `set_style_bible` / `set_brand_palette`，上游用 upsert 语义；旧工具保留一次 release 的 deprecation 窗口或直接删（项目当前阶段可以直接删 —— 没有对外稳定面）。Rubric §5.2 一等抽象 > patch。
