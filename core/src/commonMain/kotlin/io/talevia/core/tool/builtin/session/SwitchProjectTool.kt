@@ -88,7 +88,7 @@ class SwitchProjectTool(
         val sid = SessionId(input.sessionId)
         val session = sessions.getSession(sid)
             ?: error(
-                "Session ${input.sessionId} not found. Call list_sessions to discover valid session ids.",
+                "Session ${input.sessionId} not found. Call session_query(select=sessions) to discover valid session ids.",
             )
 
         val pid = ProjectId(input.projectId)

@@ -90,7 +90,7 @@ class CompactSessionTool(
         putJsonObject("properties") {
             putJsonObject("sessionId") {
                 put("type", "string")
-                put("description", "Session id from list_sessions.")
+                put("description", "Session id from session_query(select=sessions).")
             }
         }
         put("required", JsonArray(listOf(JsonPrimitive("sessionId"))))
@@ -101,7 +101,7 @@ class CompactSessionTool(
         val sid = SessionId(input.sessionId)
         val session = sessions.getSession(sid)
             ?: error(
-                "Session ${input.sessionId} not found. Call list_sessions to discover valid session ids.",
+                "Session ${input.sessionId} not found. Call session_query(select=sessions) to discover valid session ids.",
             )
 
         val history = sessions.listMessagesWithParts(sid, includeCompacted = false)

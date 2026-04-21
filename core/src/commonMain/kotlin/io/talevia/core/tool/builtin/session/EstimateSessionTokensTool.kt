@@ -32,7 +32,7 @@ import kotlinx.serialization.serializer
  * compactor uses for its "should we compact?" trigger, so the numbers here
  * line up with what compaction actually sees. Real provider tokens (BPE /
  * SentencePiece) are reported on assistant rows as `tokens_input` /
- * `tokens_output` after a turn completes; surface those via `list_messages`
+ * `tokens_output` after a turn completes; surface those via `session_query(select=messages)`
  * or `describe_session` whenever available — this tool is the *pre-turn*
  * estimate.
  *
@@ -42,7 +42,7 @@ import kotlinx.serialization.serializer
  *  - Breakdown (`includeBreakdown = true`): per-message rows with id / role
  *    / tokens. Useful for debugging "which message is the fatty?" on a
  *    session that's unexpectedly heavy. Rows are most-recent first so the
- *    usual "tail first" read matches `list_messages`.
+ *    usual "tail first" read matches `session_query(select=messages)`.
  *
  * `largestMessageTokens` is surfaced even in terse mode because it answers
  * a distinct question from "total": a session with 50 small user prompts
@@ -94,7 +94,7 @@ class EstimateSessionTokensTool(
             "compaction fire?\" after one. Uses the same ~4 chars/token heuristic that drives " +
             "the compactor's trigger — the real provider tokenizer (BPE for OpenAI, SentencePiece " +
             "for Anthropic) will disagree modestly. For the *actual* per-turn token counts, read " +
-            "`tokens_input` / `tokens_output` on assistant rows via `list_messages` / " +
+            "`tokens_input` / `tokens_output` on assistant rows via `session_query(select=messages)` / " +
             "`describe_session`. Default terse mode returns totals + largest-message size; pass " +
             "`includeBreakdown=true` for per-message rows when you're hunting the fat one."
     override val inputSerializer: KSerializer<Input> = serializer()
@@ -106,7 +106,7 @@ class EstimateSessionTokensTool(
         putJsonObject("properties") {
             putJsonObject("sessionId") {
                 put("type", "string")
-                put("description", "Session id from list_sessions.")
+                put("description", "Session id from session_query(select=sessions).")
             }
             putJsonObject("includeBreakdown") {
                 put("type", "boolean")
@@ -126,7 +126,7 @@ class EstimateSessionTokensTool(
         val sid = SessionId(input.sessionId)
         val session = sessions.getSession(sid)
             ?: error(
-                "Session ${input.sessionId} not found. Call list_sessions to discover valid session ids.",
+                "Session ${input.sessionId} not found. Call session_query(select=sessions) to discover valid session ids.",
             )
 
         // Use the post-compaction view by default (matches what the next LLM turn

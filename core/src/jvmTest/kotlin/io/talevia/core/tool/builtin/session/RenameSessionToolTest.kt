@@ -111,7 +111,7 @@ class RenameSessionToolTest {
             )
         }
         assertTrue(ex.message!!.contains("ghost"), ex.message)
-        assertTrue(ex.message!!.contains("list_sessions"), ex.message)
+        assertTrue(ex.message!!.contains("session_query(select=sessions)"), ex.message)
     }
 
     private companion object {

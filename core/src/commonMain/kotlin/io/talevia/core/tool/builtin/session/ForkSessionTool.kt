@@ -28,7 +28,7 @@ import kotlinx.serialization.serializer
  * Semantics mirror `SessionStore.fork`:
  *  - A new `SessionId` is minted and the branch is written with
  *    `parentId = <source>`. That backlink is what lets
- *    `describe_session` / `list_sessions` render the fork graph.
+ *    `describe_session` / `session_query(select=sessions)` render the fork graph.
  *  - When `anchorMessageId` is set, only messages at-or-before the
  *    anchor (in the parent's `(createdAt, id)` order) are copied —
  *    everything after is dropped from the branch. Lets the agent
@@ -39,7 +39,7 @@ import kotlinx.serialization.serializer
  *    match the store's default phrasing.
  *
  * Failure cases:
- *  - Parent session doesn't exist → loud error with a `list_sessions`
+ *  - Parent session doesn't exist → loud error with a `session_query(select=sessions)`
  *    hint.
  *  - Anchor doesn't belong to the parent session → loud error (the
  *    store's `require` surfaces it verbatim).
@@ -77,7 +77,7 @@ class ForkSessionTool(
             "messages up to optional anchorMessageId (omit to copy everything). Use for \"try a " +
             "different approach from here\" flows. The branch is a separate session — the agent's " +
             "running session is unaffected. Returns the new session id the caller can use with " +
-            "list_sessions / describe_session / session-revert etc."
+            "session_query(select=sessions) / describe_session / session-revert etc."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.write")
@@ -111,7 +111,7 @@ class ForkSessionTool(
         val parentId = SessionId(input.sessionId)
         val parent = sessions.getSession(parentId)
             ?: error(
-                "Session ${input.sessionId} not found. Call list_sessions to discover valid session ids.",
+                "Session ${input.sessionId} not found. Call session_query(select=sessions) to discover valid session ids.",
             )
 
         val anchorId = input.anchorMessageId?.takeIf { it.isNotBlank() }?.let { MessageId(it) }

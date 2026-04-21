@@ -97,15 +97,10 @@ import io.talevia.core.tool.builtin.session.DescribeMessageTool
 import io.talevia.core.tool.builtin.session.DescribeSessionTool
 import io.talevia.core.tool.builtin.session.EstimateSessionTokensTool
 import io.talevia.core.tool.builtin.session.ForkSessionTool
-import io.talevia.core.tool.builtin.session.ListMessagesTool
-import io.talevia.core.tool.builtin.session.ListPartsTool
-import io.talevia.core.tool.builtin.session.ListSessionAncestorsTool
-import io.talevia.core.tool.builtin.session.ListSessionForksTool
-import io.talevia.core.tool.builtin.session.ListSessionsTool
-import io.talevia.core.tool.builtin.session.ListToolCallsTool
 import io.talevia.core.tool.builtin.session.ReadPartTool
 import io.talevia.core.tool.builtin.session.RenameSessionTool
 import io.talevia.core.tool.builtin.session.RevertSessionTool
+import io.talevia.core.tool.builtin.session.SessionQueryTool
 import io.talevia.core.tool.builtin.session.SwitchProjectTool
 import io.talevia.core.tool.builtin.session.UnarchiveSessionTool
 import io.talevia.core.tool.builtin.shell.BashTool
@@ -286,9 +281,8 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(io.talevia.core.tool.builtin.meta.ListToolsTool(this))
         register(io.talevia.core.tool.builtin.meta.EstimateTokensTool())
         register(TodoWriteTool())
-        register(ListSessionsTool(sessions))
+        register(SessionQueryTool(sessions))
         register(DescribeSessionTool(sessions))
-        register(ListMessagesTool(sessions))
         register(EstimateSessionTokensTool(sessions))
         register(DescribeMessageTool(sessions))
         register(ForkSessionTool(sessions))
@@ -298,11 +292,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(ArchiveSessionTool(sessions))
         register(UnarchiveSessionTool(sessions))
         register(DeleteSessionTool(sessions))
-        register(ListSessionForksTool(sessions))
-        register(ListSessionAncestorsTool(sessions))
         register(ReadPartTool(sessions))
-        register(ListToolCallsTool(sessions))
-        register(ListPartsTool(sessions))
         register(ImportMediaTool(media, engine))
         register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))

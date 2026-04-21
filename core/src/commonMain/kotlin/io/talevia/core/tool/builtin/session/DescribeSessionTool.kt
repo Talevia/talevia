@@ -39,7 +39,7 @@ import kotlinx.serialization.serializer
  *    did we last *talk* on this session?" the last-message timestamp is
  *    what the user means.
  *
- * Missing sessionId fails loudly with a `list_sessions` hint. Read-only;
+ * Missing sessionId fails loudly with a `session_query(select=sessions)` hint. Read-only;
  * permission `session.read`.
  */
 class DescribeSessionTool(
@@ -77,7 +77,7 @@ class DescribeSessionTool(
     override val helpText: String =
         "Per-session deep inspection: session metadata plus message counts, summed token usage, " +
             "compaction state, permission-rule count, and the latest message timestamp. Use after " +
-            "list_sessions to pick which session to fork / revert / resume. Read-only."
+            "session_query(select=sessions) to pick which session to fork / revert / resume. Read-only."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.read")
@@ -87,7 +87,7 @@ class DescribeSessionTool(
         putJsonObject("properties") {
             putJsonObject("sessionId") {
                 put("type", "string")
-                put("description", "Session id from list_sessions.")
+                put("description", "Session id from session_query(select=sessions).")
             }
         }
         put("required", JsonArray(listOf(JsonPrimitive("sessionId"))))
@@ -98,7 +98,7 @@ class DescribeSessionTool(
         val sid = SessionId(input.sessionId)
         val session = sessions.getSession(sid)
             ?: error(
-                "Session ${input.sessionId} not found. Call list_sessions to discover valid session ids.",
+                "Session ${input.sessionId} not found. Call session_query(select=sessions) to discover valid session ids.",
             )
 
         val messages = sessions.listMessages(sid)

@@ -24,7 +24,7 @@ object DefaultPermissionRuleset {
         // (loses Source DAG / Timeline / Lockfile / RenderCache) — always confirm.
         PermissionRule(permission = "project.read", pattern = "*", action = PermissionAction.ALLOW),
         PermissionRule(permission = "project.write", pattern = "*", action = PermissionAction.ALLOW),
-        // Session introspection — reading session metadata (list_sessions) is
+        // Session introspection — reading session metadata (session_query) is
         // local-only, no I/O, no cost. Silent by default.
         PermissionRule(permission = "session.read", pattern = "*", action = PermissionAction.ALLOW),
         // Session mutation (fork_session). Purely local state: a new SessionId plus

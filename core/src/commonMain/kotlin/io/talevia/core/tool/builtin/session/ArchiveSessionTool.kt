@@ -19,7 +19,7 @@ import kotlinx.serialization.serializer
 
 /**
  * Flip `Session.archived` on. Archived sessions are hidden from
- * `list_sessions` (the store's `selectAll` / `selectByProject` SQL
+ * `session_query(select=sessions)` (the store's `selectAll` / `selectByProject` SQL
  * filter `archived = 0`), so this is effectively the "put away" verb.
  *
  * The session row and its messages are **not** deleted — recovery is
@@ -54,7 +54,7 @@ class ArchiveSessionTool(
 
     override val id: String = "archive_session"
     override val helpText: String =
-        "Archive a session. Hides it from list_sessions (row + messages are preserved). Idempotent. " +
+        "Archive a session. Hides it from session_query(select=sessions) (row + messages are preserved). Idempotent. " +
             "Inverse: unarchive_session. Note: the store does not currently expose archived-inclusive " +
             "listing, so the session id is the recovery handle once archived."
     override val inputSerializer: KSerializer<Input> = serializer()
@@ -74,7 +74,7 @@ class ArchiveSessionTool(
         val sid = SessionId(input.sessionId)
         val session = sessions.getSession(sid)
             ?: error(
-                "Session ${input.sessionId} not found. Call list_sessions to discover valid session ids.",
+                "Session ${input.sessionId} not found. Call session_query(select=sessions) to discover valid session ids.",
             )
 
         val wasArchived = session.archived
@@ -85,7 +85,7 @@ class ArchiveSessionTool(
         val verb = if (wasArchived) "was already archived" else "archived"
         return ToolResult(
             title = "archive session ${sid.value}",
-            outputForLlm = "Session ${sid.value} '${session.title}' ($verb). list_sessions will now " +
+            outputForLlm = "Session ${sid.value} '${session.title}' ($verb). session_query(select=sessions) will now " +
                 "exclude it; use unarchive_session to restore.",
             data = Output(
                 sessionId = sid.value,
@@ -120,7 +120,7 @@ class UnarchiveSessionTool(
     override val id: String = "unarchive_session"
     override val helpText: String =
         "Restore a previously-archived session. Idempotent. Use when the session id was kept " +
-            "(archived sessions aren't returned by list_sessions today). Inverse: archive_session."
+            "(archived sessions aren't returned by session_query(select=sessions) today). Inverse: archive_session."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.write")
@@ -150,7 +150,7 @@ class UnarchiveSessionTool(
         val verb = if (wasUnarchived) "was already live" else "unarchived"
         return ToolResult(
             title = "unarchive session ${sid.value}",
-            outputForLlm = "Session ${sid.value} '${session.title}' ($verb). Now visible in list_sessions again.",
+            outputForLlm = "Session ${sid.value} '${session.title}' ($verb). Now visible in session_query(select=sessions) again.",
             data = Output(
                 sessionId = sid.value,
                 title = session.title,

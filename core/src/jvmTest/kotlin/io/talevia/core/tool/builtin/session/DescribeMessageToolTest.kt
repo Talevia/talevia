@@ -237,7 +237,7 @@ class DescribeMessageToolTest {
             )
         }
         assertTrue(ex.message!!.contains("ghost"), ex.message)
-        assertTrue(ex.message!!.contains("list_messages"), ex.message)
+        assertTrue(ex.message!!.contains("session_query(select=messages)"), ex.message)
     }
 
     @Test fun compactedPartExposesCompactedAt() = runTest {

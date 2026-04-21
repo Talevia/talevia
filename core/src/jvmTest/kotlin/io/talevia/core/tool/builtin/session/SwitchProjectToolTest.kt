@@ -169,7 +169,7 @@ class SwitchProjectToolTest {
             )
         }
         assertTrue(ex.message!!.contains("ghost"), ex.message)
-        assertTrue(ex.message!!.contains("list_sessions"), ex.message)
+        assertTrue(ex.message!!.contains("session_query(select=sessions)"), ex.message)
     }
 
     @Test fun blankInputsAreRejected() = runTest {

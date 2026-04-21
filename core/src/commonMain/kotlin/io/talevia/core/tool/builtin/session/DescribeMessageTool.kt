@@ -49,7 +49,7 @@ import kotlinx.serialization.serializer
  * snapshot has its own timeline fields, compaction has a summary readable
  * via a future part-level tool) but this tool is the orientation verb.
  *
- * Missing message id fails loudly with a `list_messages` hint. Read-only;
+ * Missing message id fails loudly with a `session_query(select=messages)` hint. Read-only;
  * permission `session.read`.
  */
 class DescribeMessageTool(
@@ -96,7 +96,7 @@ class DescribeMessageTool(
         "Describe a single message: metadata + a list of PartSummary rows per part with a terse " +
             "per-kind preview (first 80 chars for text, toolId+state for tool calls, clip count for " +
             "timeline snapshots, token usage for step-finish, etc.). Full part content is NOT " +
-            "returned — this verb is for orientation within a turn. Use list_messages first to find " +
+            "returned — this verb is for orientation within a turn. Use session_query(select=messages) first to find " +
             "the messageId."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
@@ -107,7 +107,7 @@ class DescribeMessageTool(
         putJsonObject("properties") {
             putJsonObject("messageId") {
                 put("type", "string")
-                put("description", "Message id from list_messages.")
+                put("description", "Message id from session_query(select=messages).")
             }
         }
         put("required", JsonArray(listOf(JsonPrimitive("messageId"))))
@@ -118,7 +118,7 @@ class DescribeMessageTool(
         val mid = MessageId(input.messageId)
         val message = sessions.getMessage(mid)
             ?: error(
-                "Message ${input.messageId} not found. Call list_messages on the target session " +
+                "Message ${input.messageId} not found. Call session_query(select=messages) on the target session " +
                     "to discover valid message ids.",
             )
         val parts = sessions.listParts(mid)
