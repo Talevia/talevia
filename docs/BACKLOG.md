@@ -17,8 +17,6 @@
 
 - **merge-define-update-tool-pairs** — `DefineCharacterRefTool` / `UpdateCharacterRefTool`、`DefineStyleBibleTool` / `UpdateStyleBibleTool`、`DefineBrandPaletteTool` / `UpdateBrandPaletteTool` 成对存在。对 LLM 是两个互斥分支（"存在就 update，不存在就 define"），徒增 spec 数量。**方向：** 合并为单一 `set_character_ref` / `set_style_bible` / `set_brand_palette`，上游用 upsert 语义；旧工具保留一次 release 的 deprecation 窗口或直接删（项目当前阶段可以直接删 —— 没有对外稳定面）。Rubric §5.2 一等抽象 > patch。
 
-- **lockfile-byhash-index** — `Lockfile.findByInputHash` / `findByAssetId` 都是对 `entries` 的 O(n) `lastOrNull { … }`。注释承认 "~100s of entries OK, if we blow that we add a byHash index" —— 现在把这一步做了，成本极低：在 `Lockfile` 里加 `@Transient val byInputHash: Map<String, LockfileEntry>` / `byAssetId`，跟 `Source.byId` 一样在反序列化后自动重建。顺便给 `findByInputHash` 的 "lastOrNull" 语义写个 property 测试，防未来回归。Rubric §5.3。
-
 - **session-project-binding** — 当前 `Session` 和 `Project` 解耦，agent 靠对话上下文记住当前在操作哪个 project id（tool 参数一个个手传）。多项目并行时（用户同时剪 vlog + 叙事片）体验会崩。**方向：** 在 `Session` 里加一等字段 `currentProjectId: ProjectId?`，`Agent.run` 把它注入到 system prompt 里作为 cwd-analogue；提供 `switch_project` tool 让 agent / 用户显式切换。ToolContext 暴露 `currentProjectId` 便于工具默认注入。Rubric §5.4。
 
 ## P2 — 记债/观望
