@@ -19,8 +19,6 @@
 
 - **generate-project-variant** — VISION §6 叙事 / vlog 例子明确点 "30s / 竖版 variant"，但当前没有一等抽象生成变体；用户必须手动 `fork_project` + `set_output_profile` + re-export。**方向：** `generate_variant(projectId, variantSpec: {aspectRatio?, durationSeconds?, language?})`：fork project、按 spec 调整 timeline（比例裁剪 / 按 key-shot 浓缩 / 重生成 TTS 变体）、write a child project id pointing back to parent。Rubric §5.2。
 
-- **tool-input-default-projectid-from-context** — `session-project-binding` 刚落地（decision 2026-04-21-session-project-binding.md）承诺下一轮按 context 默认 `projectId`。**方向：** 挑 3 个最常用的 tool（`project_query` / `add_clip` / `create_project_from_template`），把 input `projectId: String` 改为可选（null → 从 `ToolContext.currentProjectId` 取），JSON schema 对应 optional，helpText 说清楚 "omit to use current session project"。Rubric §5.4。
-
 ## P2 — 记债/观望
 
 - **promote-find-tools-to-project-query** — `find_pinned_clips` / `find_unreferenced_assets` 两个 tool 可以折进 `project_query` 的新 filter（`onlyPinned`, `onlyReferenced=false`）。`find_stale_clips` **不动** — DAG 推导逻辑不是 pure projection。**方向：** 给 `project_query(select=timeline_clips)` 加 `onlyPinned` filter、`select=assets` 加 `onlyReferenced` filter；删 2 个 find tool。Rubric §5.2。
