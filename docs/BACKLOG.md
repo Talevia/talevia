@@ -17,8 +17,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **debt-split-projectquerytool** — `core/tool/builtin/project/ProjectQueryTool.kt` 602 行。一个 select 一个 runXxx + 对应 Row 类型，全塞一个文件。**方向：** 把 `runTracks` + `TrackRow` 拆到 `project/query/Tracks.kt`，timeline_clips / assets 同理；`ProjectQueryTool` 保留 dispatch 壳。Rubric 外 / R.5.3 长文件。
-
 - **debt-split-agent-kt** — `core/agent/Agent.kt` 581 行。turn loop + prompt builder + tool dispatch + 错误重试都挤一个类。**方向：** 拆 `AgentTurnLoop` / `AgentPromptBuilder` / `AgentErrorHandler`（或 `AgentRetry`），`Agent` 变成 orchestrator。Rubric 外 / R.5.3 长文件。
 
 - **debt-merge-pin-unpin-tool-pairs** — `PinClipAssetTool` + `UnpinClipAssetTool`、`PinLockfileEntryTool` + `UnpinLockfileEntryTool` 4 个成对工具。对 LLM 是两个互斥分支。**方向：** 合并为 `set_clip_asset_pinned(clipId, pinned: Boolean)` / `set_lockfile_entry_pinned(inputHash, pinned: Boolean)` upsert 形态（和 `set_character_ref` 同类）。Rubric 外 / §3a.2 类似。
