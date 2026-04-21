@@ -70,6 +70,7 @@ final class AppContainer {
 
         let registry = ToolRegistry()
         registry.register(tool: ListToolsTool(registry: registry))
+        registry.register(tool: EstimateTokensTool())
         registry.register(tool: TodoWriteTool(clock: clock))
         registry.register(tool: ListSessionsTool(sessions: self.sessions))
         registry.register(tool: DescribeSessionTool(sessions: self.sessions))

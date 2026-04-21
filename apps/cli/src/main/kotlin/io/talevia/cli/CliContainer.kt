@@ -259,6 +259,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
 
     val tools: ToolRegistry = ToolRegistry().apply {
         register(io.talevia.core.tool.builtin.meta.ListToolsTool(this))
+        register(io.talevia.core.tool.builtin.meta.EstimateTokensTool())
         register(TodoWriteTool())
         register(ListSessionsTool(sessions))
         register(DescribeSessionTool(sessions))
