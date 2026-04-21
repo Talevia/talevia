@@ -75,6 +75,7 @@ import io.talevia.core.tool.builtin.project.ListProjectSnapshotsTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.project.ListTimelineClipsTool
 import io.talevia.core.tool.builtin.project.ListTracksTool
+import io.talevia.core.tool.builtin.project.ListTransitionsTool
 import io.talevia.core.tool.builtin.project.PruneLockfileTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
 import io.talevia.core.tool.builtin.project.RemoveAssetTool
@@ -268,6 +269,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(ListClipsBoundToAssetTool(projects))
         register(ListTimelineClipsTool(projects))
         register(ListTracksTool(projects))
+        register(ListTransitionsTool(projects))
         register(ListAssetsTool(projects))
         register(RemoveAssetTool(projects))
         register(SetOutputProfileTool(projects))
