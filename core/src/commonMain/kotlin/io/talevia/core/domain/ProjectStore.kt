@@ -3,6 +3,8 @@ package io.talevia.core.domain
 import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.lockfile.Lockfile
+import io.talevia.core.domain.lockfile.LockfileEntry
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
@@ -53,6 +55,30 @@ interface ProjectStore {
     suspend fun mutate(id: ProjectId, block: suspend (Project) -> Project): Project
 }
 
+/**
+ * SQLDelight-backed [ProjectStore].
+ *
+ * Storage shape (schema v2):
+ *  - `Projects.data` — JSON of the [Project] with `snapshots` and `lockfile.entries`
+ *    emptied. The "hot path" slice that the agent re-reads / re-writes on every tool
+ *    call: timeline, source DAG, assets, outputProfile, renderCache.
+ *  - `ProjectSnapshots` — one row per [ProjectSnapshot], keyed by `(projectId, snapshotId)`.
+ *  - `ProjectLockfileEntries` — one row per [LockfileEntry], keyed by `(projectId, ordinal)`.
+ *    `ordinal` preserves the append-only order [Lockfile.findByInputHash] relies on
+ *    (most-recent match wins).
+ *
+ * Write shape: [upsert] always writes the split form — blob with empty lists plus
+ * fresh rows in the two sibling tables (delete-all + re-insert, one atomic cycle).
+ * [delete] explicitly clears both sibling tables because the tables don't have
+ * FK cascade (SQLite's `foreign_keys` pragma is off project-wide).
+ *
+ * Read shape with legacy fallback: [get] decodes the blob, queries both sibling
+ * tables, and overlays the table rows on top of whatever the blob carries.
+ * If the tables are empty **and** the blob still has inline snapshots / lockfile
+ * entries, those blob values are returned — this is the pre-migration ("legacy")
+ * case where a v1 project hasn't been mutated since the v2 upgrade. The next
+ * [upsert] migrates automatically (blob lists are emptied, tables are populated).
+ */
 class SqlDelightProjectStore(
     private val db: TaleviaDb,
     private val clock: Clock = Clock.System,
@@ -60,25 +86,73 @@ class SqlDelightProjectStore(
 ) : ProjectStore {
     private val mutex = Mutex()
 
-    override suspend fun get(id: ProjectId): Project? =
-        db.projectsQueries.selectById(id.value).executeAsOneOrNull()
-            ?.let { json.decodeFromString(Project.serializer(), it.data_) }
+    override suspend fun get(id: ProjectId): Project? {
+        val row = db.projectsQueries.selectById(id.value).executeAsOneOrNull() ?: return null
+        return assembleProject(row.data_, id)
+    }
+
+    private fun assembleProject(blobJson: String, id: ProjectId): Project {
+        val base = json.decodeFromString(Project.serializer(), blobJson)
+        val snapshotsFromTable = db.projectSnapshotsQueries.selectByProject(id.value).executeAsList()
+            .map { json.decodeFromString(ProjectSnapshot.serializer(), it.payload) }
+        val entriesFromTable = db.projectLockfileEntriesQueries.selectByProject(id.value).executeAsList()
+            .map { json.decodeFromString(LockfileEntry.serializer(), it.payload) }
+
+        // Legacy fallback: when v2 sibling tables are empty but the v1 blob still
+        // carries inline lists, keep serving the blob's lists. On the next upsert
+        // the split form takes over (blob lists emptied, sibling rows populated).
+        val snapshots = if (snapshotsFromTable.isEmpty()) base.snapshots else snapshotsFromTable
+        val lockfile = if (entriesFromTable.isEmpty()) base.lockfile else Lockfile(entriesFromTable)
+        return base.copy(snapshots = snapshots, lockfile = lockfile)
+    }
 
     override suspend fun upsert(title: String, project: Project) {
         val now = clock.now().toEpochMilliseconds()
         val existing = db.projectsQueries.selectById(project.id.value).executeAsOneOrNull()
-        db.projectsQueries.upsert(
-            id = project.id.value,
-            title = title,
-            data_ = json.encodeToString(Project.serializer(), project),
-            time_created = existing?.time_created ?: now,
-            time_updated = now,
-        )
+
+        // Blob carries only the "always re-written together" fields. The two
+        // append-only lists are stored in sibling tables so `add_clip` doesn't
+        // pay the write-amplification of re-encoding all history.
+        val slim = project.copy(snapshots = emptyList(), lockfile = Lockfile.EMPTY)
+
+        db.transaction {
+            db.projectsQueries.upsert(
+                id = project.id.value,
+                title = title,
+                data_ = json.encodeToString(Project.serializer(), slim),
+                time_created = existing?.time_created ?: now,
+                time_updated = now,
+            )
+            // Full-reset sibling tables — the mutex already serializes upsert
+            // calls so this is safe. Cheaper than diffing given typical sizes.
+            db.projectSnapshotsQueries.deleteAllForProject(project.id.value)
+            project.snapshots.forEach { snap ->
+                db.projectSnapshotsQueries.insert(
+                    project_id = project.id.value,
+                    snapshot_id = snap.id.value,
+                    label = snap.label,
+                    captured_at = snap.capturedAtEpochMs,
+                    payload = json.encodeToString(ProjectSnapshot.serializer(), snap),
+                )
+            }
+            db.projectLockfileEntriesQueries.deleteAllForProject(project.id.value)
+            project.lockfile.entries.forEachIndexed { index, entry ->
+                db.projectLockfileEntriesQueries.insert(
+                    project_id = project.id.value,
+                    ordinal = index.toLong(),
+                    input_hash = entry.inputHash,
+                    asset_id = entry.assetId.value,
+                    tool_id = entry.toolId,
+                    payload = json.encodeToString(LockfileEntry.serializer(), entry),
+                )
+            }
+        }
     }
 
     override suspend fun list(): List<Project> =
-        db.projectsQueries.selectAll().executeAsList()
-            .map { json.decodeFromString(Project.serializer(), it.data_) }
+        db.projectsQueries.selectAll().executeAsList().map {
+            assembleProject(it.data_, ProjectId(it.id))
+        }
 
     override suspend fun summary(id: ProjectId): ProjectSummary? =
         db.projectsQueries.selectById(id.value).executeAsOneOrNull()?.let {
@@ -91,7 +165,11 @@ class SqlDelightProjectStore(
         }
 
     override suspend fun delete(id: ProjectId) {
-        db.projectsQueries.delete(id.value)
+        db.transaction {
+            db.projectsQueries.delete(id.value)
+            db.projectSnapshotsQueries.deleteAllForProject(id.value)
+            db.projectLockfileEntriesQueries.deleteAllForProject(id.value)
+        }
     }
 
     override suspend fun setTitle(id: ProjectId, title: String) = mutex.withLock {

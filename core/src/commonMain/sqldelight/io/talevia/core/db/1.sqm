@@ -1,0 +1,33 @@
+-- Split-project-json-blob v1 → v2. Creates the two append-only sibling tables
+-- (ProjectSnapshots, ProjectLockfileEntries). Existing Projects rows keep their
+-- blob intact; the store reads both on get() and the blob becomes the legacy
+-- fallback until the project is next mutated, at which point upsert() writes the
+-- split form (blob with empty snapshots/lockfile.entries + rows in the new tables).
+
+CREATE TABLE ProjectSnapshots (
+    project_id    TEXT NOT NULL,
+    snapshot_id   TEXT NOT NULL,
+    label         TEXT NOT NULL,
+    captured_at   INTEGER NOT NULL,
+    payload       TEXT NOT NULL,
+    PRIMARY KEY (project_id, snapshot_id)
+);
+
+CREATE INDEX ProjectSnapshots_project_captured_idx
+    ON ProjectSnapshots(project_id, captured_at ASC);
+
+CREATE TABLE ProjectLockfileEntries (
+    project_id    TEXT NOT NULL,
+    ordinal       INTEGER NOT NULL,
+    input_hash    TEXT NOT NULL,
+    asset_id      TEXT NOT NULL,
+    tool_id       TEXT NOT NULL,
+    payload       TEXT NOT NULL,
+    PRIMARY KEY (project_id, ordinal)
+);
+
+CREATE INDEX ProjectLockfileEntries_input_hash_idx
+    ON ProjectLockfileEntries(project_id, input_hash);
+
+CREATE INDEX ProjectLockfileEntries_asset_id_idx
+    ON ProjectLockfileEntries(project_id, asset_id);
