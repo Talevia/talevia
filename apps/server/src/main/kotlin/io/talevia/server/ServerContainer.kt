@@ -122,6 +122,7 @@ import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveFilterTool
 import io.talevia.core.tool.builtin.video.RemoveTrackTool
+import io.talevia.core.tool.builtin.video.RemoveTransitionTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import io.talevia.core.tool.builtin.video.SetClipSourceBindingTool
@@ -314,6 +315,7 @@ class ServerContainer(
         register(AddSubtitlesTool(projects))
         register(EditTextClipTool(projects))
         register(AddTransitionTool(projects))
+        register(RemoveTransitionTool(projects))
         register(AddTrackTool(projects))
         register(DuplicateTrackTool(projects))
         register(RemoveTrackTool(projects))

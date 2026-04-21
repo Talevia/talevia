@@ -93,6 +93,7 @@ final class AppContainer {
         registry.register(tool: AddSubtitlesTool(store: self.projects))
         registry.register(tool: EditTextClipTool(store: self.projects))
         registry.register(tool: AddTransitionTool(store: self.projects))
+        registry.register(tool: RemoveTransitionTool(store: self.projects))
         registry.register(tool: AddTrackTool(store: self.projects))
         registry.register(tool: DuplicateTrackTool(store: self.projects))
         registry.register(tool: RemoveTrackTool(store: self.projects))
