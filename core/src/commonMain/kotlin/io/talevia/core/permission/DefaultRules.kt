@@ -32,6 +32,10 @@ object DefaultPermissionRuleset {
         // match `source.write` / `project.write` and default to ALLOW. Server
         // deployments can flip this to ASK if they want a paper-trail prompt.
         PermissionRule(permission = "session.write", pattern = "*", action = PermissionAction.ALLOW),
+        // Destructive session mutation (delete_session). Permanently removes the
+        // session row + every cascaded message and part. No un-delete lane.
+        // Matches `project.destructive` — default ASK.
+        PermissionRule(permission = "session.destructive", pattern = "*", action = PermissionAction.ASK),
 
         // Side-effectful — always confirm
         PermissionRule(permission = "media.export.write", pattern = "*", action = PermissionAction.ASK),

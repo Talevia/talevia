@@ -98,6 +98,7 @@ import io.talevia.core.tool.builtin.project.UnpinClipAssetTool
 import io.talevia.core.tool.builtin.project.UnpinLockfileEntryTool
 import io.talevia.core.tool.builtin.project.ValidateProjectTool
 import io.talevia.core.tool.builtin.session.ArchiveSessionTool
+import io.talevia.core.tool.builtin.session.DeleteSessionTool
 import io.talevia.core.tool.builtin.session.DescribeMessageTool
 import io.talevia.core.tool.builtin.session.DescribeSessionTool
 import io.talevia.core.tool.builtin.session.ForkSessionTool
@@ -329,6 +330,7 @@ class ServerContainer(
         register(RevertSessionTool(sessions, projects, bus))
         register(ArchiveSessionTool(sessions))
         register(UnarchiveSessionTool(sessions))
+        register(DeleteSessionTool(sessions))
         register(ImportMediaTool(media, engine))
         register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))

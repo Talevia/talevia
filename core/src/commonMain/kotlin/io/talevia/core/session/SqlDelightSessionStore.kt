@@ -62,6 +62,13 @@ class SqlDelightSessionStore(
             ?.let { json.decodeFromString(Session.serializer(), it.data_) }
 
     override suspend fun deleteSession(id: SessionId) {
+        // SQLite foreign_keys is OFF by default in our driver setup, so we
+        // explicitly cascade parts + messages before the session row rather
+        // than relying on ON DELETE CASCADE. Same discipline as deleteMessage /
+        // deleteMessagesAfter — without this, deleting a session left orphan
+        // rows in Messages/Parts that no query could ever surface again.
+        db.partsQueries.deleteBySession(id.value)
+        db.messagesQueries.deleteBySession(id.value)
         db.sessionsQueries.delete(id.value)
         bus.publish(BusEvent.SessionDeleted(id))
     }

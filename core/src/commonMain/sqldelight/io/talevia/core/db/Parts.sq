@@ -38,3 +38,6 @@ DELETE FROM Parts WHERE id = ?;
 
 deleteByMessage:
 DELETE FROM Parts WHERE message_id = ?;
+
+deleteBySession:
+DELETE FROM Parts WHERE session_id = ?;
