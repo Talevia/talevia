@@ -205,7 +205,7 @@ class PinClipAssetToolTest {
             )
         }
         assertTrue(ex.message!!.contains("ghost"), ex.message)
-        assertTrue(ex.message!!.contains("list_timeline_clips"), ex.message)
+        assertTrue(ex.message!!.contains("project_query(select=timeline_clips)"), ex.message)
     }
 
     @Test fun importedMediaClipFailsLoud() = runTest {

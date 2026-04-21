@@ -19,10 +19,10 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 
 /**
- * Safe companion to [ListAssetsTool] — drops a [io.talevia.core.domain.MediaAsset]
+ * Safe companion to [ProjectQueryTool] — drops a [io.talevia.core.domain.MediaAsset]
  * from [io.talevia.core.domain.Project.assets]. The intended flow is:
  *
- *   list_assets(onlyUnused=true) → remove_asset(assetId)
+ *   project_query(select=assets, onlyUnused=true) → remove_asset(assetId)
  *
  * By default the tool refuses when the asset is still referenced by any clip
  * — the error message lists the dependent clipIds so the agent can either
@@ -64,7 +64,7 @@ class RemoveAssetTool(
         "Remove a media asset from a project's asset catalog. Refuses by default if any clip " +
             "references the asset; pass force=true to remove anyway (leaves dangling clips that " +
             "validate_project will flag). Does not delete asset bytes from shared MediaStorage. " +
-            "Use list_assets(onlyUnused=true) to find safe candidates first."
+            "Use project_query(select=assets, onlyUnused=true) to find safe candidates first."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.write")

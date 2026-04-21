@@ -25,7 +25,7 @@ import kotlinx.serialization.serializer
 
 /**
  * Per-clip deep inspection — the counterpart of [DescribeLockfileEntryTool]
- * on the timeline side. `list_timeline_clips` gives a paginated bird's-eye
+ * on the timeline side. `project_query(select=timeline_clips)` gives a paginated bird's-eye
  * view; `describe_clip` returns every knob on a single clip plus derived
  * lockfile / staleness / pin signals computed against the project's current
  * state.
@@ -33,7 +33,7 @@ import kotlinx.serialization.serializer
  * Motivation: the expert-path editing flow typically reads as "I'm looking
  * at this one clip and want to know everything about it before I touch it."
  * The present workaround was a loop of:
- *  - `list_timeline_clips` to find the clip + track ids,
+ *  - `project_query(select=timeline_clips)` to find the clip + track ids,
  *  - `list_lockfile_entries` to find the lockfile row by assetId,
  *  - `find_stale_clips` / `find_pinned_clips` to check lane status,
  *  - manual cross-ref.
@@ -129,7 +129,7 @@ class DescribeClipTool(
 
         val (track, clip) = findClip(project.timeline.tracks, cid)
             ?: error(
-                "Clip ${input.clipId} not found in project ${input.projectId}. Call list_timeline_clips " +
+                "Clip ${input.clipId} not found in project ${input.projectId}. Call project_query(select=timeline_clips) " +
                     "to discover valid clip ids.",
             )
 

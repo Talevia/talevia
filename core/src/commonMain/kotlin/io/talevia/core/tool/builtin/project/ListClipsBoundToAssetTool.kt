@@ -82,7 +82,7 @@ class ListClipsBoundToAssetTool(
                 put(
                     "description",
                     "The media asset to query. Must exist in the project's assets list — " +
-                        "call list_assets to discover valid ids.",
+                        "call project_query(select=assets) to discover valid ids.",
                 )
             }
         }
@@ -100,7 +100,7 @@ class ListClipsBoundToAssetTool(
         if (project.assets.none { it.id == aid }) {
             throw IllegalArgumentException(
                 "Asset ${input.assetId} not found in project ${input.projectId} — " +
-                    "call list_assets to discover valid ids.",
+                    "call project_query(select=assets) to discover valid ids.",
             )
         }
 

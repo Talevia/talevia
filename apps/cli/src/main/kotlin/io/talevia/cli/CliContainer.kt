@@ -73,17 +73,15 @@ import io.talevia.core.tool.builtin.project.ForkProjectTool
 import io.talevia.core.tool.builtin.project.GcLockfileTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
 import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
-import io.talevia.core.tool.builtin.project.ListAssetsTool
 import io.talevia.core.tool.builtin.project.ListClipsBoundToAssetTool
 import io.talevia.core.tool.builtin.project.ListClipsForSourceTool
 import io.talevia.core.tool.builtin.project.ListLockfileEntriesTool
 import io.talevia.core.tool.builtin.project.ListProjectSnapshotsTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
-import io.talevia.core.tool.builtin.project.ListTimelineClipsTool
-import io.talevia.core.tool.builtin.project.ListTracksTool
 import io.talevia.core.tool.builtin.project.ListTransitionsTool
 import io.talevia.core.tool.builtin.project.PinClipAssetTool
 import io.talevia.core.tool.builtin.project.PinLockfileEntryTool
+import io.talevia.core.tool.builtin.project.ProjectQueryTool
 import io.talevia.core.tool.builtin.project.PruneLockfileTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
 import io.talevia.core.tool.builtin.project.RemoveAssetTool
@@ -321,11 +319,9 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(FindUnreferencedAssetsTool(projects))
         register(ListClipsForSourceTool(projects))
         register(ListClipsBoundToAssetTool(projects))
-        register(ListTimelineClipsTool(projects))
+        register(ProjectQueryTool(projects))
         register(DescribeClipTool(projects))
-        register(ListTracksTool(projects))
         register(ListTransitionsTool(projects))
-        register(ListAssetsTool(projects))
         register(RemoveAssetTool(projects))
         register(SetOutputProfileTool(projects))
         register(ValidateProjectTool(projects))

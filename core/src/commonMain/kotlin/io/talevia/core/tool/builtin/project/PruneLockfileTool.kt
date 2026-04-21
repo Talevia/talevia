@@ -32,8 +32,8 @@ import kotlinx.serialization.serializer
  *      same `inputHash` — [io.talevia.core.domain.lockfile.Lockfile.findByInputHash]
  *      returns the orphan row and callers try to reuse an asset that doesn't exist.
  *
- * Pairs naturally with `list_assets(onlyUnused=true) → remove_asset → prune_lockfile`
- * as the end-of-project cleanup flow.
+ * Pairs naturally with `project_query(select=assets, onlyUnused=true) → remove_asset →
+ * prune_lockfile` as the end-of-project cleanup flow.
  *
  * Permission is [PermissionSpec.fixed] `"project.write"` in both modes. Dry-run is
  * a convenience preview, not a distinct security posture — splitting into

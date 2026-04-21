@@ -24,7 +24,7 @@ import kotlinx.serialization.serializer
  * inputHash-keyed base tool deliberately doesn't try to be.
  *
  * Expert flow today without this tool:
- *   1. `describe_project` / `list_timeline_clips` → find the clip's assetId.
+ *   1. `describe_project` / `project_query(select=timeline_clips)` → find the clip's assetId.
  *   2. `list_lockfile_entries` → find the row whose assetId matches.
  *   3. Copy the `inputHash`, call `pin_lockfile_entry`.
  * Three tool calls for what is conceptually "this clip right here is the hero
@@ -234,7 +234,7 @@ private fun io.talevia.core.domain.Project.assetIdForClip(clipId: ClipId): Asset
         }
     }
     error(
-        "Clip ${clipId.value} not found in project ${id.value}. Call list_timeline_clips to " +
+        "Clip ${clipId.value} not found in project ${id.value}. Call project_query(select=timeline_clips) to " +
             "discover valid clip ids.",
     )
 }

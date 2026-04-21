@@ -22,12 +22,13 @@ import kotlin.time.Duration.Companion.milliseconds
 
 /**
  * Enumerate transitions on the project's timeline — the missing
- * companion to [ListTimelineClipsTool] for the transition slice.
+ * companion to [ProjectQueryTool] `select=timeline_clips` for the
+ * transition slice.
  *
  * `AddTransitionTool` parks each transition as a synthetic [Clip.Video]
  * on a [Track.Effect] track, with `assetId = "transition:<name>"` and
  * the engine-side transition parameters recorded in `Clip.filters[0]`.
- * `list_timeline_clips` would return them, but the agent then has to
+ * `project_query(select=timeline_clips)` would return them, but the agent then has to
  * filter-and-parse the assetId prefix to separate transitions from
  * other effect-track clips. That works, but it leaks the encoding into
  * every caller — each one re-implements "is this clip a transition?"

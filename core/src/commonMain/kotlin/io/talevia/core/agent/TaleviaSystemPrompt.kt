@@ -307,7 +307,7 @@ rows** (entries whose `assetId` is no longer in `project.assets` — dead
 because the asset is gone); `gc_lockfile` sweeps by **policy** (age or
 per-toolId count, ANDed together when both are set) regardless of whether
 the asset is still live. Use `prune_lockfile` after a catalog cleanup
-(`list_assets(onlyUnused=true)` → `remove_asset`). Use `gc_lockfile` to
+(`project_query(select=assets, onlyUnused=true)` → `remove_asset`). Use `gc_lockfile` to
 bound a long-running project's lockfile growth: `maxAgeDays=30` trims
 anything older than a month, `keepLatestPerTool=20` keeps only the 20 most
 recent generations per tool. `preserveLiveAssets=true` (default) is the
@@ -330,30 +330,41 @@ that still bind the removed node), or whenever the user reports an
 unexpected render. It does NOT cover staleness — pair with
 `find_stale_clips` for content-hash drift.
 
-`list_timeline_clips` walks the timeline and returns one row per clip with
-its id, track, kind (video/audio/text), start / duration / end in seconds,
-bound `assetId`, filter count, audio volume/fade envelope (audio only),
-and an 80-char `textPreview` (subtitle/text only). Use it before editing
-when the user refers to a clip without giving you its id ("lower the
-volume on the music after 00:30", "cut the second shot"), or when you
-need to audit a range ("what's on the timeline between 10s and 20s?").
-Optional filters: `trackId`, `trackKind` ∈ {video, audio, subtitle,
-effect}, and `fromSeconds` / `toSeconds` for time-window intersection.
-Output is ordered by track then `timeRange.start` so consecutive rows
-are adjacent in playback. Default limit is 100; `truncated=true` means
-the list is capped — refine the filter rather than raising the limit
-blindly. Prefer this over `get_project_state`, which only reports
-counts, whenever you need the clips themselves.
+`project_query` is the unified read-only projection over a project. Pick
+a `select` discriminator:
 
-`list_assets` walks `Project.assets` and returns per-asset rows with id,
-coarse kind (video/audio/image, inferred from codec metadata),
-duration, resolution (when known), `hasVideoTrack` / `hasAudioTrack`
-flags, `sourceKind` (file/http/platform), and `inUseByClips` count.
-Use it to answer "what media do I have?" or "what assets are dangling
-(zero clips reference them)?" without dumping `get_project_state`.
-Filters: `kind`, `onlyUnused=true`. Paginated with `limit`/`offset`.
-Prefer this over `get_project_state` whenever the question is about
-media, not timeline structure.
+  • `project_query(select=tracks)` — one row per track with `trackKind`,
+    `index`, `clipCount`, `isEmpty`, `firstClipStartSeconds`,
+    `lastClipEndSeconds`, `spanSeconds`. Use for PiP layering, multi-stem
+    audio, localised subtitle variant planning. Filter: `trackKind`,
+    `onlyNonEmpty`. Sort: `index` (default) | `clipCount` | `span`.
+
+  • `project_query(select=timeline_clips)` — one row per clip with id,
+    track, kind (video/audio/text), start/duration/end in seconds, bound
+    `assetId`, filter count, audio volume/fade envelope (audio only), and
+    an 80-char `textPreview` (subtitle/text only). Use it before editing
+    when the user refers to a clip without giving its id ("lower the
+    volume on the music after 00:30", "cut the second shot"), or when
+    auditing a range ("what's on the timeline between 10s and 20s?").
+    Filter: `trackKind`, `trackId`, `fromSeconds`, `toSeconds`,
+    `onlySourceBound` (AIGC-only). Sort: `startSeconds` (default) |
+    `durationSeconds`.
+
+  • `project_query(select=assets)` — one row per asset with id, coarse
+    kind (video/audio/image, inferred from codec metadata), duration,
+    resolution (when known), `hasVideoTrack`/`hasAudioTrack`, `sourceKind`
+    (file/http/platform), and `inUseByClips` count. Answers "what media
+    do I have?" or "what's dangling?" without dumping `get_project_state`.
+    Filter: `kind` (video|audio|image|all), `onlyUnused`. Sort:
+    `insertion` (default) | `duration` | `duration-asc` | `id`.
+
+Common controls: `limit` (default 100, clamped to `[1, 500]`), `offset`
+(default 0). Rows are returned in `rows` (an array whose shape matches
+the echoed `select`). Setting a filter that doesn't apply to the chosen
+select fails loud so typos surface instead of silently returning an
+empty list. Prefer `project_query` over `get_project_state` whenever
+you only need a specific slice — `get_project_state` is whole-project
+JSON.
 
 `remove_asset` drops a single asset row from `Project.assets`. Safe by
 default: refuses when any clip still references the asset, and returns
@@ -361,7 +372,7 @@ the dependent clipIds in the error so you can prune them first. Pass
 `force=true` to remove anyway (Unix `rm -f` — leaves dangling clips
 that `validate_project` will flag). Does **not** delete bytes from
 shared media storage; the same AssetId may live in snapshots or other
-projects. Typical flow: `list_assets(onlyUnused=true)` →
+projects. Typical flow: `project_query(select=assets, onlyUnused=true)` →
 `remove_asset`. For a broad sweep of dangling AIGC regenerations,
 prefer `find_stale_clips` + `regenerate_stale_clips`; `remove_asset`
 is for the catalog-level prune, not the regen path.
