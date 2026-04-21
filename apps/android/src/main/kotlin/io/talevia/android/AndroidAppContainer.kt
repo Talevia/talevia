@@ -26,6 +26,7 @@ import io.talevia.core.tool.builtin.TodoWriteTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
+import io.talevia.core.tool.builtin.project.DescribeClipTool
 import io.talevia.core.tool.builtin.project.DescribeLockfileEntryTool
 import io.talevia.core.tool.builtin.project.DescribeProjectTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
@@ -175,6 +176,7 @@ class AndroidAppContainer(context: Context) {
         register(GetProjectStateTool(projects))
         register(DescribeProjectTool(projects))
         register(ListTimelineClipsTool(projects))
+        register(DescribeClipTool(projects))
         register(ListTracksTool(projects))
         register(ListTransitionsTool(projects))
         register(ListClipsBoundToAssetTool(projects))
