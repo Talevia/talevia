@@ -120,6 +120,7 @@ import io.talevia.core.tool.builtin.video.RemoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveFilterTool
 import io.talevia.core.tool.builtin.video.RemoveTrackTool
 import io.talevia.core.tool.builtin.video.RemoveTransitionTool
+import io.talevia.core.tool.builtin.video.ReorderTracksTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import io.talevia.core.tool.builtin.video.SetClipSourceBindingTool
@@ -281,6 +282,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(AddTrackTool(projects))
         register(DuplicateTrackTool(projects))
         register(RemoveTrackTool(projects))
+        register(ReorderTracksTool(projects))
         register(RevertTimelineTool(sessions, projects))
         register(ClearTimelineTool(projects))
         register(CreateProjectTool(projects))
