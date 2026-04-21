@@ -17,8 +17,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **debt-consolidate-source-reads-via-source-query** — `core/tool/builtin/source/` 下 `list_source_nodes` + `search_source_nodes` + `describe_source_node` + `describe_source_dag` 4 个 read tool。**方向：** 引入 `source_query(select ∈ {nodes, dag_summary}, filter ∈ {kind, kindPrefix, contentSubstring, id}, limit)`，吸收 list + search，describe_source_node 留作单实体深看。Rubric 外。
-
 - **session-projector-views** — `Session` 当前只暴露一份 linear message list，UI 自己拼 "tool-call tree" / "artifact timeline" view。OpenCode `session/projectors.ts` 把投影下沉到 session 层。**方向：** `core.session.SessionProjector` 接口 + 2 个实现：`ToolCallTreeProjector`（把嵌套 tool-call 展开成树）、`ArtifactTimelineProjector`（扫 lockfile entries 按时间聚合）。UI 按需选投影。Rubric §5.4。
 
 - **generate-project-variant** — VISION §6 叙事 / vlog 例子明确点 "30s / 竖版 variant"，但当前没有一等抽象生成变体；用户必须手动 `fork_project` + `set_output_profile` + re-export。**方向：** `generate_variant(projectId, variantSpec: {aspectRatio?, durationSeconds?, language?})`：fork project、按 spec 调整 timeline（比例裁剪 / 按 key-shot 浓缩 / 重生成 TTS 变体）、write a child project id pointing back to parent。Rubric §5.2。
