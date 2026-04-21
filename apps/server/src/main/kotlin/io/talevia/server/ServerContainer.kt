@@ -34,7 +34,9 @@ import io.talevia.core.platform.UpscaleEngine
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.platform.VideoGenEngine
 import io.talevia.core.platform.VisionEngine
+import io.talevia.core.provider.EnvProviderAuth
 import io.talevia.core.provider.LlmProvider
+import io.talevia.core.provider.ProviderAuth
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.provider.openai.OpenAiImageGenEngine
 import io.talevia.core.provider.openai.OpenAiSoraVideoGenEngine
@@ -236,10 +238,12 @@ class ServerContainer(
      * same values as [ProviderRegistry]. Writes go to an in-memory map only —
      * operators are expected to manage server secrets out-of-band.
      */
+    val providerAuth: ProviderAuth = EnvProviderAuth(env::get)
+
     val secrets: SecretStore = InMemorySecretStore(
         buildMap {
-            env["ANTHROPIC_API_KEY"]?.takeIf(String::isNotEmpty)?.let { put("anthropic", it) }
-            env["OPENAI_API_KEY"]?.takeIf(String::isNotEmpty)?.let { put("openai", it) }
+            providerAuth.apiKey("anthropic")?.let { put("anthropic", it) }
+            providerAuth.apiKey("openai")?.let { put("openai", it) }
         },
     )
 
@@ -250,16 +254,14 @@ class ServerContainer(
      * tool itself registers unconditionally via [imageGen]?.let so headless
      * deployments without an OpenAI key simply don't expose it.
      */
-    val imageGen: ImageGenEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val imageGen: ImageGenEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiImageGenEngine(httpClient, it) }
 
     /**
      * Whisper-backed [AsrEngine], wired alongside [imageGen] when the OpenAI key
      * is present. Same conditional pattern: no key → no ml-transcribe tool.
      */
-    val asr: AsrEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val asr: AsrEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiWhisperEngine(httpClient, it) }
 
     /**
@@ -267,8 +269,7 @@ class ServerContainer(
      * and [asr] — present only when `OPENAI_API_KEY` is set, so headless
      * deployments without it simply don't expose `synthesize_speech`.
      */
-    val tts: TtsEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val tts: TtsEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiTtsEngine(httpClient, it) }
 
     /**
@@ -276,16 +277,14 @@ class ServerContainer(
      * when `OPENAI_API_KEY` is set; deployments without it don't expose
      * `generate_video`.
      */
-    val videoGen: VideoGenEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val videoGen: VideoGenEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiSoraVideoGenEngine(httpClient, it) }
 
     /**
      * Vision-describe engine for the ML lane. Same conditional pattern; headless
      * deployments without an OpenAI key simply don't expose `describe_asset`.
      */
-    val vision: VisionEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val vision: VisionEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiVisionEngine(httpClient, it) }
 
     /**
@@ -294,8 +293,7 @@ class ServerContainer(
      * stays unregistered. `REPLICATE_MUSICGEN_MODEL` overrides the default
      * `meta/musicgen` model slug.
      */
-    val musicGen: MusicGenEngine? = env["REPLICATE_API_TOKEN"]
-        ?.takeIf { it.isNotBlank() }
+    val musicGen: MusicGenEngine? = providerAuth.apiKey("replicate")
         ?.let { token ->
             ReplicateMusicGenEngine(
                 httpClient = httpClient,
@@ -310,8 +308,7 @@ class ServerContainer(
      * otherwise null and `upscale_asset` stays unregistered.
      * `REPLICATE_UPSCALE_MODEL` overrides the default slug.
      */
-    val upscale: UpscaleEngine? = env["REPLICATE_API_TOKEN"]
-        ?.takeIf { it.isNotBlank() }
+    val upscale: UpscaleEngine? = providerAuth.apiKey("replicate")
         ?.let { token ->
             ReplicateUpscaleEngine(
                 httpClient = httpClient,
@@ -324,8 +321,7 @@ class ServerContainer(
      * Web-search engine for the `web_search` tool. Wired to Tavily when
      * `TAVILY_API_KEY` is set; otherwise null and the tool stays unregistered.
      */
-    val search: SearchEngine? = env["TAVILY_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val search: SearchEngine? = providerAuth.apiKey("tavily")
         ?.let { TavilySearchEngine(httpClient, it) }
 
     /** JVM blob writer backing AIGC tools. */

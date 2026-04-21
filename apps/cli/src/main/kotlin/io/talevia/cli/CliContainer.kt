@@ -31,6 +31,8 @@ import io.talevia.core.platform.UpscaleEngine
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.platform.VideoGenEngine
 import io.talevia.core.platform.VisionEngine
+import io.talevia.core.provider.EnvProviderAuth
+import io.talevia.core.provider.ProviderAuth
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.provider.openai.OpenAiImageGenEngine
 import io.talevia.core.provider.openai.OpenAiSoraVideoGenEngine
@@ -199,28 +201,24 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
 
     val httpClient: HttpClient = HttpClient(CIO)
 
-    val imageGen: ImageGenEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val providerAuth: ProviderAuth = EnvProviderAuth(env::get)
+
+    val imageGen: ImageGenEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiImageGenEngine(httpClient, it) }
 
-    val asr: AsrEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val asr: AsrEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiWhisperEngine(httpClient, it) }
 
-    val tts: TtsEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val tts: TtsEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiTtsEngine(httpClient, it) }
 
-    val videoGen: VideoGenEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val videoGen: VideoGenEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiSoraVideoGenEngine(httpClient, it) }
 
-    val vision: VisionEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val vision: VisionEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiVisionEngine(httpClient, it) }
 
-    val musicGen: MusicGenEngine? = env["REPLICATE_API_TOKEN"]
-        ?.takeIf { it.isNotBlank() }
+    val musicGen: MusicGenEngine? = providerAuth.apiKey("replicate")
         ?.let { token ->
             ReplicateMusicGenEngine(
                 httpClient = httpClient,
@@ -229,8 +227,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
             )
         }
 
-    val upscale: UpscaleEngine? = env["REPLICATE_API_TOKEN"]
-        ?.takeIf { it.isNotBlank() }
+    val upscale: UpscaleEngine? = providerAuth.apiKey("replicate")
         ?.let { token ->
             ReplicateUpscaleEngine(
                 httpClient = httpClient,
@@ -239,8 +236,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
             )
         }
 
-    val search: SearchEngine? = env["TAVILY_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val search: SearchEngine? = providerAuth.apiKey("tavily")
         ?.let { TavilySearchEngine(httpClient, it) }
 
     val blobWriter: MediaBlobWriter = FileBlobWriter(mediaRootDir)

@@ -435,6 +435,18 @@ fun buildIosProviderRegistry(httpClient: HttpClient): ProviderRegistry {
 }
 
 /**
+ * iOS-side [ProviderAuth] factory. UI (SwiftUI shell) calls
+ * `providerAuth.authStatus("openai")` instead of poking NSProcessInfo
+ * directly. Mirrors the JVM containers' centralised auth status path.
+ */
+fun iosProviderAuth(): io.talevia.core.provider.ProviderAuth {
+    val env = NSProcessInfo.processInfo.environment
+    return io.talevia.core.provider.EnvProviderAuth(
+        envLookup = { name -> (env[name] as? String) },
+    )
+}
+
+/**
  * Build an [Agent] wired to [provider] with a [Compactor] and the Talevia system
  * prompt. Returns a fresh Agent each call — callers typically cache by
  * `provider.id` to avoid re-instantiating the Compactor.

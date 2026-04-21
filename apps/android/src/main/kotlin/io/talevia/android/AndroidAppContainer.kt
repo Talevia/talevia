@@ -18,6 +18,8 @@ import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.provider.LlmProvider
+import io.talevia.core.provider.EnvProviderAuth
+import io.talevia.core.provider.ProviderAuth
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
@@ -238,16 +240,25 @@ class AndroidAppContainer(context: Context) {
     }
 
     /**
+     * Centralised auth-status lookup. Reads system properties (adb shell
+     * `setprop` or BuildConfig injection) first, falls back to OS env.
+     * UI code can `providerAuth.authStatus("openai")` to render "missing key"
+     * banners without knowing env var names.
+     */
+    val providerAuth: ProviderAuth = EnvProviderAuth(
+        envLookup = { name -> System.getProperty(name) ?: System.getenv(name) },
+    )
+
+    /**
      * LLM provider registry. Reads `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` /
-     * `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) from system properties (set via
-     * adb shell `setprop` or BuildConfig injection). Callers should check
-     * [providers.default] before calling [agentFor].
+     * `GEMINI_API_KEY` (or `GOOGLE_API_KEY`) via [providerAuth]. Callers should
+     * check [providers.default] before calling [agentFor].
      */
     val providers: ProviderRegistry = ProviderRegistry.Builder()
         .addEnv(httpClient, buildMap {
             for (key in listOf("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY")) {
-                System.getProperty(key)?.takeIf(String::isNotEmpty)?.let { put(key, it) }
-                System.getenv(key)?.takeIf(String::isNotEmpty)?.let { put(key, it) }
+                val value = System.getProperty(key) ?: System.getenv(key)
+                value?.takeIf(String::isNotEmpty)?.let { put(key, it) }
             }
         })
         .build()

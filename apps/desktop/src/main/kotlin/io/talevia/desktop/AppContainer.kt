@@ -32,6 +32,8 @@ import io.talevia.core.platform.UpscaleEngine
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.platform.VideoGenEngine
 import io.talevia.core.platform.VisionEngine
+import io.talevia.core.provider.EnvProviderAuth
+import io.talevia.core.provider.ProviderAuth
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.provider.openai.OpenAiImageGenEngine
 import io.talevia.core.provider.openai.OpenAiSoraVideoGenEngine
@@ -200,33 +202,30 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
 
     val httpClient: HttpClient = HttpClient(CIO)
 
+    val providerAuth: ProviderAuth = EnvProviderAuth(env::get)
+
     /**
      * Image-generation engine, only wired when `OPENAI_API_KEY` is set. No
      * registry yet — one provider doesn't warrant one, and a premature
      * `GenerativeProviderRegistry` would just be scaffolding.
      */
-    val imageGen: ImageGenEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val imageGen: ImageGenEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiImageGenEngine(httpClient, it) }
 
     /** Whisper-backed ASR engine, wired alongside [imageGen] when OpenAI key is set. */
-    val asr: AsrEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val asr: AsrEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiWhisperEngine(httpClient, it) }
 
     /** TTS engine for the AIGC audio lane, gated on the same `OPENAI_API_KEY`. */
-    val tts: TtsEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val tts: TtsEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiTtsEngine(httpClient, it) }
 
     /** Sora-backed text-to-video engine, gated on the same `OPENAI_API_KEY`. */
-    val videoGen: VideoGenEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val videoGen: VideoGenEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiSoraVideoGenEngine(httpClient, it) }
 
     /** Vision-describe engine for the ML lane, gated on the same `OPENAI_API_KEY`. */
-    val vision: VisionEngine? = env["OPENAI_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val vision: VisionEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiVisionEngine(httpClient, it) }
 
     /**
@@ -236,8 +235,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
      * `REPLICATE_MUSICGEN_MODEL` to point at a different model slug
      * (default `meta/musicgen`).
      */
-    val musicGen: MusicGenEngine? = env["REPLICATE_API_TOKEN"]
-        ?.takeIf { it.isNotBlank() }
+    val musicGen: MusicGenEngine? = providerAuth.apiKey("replicate")
         ?.let { token ->
             ReplicateMusicGenEngine(
                 httpClient = httpClient,
@@ -253,8 +251,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
      * overrides the default `nightmareai/real-esrgan` slug (SUPIR, CodeFormer,
      * etc.).
      */
-    val upscale: UpscaleEngine? = env["REPLICATE_API_TOKEN"]
-        ?.takeIf { it.isNotBlank() }
+    val upscale: UpscaleEngine? = providerAuth.apiKey("replicate")
         ?.let { token ->
             ReplicateUpscaleEngine(
                 httpClient = httpClient,
@@ -268,8 +265,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
      * `TAVILY_API_KEY` is set; otherwise stays null and `web_search` stays
      * unregistered, mirroring the gating posture of the AIGC engines.
      */
-    val search: SearchEngine? = env["TAVILY_API_KEY"]
-        ?.takeIf { it.isNotBlank() }
+    val search: SearchEngine? = providerAuth.apiKey("tavily")
         ?.let { TavilySearchEngine(httpClient, it) }
 
     /** JVM blob writer backing AIGC tools. Paired with [mediaRootDir]. */
