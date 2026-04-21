@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.ProjectId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.TimeRange
@@ -47,7 +46,12 @@ class RemoveClipTool(
 ) : Tool<RemoveClipTool.Input, RemoveClipTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
         val clipId: String,
         /**
          * When `true`, close the gap on the removed clip's track by shifting
@@ -82,7 +86,13 @@ class RemoveClipTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
             putJsonObject("clipId") { put("type", "string") }
             putJsonObject("ripple") {
                 put("type", "boolean")
@@ -92,16 +102,17 @@ class RemoveClipTool(
                 )
             }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("clipId"))))
+        put("required", JsonArray(listOf(JsonPrimitive("clipId"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        val pid = ctx.resolveProjectId(input.projectId)
         var foundTrackId: String? = null
         var removedRange: TimeRange? = null
         var shifted = 0
         var remaining = 0
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
+        val updated = store.mutate(pid) { project ->
             val newTracks = project.timeline.tracks.map { track ->
                 val target = track.clips.firstOrNull { it.id.value == input.clipId }
                 if (target == null) {
@@ -132,7 +143,7 @@ class RemoveClipTool(
                 }
             }
             if (foundTrackId == null) {
-                error("clip ${input.clipId} not found in project ${input.projectId}")
+                error("clip ${input.clipId} not found in project ${pid.value}")
             }
             project.copy(timeline = project.timeline.copy(tracks = newTracks))
         }

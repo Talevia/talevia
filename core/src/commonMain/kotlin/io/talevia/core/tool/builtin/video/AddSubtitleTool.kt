@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.video
 
 import io.talevia.core.ClipId
-import io.talevia.core.ProjectId
 import io.talevia.core.TrackId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
@@ -31,7 +30,12 @@ class AddSubtitleTool(
 ) : Tool<AddSubtitleTool.Input, AddSubtitleTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
         val text: String,
         val timelineStartSeconds: Double,
         val durationSeconds: Double,
@@ -50,7 +54,13 @@ class AddSubtitleTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
             putJsonObject("text") { put("type", "string") }
             putJsonObject("timelineStartSeconds") { put("type", "number") }
             putJsonObject("durationSeconds") { put("type", "number") }
@@ -59,16 +69,17 @@ class AddSubtitleTool(
             putJsonObject("backgroundColor") { put("type", "string"); put("description", "Optional background hex; null = transparent") }
         }
         put("required", JsonArray(listOf(
-            JsonPrimitive("projectId"), JsonPrimitive("text"),
+            JsonPrimitive("text"),
             JsonPrimitive("timelineStartSeconds"), JsonPrimitive("durationSeconds"),
         )))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        val pid = ctx.resolveProjectId(input.projectId)
         val clipId = ClipId(Uuid.random().toString())
         var trackId: TrackId? = null
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
+        val updated = store.mutate(pid) { project ->
             val subtitleTrack = pickSubtitleTrack(project.timeline.tracks)
             val tlRange = TimeRange(input.timelineStartSeconds.seconds, input.durationSeconds.seconds)
             val clip = Clip.Text(

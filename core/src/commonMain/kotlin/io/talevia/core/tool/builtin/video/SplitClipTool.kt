@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.video
 
 import io.talevia.core.ClipId
-import io.talevia.core.ProjectId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.TimeRange
@@ -30,7 +29,12 @@ class SplitClipTool(
 ) : Tool<SplitClipTool.Input, SplitClipTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
         val clipId: String,
         val atTimelineSeconds: Double,
     )
@@ -45,18 +49,25 @@ class SplitClipTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
             putJsonObject("clipId") { put("type", "string") }
             putJsonObject("atTimelineSeconds") { put("type", "number"); put("description", "Absolute timeline position to split at.") }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("clipId"), JsonPrimitive("atTimelineSeconds"))))
+        put("required", JsonArray(listOf(JsonPrimitive("clipId"), JsonPrimitive("atTimelineSeconds"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        val pid = ctx.resolveProjectId(input.projectId)
         var left: ClipId? = null
         var right: ClipId? = null
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
+        val updated = store.mutate(pid) { project ->
             var found = false
             val splitAt = input.atTimelineSeconds.seconds
             val newTracks = project.timeline.tracks.map { track ->
@@ -70,7 +81,7 @@ class SplitClipTool(
                 left = l.id; right = r.id
                 rebuildTrack(track, target, listOf(l, r))
             }
-            if (!found) error("clip ${input.clipId} not found in project ${input.projectId}")
+            if (!found) error("clip ${input.clipId} not found in project ${pid.value}")
             project.copy(timeline = project.timeline.copy(tracks = newTracks))
         }
         val cs = (input.atTimelineSeconds * 100).toLong()

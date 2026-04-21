@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.ProjectId
 import io.talevia.core.TrackId
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Track
@@ -48,7 +47,12 @@ class AddTrackTool(
 ) : Tool<AddTrackTool.Input, AddTrackTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
         /** `video`, `audio`, `subtitle`, or `effect`. Case-insensitive. */
         val trackKind: String,
         val trackId: String? = null,
@@ -74,7 +78,13 @@ class AddTrackTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
             putJsonObject("trackKind") {
                 put("type", "string")
                 put("description", "One of: video, audio, subtitle, effect (case-insensitive).")
@@ -87,7 +97,7 @@ class AddTrackTool(
                 )
             }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("trackKind"))))
+        put("required", JsonArray(listOf(JsonPrimitive("trackKind"))))
         put("additionalProperties", false)
     }
 
@@ -99,10 +109,11 @@ class AddTrackTool(
         val requestedId = input.trackId?.trim()?.takeIf { it.isNotEmpty() }
         val newId = requestedId ?: Uuid.random().toString()
 
+        val pid = ctx.resolveProjectId(input.projectId)
         var totalCount = 0
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
+        val updated = store.mutate(pid) { project ->
             if (project.timeline.tracks.any { it.id.value == newId }) {
-                error("trackId '$newId' already exists in project ${input.projectId}")
+                error("trackId '$newId' already exists in project ${pid.value}")
             }
             val tid = TrackId(newId)
             val newTrack: Track = when (normalisedKind) {
@@ -119,14 +130,14 @@ class AddTrackTool(
 
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
         val out = Output(
-            projectId = input.projectId,
+            projectId = pid.value,
             trackId = newId,
             trackKind = normalisedKind,
             totalTrackCount = totalCount,
         )
         return ToolResult(
             title = "add $normalisedKind track",
-            outputForLlm = "Added empty $normalisedKind track $newId to project ${input.projectId} " +
+            outputForLlm = "Added empty $normalisedKind track $newId to project ${pid.value} " +
                 "($totalCount total track(s)). Timeline snapshot: ${snapshotId.value}",
             data = out,
         )

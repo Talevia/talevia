@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.ProjectId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.TextStyle
@@ -42,7 +41,12 @@ class EditTextClipTool(
 ) : Tool<EditTextClipTool.Input, EditTextClipTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
         val clipId: String,
         /** New body text. Null = keep. Must be non-blank when provided. */
         val newText: String? = null,
@@ -72,7 +76,13 @@ class EditTextClipTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
             putJsonObject("clipId") { put("type", "string") }
             putJsonObject("newText") {
                 put("type", "string")
@@ -90,7 +100,7 @@ class EditTextClipTool(
         }
         put(
             "required",
-            JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("clipId"))),
+            JsonArray(listOf(JsonPrimitive("clipId"))),
         )
         put("additionalProperties", false)
     }
@@ -111,8 +121,9 @@ class EditTextClipTool(
         input.fontSize?.let { require(it > 0f) { "fontSize must be > 0 (got $it)" } }
         input.color?.let { require(it.isNotBlank()) { "color must be non-blank" } }
 
+        val pid = ctx.resolveProjectId(input.projectId)
         var found = false
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
+        val updated = store.mutate(pid) { project ->
             val newTracks = project.timeline.tracks.map { track ->
                 val target = track.clips.firstOrNull { it.id.value == input.clipId } ?: return@map track
                 found = true
@@ -137,7 +148,7 @@ class EditTextClipTool(
             }
             project.copy(timeline = project.timeline.copy(tracks = newTracks))
         }
-        if (!found) error("clip ${input.clipId} not found in project ${input.projectId}")
+        if (!found) error("clip ${input.clipId} not found in project ${pid.value}")
 
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
         return ToolResult(

@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.video
 
 import io.talevia.core.AssetId
-import io.talevia.core.ProjectId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.TimeRange
@@ -57,7 +56,12 @@ class TrimClipTool(
 ) : Tool<TrimClipTool.Input, TrimClipTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
         val clipId: String,
         /** New `sourceRange.start` in seconds. If null, keep current. */
         val newSourceStartSeconds: Double? = null,
@@ -92,7 +96,13 @@ class TrimClipTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
             putJsonObject("clipId") { put("type", "string") }
             putJsonObject("newSourceStartSeconds") {
                 put("type", "number")
@@ -105,7 +115,7 @@ class TrimClipTool(
         }
         put(
             "required",
-            JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("clipId"))),
+            JsonArray(listOf(JsonPrimitive("clipId"))),
         )
         put("additionalProperties", false)
     }
@@ -121,11 +131,12 @@ class TrimClipTool(
             require(it > 0.0) { "newDurationSeconds must be > 0 (got $it)" }
         }
 
+        val pid = ctx.resolveProjectId(input.projectId)
         var foundTrackId: String? = null
         var resolvedSourceStart: Duration = Duration.ZERO
         var resolvedDuration: Duration = Duration.ZERO
         var resolvedTimelineEnd: Duration = Duration.ZERO
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
+        val updated = store.mutate(pid) { project ->
             val newTracks = project.timeline.tracks.map { track ->
                 val target = track.clips.firstOrNull { it.id.value == input.clipId }
                 if (target == null) {
@@ -175,7 +186,7 @@ class TrimClipTool(
                 }
             }
             if (foundTrackId == null) {
-                error("clip ${input.clipId} not found in project ${input.projectId}")
+                error("clip ${input.clipId} not found in project ${pid.value}")
             }
             val duration = newTracks.flatMap { it.clips }.maxOfOrNull { it.timeRange.end }
                 ?: Duration.ZERO

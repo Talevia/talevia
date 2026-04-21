@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.ProjectId
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Track
@@ -45,7 +44,12 @@ class MoveClipTool(
 ) : Tool<MoveClipTool.Input, MoveClipTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
         val clipId: String,
         /** New `timeRange.start` in seconds. Must be >= 0. Duration is preserved. */
         val newStartSeconds: Double,
@@ -71,7 +75,13 @@ class MoveClipTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
             putJsonObject("clipId") { put("type", "string") }
             putJsonObject("newStartSeconds") {
                 put("type", "number")
@@ -82,7 +92,6 @@ class MoveClipTool(
             "required",
             JsonArray(
                 listOf(
-                    JsonPrimitive("projectId"),
                     JsonPrimitive("clipId"),
                     JsonPrimitive("newStartSeconds"),
                 ),
@@ -95,10 +104,11 @@ class MoveClipTool(
         if (input.newStartSeconds < 0) {
             error("newStartSeconds must be >= 0 (got ${input.newStartSeconds})")
         }
+        val pid = ctx.resolveProjectId(input.projectId)
         var foundTrackId: String? = null
         var oldStartSeconds = 0.0
         val newStart = input.newStartSeconds.seconds
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
+        val updated = store.mutate(pid) { project ->
             val newTracks = project.timeline.tracks.map { track ->
                 val target = track.clips.firstOrNull { it.id.value == input.clipId }
                 if (target == null) {
@@ -118,7 +128,7 @@ class MoveClipTool(
                 }
             }
             if (foundTrackId == null) {
-                error("clip ${input.clipId} not found in project ${input.projectId}")
+                error("clip ${input.clipId} not found in project ${pid.value}")
             }
             project.copy(timeline = project.timeline.copy(tracks = newTracks))
         }

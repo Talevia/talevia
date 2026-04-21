@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.video
 
 import io.talevia.core.ClipId
-import io.talevia.core.ProjectId
 import io.talevia.core.TrackId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Filter
@@ -40,7 +39,12 @@ class AddTransitionTool(
 ) : Tool<AddTransitionTool.Input, AddTransitionTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
         val fromClipId: String,
         val toClipId: String,
         val transitionName: String = "fade",
@@ -57,24 +61,31 @@ class AddTransitionTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
             putJsonObject("fromClipId") { put("type", "string") }
             putJsonObject("toClipId") { put("type", "string") }
             putJsonObject("transitionName") { put("type", "string"); put("description", "fade | dissolve | slide | wipe (engine-specific)") }
             putJsonObject("durationSeconds") { put("type", "number"); put("description", "Default 0.5s; longer transitions overlap more material.") }
         }
         put("required", JsonArray(listOf(
-            JsonPrimitive("projectId"), JsonPrimitive("fromClipId"), JsonPrimitive("toClipId"),
+            JsonPrimitive("fromClipId"), JsonPrimitive("toClipId"),
         )))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         require(input.durationSeconds > 0.0) { "durationSeconds must be > 0" }
+        val pid = ctx.resolveProjectId(input.projectId)
         val transitionId = ClipId(Uuid.random().toString())
         var resolvedTrackId: TrackId? = null
 
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
+        val updated = store.mutate(pid) { project ->
             val from = project.timeline.tracks.firstNotNullOfOrNull { track ->
                 track.clips.firstOrNull { it.id.value == input.fromClipId }?.let { track to it }
             }?.let { (track, clip) -> track to clip }

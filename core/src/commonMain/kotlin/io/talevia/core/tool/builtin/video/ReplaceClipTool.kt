@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.video
 
 import io.talevia.core.AssetId
-import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
@@ -51,7 +50,12 @@ class ReplaceClipTool(
 ) : Tool<ReplaceClipTool.Input, ReplaceClipTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
         val clipId: String,
         val newAssetId: String,
     )
@@ -77,7 +81,13 @@ class ReplaceClipTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
             putJsonObject("clipId") { put("type", "string") }
             putJsonObject("newAssetId") {
                 put("type", "string")
@@ -88,7 +98,6 @@ class ReplaceClipTool(
             "required",
             JsonArray(
                 listOf(
-                    JsonPrimitive("projectId"),
                     JsonPrimitive("clipId"),
                     JsonPrimitive("newAssetId"),
                 ),
@@ -98,7 +107,7 @@ class ReplaceClipTool(
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val pid = ProjectId(input.projectId)
+        val pid = ctx.resolveProjectId(input.projectId)
         val newAssetId = AssetId(input.newAssetId)
         media.get(newAssetId) ?: error("Asset ${input.newAssetId} not found; import or generate it first.")
 
@@ -128,7 +137,7 @@ class ReplaceClipTool(
                 }
                 replaceClipOnTrack(track, target, replaced)
             }
-            if (!found) error("clip ${input.clipId} not found in project ${input.projectId}")
+            if (!found) error("clip ${input.clipId} not found in project ${pid.value}")
             project.copy(timeline = project.timeline.copy(tracks = newTracks))
         }
 

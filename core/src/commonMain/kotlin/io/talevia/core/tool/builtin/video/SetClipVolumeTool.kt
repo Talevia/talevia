@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.ProjectId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Track
@@ -48,7 +47,12 @@ class SetClipVolumeTool(
 ) : Tool<SetClipVolumeTool.Input, SetClipVolumeTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
         val clipId: String,
         /** Absolute multiplier in [0, 4]. 1.0 = unchanged, 0.0 = mute. */
         val volume: Float,
@@ -75,7 +79,13 @@ class SetClipVolumeTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
             putJsonObject("clipId") { put("type", "string") }
             putJsonObject("volume") {
                 put("type", "number")
@@ -86,7 +96,6 @@ class SetClipVolumeTool(
             "required",
             JsonArray(
                 listOf(
-                    JsonPrimitive("projectId"),
                     JsonPrimitive("clipId"),
                     JsonPrimitive("volume"),
                 ),
@@ -102,9 +111,10 @@ class SetClipVolumeTool(
             "volume must be <= $MAX_VOLUME; clip-level gain beyond that belongs in mix-time staging."
         }
 
+        val pid = ctx.resolveProjectId(input.projectId)
         var foundTrackId: String? = null
         var oldVolume = 0f
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
+        val updated = store.mutate(pid) { project ->
             val newTracks = project.timeline.tracks.map { track ->
                 val target = track.clips.firstOrNull { it.id.value == input.clipId }
                 if (target == null) {
@@ -128,7 +138,7 @@ class SetClipVolumeTool(
                 }
             }
             if (foundTrackId == null) {
-                error("clip ${input.clipId} not found in project ${input.projectId}")
+                error("clip ${input.clipId} not found in project ${pid.value}")
             }
             project.copy(timeline = project.timeline.copy(tracks = newTracks))
         }
