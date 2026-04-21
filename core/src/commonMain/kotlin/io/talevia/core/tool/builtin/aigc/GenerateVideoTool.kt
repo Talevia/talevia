@@ -190,19 +190,26 @@ class GenerateVideoTool(
             }
         }
 
-        val result = engine.generate(
-            VideoGenRequest(
-                prompt = folded.effectivePrompt,
-                modelId = input.model,
-                width = input.width,
-                height = input.height,
-                durationSeconds = input.durationSeconds,
-                seed = seed,
-                negativePrompt = folded.negativePrompt,
-                referenceAssetPaths = referenceAssetPaths,
-                loraPins = folded.loraPins,
-            ),
-        )
+        val result = AigcPipeline.withProgress(
+            ctx = ctx,
+            jobId = "gen-video-${inputHash.take(8)}",
+            startMessage = "generating ${input.durationSeconds}s video " +
+                "(${input.width}x${input.height}) with ${input.model}",
+        ) {
+            engine.generate(
+                VideoGenRequest(
+                    prompt = folded.effectivePrompt,
+                    modelId = input.model,
+                    width = input.width,
+                    height = input.height,
+                    durationSeconds = input.durationSeconds,
+                    seed = seed,
+                    negativePrompt = folded.negativePrompt,
+                    referenceAssetPaths = referenceAssetPaths,
+                    loraPins = folded.loraPins,
+                ),
+            )
+        }
         val video = result.videos.firstOrNull()
             ?: error("${engine.providerId} video-gen returned zero videos")
 

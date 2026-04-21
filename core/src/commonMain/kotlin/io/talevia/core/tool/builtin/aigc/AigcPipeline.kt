@@ -1,6 +1,7 @@
 package io.talevia.core.tool.builtin.aigc
 
 import io.talevia.core.AssetId
+import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.Project
@@ -12,8 +13,13 @@ import io.talevia.core.domain.source.consistency.consistencyNodes
 import io.talevia.core.domain.source.consistency.foldConsistencyIntoPrompt
 import io.talevia.core.domain.source.consistency.resolveConsistencyBindings
 import io.talevia.core.platform.GenerationProvenance
+import io.talevia.core.session.Part
+import io.talevia.core.tool.ToolContext
 import io.talevia.core.util.fnv1a64Hex
+import kotlinx.datetime.Clock
 import kotlinx.serialization.json.JsonObject
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 import io.talevia.core.domain.source.consistency.foldVoice as foldVoiceFn
 
 /**
@@ -121,6 +127,74 @@ internal object AigcPipeline {
      * (`Project.staleClipsFromLockfile`) — without it the detector has no anchor
      * to compare today's hash against.
      */
+    /**
+     * Wrap a long-running provider call so the Agent's UI / SSE subscribers
+     * see a [Part.RenderProgress] "started" marker immediately, a "completed"
+     * marker on success, or a "failed: …" marker if [block] throws.
+     *
+     * Same `partId` is reused across all emits so consumers treat this as
+     * a single logical progress row (the latest payload wins — pattern
+     * mirrors `ExportTool.executeRender`). No middle-progress ratio today:
+     * the engine interfaces ([VideoGenEngine] / [ImageGenEngine] / etc.)
+     * don't expose poll-progress callbacks yet, so we can only emit
+     * bookends. When engines grow a `onProgress: (ratio) -> Unit` param
+     * this helper will forward it; until then a single start-complete pair
+     * is already enough to flip the UI from "silent" to "generating…".
+     *
+     * On failure, the progress marker flips to `ratio=0 + "failed: <msg>"`
+     * and the exception rethrows untouched — caller's normal error path
+     * still runs.
+     */
+    @OptIn(ExperimentalUuidApi::class)
+    suspend fun <T> withProgress(
+        ctx: ToolContext,
+        jobId: String,
+        startMessage: String,
+        clock: Clock = Clock.System,
+        block: suspend () -> T,
+    ): T {
+        val partId = PartId(Uuid.random().toString())
+        ctx.emitPart(
+            Part.RenderProgress(
+                id = partId,
+                messageId = ctx.messageId,
+                sessionId = ctx.sessionId,
+                createdAt = clock.now(),
+                jobId = jobId,
+                ratio = 0f,
+                message = startMessage,
+            ),
+        )
+        return try {
+            val result = block()
+            ctx.emitPart(
+                Part.RenderProgress(
+                    id = partId,
+                    messageId = ctx.messageId,
+                    sessionId = ctx.sessionId,
+                    createdAt = clock.now(),
+                    jobId = jobId,
+                    ratio = 1f,
+                    message = "completed",
+                ),
+            )
+            result
+        } catch (t: Throwable) {
+            ctx.emitPart(
+                Part.RenderProgress(
+                    id = partId,
+                    messageId = ctx.messageId,
+                    sessionId = ctx.sessionId,
+                    createdAt = clock.now(),
+                    jobId = jobId,
+                    ratio = 0f,
+                    message = "failed: ${t.message ?: t::class.simpleName ?: "unknown"}",
+                ),
+            )
+            throw t
+        }
+    }
+
     suspend fun record(
         store: ProjectStore,
         projectId: ProjectId,

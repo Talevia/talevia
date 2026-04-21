@@ -174,19 +174,25 @@ class GenerateImageTool(
             }
         }
 
-        val result = engine.generate(
-            ImageGenRequest(
-                prompt = folded.effectivePrompt,
-                modelId = input.model,
-                width = input.width,
-                height = input.height,
-                seed = seed,
-                n = 1,
-                negativePrompt = folded.negativePrompt,
-                referenceAssetPaths = referenceAssetPaths,
-                loraPins = folded.loraPins,
-            ),
-        )
+        val result = AigcPipeline.withProgress(
+            ctx = ctx,
+            jobId = "gen-image-${inputHash.take(8)}",
+            startMessage = "generating ${input.width}x${input.height} image with ${input.model}",
+        ) {
+            engine.generate(
+                ImageGenRequest(
+                    prompt = folded.effectivePrompt,
+                    modelId = input.model,
+                    width = input.width,
+                    height = input.height,
+                    seed = seed,
+                    n = 1,
+                    negativePrompt = folded.negativePrompt,
+                    referenceAssetPaths = referenceAssetPaths,
+                    loraPins = folded.loraPins,
+                ),
+            )
+        }
         val image = result.images.firstOrNull()
             ?: error("${engine.providerId} image-gen returned zero images")
 

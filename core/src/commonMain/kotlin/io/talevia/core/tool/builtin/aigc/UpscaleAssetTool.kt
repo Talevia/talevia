@@ -161,15 +161,21 @@ class UpscaleAssetTool(
             }
         }
 
-        val result = engine.upscale(
-            UpscaleRequest(
-                imagePath = sourcePath,
-                modelId = input.model,
-                scale = input.scale,
-                seed = seed,
-                format = input.format,
-            ),
-        )
+        val result = AigcPipeline.withProgress(
+            ctx = ctx,
+            jobId = "upscale-${inputHash.take(8)}",
+            startMessage = "upscaling asset ${input.assetId} x${input.scale} with ${input.model}",
+        ) {
+            engine.upscale(
+                UpscaleRequest(
+                    imagePath = sourcePath,
+                    modelId = input.model,
+                    scale = input.scale,
+                    seed = seed,
+                    format = input.format,
+                ),
+            )
+        }
         val image = result.image
 
         val source = blobWriter.writeBlob(image.imageBytes, image.format)

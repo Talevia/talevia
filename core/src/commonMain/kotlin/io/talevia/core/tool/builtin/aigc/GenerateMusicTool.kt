@@ -167,15 +167,21 @@ class GenerateMusicTool(
             }
         }
 
-        val result = engine.generate(
-            MusicGenRequest(
-                prompt = folded.effectivePrompt,
-                modelId = input.model,
-                seed = seed,
-                durationSeconds = input.durationSeconds,
-                format = input.format,
-            ),
-        )
+        val result = AigcPipeline.withProgress(
+            ctx = ctx,
+            jobId = "gen-music-${inputHash.take(8)}",
+            startMessage = "generating ${input.durationSeconds}s music with ${input.model}",
+        ) {
+            engine.generate(
+                MusicGenRequest(
+                    prompt = folded.effectivePrompt,
+                    modelId = input.model,
+                    seed = seed,
+                    durationSeconds = input.durationSeconds,
+                    format = input.format,
+                ),
+            )
+        }
         val music = result.music
 
         val source = blobWriter.writeBlob(music.audioBytes, music.format)

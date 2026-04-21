@@ -165,15 +165,21 @@ class SynthesizeSpeechTool(
             }
         }
 
-        val result = engine.synthesize(
-            TtsRequest(
-                text = input.text,
-                modelId = input.model,
-                voice = resolvedVoice,
-                format = input.format,
-                speed = input.speed,
-            ),
-        )
+        val result = AigcPipeline.withProgress(
+            ctx = ctx,
+            jobId = "tts-${inputHash.take(8)}",
+            startMessage = "synthesising speech (${input.text.length} chars) with ${input.model}",
+        ) {
+            engine.synthesize(
+                TtsRequest(
+                    text = input.text,
+                    modelId = input.model,
+                    voice = resolvedVoice,
+                    format = input.format,
+                    speed = input.speed,
+                ),
+            )
+        }
 
         val source = blobWriter.writeBlob(result.audio.audioBytes, result.audio.format)
         val asset = storage.import(source) { _ ->
