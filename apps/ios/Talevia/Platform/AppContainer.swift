@@ -104,7 +104,6 @@ final class AppContainer {
         registry.register(tool: ApplyFilterTool(store: self.projects))
         registry.register(tool: RemoveFilterTool(store: self.projects))
         registry.register(tool: ApplyLutTool(store: self.projects, media: self.media))
-        registry.register(tool: AddSubtitleTool(store: self.projects))
         registry.register(tool: AddSubtitlesTool(store: self.projects))
         registry.register(tool: EditTextClipTool(store: self.projects))
         registry.register(tool: AddTransitionTool(store: self.projects))

@@ -22,7 +22,7 @@ import kotlinx.serialization.serializer
 /**
  * Transcribe an imported audio / video asset via an [AsrEngine] (VISION §5.2 ML
  * lane). Returns the full text plus time-aligned segments the agent can hand to
- * `add_subtitle` for auto-captioning, or quote back when planning cuts ("the
+ * `add_subtitles` for auto-captioning, or quote back when planning cuts ("the
  * speaker mentions the team at 00:14, that's a natural moment to insert B-roll").
  *
  * Permission: `"ml.transcribe"` — defaults to ASK because the audio is uploaded

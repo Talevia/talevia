@@ -43,7 +43,7 @@ import kotlin.time.DurationUnit
  *    speed changes).
  *  - Either field may be omitted; omitted = preserve current.
  *  - Rejects [Clip.Text] — it has no `sourceRange` to trim. Use
- *    `add_subtitle` / `add_subtitles` to adjust subtitle timing for now;
+ *    `add_subtitles` to adjust subtitle timing for now;
  *    a dedicated text-trim tool would have a different shape.
  *
  * Validates against the bound asset's duration so we never produce a
@@ -87,7 +87,7 @@ class TrimClipTool(
             "removing/re-adding (which would lose attached filters). Preserves the " +
             "clip's timeline.start — chain `move_clip` if you also want to reposition. " +
             "At least one of newSourceStartSeconds / newDurationSeconds must be set. " +
-            "Subtitle (Text) clips are not trimmable here; adjust them via add_subtitle. " +
+            "Subtitle (Text) clips are not trimmable here; adjust them via add_subtitles. " +
             "Emits a timeline snapshot for revert_timeline."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
@@ -147,7 +147,7 @@ class TrimClipTool(
                         is Clip.Audio -> target.assetId to target.sourceRange
                         is Clip.Text -> error(
                             "trim_clip cannot trim a text/subtitle clip (clip ${input.clipId}); " +
-                                "use add_subtitle to reset its time range.",
+                                "use add_subtitles to reset its time range.",
                         )
                     }
                     val newSourceStart: Duration = input.newSourceStartSeconds?.seconds

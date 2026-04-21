@@ -23,7 +23,7 @@ import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.video.AddClipTool
-import io.talevia.core.tool.builtin.video.AddSubtitleTool
+import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
@@ -85,13 +85,19 @@ class M6FeaturesTest {
     @Test
     fun addSubtitleCreatesSubtitleTrackAndClip() = runTest {
         val (store, projects, _, ctx, projectId) = newWiring()
-        val r = ToolRegistry().apply { register(AddSubtitleTool(projects)) }
-        r["add_subtitle"]!!.dispatch(
+        val r = ToolRegistry().apply { register(AddSubtitlesTool(projects)) }
+        r["add_subtitles"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("text", "hello")
-                put("timelineStartSeconds", 1.0)
-                put("durationSeconds", 2.5)
+                putJsonArray("subtitles") {
+                    add(
+                        buildJsonObject {
+                            put("text", "hello")
+                            put("timelineStartSeconds", 1.0)
+                            put("durationSeconds", 2.5)
+                        },
+                    )
+                }
             },
             ctx,
         )
@@ -209,7 +215,7 @@ class M6FeaturesTest {
             register(ImportMediaTool(media, engine))
             register(AddClipTool(projects, media))
             register(ApplyFilterTool(projects))
-            register(AddSubtitleTool(projects))
+            register(AddSubtitlesTool(projects))
             register(AddTransitionTool(projects))
         }
         val ctx = ToolContext(

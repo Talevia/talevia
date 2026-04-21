@@ -31,7 +31,7 @@ Every Project is (Source → Compiler → Artifact):
     - core.consistency.style_bible — global look / color / mood / negative prompts.
     - core.consistency.brand_palette — brand colors + typography hints.
 - Compiler = your Tool calls. Traditional clips (add_clip / split / apply_filter /
-  apply_lut / add_transition / add_subtitle / add_subtitles), AIGC (generate_image,
+  apply_lut / add_transition / add_subtitles), AIGC (generate_image,
   generate_video, synthesize_speech, generate_music, upscale_asset), ML enhancement
   (transcribe_asset, describe_asset, auto_subtitle_clip), media derivation
   (extract_frame), export.

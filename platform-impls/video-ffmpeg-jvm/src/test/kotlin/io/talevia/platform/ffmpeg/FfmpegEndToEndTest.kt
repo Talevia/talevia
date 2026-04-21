@@ -16,13 +16,15 @@ import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.video.AddClipTool
-import io.talevia.core.tool.builtin.video.AddSubtitleTool
+import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import java.io.File
 import java.nio.file.Files
 import kotlin.test.AfterTest
@@ -168,7 +170,7 @@ class FfmpegEndToEndTest {
         val registry = ToolRegistry().apply {
             register(ImportMediaTool(media, engine))
             register(AddClipTool(projects, media))
-            register(AddSubtitleTool(projects))
+            register(AddSubtitlesTool(projects))
             register(ExportTool(projects, engine))
         }
 
@@ -191,12 +193,18 @@ class FfmpegEndToEndTest {
             ctx,
         )
         // Subtitle text exercises filtergraph escaping: colon, single quote, comma.
-        registry["add_subtitle"]!!.dispatch(
+        registry["add_subtitles"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("text", "hi: it's, you")
-                put("timelineStartSeconds", 0.2)
-                put("durationSeconds", 1.5)
+                putJsonArray("subtitles") {
+                    add(
+                        buildJsonObject {
+                            put("text", "hi: it's, you")
+                            put("timelineStartSeconds", 0.2)
+                            put("durationSeconds", 1.5)
+                        },
+                    )
+                }
                 put("fontSize", 36f)
                 put("color", "#FFFF00")
                 put("backgroundColor", "#000000")

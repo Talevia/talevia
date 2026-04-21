@@ -20,7 +20,7 @@ import kotlinx.serialization.serializer
 
 /**
  * Surgical edits on an existing [Clip.Text] — text body or style
- * fields. The missing counterpart to `add_subtitle` / `add_subtitles`:
+ * fields. The missing counterpart to `add_subtitles`:
  * once a subtitle is on the timeline, fixing a typo or bumping the
  * font size should not require removing and re-adding the clip (which
  * drops the id, breaks any downstream tool state that captured the

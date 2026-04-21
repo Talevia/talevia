@@ -11,7 +11,7 @@ import kotlin.uuid.Uuid
 /**
  * Record the post-mutation [Timeline] as a [Part.TimelineSnapshot] in the session.
  *
- * Every timeline-mutating tool (add_clip, split_clip, apply_filter, add_subtitle,
+ * Every timeline-mutating tool (add_clip, split_clip, apply_filter, add_subtitles,
  * add_transition, revert_timeline) calls this after committing to [ProjectStore].
  * Snapshots are the history stack the `revert_timeline` tool walks — without one
  * per mutation there is nothing to roll back to.

@@ -20,7 +20,7 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * Create an empty track of a given kind. `add_clip` / `add_subtitle` auto-create
+ * Create an empty track of a given kind. `add_clip` / `add_subtitles` auto-create
  * the *first* track of the needed kind on demand, which is convenient for
  * single-layer edits but makes it impossible to express "I want N parallel
  * tracks" up front:

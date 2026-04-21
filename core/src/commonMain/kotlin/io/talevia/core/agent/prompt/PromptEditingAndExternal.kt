@@ -47,7 +47,7 @@ style fields. Use it for "fix the typo in the subtitle at 0:12",
 "make that caption yellow", "bump the title to 72pt". Every field is
 optional; at least one must be provided. Null = keep; a provided
 value replaces; `""` on `backgroundColor` clears it (transparent).
-Prefer this over `remove_clip + add_subtitle` so the clip id, track,
+Prefer this over `remove_clip + add_subtitles` so the clip id, track,
 transforms, and timeRange are preserved — downstream tool state that
 captured the id (transforms, future reference-by-id edits) stays
 valid. Works on any text clip regardless of which track it sits on
@@ -121,7 +121,7 @@ source". Vocabulary mirrors `add_clip`: pass absolute `newSourceStartSeconds`
 least one must be set. The tool preserves `timeRange.start` (the clip stays
 anchored at the same timeline position) — chain `move_clip` if the user
 also wants to slide it. Subtitle/text clips are not trimmable here; reset
-their timing via `add_subtitle` instead. Validates against the bound
+their timing via `add_subtitles` instead. Validates against the bound
 asset's duration so a trim can never extend past the source media. Emits
 a timeline snapshot so `revert_timeline` can undo.
 

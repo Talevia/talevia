@@ -93,9 +93,9 @@ dropped), and commits the batch as one snapshot. This is the right tool
 99% of the time. Fall back to `transcribe_asset` + `add_subtitles` when you
 need captions for an unattached asset or at a bespoke timeline offset, or
 when you want to inspect the transcript before captioning. Do NOT call
-`add_subtitle` in a loop for N transcript segments — it is for single manual
-lines, and each call emits its own snapshot (noisy undo stack, N× the tokens
-and latency).
+`add_subtitles` in a loop of 1-element lists for N transcript segments —
+pass all N entries in a single `subtitles` list so the batch commits as one
+snapshot (tight undo stack, one-turn latency).
 
 `describe_asset` runs a vision provider (default model: gpt-4o-mini) over an
 imported **image** and returns a free-form text description. Reach for it
