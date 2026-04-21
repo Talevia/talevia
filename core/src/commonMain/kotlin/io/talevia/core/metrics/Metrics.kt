@@ -118,6 +118,7 @@ class EventBusMetricsSink(
         is BusEvent.AgentRetryScheduled -> "agent.retry.scheduled"
         is BusEvent.SessionCompactionAuto -> "session.compaction.auto"
         is BusEvent.AgentRunStateChanged -> "agent.run.state.${stateTag(event.state)}"
+        is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
     }
 
     private fun stateTag(state: io.talevia.core.agent.AgentRunState): String = when (state) {

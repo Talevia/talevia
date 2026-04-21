@@ -14,6 +14,9 @@ import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -238,6 +241,78 @@ class SwitchProjectToolTest {
             currentProjectId = session.currentProjectId,
         )
         assertEquals(ProjectId("p-bound"), downstreamCtx.currentProjectId)
+    }
+
+    @Test fun changedBindingPublishesBusEvent() = runTest {
+        val rig = rig()
+        seedSession(rig.sessions, currentProjectId = ProjectId("p-a"))
+        seedProject(rig.projects, "p-a")
+        seedProject(rig.projects, "p-b")
+
+        val bus = EventBus()
+        val received = mutableListOf<io.talevia.core.bus.BusEvent.SessionProjectBindingChanged>()
+        val job = CoroutineScope(Dispatchers.Unconfined).launch {
+            bus.events.collect { ev ->
+                if (ev is io.talevia.core.bus.BusEvent.SessionProjectBindingChanged) received.add(ev)
+            }
+        }
+
+        SwitchProjectTool(rig.sessions, rig.projects, fixedClock, bus = bus).execute(
+            SwitchProjectTool.Input(sessionId = "s-1", projectId = "p-b"),
+            rig.ctx,
+        )
+
+        assertEquals(1, received.size)
+        assertEquals(SessionId("s-1"), received[0].sessionId)
+        assertEquals(ProjectId("p-a"), received[0].previousProjectId)
+        assertEquals(ProjectId("p-b"), received[0].newProjectId)
+        job.cancel()
+    }
+
+    @Test fun firstBindingFromNullPublishesEventWithNullPrevious() = runTest {
+        val rig = rig()
+        seedSession(rig.sessions)
+        seedProject(rig.projects, "p-first")
+
+        val bus = EventBus()
+        val received = mutableListOf<io.talevia.core.bus.BusEvent.SessionProjectBindingChanged>()
+        val job = CoroutineScope(Dispatchers.Unconfined).launch {
+            bus.events.collect { ev ->
+                if (ev is io.talevia.core.bus.BusEvent.SessionProjectBindingChanged) received.add(ev)
+            }
+        }
+
+        SwitchProjectTool(rig.sessions, rig.projects, fixedClock, bus = bus).execute(
+            SwitchProjectTool.Input(sessionId = "s-1", projectId = "p-first"),
+            rig.ctx,
+        )
+
+        assertEquals(1, received.size)
+        assertNull(received[0].previousProjectId)
+        assertEquals(ProjectId("p-first"), received[0].newProjectId)
+        job.cancel()
+    }
+
+    @Test fun sameIdNoOpDoesNotPublishEvent() = runTest {
+        val rig = rig()
+        seedSession(rig.sessions, currentProjectId = ProjectId("p-a"))
+        seedProject(rig.projects, "p-a")
+
+        val bus = EventBus()
+        val received = mutableListOf<io.talevia.core.bus.BusEvent.SessionProjectBindingChanged>()
+        val job = CoroutineScope(Dispatchers.Unconfined).launch {
+            bus.events.collect { ev ->
+                if (ev is io.talevia.core.bus.BusEvent.SessionProjectBindingChanged) received.add(ev)
+            }
+        }
+
+        SwitchProjectTool(rig.sessions, rig.projects, fixedClock, bus = bus).execute(
+            SwitchProjectTool.Input(sessionId = "s-1", projectId = "p-a"),
+            rig.ctx,
+        )
+
+        assertEquals(0, received.size)
+        job.cancel()
     }
 
     private companion object {

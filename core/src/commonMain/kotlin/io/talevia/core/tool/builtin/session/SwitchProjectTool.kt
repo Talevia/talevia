@@ -2,6 +2,8 @@ package io.talevia.core.tool.builtin.session
 
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
+import io.talevia.core.bus.BusEvent
+import io.talevia.core.bus.EventBus
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.session.SessionStore
@@ -41,6 +43,14 @@ class SwitchProjectTool(
     private val sessions: SessionStore,
     private val projects: ProjectStore,
     private val clock: Clock = Clock.System,
+    /**
+     * Optional event bus. When provided, a
+     * [BusEvent.SessionProjectBindingChanged] is published after a successful
+     * binding change. Null keeps the tool usable in test rigs that don't
+     * subscribe. Production composition roots (CLI / Desktop / Server /
+     * Android / iOS) all pass the app's bus.
+     */
+    private val bus: EventBus? = null,
 ) : Tool<SwitchProjectTool.Input, SwitchProjectTool.Output> {
 
     @Serializable data class Input(
@@ -120,6 +130,14 @@ class SwitchProjectTool(
             session.copy(
                 currentProjectId = pid,
                 updatedAt = clock.now(),
+            ),
+        )
+
+        bus?.publish(
+            BusEvent.SessionProjectBindingChanged(
+                sessionId = sid,
+                previousProjectId = session.currentProjectId,
+                newProjectId = pid,
             ),
         )
 

@@ -414,6 +414,7 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.AgentRetryScheduled -> "agent.retry.scheduled"
     is BusEvent.SessionCompactionAuto -> "session.compaction.auto"
     is BusEvent.AgentRunStateChanged -> "agent.run.state.changed"
+    is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
 }
 
 @Serializable data class CreateProjectRequest(val title: String)
@@ -496,6 +497,8 @@ data class BusEventDto(
     val correlationId: String? = null,
     val message: String? = null,
     val projectId: String? = null,
+    /** Set for `session.project.binding.changed` — null when previously unbound. */
+    val previousProjectId: String? = null,
     val anchorMessageId: String? = null,
     val deletedMessages: Int? = null,
     val appliedSnapshotPartId: String? = null,
@@ -563,6 +566,11 @@ data class BusEventDto(
                     runState = tag.first, runStateCause = tag.second,
                 )
             }
+            is BusEvent.SessionProjectBindingChanged -> BusEventDto(
+                "session.project.binding.changed", e.sessionId.value,
+                projectId = e.newProjectId.value,
+                previousProjectId = e.previousProjectId?.value,
+            )
         }
     }
 }

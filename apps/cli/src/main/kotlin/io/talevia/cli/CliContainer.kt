@@ -245,7 +245,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(DescribeMessageTool(sessions))
         register(ForkSessionTool(sessions))
         register(RenameSessionTool(sessions))
-        register(SwitchProjectTool(sessions, projects))
+        register(SwitchProjectTool(sessions, projects, bus = bus))
         register(RevertSessionTool(sessions, projects, bus))
         register(ArchiveSessionTool(sessions))
         register(UnarchiveSessionTool(sessions))

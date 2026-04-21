@@ -158,4 +158,27 @@ sealed interface BusEvent {
         override val sessionId: SessionId,
         val state: AgentRunState,
     ) : SessionEvent
+
+    /**
+     * The session's `currentProjectId` binding changed — fired exclusively
+     * by `switch_project` after it persists the new binding. [previousProjectId]
+     * is null when the session was previously unbound (first-time bind);
+     * [newProjectId] is always set because unbinding is not an operation
+     * exposed on the session lane (to unbind, the user creates a new session).
+     *
+     * UI / metrics subscribers can consume this to refresh the "current
+     * project" indicator without polling `describe_session`, and to log
+     * per-session project switches for observability.
+     *
+     * A no-op same-id rebind does NOT fire this event — see [SwitchProjectTool]
+     * where the same-id branch returns early before `updateSession`. Fork does
+     * not fire this event either: a freshly forked session inherits its
+     * parent's binding through [SessionCreated] (the binding is the session's
+     * initial state, not a change).
+     */
+    data class SessionProjectBindingChanged(
+        override val sessionId: SessionId,
+        val previousProjectId: ProjectId?,
+        val newProjectId: ProjectId,
+    ) : SessionEvent
 }
