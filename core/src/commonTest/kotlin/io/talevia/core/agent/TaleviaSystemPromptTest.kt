@@ -83,6 +83,8 @@ class TaleviaSystemPromptTest {
         "fork_project",
         // Diff — closes the VISION §3.4 "可 diff" property alongside snapshot + fork.
         "diff_projects",
+        // Node-level diff — the zoom-in sibling of diff_projects (VISION §5.1 "改一个 source 节点").
+        "diff_source_nodes",
         // Import — closes the VISION §3.4 "可组合" leg (cross-project source-node reuse).
         "import_source_node",
         // Traditional color grading — LUT enforcement on style_bible.lutReference

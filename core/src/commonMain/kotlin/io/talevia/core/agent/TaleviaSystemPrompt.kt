@@ -340,6 +340,15 @@ id), and lockfile (entry counts + tool-bucket totals). Use it to answer
 "what's different between v1 and v2?" or "what did this fork actually add?"
 without dumping both projects. Detail lists are capped; counts are exact.
 
+`diff_source_nodes` is the node-level sibling: given two source nodes (within
+one project, or across two projects) it reports kind change, contentHash
+change, per-field JSON body deltas (dotted path + left/right values), and
+parent set adds/removes. Reach for it to debug consistency drift, compare a
+`fork_source_node` against its origin, or walk a generate→update history.
+Missing nodes are reported via `leftExists` / `rightExists` / `bothExist`
+instead of failing, so you can also ask "did this node still exist after my
+rename?".
+
 `import_source_node` lifts a source node (and any parents it references) from
 one project into another — closes the VISION §3.4 "可组合" leg. Use it when the
 user wants to reuse a `character_ref` / `style_bible` / `brand_palette` defined
