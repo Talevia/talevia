@@ -77,6 +77,20 @@ descendant's hash and makes dependent clips stale. Keep parent chains shallow
 and meaningful — don't add parents "for documentation" when there's no real
 derivation relationship.
 
+`rename_source_node(projectId, oldId, newId)` atomically refactors a source-node
+id: the node itself, every descendant's parent-ref, every clip's `sourceBinding`
+set, and every lockfile entry's binding + content-hash keys are rewritten in one
+mutation. Use it when the user wants a better name ("rename `character-mei` to
+`mei`") instead of `remove_source_node` + a fresh `define_*`, which would drop
+all those references. The node's own contentHash survives the rename (it's a
+hash of `(kind, body, parents)`, not `id`); descendant nodes whose parent-ref
+changed do get a new hash, which correctly invalidates any AIGC render that
+consumed the old ref. `newId` must match the slug shape (lowercase letters /
+digits / `-`), must not collide with an existing node, and same-id is a no-op.
+The rename does NOT rewrite string ids embedded inside typed bodies (e.g. a
+`narrative.shot.body.sceneId`) — update those separately via the kind-specific
+`update_*` tool.
+
 When the user changes a consistency node and you need to regenerate everything
 that depended on it, call `regenerate_stale_clips` — one tool that handles the
 full find_stale_clips → regenerate → replace_clip chain in one atomic batch.
