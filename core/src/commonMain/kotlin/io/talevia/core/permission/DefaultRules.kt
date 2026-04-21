@@ -24,6 +24,9 @@ object DefaultPermissionRuleset {
         // (loses Source DAG / Timeline / Lockfile / RenderCache) — always confirm.
         PermissionRule(permission = "project.read", pattern = "*", action = PermissionAction.ALLOW),
         PermissionRule(permission = "project.write", pattern = "*", action = PermissionAction.ALLOW),
+        // Session introspection — reading session metadata (list_sessions) is
+        // local-only, no I/O, no cost. Silent by default.
+        PermissionRule(permission = "session.read", pattern = "*", action = PermissionAction.ALLOW),
 
         // Side-effectful — always confirm
         PermissionRule(permission = "media.export.write", pattern = "*", action = PermissionAction.ASK),

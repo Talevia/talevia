@@ -97,6 +97,7 @@ import io.talevia.core.tool.builtin.project.SetOutputProfileTool
 import io.talevia.core.tool.builtin.project.UnpinClipAssetTool
 import io.talevia.core.tool.builtin.project.UnpinLockfileEntryTool
 import io.talevia.core.tool.builtin.project.ValidateProjectTool
+import io.talevia.core.tool.builtin.session.ListSessionsTool
 import io.talevia.core.tool.builtin.shell.BashTool
 import io.talevia.core.tool.builtin.source.AddSourceNodeTool
 import io.talevia.core.tool.builtin.source.DefineBrandPaletteTool
@@ -311,6 +312,7 @@ class ServerContainer(
 
     val tools: ToolRegistry = ToolRegistry().apply {
         register(TodoWriteTool())
+        register(ListSessionsTool(sessions))
         register(ImportMediaTool(media, engine))
         register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))
