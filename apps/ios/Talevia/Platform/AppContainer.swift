@@ -76,6 +76,7 @@ final class AppContainer {
         registry.register(tool: DescribeMessageTool(sessions: self.sessions))
         registry.register(tool: ForkSessionTool(sessions: self.sessions))
         registry.register(tool: RenameSessionTool(sessions: self.sessions, clock: clock))
+        registry.register(tool: RevertSessionTool(sessions: self.sessions, projects: self.projects, bus: self.bus))
         registry.register(tool: ImportMediaTool(storage: self.media, engine: self.engine))
         registry.register(tool: ExtractFrameTool(engine: self.engine, storage: self.media, blobWriter: self.blobWriter))
         registry.register(tool: AddClipTool(store: self.projects, media: self.media))
