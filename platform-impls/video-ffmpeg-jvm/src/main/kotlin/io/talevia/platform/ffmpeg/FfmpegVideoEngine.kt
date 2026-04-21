@@ -120,8 +120,16 @@ class FfmpegVideoEngine(
         // what the Media3 / AVFoundation engines can render without custom
         // shaders.
         val transitionFades: Map<String, ClipFades> = transitionFadesFor(timeline, videoClips)
+        // `-fflags +bitexact` strips the container-level encoder id string and
+        // random/timestamp-based metadata; `-flags:v/+flags:a +bitexact` do the
+        // same for video and audio streams (codec headers). Guarantees the
+        // same `Project` + same `OutputProfile` produce **byte-identical**
+        // output across re-invocations — a `RenderCache` correctness
+        // precondition. Pinned by `ExportDeterminismTest`; see
+        // `docs/decisions/2026-04-21-export-variant-deterministic-hash.md`.
         val args = mutableListOf(
             ffmpegPath, "-y", "-progress", "pipe:2",
+            "-fflags", "+bitexact",
         )
         for ((clip, path) in videoClips.zip(resolvedPaths)) {
             args += listOf("-ss", "${clip.sourceRange.start.toDouble(kotlin.time.DurationUnit.SECONDS)}")
@@ -177,8 +185,8 @@ class FfmpegVideoEngine(
         args += listOf("-map", "[outv]", "-map", "[outa]")
         args += listOf("-r", output.frameRate.toString())
         args += listOf("-s", "${output.resolution.width}x${output.resolution.height}")
-        args += listOf("-c:v", output.videoCodec, "-b:v", "${output.videoBitrate}")
-        args += listOf("-c:a", output.audioCodec, "-b:a", "${output.audioBitrate}")
+        args += listOf("-c:v", output.videoCodec, "-b:v", "${output.videoBitrate}", "-flags:v", "+bitexact")
+        args += listOf("-c:a", output.audioCodec, "-b:a", "${output.audioBitrate}", "-flags:a", "+bitexact")
         args += output.targetPath
 
         val process = ProcessBuilder(args).redirectErrorStream(false).start()
