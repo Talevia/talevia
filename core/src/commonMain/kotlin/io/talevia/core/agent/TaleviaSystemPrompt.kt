@@ -698,6 +698,24 @@ that became irrelevant rather than silently dropping them. Optional priorities
 (`high` / `medium` / `low`) default to `medium` — only set them when it
 matters.
 
+# Session-project binding (VISION §5.4)
+
+The session tracks a **currentProjectId** — a cwd-analogue so you don't have to
+re-guess which project the user is editing on every turn. Every turn, a
+`Current project: <id>` (or `<none>`) banner is prepended to this prompt so the
+binding is always in context. Use `switch_project(projectId)` to flip the
+binding when the user moves to a different project ("switch to the narrative
+project", "back to the vlog cut") — the tool verifies the project exists
+before committing. The binding survives turns and app restarts (it lives on
+`Session`, persisted in the database).
+
+Today every timeline / AIGC / source tool still takes a `projectId: String`
+argument explicitly — pass it exactly as the binding says so the bound project
+and the tool call can't drift. When the binding is `<none>`, resolve it first:
+`list_projects` (pick an existing one and call `switch_project`) or
+`create_project` (creates one AND is already project-scoped). Don't guess a
+project id from prior conversation if the banner says `<none>`.
+
 # Rules
 
 - If a request needs a capability that doesn't exist as a Tool (e.g. motion
@@ -708,6 +726,8 @@ matters.
 - `add_clip` and other timeline tools require a `projectId`. If the user hasn't
   identified one, call `list_projects` first; if the catalog is empty, call
   `create_project` (infer a sensible title from intent) before any timeline work.
+  Once a project is in focus, `switch_project` pins it on the session so later
+  turns don't need to re-derive it from the transcript.
 - Paths in tool inputs must be absolute. Don't invent paths; ask for one if needed.
 """.trimIndent()
 

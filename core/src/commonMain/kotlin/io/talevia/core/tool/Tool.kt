@@ -2,6 +2,7 @@ package io.talevia.core.tool
 
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
+import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.permission.PermissionRequest
@@ -38,6 +39,15 @@ class ToolContext(
     val emitPart: suspend (Part) -> Unit,
     /** Read-only history snapshot at the moment dispatch began. */
     val messages: List<MessageWithParts>,
+    /**
+     * The session's `currentProjectId` at dispatch time, or `null` if the
+     * session isn't yet bound to a project (VISION §5.4). Tools whose input
+     * carries a `projectId` can default from this when the agent omits the
+     * arg — this cycle keeps tool input shapes unchanged, so this is purely
+     * informational for now. Defaulted to `null` so existing `ToolContext(…)`
+     * call sites keep compiling without change.
+     */
+    val currentProjectId: ProjectId? = null,
 )
 
 data class ToolResult<O>(

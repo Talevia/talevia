@@ -108,6 +108,7 @@ import io.talevia.core.tool.builtin.session.ListToolCallsTool
 import io.talevia.core.tool.builtin.session.ReadPartTool
 import io.talevia.core.tool.builtin.session.RenameSessionTool
 import io.talevia.core.tool.builtin.session.RevertSessionTool
+import io.talevia.core.tool.builtin.session.SwitchProjectTool
 import io.talevia.core.tool.builtin.session.UnarchiveSessionTool
 import io.talevia.core.tool.builtin.shell.BashTool
 import io.talevia.core.tool.builtin.source.AddSourceNodeTool
@@ -294,6 +295,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(DescribeMessageTool(sessions))
         register(ForkSessionTool(sessions))
         register(RenameSessionTool(sessions))
+        register(SwitchProjectTool(sessions, projects))
         register(RevertSessionTool(sessions, projects, bus))
         register(ArchiveSessionTool(sessions))
         register(UnarchiveSessionTool(sessions))

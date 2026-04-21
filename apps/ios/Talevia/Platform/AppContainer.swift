@@ -79,6 +79,7 @@ final class AppContainer {
         registry.register(tool: DescribeMessageTool(sessions: self.sessions))
         registry.register(tool: ForkSessionTool(sessions: self.sessions))
         registry.register(tool: RenameSessionTool(sessions: self.sessions, clock: clock))
+        registry.register(tool: SwitchProjectTool(sessions: self.sessions, projects: self.projects, clock: clock))
         registry.register(tool: RevertSessionTool(sessions: self.sessions, projects: self.projects, bus: self.bus))
         registry.register(tool: ArchiveSessionTool(sessions: self.sessions, clock: clock))
         registry.register(tool: UnarchiveSessionTool(sessions: self.sessions, clock: clock))

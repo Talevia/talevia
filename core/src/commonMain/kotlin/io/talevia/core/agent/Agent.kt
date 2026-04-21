@@ -4,6 +4,7 @@ import io.talevia.core.CallId
 import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.PartId
+import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
@@ -251,6 +252,11 @@ class Agent(
                 history = store.listMessagesWithParts(input.sessionId, includeCompacted = false)
             }
 
+            // Re-read the session every step so a `switch_project` invoked in the
+            // previous turn is reflected in the next turn's system prompt and in
+            // the ToolContext seen by freshly dispatched tools (VISION §5.4).
+            val currentProjectId = store.getSession(input.sessionId)?.currentProjectId
+
             var attempt = 0
             var asstMsg: Message.Assistant
             var turnResult: TurnResult
@@ -266,7 +272,7 @@ class Agent(
                 store.appendMessage(asstMsg)
                 handle.currentAssistantId = asstMsg.id
 
-                turnResult = streamTurn(asstMsg, history, input)
+                turnResult = streamTurn(asstMsg, history, input, currentProjectId)
 
                 // Only retry when the turn failed and nothing useful was streamed.
                 // Mid-stream errors (rare — an error event after text/tool_calls) are
@@ -317,12 +323,13 @@ class Agent(
         asstMsg: Message.Assistant,
         history: List<MessageWithParts>,
         input: RunInput,
+        currentProjectId: ProjectId?,
     ): TurnResult {
         val request = LlmRequest(
             model = input.model,
             messages = history,
             tools = registry.specs(),
-            systemPrompt = systemPrompt,
+            systemPrompt = buildSystemPrompt(systemPrompt, currentProjectId),
             // Seed the OpenAI cache-routing hint from the session id so every
             // turn in a session hits the same replica — unless the caller
             // already picked a key.
@@ -383,7 +390,7 @@ class Agent(
                 is LlmEvent.ToolCallInputDelta -> bus.publish(
                     BusEvent.PartDelta(asstMsg.sessionId, asstMsg.id, event.partId, "input", event.jsonDelta),
                 )
-                is LlmEvent.ToolCallReady -> dispatchTool(asstMsg, history, input, event, pending)
+                is LlmEvent.ToolCallReady -> dispatchTool(asstMsg, history, input, event, pending, currentProjectId)
 
                 LlmEvent.StepStart -> store.upsertPart(
                     Part.StepStart(
@@ -445,6 +452,7 @@ class Agent(
         input: RunInput,
         event: LlmEvent.ToolCallReady,
         pending: MutableMap<CallId, PendingToolCall>,
+        currentProjectId: ProjectId?,
     ) {
         val handle = pending[event.callId]
             ?: PendingToolCall(event.partId, event.toolId).also { pending[event.callId] = it }
@@ -493,6 +501,11 @@ class Agent(
             askPermission = { req -> permissions.check(input.permissionRules, req) },
             emitPart = { p -> store.upsertPart(p) },
             messages = history,
+            // A tool dispatched inside the same turn that `switch_project`
+            // ran will observe the updated binding because we re-read the
+            // session before each turn, not mid-turn; the next turn's
+            // first tool call picks up the switch.
+            currentProjectId = currentProjectId,
         )
 
         val toolStart = clock.now()
@@ -526,6 +539,25 @@ class Agent(
                 )
             },
         )
+    }
+
+    /**
+     * Prepend a one-line "Current project" banner to the configured system prompt
+     * so every turn reminds the model of the session's current binding (VISION §5.4).
+     * A null binding renders explicitly so the agent knows to pick one before
+     * dispatching timeline tools, rather than guessing silently.
+     */
+    private fun buildSystemPrompt(base: String?, currentProjectId: ProjectId?): String? {
+        val banner = if (currentProjectId != null) {
+            "Current project: ${currentProjectId.value} (from session binding; call switch_project to change)"
+        } else {
+            "Current project: <none> (session not yet bound; call list_projects / create_project / switch_project before running timeline tools)"
+        }
+        return when {
+            base == null -> banner
+            base.isBlank() -> banner
+            else -> "$banner\n\n$base"
+        }
     }
 
     private data class TurnResult(
