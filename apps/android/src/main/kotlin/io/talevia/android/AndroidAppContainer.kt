@@ -38,11 +38,8 @@ import io.talevia.core.tool.builtin.project.ForkProjectTool
 import io.talevia.core.tool.builtin.project.GcLockfileTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
 import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
-import io.talevia.core.tool.builtin.project.ListClipsBoundToAssetTool
-import io.talevia.core.tool.builtin.project.ListLockfileEntriesTool
 import io.talevia.core.tool.builtin.project.ListProjectSnapshotsTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
-import io.talevia.core.tool.builtin.project.ListTransitionsTool
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
 import io.talevia.core.tool.builtin.project.PruneLockfileTool
 import io.talevia.core.tool.builtin.project.RemoveAssetTool
@@ -196,15 +193,12 @@ class AndroidAppContainer(context: Context) {
         register(DescribeProjectTool(projects))
         register(ProjectQueryTool(projects))
         register(DescribeClipTool(projects))
-        register(ListTransitionsTool(projects))
-        register(ListClipsBoundToAssetTool(projects))
         register(RemoveAssetTool(projects))
         register(SetOutputProfileTool(projects))
         register(ValidateProjectTool(projects))
         register(DeleteProjectTool(projects))
         register(RenameProjectTool(projects))
         register(FindStaleClipsTool(projects))
-        register(ListLockfileEntriesTool(projects))
         register(DescribeLockfileEntryTool(projects))
         register(PruneLockfileTool(projects))
         register(GcLockfileTool(projects))

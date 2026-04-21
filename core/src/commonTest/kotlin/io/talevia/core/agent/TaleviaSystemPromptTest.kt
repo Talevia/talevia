@@ -95,7 +95,7 @@ class TaleviaSystemPromptTest {
         // (VISION §3.3 traditional lane).
         "apply_lut",
         // Lockfile observability (VISION §3.1) — enumerate AIGC productions.
-        "list_lockfile_entries",
+        "project_query(select=lockfile_entries)",
         // Seed / lockfile discipline (VISION §3.1)
         "seed",
         "cacheHit",

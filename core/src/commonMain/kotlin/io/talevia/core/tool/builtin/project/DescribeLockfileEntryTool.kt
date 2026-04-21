@@ -43,7 +43,7 @@ import kotlinx.serialization.serializer
  *
  * Lookup keys on `inputHash` (most recent match, same semantics as
  * [io.talevia.core.domain.lockfile.Lockfile.findByInputHash]). Missing
- * hash fails loudly with a nudge at `list_lockfile_entries` so the agent
+ * hash fails loudly with a nudge at `project_query(select=lockfile_entries)` so the agent
  * can discover valid hashes.
  *
  * Read-only; permission `project.read`.
@@ -109,7 +109,7 @@ class DescribeLockfileEntryTool(
             "which clips currently reference its asset. Use for debugging regeneration skips " +
             "(\"why didn't regenerate_stale_clips re-dispatch this?\"), auditing a hero shot, " +
             "or tracing which source edit made a clip stale. Look up by inputHash — get one from " +
-            "list_lockfile_entries."
+            "project_query(select=lockfile_entries)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.read")
@@ -120,7 +120,7 @@ class DescribeLockfileEntryTool(
             putJsonObject("projectId") { put("type", "string") }
             putJsonObject("inputHash") {
                 put("type", "string")
-                put("description", "Lockfile entry identifier from list_lockfile_entries.")
+                put("description", "Lockfile entry identifier from project_query(select=lockfile_entries).")
             }
         }
         put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("inputHash"))))
@@ -133,7 +133,7 @@ class DescribeLockfileEntryTool(
         val entry = project.lockfile.findByInputHash(input.inputHash)
             ?: error(
                 "Lockfile entry with inputHash '${input.inputHash}' not found in project " +
-                    "${input.projectId}. Call list_lockfile_entries to see valid hashes.",
+                    "${input.projectId}. Call project_query(select=lockfile_entries) to see valid hashes.",
             )
 
         val currentHashesById = project.source.nodes.associate { it.id.value to it.contentHash }

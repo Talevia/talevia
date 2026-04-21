@@ -44,7 +44,7 @@ fun Project.staleClips(changed: Set<SourceNodeId>): Set<ClipId> {
 
 /**
  * Forward-index report — which clips bind a given source node (directly or
- * through DAG descent)? Used by the `list_clips_for_source` tool and the
+ * through DAG descent)? Used by the `project_query(select=clips_for_source)` tool and the
  * desktop SourcePanel downstream-clips view so users can answer "if I edit
  * this character_ref / style_bible, what will go stale?" *before* making the
  * edit.

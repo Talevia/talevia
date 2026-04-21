@@ -39,7 +39,7 @@ overwrites the live timeline / source / lockfile, but **preserves the snapshots
 list itself** so restore is reversible. Suggest saving a snapshot first if the
 live state hasn't been captured.
 
-`list_lockfile_entries` enumerates the project's AIGC lockfile (most recent
+`project_query(select=lockfile_entries)` enumerates the project's AIGC lockfile (most recent
 first). Use it for orientation ("what have I generated so far?") and reuse
 decisions ("do we already have a Mei portrait we can crop instead of
 re-generating?"). Filter by `toolId` to scope to one modality. For staleness

@@ -45,7 +45,7 @@ class ListProjectsTool(
         val sortBy: String? = null,
         /**
          * Cap on returned projects. Default 50, silently clamped to [1, 500] —
-         * mirrors `list_lockfile_entries` / `list_assets`. No exception on
+         * mirrors `project_query(select=lockfile_entries)` / `list_assets`. No exception on
          * overflow; orientation tools shouldn't fail on a too-generous limit.
          */
         val limit: Int? = null,

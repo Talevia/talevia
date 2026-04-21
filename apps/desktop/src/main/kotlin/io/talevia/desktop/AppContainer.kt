@@ -74,12 +74,8 @@ import io.talevia.core.tool.builtin.project.ForkProjectTool
 import io.talevia.core.tool.builtin.project.GcLockfileTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
 import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
-import io.talevia.core.tool.builtin.project.ListClipsBoundToAssetTool
-import io.talevia.core.tool.builtin.project.ListClipsForSourceTool
-import io.talevia.core.tool.builtin.project.ListLockfileEntriesTool
 import io.talevia.core.tool.builtin.project.ListProjectSnapshotsTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
-import io.talevia.core.tool.builtin.project.ListTransitionsTool
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
 import io.talevia.core.tool.builtin.project.PruneLockfileTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
@@ -324,16 +320,12 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(DeleteProjectTool(projects))
         register(RenameProjectTool(projects))
         register(FindStaleClipsTool(projects))
-        register(ListClipsForSourceTool(projects))
-        register(ListClipsBoundToAssetTool(projects))
         register(ProjectQueryTool(projects))
         register(DescribeClipTool(projects))
-        register(ListTransitionsTool(projects))
         register(RemoveAssetTool(projects))
         register(SetOutputProfileTool(projects))
         register(ValidateProjectTool(projects))
         register(RegenerateStaleClipsTool(projects, this))
-        register(ListLockfileEntriesTool(projects))
         register(DescribeLockfileEntryTool(projects))
         register(PruneLockfileTool(projects))
         register(GcLockfileTool(projects))

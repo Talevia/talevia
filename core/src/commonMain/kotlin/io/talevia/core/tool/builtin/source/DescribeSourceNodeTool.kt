@@ -33,7 +33,7 @@ import kotlinx.serialization.serializer
  * timeline it binds, and whether those clips are direct or transitively bound.
  *
  * Pulling this into `get_project_state` bloats every caller; pulling it per-field
- * (`source_query(select=nodes) includeBody=true` for body, then `list_clips_for_source` for
+ * (`source_query(select=nodes) includeBody=true` for body, then `project_query(select=clips_for_source)` for
  * bindings, then a third call to resolve parent kinds) is three round-trips.
  * This tool is the cheap single read.
  *

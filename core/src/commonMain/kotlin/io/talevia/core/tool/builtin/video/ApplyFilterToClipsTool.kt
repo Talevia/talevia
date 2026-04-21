@@ -27,7 +27,7 @@ import kotlinx.serialization.serializer
  * would otherwise need N chat round-trips.
  *
  * Selection shapes (mutually exclusive — exactly one must be provided):
- *   - `clipIds`: explicit list (e.g. from `list_clips_for_source` or a
+ *   - `clipIds`: explicit list (e.g. from `project_query(select=clips_for_source)` or a
  *     timeline multi-select)
  *   - `trackId`: every video clip on the given track
  *   - `allVideoClips=true`: every video clip in the project

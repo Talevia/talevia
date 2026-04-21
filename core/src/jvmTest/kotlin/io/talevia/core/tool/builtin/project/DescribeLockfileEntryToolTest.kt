@@ -261,6 +261,6 @@ class DescribeLockfileEntryToolTest {
             )
         }
         assertTrue(ex.message!!.contains("ghost"), ex.message)
-        assertTrue(ex.message!!.contains("list_lockfile_entries"), ex.message)
+        assertTrue(ex.message!!.contains("project_query(select=lockfile_entries)"), ex.message)
     }
 }
