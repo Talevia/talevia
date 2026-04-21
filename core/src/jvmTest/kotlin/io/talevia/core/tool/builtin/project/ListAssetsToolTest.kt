@@ -242,6 +242,85 @@ class ListAssetsToolTest {
         assertEquals(null, byId["img-1"]!!.width)
     }
 
+    @Test fun sortByNullPreservesStoreInsertionOrder() = runTest {
+        val (store, pid) = fixture()
+        val tool = ListAssetsTool(store)
+        val out = tool.execute(ListAssetsTool.Input(projectId = pid.value), ctx()).data
+        assertEquals(
+            listOf("v-used", "v-unused", "a-used", "a-unused", "img-1"),
+            out.assets.map { it.assetId },
+        )
+    }
+
+    @Test fun sortByDurationOrdersLongestFirst() = runTest {
+        val (store, pid) = fixture()
+        val tool = ListAssetsTool(store)
+        val out = tool.execute(
+            ListAssetsTool.Input(projectId = pid.value, sortBy = "duration"),
+            ctx(),
+        ).data
+        // a-unused=120, a-used=30, v-used=10, v-unused=10 (stable), img-1=0
+        assertEquals(
+            listOf("a-unused", "a-used", "v-used", "v-unused", "img-1"),
+            out.assets.map { it.assetId },
+        )
+    }
+
+    @Test fun sortByDurationAscOrdersShortestFirst() = runTest {
+        val (store, pid) = fixture()
+        val tool = ListAssetsTool(store)
+        val out = tool.execute(
+            ListAssetsTool.Input(projectId = pid.value, sortBy = "duration-asc"),
+            ctx(),
+        ).data
+        // img-1=0, v-used=10, v-unused=10 (stable), a-used=30, a-unused=120
+        assertEquals(
+            listOf("img-1", "v-used", "v-unused", "a-used", "a-unused"),
+            out.assets.map { it.assetId },
+        )
+    }
+
+    @Test fun sortByIdOrdersAscending() = runTest {
+        val (store, pid) = fixture()
+        val tool = ListAssetsTool(store)
+        val out = tool.execute(
+            ListAssetsTool.Input(projectId = pid.value, sortBy = "id"),
+            ctx(),
+        ).data
+        assertEquals(
+            listOf("a-unused", "a-used", "img-1", "v-unused", "v-used"),
+            out.assets.map { it.assetId },
+        )
+    }
+
+    @Test fun sortByAppliedBeforeOffsetAndLimit() = runTest {
+        val (store, pid) = fixture()
+        val tool = ListAssetsTool(store)
+        // Top-2 by duration DESC should be the two audio assets, not the first
+        // two store-inserted entries.
+        val out = tool.execute(
+            ListAssetsTool.Input(projectId = pid.value, sortBy = "duration", limit = 2, offset = 0),
+            ctx(),
+        ).data
+        assertEquals(5, out.total)
+        assertEquals(listOf("a-unused", "a-used"), out.assets.map { it.assetId })
+    }
+
+    @Test fun rejectsInvalidSortBy() = runTest {
+        val (store, pid) = fixture()
+        val tool = ListAssetsTool(store)
+        val ex = assertFailsWith<IllegalArgumentException> {
+            tool.execute(
+                ListAssetsTool.Input(projectId = pid.value, sortBy = "newest"),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("sortBy"))
+        assertTrue(ex.message!!.contains("duration"))
+        assertTrue(ex.message!!.contains("duration-asc"))
+        assertTrue(ex.message!!.contains("id"))
+    }
+
     @Test fun hasTrackFlagsAreAccurate() = runTest {
         val (store, pid) = fixture()
         val tool = ListAssetsTool(store)

@@ -60,6 +60,17 @@ class ListAssetsTool(
         val onlyUnused: Boolean = false,
         val limit: Int = 50,
         val offset: Int = 0,
+        /**
+         * Deterministic ordering applied before offset+limit. Accepted values:
+         *   - `"duration"`     — metadata.duration DESC (longest first).
+         *   - `"duration-asc"` — metadata.duration ASC (shortest first).
+         *   - `"id"`           — asset id ASC (stable pagination).
+         *
+         * Null / omitted preserves store-insertion order (today's behaviour).
+         * `MediaAsset` carries no creation timestamp, so `"newest"` is not
+         * offered — adding one would require extending the domain model.
+         */
+        val sortBy: String? = null,
     )
 
     @Serializable data class AssetInfo(
@@ -86,8 +97,10 @@ class ListAssetsTool(
     override val id: String = "list_assets"
     override val helpText: String =
         "List media assets in a project (paginated). Filter by kind (video/audio/image), " +
-            "or only show unused assets. Cheap alternative to get_project_state when the agent " +
-            "just needs to know what media is available or which assets are dangling."
+            "or only show unused assets. Optional sortBy (duration | duration-asc | id) applies " +
+            "a deterministic ordering before offset+limit; omit to keep store-insertion order. " +
+            "Cheap alternative to get_project_state when the agent just needs to know what media " +
+            "is available or which assets are dangling."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.read")
@@ -106,6 +119,15 @@ class ListAssetsTool(
             }
             putJsonObject("limit") { put("type", "integer"); put("description", "Default 50, max 500.") }
             putJsonObject("offset") { put("type", "integer"); put("description", "Skip this many matches before returning. Default 0.") }
+            putJsonObject("sortBy") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Deterministic ordering applied before offset+limit. One of: " +
+                        "duration (longest first) | duration-asc (shortest first) | id (asset id asc). " +
+                        "Omit to preserve store-insertion order.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("projectId"))))
         put("additionalProperties", false)
@@ -117,6 +139,11 @@ class ListAssetsTool(
         val kindFilter = input.kind.lowercase()
         require(kindFilter in setOf("video", "audio", "image", "all")) {
             "kind must be one of video|audio|image|all (got '${input.kind}')"
+        }
+        if (input.sortBy != null) {
+            require(input.sortBy in SORT_BY_ALLOWED) {
+                "sortBy must be one of duration|duration-asc|id (got '${input.sortBy}')"
+            }
         }
 
         val project = projects.get(ProjectId(input.projectId))
@@ -135,12 +162,14 @@ class ListAssetsTool(
             }
         }
 
-        val matching = project.assets.asSequence()
+        val filtered = project.assets.asSequence()
             .map { asset -> asset to classify(asset) }
             .filter { (_, kind) -> kindFilter == "all" || kind == kindFilter }
             .map { (asset, kind) -> buildInfo(asset, kind, refCount[asset.id.value] ?: 0) }
             .filter { !input.onlyUnused || it.inUseByClips == 0 }
             .toList()
+
+        val matching = sorted(filtered, input.sortBy)
 
         val page = matching.drop(input.offset).take(input.limit)
 
@@ -157,6 +186,15 @@ class ListAssetsTool(
             ),
         )
     }
+
+    private fun sorted(assets: List<AssetInfo>, sortBy: String?): List<AssetInfo> =
+        when (sortBy) {
+            null -> assets
+            "duration" -> assets.sortedByDescending { it.durationSeconds }
+            "duration-asc" -> assets.sortedBy { it.durationSeconds }
+            "id" -> assets.sortedBy { it.assetId }
+            else -> error("unreachable — validated above: '$sortBy'")
+        }
 
     private fun classify(asset: MediaAsset): String {
         val hasV = asset.metadata.videoCodec != null
@@ -186,5 +224,9 @@ class ListAssetsTool(
             sourceKind = sourceKind,
             inUseByClips = refCount,
         )
+    }
+
+    private companion object {
+        val SORT_BY_ALLOWED = setOf("duration", "duration-asc", "id")
     }
 }
