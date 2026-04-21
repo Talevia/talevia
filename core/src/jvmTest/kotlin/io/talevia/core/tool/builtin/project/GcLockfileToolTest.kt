@@ -220,7 +220,10 @@ class GcLockfileToolTest {
         assertEquals("age+count", byAsset["stale"]?.reason)
         assertEquals("age", byAsset["solo-old"]?.reason)
 
-        assertEquals(listOf("age", "count"), out.data.policiesApplied.filter { it != "liveAssetGuard" })
+        assertEquals(
+            listOf("age", "count"),
+            out.data.policiesApplied.filter { it != "liveAssetGuard" && it != "pinGuard" },
+        )
     }
 
     @Test fun preserveLiveAssetsTrueRescuesWouldBeDroppedEntry() = runTest {
@@ -452,5 +455,69 @@ class GcLockfileToolTest {
                 rig.ctx,
             )
         }
+    }
+
+    @Test fun pinnedRowSurvivesStrictPolicySweep() = runTest {
+        val rig = rig()
+        val ancient = NOW_MS - 30L * MS_PER_DAY
+        val entries = listOf(
+            // An ancient entry that's policy-eligible to drop — but pinned.
+            entry("generate_image", "pinned-hero", createdAt = ancient).copy(pinned = true),
+            entry("generate_image", "ancient-other", createdAt = ancient),
+            entry("generate_image", "fresh", createdAt = NOW_MS),
+        )
+        seed(rig, assetIds = emptyList(), entries = entries)
+
+        val out = GcLockfileTool(rig.store, fixedClock).execute(
+            // maxAgeDays=7 drops both ancient rows; preserveLiveAssets=false removes
+            // the live-asset safety net so only the pin guard can rescue the hero.
+            GcLockfileTool.Input(
+                projectId = "p",
+                maxAgeDays = 7,
+                preserveLiveAssets = false,
+            ),
+            rig.ctx,
+        )
+
+        assertEquals(3, out.data.totalEntries)
+        assertEquals(1, out.data.prunedCount)
+        assertEquals(2, out.data.keptCount)
+        assertEquals(1, out.data.keptByPinCount)
+        assertEquals(0, out.data.keptByLiveAssetGuardCount)
+        assertEquals(setOf("ancient-other"), out.data.prunedEntries.map { it.assetId }.toSet())
+        assertTrue(out.data.policiesApplied.contains("pinGuard"))
+
+        // The pinned row + the fresh row survived; only ancient-other dropped.
+        val refreshed = rig.store.get(ProjectId("p"))!!
+        assertEquals(
+            setOf("pinned-hero", "fresh"),
+            refreshed.lockfile.entries.map { it.assetId.value }.toSet(),
+        )
+        // Pin flag itself survived the mutation round-trip.
+        assertTrue(refreshed.lockfile.findByAssetId(AssetId("pinned-hero"))!!.pinned)
+    }
+
+    @Test fun pinGuardAttributionTakesPriorityOverLiveAssetGuard() = runTest {
+        val rig = rig()
+        // Entry is pinned AND its asset is live. Both guards would rescue it
+        // — we want the pin guard's accounting to win so the user can tell
+        // whether it was protection-by-pin or protection-by-live-asset.
+        val entries = listOf(
+            entry(
+                "generate_image",
+                "hero",
+                createdAt = NOW_MS - 30L * MS_PER_DAY,
+            ).copy(pinned = true),
+        )
+        seed(rig, assetIds = listOf("hero"), entries = entries)
+
+        val out = GcLockfileTool(rig.store, fixedClock).execute(
+            GcLockfileTool.Input(projectId = "p", maxAgeDays = 7),
+            rig.ctx,
+        )
+
+        assertEquals(0, out.data.prunedCount)
+        assertEquals(1, out.data.keptByPinCount)
+        assertEquals(0, out.data.keptByLiveAssetGuardCount)
     }
 }

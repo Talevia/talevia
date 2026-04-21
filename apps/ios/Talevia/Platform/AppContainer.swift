@@ -119,6 +119,8 @@ final class AppContainer {
         registry.register(tool: ListLockfileEntriesTool(projects: self.projects))
         registry.register(tool: PruneLockfileTool(projects: self.projects))
         registry.register(tool: GcLockfileTool(projects: self.projects, clock: clock))
+        registry.register(tool: PinLockfileEntryTool(projects: self.projects))
+        registry.register(tool: UnpinLockfileEntryTool(projects: self.projects))
         registry.register(tool: SaveProjectSnapshotTool(projects: self.projects, clock: clock))
         registry.register(tool: ListProjectSnapshotsTool(projects: self.projects))
         registry.register(tool: RestoreProjectSnapshotTool(projects: self.projects))

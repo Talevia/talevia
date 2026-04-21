@@ -56,6 +56,8 @@ class ListLockfileEntriesTool(
         val seed: Long,
         val createdAtEpochMs: Long,
         val sourceBindingIds: List<String>,
+        /** True when the entry was marked a hero shot via `pin_lockfile_entry`. */
+        val pinned: Boolean,
     )
 
     @Serializable data class Output(
@@ -116,6 +118,7 @@ class ListLockfileEntriesTool(
                 seed = e.provenance.seed,
                 createdAtEpochMs = e.provenance.createdAtEpochMs,
                 sourceBindingIds = e.sourceBinding.map { it.value }.sorted(),
+                pinned = e.pinned,
             )
         }
 

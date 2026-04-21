@@ -96,9 +96,13 @@ class GcLockfileTool(
          *  the live-asset guard rescued. Always `0` when
          *  `preserveLiveAssets=false`. */
         val keptByLiveAssetGuardCount: Int,
+        /** Count of entries the age/count policies selected for drop but that
+         *  the user-pin guard rescued (`pinned=true`). The pin guard runs before
+         *  the live-asset guard, so a pinned+live row counts here, not there. */
+        val keptByPinCount: Int,
         val prunedEntries: List<PrunedSummary>,
         val dryRun: Boolean,
-        /** Subset of {"age", "count", "liveAssetGuard"} — which policies
+        /** Subset of {"age", "count", "liveAssetGuard", "pinGuard"} — which policies
          *  were active on this call. Empty when both policies are null. */
         val policiesApplied: List<String>,
     )
@@ -108,8 +112,9 @@ class GcLockfileTool(
         "Policy-based garbage collection for the AIGC lockfile. Companion to " +
             "prune_lockfile: prune drops orphan rows (assetId gone from project.assets); gc " +
             "drops rows by age (maxAgeDays) and/or per-toolId count (keepLatestPerTool). " +
-            "Policies AND together: an entry must pass both to survive. " +
-            "preserveLiveAssets=true (default) rescues rows whose asset is still in " +
+            "Policies AND together: an entry must pass both to survive. Pinned rows " +
+            "(pin_lockfile_entry) are always rescued — a pin is user intent and overrides policy. " +
+            "preserveLiveAssets=true (default) additionally rescues rows whose asset is still in " +
             "project.assets so live-cache hits aren't invalidated by policy sweeps. Pass " +
             "dryRun=true to preview without mutating. Both policies null is a no-op — use " +
             "prune_lockfile for orphan sweeps."
@@ -169,6 +174,7 @@ class GcLockfileTool(
                 prunedCount = 0,
                 keptCount = entries.size,
                 keptByLiveAssetGuardCount = 0,
+                keptByPinCount = 0,
                 prunedEntries = emptyList(),
                 dryRun = input.dryRun,
                 policiesApplied = emptyList(),
@@ -227,11 +233,17 @@ class GcLockfileTool(
             }
         }
 
+        // Pin guard runs before the live-asset guard so pinned rows are always
+        // counted under [keptByPinCount], not double-attributed when they also
+        // happen to have a live asset. VISION §3.1 — a pin is user intent, it
+        // takes priority over any policy.
+        val (pinRescued, afterPinGuard) = selectedForDrop.partition { (e, _) -> e.pinned }
+
         // Live-asset guard rescues entries whose asset is still referenced.
-        val (rescued, pruned) = if (input.preserveLiveAssets) {
-            selectedForDrop.partition { (e, _) -> e.assetId in liveAssetIds }
+        val (liveRescued, pruned) = if (input.preserveLiveAssets) {
+            afterPinGuard.partition { (e, _) -> e.assetId in liveAssetIds }
         } else {
-            emptyList<Pair<LockfileEntry, String>>() to selectedForDrop
+            emptyList<Pair<LockfileEntry, String>>() to afterPinGuard
         }
 
         val prunedSet: Set<LockfileEntry> = pruned.map { it.first }.toSet()
@@ -259,6 +271,7 @@ class GcLockfileTool(
         val policiesApplied = buildList {
             if (ageEnabled) add("age")
             if (countEnabled) add("count")
+            add("pinGuard")
             if (input.preserveLiveAssets) add("liveAssetGuard")
         }
 
@@ -267,15 +280,21 @@ class GcLockfileTool(
             totalEntries = entries.size,
             prunedCount = pruned.size,
             keptCount = entries.size - pruned.size,
-            keptByLiveAssetGuardCount = rescued.size,
+            keptByLiveAssetGuardCount = liveRescued.size,
+            keptByPinCount = pinRescued.size,
             prunedEntries = prunedSummaries,
             dryRun = input.dryRun,
             policiesApplied = policiesApplied,
         )
 
         val verb = if (input.dryRun) "Would drop" else "Dropped"
-        val rescueNote = if (rescued.isNotEmpty()) {
-            " ${rescued.size} additional row(s) preserved by liveAssetGuard."
+        val pinNote = if (pinRescued.isNotEmpty()) {
+            " ${pinRescued.size} row(s) preserved by pinGuard."
+        } else {
+            ""
+        }
+        val rescueNote = if (liveRescued.isNotEmpty()) {
+            " ${liveRescued.size} additional row(s) preserved by liveAssetGuard."
         } else {
             ""
         }
@@ -284,12 +303,12 @@ class GcLockfileTool(
                 "Lockfile on project ${pid.value} is empty. Nothing to GC."
             pruned.isEmpty() ->
                 "All ${entries.size} lockfile entries on project ${pid.value} pass the GC policy " +
-                    "(${policiesApplied.joinToString("+")}). Nothing to drop.$rescueNote"
+                    "(${policiesApplied.joinToString("+")}). Nothing to drop.$pinNote$rescueNote"
             else ->
                 "$verb ${pruned.size} of ${entries.size} lockfile entries on project ${pid.value} " +
                     "(policy: ${policiesApplied.joinToString("+")}; reasons: " +
                     prunedSummaries.take(5).joinToString(", ") { "${it.toolId}/${it.assetId}(${it.reason})" } +
-                    if (prunedSummaries.size > 5) ", …).$rescueNote" else ").$rescueNote"
+                    if (prunedSummaries.size > 5) ", …).$pinNote$rescueNote" else ").$pinNote$rescueNote"
         }
         return ToolResult(
             title = if (input.dryRun) "gc lockfile (dry run)" else "gc lockfile",

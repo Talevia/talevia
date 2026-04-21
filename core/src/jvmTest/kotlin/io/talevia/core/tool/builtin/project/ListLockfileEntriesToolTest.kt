@@ -52,6 +52,7 @@ class ListLockfileEntriesToolTest {
         seed: Long = 1L,
         createdAt: Long = 1_700_000_000_000L,
         bindings: Set<SourceNodeId> = emptySet(),
+        pinned: Boolean = false,
     ): LockfileEntry = LockfileEntry(
         inputHash = "h-$assetId",
         toolId = toolId,
@@ -65,6 +66,7 @@ class ListLockfileEntriesToolTest {
             createdAtEpochMs = createdAt,
         ),
         sourceBinding = bindings,
+        pinned = pinned,
     )
 
     private suspend fun seed(rig: Rig, vararg entries: LockfileEntry) {
@@ -165,5 +167,21 @@ class ListLockfileEntriesToolTest {
             )
         }
         assertTrue(ex.message!!.contains("ghost"), ex.message)
+    }
+
+    @Test fun pinnedFlagIsSurfaced() = runTest {
+        val rig = rig()
+        seed(
+            rig,
+            entry("generate_image", "hero", pinned = true),
+            entry("generate_image", "other", pinned = false),
+        )
+        val out = ListLockfileEntriesTool(rig.store).execute(
+            ListLockfileEntriesTool.Input(projectId = "p"),
+            rig.ctx,
+        )
+        val byAsset = out.data.entries.associateBy { it.assetId }
+        assertTrue(byAsset.getValue("hero").pinned)
+        assertTrue(!byAsset.getValue("other").pinned)
     }
 }

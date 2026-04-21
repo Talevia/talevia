@@ -418,4 +418,105 @@ class RegenerateStaleClipsToolTest {
         assertEquals(0, out.totalStale)
         assertEquals(0, out.regenerated.size)
     }
+
+    @Test fun skipsPinnedEntriesWithoutDispatching() = runTest {
+        val tmpDir = createTempDirectory("regen-pinned").toFile()
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val storage = InMemoryMediaStorage()
+        val engine = CountingImageEngine()
+        val writer = FakeBlobWriter(tmpDir)
+        val pid = ProjectId("p-pinned")
+        val clipId = ClipId("c-hero")
+
+        val registry = ToolRegistry()
+        registry.register(GenerateImageTool(engine, storage, writer, store))
+        registry.register(RegenerateStaleClipsTool(store, registry))
+
+        store.upsert(
+            "demo",
+            Project(
+                id = pid,
+                timeline = Timeline(
+                    tracks = listOf(
+                        Track.Video(
+                            id = TrackId("v"),
+                            clips = listOf(
+                                Clip.Video(
+                                    id = clipId,
+                                    timeRange = TimeRange(0.seconds, 2.seconds),
+                                    sourceRange = TimeRange(0.seconds, 2.seconds),
+                                    assetId = AssetId("a-hero"),
+                                    sourceBinding = setOf(SourceNodeId("mei")),
+                                ),
+                            ),
+                        ),
+                    ),
+                    duration = 2.seconds,
+                ),
+            ),
+        )
+        store.mutateSource(pid) {
+            it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Mei", visualDescription = "teal"))
+        }
+        val originalHash = store.get(pid)!!.source.byId[SourceNodeId("mei")]!!.contentHash
+        val originalInputs = buildJsonObject {
+            put("prompt", "portrait of Mei")
+            put("model", "gpt-image-1")
+            put("width", 512)
+            put("height", 512)
+            put("seed", 42L)
+            put("projectId", pid.value)
+            put("consistencyBindingIds", JsonConfig.default.parseToJsonElement("""["mei"]"""))
+        }
+        store.mutate(pid) { p ->
+            p.copy(
+                lockfile = p.lockfile.append(
+                    LockfileEntry(
+                        inputHash = "pinned-hash",
+                        toolId = "generate_image",
+                        assetId = AssetId("a-hero"),
+                        provenance = GenerationProvenance(
+                            providerId = "fake",
+                            modelId = "gpt-image-1",
+                            modelVersion = null,
+                            seed = 42L,
+                            parameters = JsonObject(emptyMap()),
+                            createdAtEpochMs = 0L,
+                        ),
+                        sourceBinding = setOf(SourceNodeId("mei")),
+                        sourceContentHashes = mapOf(SourceNodeId("mei") to originalHash),
+                        baseInputs = originalInputs,
+                        pinned = true,
+                    ),
+                ),
+            )
+        }
+        // Edit mei — the clip is now stale.
+        store.mutateSource(pid) { source ->
+            source.replaceNode(SourceNodeId("mei")) { node ->
+                node.copy(
+                    body = JsonConfig.default.encodeToJsonElement(
+                        CharacterRefBody.serializer(),
+                        CharacterRefBody(name = "Mei", visualDescription = "red"),
+                    ),
+                )
+            }
+        }
+
+        val tool = RegenerateStaleClipsTool(store, registry)
+        val out = tool.execute(RegenerateStaleClipsTool.Input(projectId = pid.value), ctx()).data
+        // VISION §3.1: pinned entries are user-intent hero shots. Stale-but-frozen.
+        assertEquals(1, out.totalStale)
+        assertEquals(0, out.regenerated.size)
+        assertEquals(1, out.skipped.size)
+        assertEquals("pinned", out.skipped.single().reason)
+        assertEquals(0, engine.calls, "engine must not run for a pinned stale clip")
+
+        // Timeline left untouched.
+        val project = store.get(pid)!!
+        val clip = project.timeline.tracks.first().clips.filterIsInstance<Clip.Video>().single()
+        assertEquals("a-hero", clip.assetId.value)
+    }
 }

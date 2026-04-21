@@ -38,6 +38,28 @@ data class Lockfile(
 
     fun append(entry: LockfileEntry): Lockfile = copy(entries = entries + entry)
 
+    /**
+     * Flip the `pinned` flag on the most recent entry matching [inputHash].
+     *
+     * VISION §3.1 "产物可 pin" — once the user marks a hero-shot entry pinned,
+     * it survives GC policy sweeps ([io.talevia.core.tool.builtin.project.GcLockfileTool])
+     * and `regenerate_stale_clips` skips re-generating its clip even when the
+     * bound source changed. Returns the lockfile unchanged when no entry matches,
+     * so callers can fail loudly on their own.
+     *
+     * Only the most recent match is toggled — `findByInputHash` semantics. Older
+     * duplicate-hash entries (the append-only ledger allows them when a provider
+     * re-runs and happens to produce the same hash twice) stay untouched because
+     * they are not the one a cache lookup would return.
+     */
+    fun withEntryPinned(inputHash: String, pinned: Boolean): Lockfile {
+        val idx = entries.indexOfLast { it.inputHash == inputHash }
+        if (idx < 0) return this
+        val current = entries[idx]
+        if (current.pinned == pinned) return this
+        return copy(entries = entries.toMutableList().apply { this[idx] = current.copy(pinned = pinned) })
+    }
+
     companion object {
         val EMPTY: Lockfile = Lockfile()
     }
@@ -70,6 +92,17 @@ data class Lockfile(
  *   today's character_ref / style_bible, yielding a fresh generation. Empty for
  *   legacy entries written before this field existed; the regenerate tool skips
  *   those (it can't reconstruct what the agent originally asked for).
+ * @property pinned VISION §3.1 "产物可 pin" — user intent "this exact generation is
+ *   the hero shot, don't regenerate it even when downstream source changes". Set via
+ *   `pin_lockfile_entry`; cleared via `unpin_lockfile_entry`. When true:
+ *   - `gc_lockfile` policy sweeps skip the entry regardless of age/count verdict,
+ *   - `regenerate_stale_clips` skips every clip whose current lockfile entry is
+ *     pinned (reason `"pinned"`), leaving the clip stale-but-frozen until the user
+ *     unpins or removes the asset.
+ *   Pinned entries are still subject to `prune_lockfile` — an orphan entry (no
+ *   surviving asset) is dead weight regardless of intent, and the pin had no
+ *   artifact to protect anyway. Default `false` preserves the legacy shape; old
+ *   serialized lockfiles missing this field deserialize as unpinned.
  */
 @Serializable
 data class LockfileEntry(
@@ -80,4 +113,5 @@ data class LockfileEntry(
     val sourceBinding: Set<SourceNodeId> = emptySet(),
     val sourceContentHashes: Map<SourceNodeId, String> = emptyMap(),
     val baseInputs: JsonObject = JsonObject(emptyMap()),
+    val pinned: Boolean = false,
 )
