@@ -13,8 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **unify-project-query** — `core/tool/builtin/` 里已经有 127 个 builtin tool，其中 20+ 个是 `list_*` / `find_*` 专用变体（`list_tracks` / `list_transitions` / `list_timeline_clips` / `list_assets` / `list_clips_bound_to_asset` / `list_clips_for_source` / `find_unreferenced_assets` / `find_pinned_clips` / `find_stale_clips` …）。每个 LLM turn 都会把全部 spec 塞进 context，最近几个 commit 都在给这些工具加 `onlyX + sortBy + limit` 参数 —— 增长模式是"每个维度一个工具"而不是"少量 query 原语 + filter"。**方向：** 引入类 codebase grep 的 `project_query(select, filter, sort, limit)` 原语，吸收绝大多数纯只读的 list/find 工具；保留真正有副作用或聚合语义的（比如 `find_stale_clips` 背后是 DAG 推导而非纯 query）。Rubric §5.2 / §5.4。
-
 - **split-project-json-blob** — `SqlDelightProjectStore.mutate()` 每次都把整个 `Project`（`timeline` + `source` DAG + `lockfile.entries` + `renderCache` + `snapshots`）序列化写回一列。`add_clip` 一次调用 → 重新 encode 全部历史。`snapshots` 和 `lockfile.entries` 是 append-only 语义，跟 timeline 的热路径绑在一起没道理。**方向：** 把 `snapshots` 和 `lockfile.entries` 拆到独立 SQLDelight 表（按 projectId 外键），Project blob 只保留 `id / timeline / assets / source / outputProfile / renderCache` 等"每次都会整读整写"的字段。`ProjectStore.mutate` 签名保持不变，内部读写分发到两张表。Rubric §5.3 / §3.4「可版本化 / 可 diff」。
 
 - **unbound-clip-stale-semantics** — `ProjectStaleness.staleClips()` 里 `sourceBinding.isEmpty() → 恒 stale` —— 手工 clip 被标成 "永远 stale"，但又无法 `regenerate_stale_clips`（它们没有 `baseInputs` 可以重放），stale 信号被污染。小白路径尤其不友好。**方向：** 要么语义翻转为 "unbound → 恒 fresh（用户明示放弃增量）"，要么引入三态 `Fresh / Stale / Unknown`，让 UI 和 `regenerate_stale_clips` 区分"真 stale"和"无法判断"。写 decision 时明确选择背后的权衡。Rubric §5.3 / §5.5。
