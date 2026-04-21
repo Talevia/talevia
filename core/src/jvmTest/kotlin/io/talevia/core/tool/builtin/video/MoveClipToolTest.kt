@@ -83,7 +83,9 @@ class MoveClipToolTest {
         // Move c1 to start at 9s — should land after c3 in track order.
         val out = rig.tool.execute(MoveClipTool.Input("p", "c1", 9.0), rig.ctx)
         assertEquals("c1", out.data.clipId)
-        assertEquals("v1", out.data.trackId)
+        assertEquals("v1", out.data.fromTrackId)
+        assertEquals("v1", out.data.toTrackId)
+        assertEquals(false, out.data.changedTrack)
         assertEquals(0.0, out.data.oldStartSeconds)
         assertEquals(9.0, out.data.newStartSeconds)
 
@@ -192,6 +194,134 @@ class MoveClipToolTest {
         // Original position untouched.
         val refreshed = rig.store.get(rig.projectId)!!
         assertEquals(3.seconds, refreshed.timeline.tracks.single().clips.single().timeRange.start)
+    }
+
+    @Test fun crossTrackMovePreservesTime() = runTest {
+        val v = videoClip("c1", 2.seconds, 5.seconds)
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(
+                    tracks = listOf(
+                        Track.Video(TrackId("v1"), listOf(v)),
+                        Track.Video(TrackId("v2")),
+                    ),
+                ),
+            ),
+        )
+        val out = rig.tool.execute(
+            MoveClipTool.Input(projectId = "p", clipId = "c1", toTrackId = "v2"),
+            rig.ctx,
+        )
+        assertEquals("v1", out.data.fromTrackId)
+        assertEquals("v2", out.data.toTrackId)
+        assertEquals(true, out.data.changedTrack)
+        assertEquals(2.0, out.data.oldStartSeconds)
+        assertEquals(2.0, out.data.newStartSeconds)
+        val refreshed = rig.store.get(rig.projectId)!!
+        val src = refreshed.timeline.tracks.first { it.id.value == "v1" }.clips
+        val dst = refreshed.timeline.tracks.first { it.id.value == "v2" }.clips
+        assertTrue(src.isEmpty(), "source track emptied")
+        assertEquals(1, dst.size)
+        assertEquals(2.seconds, dst.single().timeRange.start)
+    }
+
+    @Test fun crossTrackMoveWithRepositionShiftsTime() = runTest {
+        val v = videoClip("c1", 1.seconds, 5.seconds)
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(
+                    tracks = listOf(
+                        Track.Video(TrackId("v1"), listOf(v)),
+                        Track.Video(TrackId("v2")),
+                    ),
+                ),
+            ),
+        )
+        rig.tool.execute(
+            MoveClipTool.Input(projectId = "p", clipId = "c1", timelineStartSeconds = 10.0, toTrackId = "v2"),
+            rig.ctx,
+        )
+        val dst = rig.store.get(rig.projectId)!!.timeline.tracks.first { it.id.value == "v2" }.clips
+        assertEquals(10.seconds, dst.single().timeRange.start)
+    }
+
+    @Test fun crossTrackKindMismatchFailsLoud() = runTest {
+        val v = videoClip("c1", Duration.ZERO, 3.seconds)
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(
+                    tracks = listOf(
+                        Track.Video(TrackId("v1"), listOf(v)),
+                        Track.Audio(TrackId("a1")),
+                    ),
+                ),
+            ),
+        )
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                MoveClipTool.Input(projectId = "p", clipId = "c1", toTrackId = "a1"),
+                rig.ctx,
+            )
+        }
+        assertTrue("video clip onto audio track" in ex.message!!, ex.message)
+        // Clip untouched on failure.
+        val refreshed = rig.store.get(rig.projectId)!!
+        val src = refreshed.timeline.tracks.first { it.id.value == "v1" }.clips
+        assertEquals(1, src.size)
+    }
+
+    @Test fun unknownTargetTrackFailsLoud() = runTest {
+        val v = videoClip("c1", Duration.ZERO, 3.seconds)
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(v)))),
+            ),
+        )
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                MoveClipTool.Input(projectId = "p", clipId = "c1", toTrackId = "nope"),
+                rig.ctx,
+            )
+        }
+        assertTrue("nope" in ex.message!!, ex.message)
+    }
+
+    @Test fun toTrackIdEqualToCurrentIsSameTrackPath() = runTest {
+        // toTrackId == current track should NOT fail (unified tool is lenient)
+        // and should exercise the same-track path.
+        val v = videoClip("c1", 2.seconds, 3.seconds)
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(v)))),
+            ),
+        )
+        val out = rig.tool.execute(
+            MoveClipTool.Input(projectId = "p", clipId = "c1", timelineStartSeconds = 5.0, toTrackId = "v1"),
+            rig.ctx,
+        )
+        assertEquals("v1", out.data.fromTrackId)
+        assertEquals("v1", out.data.toTrackId)
+        assertEquals(false, out.data.changedTrack)
+        assertEquals(5.0, out.data.newStartSeconds)
+    }
+
+    @Test fun emptyInputFailsLoud() = runTest {
+        val v = videoClip("c1", Duration.ZERO, 3.seconds)
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(v)))),
+            ),
+        )
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(MoveClipTool.Input(projectId = "p", clipId = "c1"), rig.ctx)
+        }
+        assertTrue("at least one of" in ex.message!!, ex.message)
     }
 
     @Test fun emitsTimelineSnapshotForRevert() = runTest {

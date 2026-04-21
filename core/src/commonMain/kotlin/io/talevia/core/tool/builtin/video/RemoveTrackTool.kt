@@ -39,7 +39,7 @@ import kotlin.time.Duration
  * `force=true` or remove clips first. Empty tracks drop cleanly either way.
  *
  * `Timeline.duration` is recomputed from the remaining clips' `timeRange.end` —
- * matching the `AddClipTool` / `MoveClipToTrackTool` / `TrimClipTool` convention
+ * matching the `AddClipTool` / `MoveClipTool` / `TrimClipTool` convention
  * — so dropping the track that held the tail clip shrinks the reported duration.
  *
  * Permission tier matches `clear_timeline` (`project.destructive`). Even the

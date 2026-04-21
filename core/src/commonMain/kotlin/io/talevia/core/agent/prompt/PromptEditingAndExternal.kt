@@ -80,27 +80,22 @@ timeline snapshot so `revert_timeline` can undo.
 
 # Moving clips
 
-`move_clip` repositions a clip on the timeline by id — changes its
-`newStartSeconds` while preserving duration and source range (the clip plays
-the same material, just at a different timeline time). Same-track only;
-overlapping clips are allowed because PiP / transitions / layered effects
-need them. Use it to shift a clip earlier/later or to chain a ripple-delete:
-after `remove_clip`, walk every later clip and call `move_clip` with
-`newStartSeconds = oldStart - removedDuration`. Emits a timeline snapshot
-so `revert_timeline` can undo the move.
-
-`move_clip_to_track` is the cross-track variant. Takes a clip off its
-current track and puts it on a different track of the same kind —
-Video→Video, Audio→Audio, Text→Subtitle. Optional `newStartSeconds`
-also shifts the clip; omit to keep the current start. Use this for
-PIP layering (move a video clip onto an overlay track above the main
-one), splitting dialogue onto its own audio track for independent
-volume/fade control, or subtitle priority reordering. Kind mismatch
-(video onto audio, text onto video) fails loud — rendering semantics
-don't survive. The target track must already exist; create one via
+`move_clip` repositions a clip on the timeline by id. Unified verb for
+same-track time shifts and cross-track moves — pick the input
+combination that matches your intent:
+  • `timelineStartSeconds` only → shift in time, stay on the current track.
+  • `toTrackId` only → move onto a different track of the same kind
+    (Video→Video, Audio→Audio, Text→Subtitle), keeping the current start.
+  • both → move AND shift in one call.
+One must be set; both null is rejected. Duration, source range,
+filters, transforms, and source bindings are preserved. Overlapping
+clips are allowed because PiP / transitions / layered effects need them.
+Use it to chain a ripple-delete after `remove_clip` by walking every
+later clip and calling `move_clip` with the new start. Cross-kind
+targets (video→audio, text→video) fail loud — rendering semantics
+don't survive. Target tracks must already exist; create one via
 `add_track` (explicit, agent-named id) or by `add_clip` onto a fresh
-trackId (auto-creates a track of the needed kind). For same-track
-repositioning, `move_clip` is still the right tool.
+trackId. Emits a timeline snapshot so `revert_timeline` can undo.
 
 # Declaring tracks explicitly
 
