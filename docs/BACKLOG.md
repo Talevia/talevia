@@ -21,8 +21,6 @@
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
 
-- **session-status-snapshot-query** — 当前 Agent 状态只通过 `BusEvent.AgentRunStateChanged` 流式广播；新 subscriber（UI 冷启动、新进程 attach）拿不到当前态。**方向：** 让 `Agent` 维护 per-session `lastState: Map<SessionId, AgentRunState>`（每次 publish 时更新）+ 暴露 `Agent.currentState(sessionId): AgentRunState?`；新增 `session_query(select=status, sessionId=X)` 让 LLM / UI 都能 snapshot 当前态。Rubric §5.4。
-
 - **debt-merge-move-clip-pair** — `MoveClipTool` + `MoveClipToTrackTool` 一对 —— 前者 same-track 移动、后者跨 track。典型 §3a.2 singular/variant 分裂。**方向：** 合并为 `move_clip(clipId, toTrackId?: String, timelineStartSeconds?: Double)`：`toTrackId` null = 原 track 内移动，非 null = 跨 track；`timelineStartSeconds` null = 保持相对位置。Rubric 外 / §R.5.4。
 
 - **debt-merge-apply-filter-pair** — `ApplyFilterTool` + `ApplyFilterToClipsTool`（单 clip vs 多 clip 批量）同样是 §3a.2 单/批分裂。**方向：** 合并为 `apply_filter(clipIds: List<String>, filter: ...)`，单 clip 传一元素 list 即可。Rubric 外 / §R.5.4。
