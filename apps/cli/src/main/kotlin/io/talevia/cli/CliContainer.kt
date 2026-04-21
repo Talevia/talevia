@@ -391,6 +391,13 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
             .build()
     }
 
+    init {
+        // Tools that depend on the ProviderRegistry land after providers
+        // is initialised — the property-initialiser ordering puts them
+        // past the main `tools` block.
+        tools.register(io.talevia.core.tool.builtin.provider.ListProvidersTool(providers))
+    }
+
     fun newAgent(): Agent? {
         val provider = providers.default ?: return null
         return Agent(

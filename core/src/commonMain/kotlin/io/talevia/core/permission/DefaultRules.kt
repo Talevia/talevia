@@ -36,6 +36,9 @@ object DefaultPermissionRuleset {
         // session row + every cascaded message and part. No un-delete lane.
         // Matches `project.destructive` — default ASK.
         PermissionRule(permission = "session.destructive", pattern = "*", action = PermissionAction.ASK),
+        // Provider introspection (list_providers) — pure local container state,
+        // no external call. Silent default matches the other `*.read` keywords.
+        PermissionRule(permission = "provider.read", pattern = "*", action = PermissionAction.ALLOW),
 
         // Side-effectful — always confirm
         PermissionRule(permission = "media.export.write", pattern = "*", action = PermissionAction.ASK),

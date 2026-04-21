@@ -274,6 +274,10 @@ class AndroidAppContainer(context: Context) {
         })
         .build()
 
+    init {
+        tools.register(io.talevia.core.tool.builtin.provider.ListProvidersTool(providers))
+    }
+
     private val agents = mutableMapOf<String, Agent>()
 
     fun agentFor(providerId: String): Agent? {

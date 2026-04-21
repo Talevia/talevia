@@ -457,6 +457,10 @@ class ServerContainer(
     val providers: ProviderRegistry =
         providerRegistryOverride ?: ProviderRegistry.Builder().addEnv(httpClient, env).build()
 
+    init {
+        tools.register(io.talevia.core.tool.builtin.provider.ListProvidersTool(providers))
+    }
+
     /** Counter registry scraped by GET /metrics. See [EventBusMetricsSink]. */
     val metrics: MetricsRegistry = MetricsRegistry()
     val metricsSink: EventBusMetricsSink = EventBusMetricsSink(bus, metrics)

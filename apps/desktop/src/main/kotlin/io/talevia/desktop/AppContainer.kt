@@ -430,6 +430,10 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
             .build()
     }
 
+    init {
+        tools.register(io.talevia.core.tool.builtin.provider.ListProvidersTool(providers))
+    }
+
     /**
      * Build a new Agent if at least one provider is configured, else null —
      * the UI uses this to decide whether to show the chat pane or a

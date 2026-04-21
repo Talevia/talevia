@@ -173,5 +173,8 @@ final class AppContainer {
 
         self.httpClient = createIosHttpClient()
         self.providers = buildIosProviderRegistry(httpClient: self.httpClient)
+
+        // Provider-dependent tools land after providers is initialised.
+        registry.register(tool: ListProvidersTool(providers: self.providers))
     }
 }
