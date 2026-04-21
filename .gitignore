@@ -28,10 +28,11 @@ Thumbs.db
 
 .worktrees/
 
-# Claude Code: ignore local state but keep team-shared settings + hooks
+# Claude Code: ignore local state but keep team-shared settings + hooks + skills
 .claude/*
 !.claude/settings.json
 !.claude/hooks/
+!.claude/skills/
 
 # Logs
 *.log
