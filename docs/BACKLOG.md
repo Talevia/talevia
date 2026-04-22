@@ -19,10 +19,6 @@
 
 ## P2 — 记债 / 观望
 
-- **copy-source-node-across-projects** — `export_source_node` + `import_source_node` 已经存在，但跨 project 复用一个 character_ref / style_bible 要两步手工。**方向：** 新增 `copy_source_node(fromProjectId, sourceNodeId, toProjectId)` 便利 wrapper，或把 `import_source_node` 扩展为从另一个项目拉取（带 `fromProject: String?`）。Rubric §5.1。
-
-- **lockfile-history-explorer** — `project_query(select=lockfile_entries)` 可以列条目，但不能按"asset 产出时间线"或"同一 source node 的多次 generation history"筛。**方向：** 扩展 `lockfile_entries` select 支持 `groupBy="sourceNode"` 或 `sinceEpochMs` 过滤；给 UI 做一个"这个角色被生成过 5 次"的 timeline。Rubric §5.4 debug。
-
 - **cross-project-source-similarity** — §5.1 "跨 project 复用"：当前用户有 10 个 project，想找"之前做过的类似 character_ref"没有原语，只能手动 grep。**方向：** `search_source_nodes` 已有 body 内容 lookup（`2026-04-21-search-source-nodes-body-content-lookup.md`），扩展为 `search_source_nodes(scope="all_projects", kind="character_ref", query="cyberpunk")` 返回 `(projectId, nodeId, score)`。Rubric §5.1。
 
 - **asset-proxy-generation** — `MediaAsset.proxies` 已有 `ProxyPurpose.THUMBNAIL / LOW_RES / AUDIO_WAVEFORM` 的数据形，但没有自动生成 proxy 的 ingestion path。UI 对 4K 视频 asset 要等原片 decode 才能显示缩略图。**方向：** `ImportMediaTool` 成功后异步 dispatch 一个 `generate_proxies` job（ffmpeg -ss 取中点帧 + 缩放）填 `proxies` 列表。Rubric §5.3 性能。
