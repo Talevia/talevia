@@ -55,6 +55,7 @@ import io.talevia.core.tool.builtin.session.ArchiveSessionTool
 import io.talevia.core.tool.builtin.session.DeleteSessionTool
 import io.talevia.core.tool.builtin.session.DescribeMessageTool
 import io.talevia.core.tool.builtin.session.DescribeSessionTool
+import io.talevia.core.tool.builtin.session.ExportSessionTool
 import io.talevia.core.tool.builtin.session.EstimateSessionTokensTool
 import io.talevia.core.tool.builtin.session.ForkSessionTool
 import io.talevia.core.tool.builtin.session.ReadPartTool
@@ -152,6 +153,7 @@ class AndroidAppContainer(context: Context) {
         register(TodoWriteTool())
         register(SessionQueryTool(sessions, agentStates))
         register(DescribeSessionTool(sessions))
+        register(ExportSessionTool(sessions))
         register(EstimateSessionTokensTool(sessions))
         register(DescribeMessageTool(sessions))
         register(ForkSessionTool(sessions))
