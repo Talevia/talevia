@@ -2,8 +2,12 @@ package io.talevia.core.tool.builtin.project
 
 import io.talevia.core.ProjectId
 import io.talevia.core.ProjectSnapshotId
+import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStore
+import io.talevia.core.domain.Resolution
+import io.talevia.core.domain.TimeRange
+import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
@@ -17,6 +21,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
+import kotlin.time.Duration
+import kotlin.time.Duration.Companion.seconds
 
 /**
  * Branch a project into a new one (VISION §3.4 — "可分支").
@@ -52,6 +58,43 @@ class ForkProjectTool(
          * must exist on the source project; we fail loudly otherwise.
          */
         val snapshotId: String? = null,
+        /**
+         * Optional variant spec — when set, applies a post-fork reshape to
+         * the forked project's timeline + output profile. Used by
+         * VISION §6 "30s / 竖版 variant" flows: instead of
+         * `fork + set_output_profile + trim_clips`, the caller passes a
+         * `variantSpec` and the tool does the reshape in one step.
+         * `null` → verbatim fork (no reshape, identical to pre-variant
+         * behavior).
+         */
+        val variantSpec: VariantSpec? = null,
+    )
+
+    /**
+     * Bounded set of post-fork reshape operations. Intentionally narrow:
+     * anything more invasive (re-binding AIGC nodes, re-running TTS in a
+     * different language) should stay in specialised tools because it
+     * needs provider calls / LLM reasoning. This spec covers what can be
+     * done as a pure in-memory transform.
+     */
+    @Serializable data class VariantSpec(
+        /**
+         * Target aspect ratio. Accepted presets (case-insensitive):
+         * `"16:9"` (1920x1080), `"9:16"` (1080x1920), `"1:1"` (1080x1080),
+         * `"4:5"` (1080x1350), `"21:9"` (2520x1080). Each preset sets
+         * both `outputProfile.resolution` and `timeline.resolution`.
+         * Engines render at the new aspect — per-clip transforms stay
+         * untouched; the caller is expected to follow up with
+         * re-framing tools if clips need per-clip reposition.
+         */
+        val aspectRatio: String? = null,
+        /**
+         * Cap the timeline at this many seconds. Clips starting at or
+         * after the cap are dropped; clips straddling the cap get
+         * truncated in both their timeline range and their source
+         * range. Must be `> 0` when set.
+         */
+        val durationSecondsMax: Double? = null,
     )
 
     @Serializable data class Output(
@@ -61,6 +104,15 @@ class ForkProjectTool(
         val branchedFromSnapshotId: String?,
         val clipCount: Int,
         val trackCount: Int,
+        /** Echo of the variant spec that was applied (omitted when null). */
+        val appliedVariantSpec: VariantSpec? = null,
+        /** Final timeline resolution after aspect reframe (null when no reshape). */
+        val variantResolutionWidth: Int? = null,
+        val variantResolutionHeight: Int? = null,
+        /** Number of clips dropped by `durationSecondsMax` trimming. */
+        val clipsDroppedByTrim: Int = 0,
+        /** Number of clips truncated by `durationSecondsMax` trimming. */
+        val clipsTruncatedByTrim: Int = 0,
     )
 
     override val id: String = "fork_project"
@@ -70,7 +122,12 @@ class ForkProjectTool(
             "from a previously-saved snapshot instead. The new project has a fresh id, an empty " +
             "snapshots list, and otherwise inherits everything (timeline, source, lockfile, " +
             "render cache, assets, output profile). Asset bytes are not duplicated — both " +
-            "projects reference the same AssetIds in shared media storage."
+            "projects reference the same AssetIds in shared media storage. " +
+            "Pass variantSpec={aspectRatio?, durationSecondsMax?} to reshape the fork in one " +
+            "step (VISION §6 \"30s / vertical variant\"): aspectRatio remaps resolution " +
+            "(presets: 16:9, 9:16, 1:1, 4:5, 21:9); durationSecondsMax caps the timeline (drops " +
+            "tail clips, truncates straddlers). The fork's parentProjectId points at the source " +
+            "so variants form a lineage."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.write")
@@ -93,6 +150,29 @@ class ForkProjectTool(
                     "description",
                     "Optional snapshot to fork from; defaults to the source project's current state.",
                 )
+            }
+            putJsonObject("variantSpec") {
+                put("type", "object")
+                put(
+                    "description",
+                    "Optional reshape spec. Set fields trigger post-fork transforms: aspectRatio " +
+                        "remaps resolution (16:9 / 9:16 / 1:1 / 4:5 / 21:9); durationSecondsMax caps " +
+                        "the timeline at that many seconds.",
+                )
+                putJsonObject("properties") {
+                    putJsonObject("aspectRatio") {
+                        put("type", "string")
+                        put(
+                            "description",
+                            "Target aspect preset: 16:9, 9:16, 1:1, 4:5, or 21:9 (case-insensitive).",
+                        )
+                    }
+                    putJsonObject("durationSecondsMax") {
+                        put("type", "number")
+                        put("description", "Cap the timeline at this many seconds (must be > 0).")
+                    }
+                }
+                put("additionalProperties", false)
             }
         }
         put(
@@ -126,9 +206,16 @@ class ForkProjectTool(
             "project ${newPid.value} already exists; pick a different newProjectId or call list_projects to find an unused id"
         }
 
-        // Fresh id, empty snapshots list. Everything else carries over from the
-        // chosen payload (current state or a captured snapshot).
-        val forked = payload.copy(id = newPid, snapshots = emptyList())
+        // Fresh id, empty snapshots list, parent pointer at the source.
+        // Everything else carries over from the chosen payload (current state
+        // or a captured snapshot).
+        val baseFork = payload.copy(
+            id = newPid,
+            snapshots = emptyList(),
+            parentProjectId = sourcePid,
+        )
+        val reshape = input.variantSpec?.let { spec -> applyVariantSpec(baseFork, spec) }
+        val forked = reshape?.project ?: baseFork
         projects.upsert(input.newTitle, forked)
 
         val clipCount = forked.timeline.tracks.sumOf { it.clips.size }
@@ -140,14 +227,135 @@ class ForkProjectTool(
             branchedFromSnapshotId = input.snapshotId,
             clipCount = clipCount,
             trackCount = trackCount,
+            appliedVariantSpec = input.variantSpec,
+            variantResolutionWidth = reshape?.project?.timeline?.resolution?.width
+                ?.takeIf { input.variantSpec?.aspectRatio != null },
+            variantResolutionHeight = reshape?.project?.timeline?.resolution?.height
+                ?.takeIf { input.variantSpec?.aspectRatio != null },
+            clipsDroppedByTrim = reshape?.clipsDropped ?: 0,
+            clipsTruncatedByTrim = reshape?.clipsTruncated ?: 0,
         )
         val from = input.snapshotId?.let { "snapshot $it" } ?: "current state"
+        val variantNote = reshape?.let { r ->
+            buildString {
+                append(", variantSpec applied (")
+                val parts = mutableListOf<String>()
+                input.variantSpec?.aspectRatio?.let {
+                    parts += "aspect=$it → ${forked.timeline.resolution.width}x${forked.timeline.resolution.height}"
+                }
+                input.variantSpec?.durationSecondsMax?.let {
+                    parts += "duration≤${it}s (dropped ${r.clipsDropped}, truncated ${r.clipsTruncated})"
+                }
+                append(parts.joinToString(", "))
+                append(")")
+            }
+        }.orEmpty()
         return ToolResult(
             title = "fork project ${input.newTitle}",
             outputForLlm = "Forked project ${sourcePid.value} → ${newPid.value} " +
-                "(\"${input.newTitle}\", from $from, $clipCount clip(s), $trackCount track(s)). " +
+                "(\"${input.newTitle}\", from $from, $clipCount clip(s), $trackCount track(s)$variantNote). " +
                 "Pass projectId=${newPid.value} to subsequent tool calls on the fork.",
             data = out,
         )
+    }
+
+    private data class VariantReshape(val project: Project, val clipsDropped: Int, val clipsTruncated: Int)
+
+    /**
+     * Pure-data post-fork reshape. Splitting this out keeps `execute`
+     * short; also makes it obvious that the reshape does NOT touch the
+     * source DAG, lockfile, or render cache — render cache especially
+     * must stay: reshape invalidates memoised exports, but that's
+     * handled naturally because `Timeline.resolution` is part of the
+     * export cache key (see `RenderCache` logic in `ExportProjectTool`).
+     */
+    private fun applyVariantSpec(project: Project, spec: VariantSpec): VariantReshape {
+        var current = project
+        if (spec.aspectRatio != null) {
+            val target = resolveAspectPreset(spec.aspectRatio)
+            current = current.copy(
+                timeline = current.timeline.copy(resolution = target),
+                outputProfile = current.outputProfile.copy(resolution = target),
+            )
+        }
+        var dropped = 0
+        var truncated = 0
+        if (spec.durationSecondsMax != null) {
+            require(spec.durationSecondsMax > 0.0) {
+                "variantSpec.durationSecondsMax must be > 0 (got ${spec.durationSecondsMax})"
+            }
+            val cap: Duration = spec.durationSecondsMax.seconds
+            val trimmedTracks = current.timeline.tracks.map { track ->
+                val (newClips, d, t) = trimTrackClips(track.clips, cap)
+                dropped += d
+                truncated += t
+                withTrackClips(track, newClips)
+            }
+            val cappedDuration = minOf(current.timeline.duration, cap)
+            current = current.copy(
+                timeline = current.timeline.copy(
+                    tracks = trimmedTracks,
+                    duration = cappedDuration,
+                ),
+            )
+        }
+        return VariantReshape(current, dropped, truncated)
+    }
+
+    private fun resolveAspectPreset(aspect: String): Resolution = when (aspect.trim().lowercase()) {
+        "16:9" -> Resolution(1920, 1080)
+        "9:16" -> Resolution(1080, 1920)
+        "1:1" -> Resolution(1080, 1080)
+        "4:5" -> Resolution(1080, 1350)
+        "21:9" -> Resolution(2520, 1080)
+        else -> error(
+            "variantSpec.aspectRatio '$aspect' unknown; accepted presets: 16:9, 9:16, 1:1, 4:5, 21:9",
+        )
+    }
+
+    private fun trimTrackClips(clips: List<Clip>, cap: Duration): Triple<List<Clip>, Int, Int> {
+        var dropped = 0
+        var truncated = 0
+        val out = mutableListOf<Clip>()
+        for (clip in clips) {
+            val start = clip.timeRange.start
+            val end = clip.timeRange.end
+            if (start >= cap) {
+                dropped += 1
+                continue
+            }
+            if (end <= cap) {
+                out += clip
+                continue
+            }
+            // Straddler — truncate timeline range AND source range (same delta).
+            val newDuration = cap - start
+            val truncatedClip = applyDurationTrim(clip, newDuration)
+            out += truncatedClip
+            truncated += 1
+        }
+        return Triple(out, dropped, truncated)
+    }
+
+    private fun applyDurationTrim(clip: Clip, newDuration: Duration): Clip {
+        val newTimelineRange = TimeRange(clip.timeRange.start, newDuration)
+        return when (clip) {
+            is Clip.Video -> clip.copy(
+                timeRange = newTimelineRange,
+                sourceRange = TimeRange(clip.sourceRange.start, newDuration),
+            )
+            is Clip.Audio -> clip.copy(
+                timeRange = newTimelineRange,
+                sourceRange = TimeRange(clip.sourceRange.start, newDuration),
+            )
+            is Clip.Text -> clip.copy(timeRange = newTimelineRange)
+        }
+    }
+
+    private fun withTrackClips(track: Track, clips: List<Clip>): Track = when (track) {
+        is Track.Video -> track.copy(clips = clips)
+        is Track.Audio -> track.copy(clips = clips)
+        is Track.Subtitle -> track.copy(clips = clips)
+        is Track.Effect -> track.copy(clips = clips)
     }
 }

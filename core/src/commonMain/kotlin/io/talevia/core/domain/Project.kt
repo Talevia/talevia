@@ -14,6 +14,15 @@ data class Project(
     val source: Source = Source.EMPTY,
     val outputProfile: OutputProfile = OutputProfile.DEFAULT_1080P,
     /**
+     * Parent project this one was forked from, if any. Set when
+     * [io.talevia.core.tool.builtin.project.ForkProjectTool] runs — either the
+     * plain fork path or the `variantSpec` path that reshapes aspect /
+     * duration. Enables forward navigation ("show me all variants of project
+     * X") without threading a sibling table. Null for roots and pre-lineage
+     * blobs (serialisation default preserves backward compat — §3a #7).
+     */
+    val parentProjectId: ProjectId? = null,
+    /**
      * Per-project record of every AIGC production — the VISION §3.1 lockfile. Defaults
      * empty so pre-lockfile projects decode without migration. AIGC tools append a
      * [io.talevia.core.domain.lockfile.LockfileEntry] after each generation and check
