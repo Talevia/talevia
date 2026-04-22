@@ -19,7 +19,6 @@
 
 ## P2 — 记债 / 观望
 
-- **tool-call-provenance-in-lockfile** — `LockfileEntry` 记了 tool / input / sourceContentHashes，但不记是**哪条 Message** 触发的。审计 "这张 image 是在哪句 prompt 下生成的" 要回去 grep session parts。**方向：** `LockfileEntry.originatingMessageId: MessageId? = null`（default 向后兼容），AIGC 工具 `ctx.messageId` 填进去。Rubric §5.2。
 - **project-import-validator** — `ImportProjectFromJsonTool` 解析 JSON 直接 upsert，没校验 `Clip.assetId` / `Clip.sourceBinding` 指向的对象是不是都存在。坏 JSON 能导入一个"timeline 引用不存在的 source 节点"的项目，后面 `find_stale_clips` 才报警。**方向：** import 时跑一次跟 `ValidateProjectTool` 同口径的完整性校验，reject or warn on broken refs。Rubric §5.3。
 - **agent-interrupt-via-bus** — OpenCode 通过 bus 事件 trigger agent cancel（`session/prompt.ts` 的 abort 流）；我们的 Agent 支持 `Job.cancel()` 但没有"所有平台统一的取消路径"。长 provider stream 中途用户按 Ctrl+C，取消生效有多快？没有测试覆盖。**方向：** `BusEvent.SessionCancelled(sessionId)` + Agent 订阅 → 传到 provider stream 的 `cancel()`；加 E2E 测 "cancel 从发到生效 ≤ 500ms"。Rubric §5.4。
 
