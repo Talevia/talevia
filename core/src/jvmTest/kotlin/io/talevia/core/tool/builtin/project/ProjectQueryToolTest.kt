@@ -919,4 +919,144 @@ class ProjectQueryToolTest {
         assertEquals(2_000L, rows[1].updatedAtEpochMs)
         assertEquals(1_000L, rows[2].updatedAtEpochMs)
     }
+
+    // -------- single-row drill-down selects (absorbed describe_* tools) --------
+
+    @Test fun clipDrillDownReturnsKindSpecificFields() = runTest {
+        val (store, pid) = fixture()
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(projectId = pid.value, select = "clip", clipId = "c-1"),
+            ctx(),
+        ).data
+        assertEquals("clip", out.select)
+        assertEquals(1, out.total)
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(ProjectQueryTool.ClipDetailRow.serializer()),
+            out.rows,
+        )
+        val r = rows.single()
+        assertEquals("c-1", r.clipId)
+        assertEquals("v", r.trackId)
+        assertEquals("video", r.clipType)
+        assertEquals("v-used", r.assetId)
+        assertTrue("mei" in r.sourceBindingIds)
+    }
+
+    @Test fun clipDrillDownMissingClipFailsLoud() = runTest {
+        val (store, pid) = fixture()
+        val ex = assertFailsWith<IllegalStateException> {
+            ProjectQueryTool(store).execute(
+                ProjectQueryTool.Input(projectId = pid.value, select = "clip", clipId = "nope"),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("Clip nope not found"), ex.message)
+    }
+
+    @Test fun clipDrillDownRequiresClipId() = runTest {
+        val (store, pid) = fixture()
+        val ex = assertFailsWith<IllegalStateException> {
+            ProjectQueryTool(store).execute(
+                ProjectQueryTool.Input(projectId = pid.value, select = "clip"),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("requires clipId"), ex.message)
+    }
+
+    @Test fun clipIdOnOtherSelectFailsLoud() = runTest {
+        val (store, pid) = fixture()
+        val ex = assertFailsWith<IllegalStateException> {
+            ProjectQueryTool(store).execute(
+                ProjectQueryTool.Input(
+                    projectId = pid.value,
+                    select = "timeline_clips",
+                    clipId = "c-1",
+                ),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("clipId"), ex.message)
+    }
+
+    @Test fun lockfileEntryDrillDownReturnsFullProvenanceAndRefs() = runTest {
+        val (store, pid) = lockfileFixture()
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(
+                projectId = pid.value,
+                select = "lockfile_entry",
+                inputHash = "h-pinned",
+            ),
+            ctx(),
+        ).data
+        assertEquals("lockfile_entry", out.select)
+        assertEquals(1, out.total)
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(ProjectQueryTool.LockfileEntryDetailRow.serializer()),
+            out.rows,
+        )
+        val r = rows.single()
+        assertEquals("h-pinned", r.inputHash)
+        assertEquals("a-pinned", r.assetId)
+        assertTrue(r.pinned)
+        assertEquals("fake", r.provenance.providerId)
+        assertEquals("fake-model", r.provenance.modelId)
+        assertEquals(1, r.clipReferences.size)
+        assertEquals("c-pinned", r.clipReferences.single().clipId)
+        assertFalse(r.currentlyStale)
+    }
+
+    @Test fun lockfileEntryDrillDownMissingHashFailsLoud() = runTest {
+        val (store, pid) = lockfileFixture()
+        val ex = assertFailsWith<IllegalStateException> {
+            ProjectQueryTool(store).execute(
+                ProjectQueryTool.Input(
+                    projectId = pid.value,
+                    select = "lockfile_entry",
+                    inputHash = "h-does-not-exist",
+                ),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("not found"), ex.message)
+    }
+
+    @Test fun lockfileEntryDrillDownRequiresInputHash() = runTest {
+        val (store, pid) = lockfileFixture()
+        val ex = assertFailsWith<IllegalStateException> {
+            ProjectQueryTool(store).execute(
+                ProjectQueryTool.Input(projectId = pid.value, select = "lockfile_entry"),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("requires inputHash"), ex.message)
+    }
+
+    @Test fun projectMetadataReturnsSummaryAndBreakdowns() = runTest {
+        val (store, pid) = fixture()
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(projectId = pid.value, select = "project_metadata"),
+            ctx(),
+        ).data
+        assertEquals("project_metadata", out.select)
+        assertEquals(1, out.total)
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(ProjectQueryTool.ProjectMetadataRow.serializer()),
+            out.rows,
+        )
+        val r = rows.single()
+        assertEquals("demo", r.title)
+        assertEquals(4, r.trackCount)
+        // fixture: 1 video + 1 audio + 1 subtitle + 1 effect (empty).
+        assertEquals(1, r.tracksByKind["video"])
+        assertEquals(1, r.tracksByKind["audio"])
+        assertEquals(1, r.tracksByKind["subtitle"])
+        assertEquals(1, r.tracksByKind["effect"])
+        // fixture: c-1, c-2 video; c-3 audio; c-4 text.
+        assertEquals(4, r.clipCount)
+        assertEquals(2, r.clipsByKind["video"])
+        assertEquals(1, r.clipsByKind["audio"])
+        assertEquals(1, r.clipsByKind["text"])
+        assertTrue(r.summaryText.contains("'demo'"))
+    }
 }

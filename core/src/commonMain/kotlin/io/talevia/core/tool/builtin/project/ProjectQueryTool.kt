@@ -7,9 +7,12 @@ import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.query.runAssetsQuery
+import io.talevia.core.tool.builtin.project.query.runClipDetailQuery
 import io.talevia.core.tool.builtin.project.query.runClipsForAssetQuery
 import io.talevia.core.tool.builtin.project.query.runClipsForSourceQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileEntriesQuery
+import io.talevia.core.tool.builtin.project.query.runLockfileEntryDetailQuery
+import io.talevia.core.tool.builtin.project.query.runProjectMetadataQuery
 import io.talevia.core.tool.builtin.project.query.runTimelineClipsQuery
 import io.talevia.core.tool.builtin.project.query.runTracksQuery
 import io.talevia.core.tool.builtin.project.query.runTransitionsQuery
@@ -117,6 +120,12 @@ class ProjectQueryTool(
         // ---- clips_for_source filter (required for that select) ----
         /** Source node id to look up. Required for `select=clips_for_source`; rejected elsewhere. */
         val sourceNodeId: String? = null,
+        // ---- clip drill-down (required for that select) ----
+        /** Clip id for drill-down. Required for `select=clip`; rejected elsewhere. */
+        val clipId: String? = null,
+        // ---- lockfile_entry drill-down (required for that select) ----
+        /** Lockfile entry inputHash. Required for `select=lockfile_entry`; rejected elsewhere. */
+        val inputHash: String? = null,
         // ---- common ----
         /** Sort key — interpretation depends on [select]. See [helpText]. */
         val sortBy: String? = null,
@@ -227,6 +236,133 @@ class ProjectQueryTool(
         val boundVia: List<String> = emptyList(),
     )
 
+    // -----------------------------------------------------------------
+    // Single-row drill-down rows — folded from the deleted describe_*
+    // tools (debt-consolidate-project-describe-queries cycle).
+
+    @Serializable data class ClipDetailTimeRange(
+        val startMs: Long,
+        val durationMs: Long,
+        val endMs: Long,
+    )
+
+    @Serializable data class ClipDetailLockfileRef(
+        val inputHash: String,
+        val toolId: String,
+        val pinned: Boolean,
+        val currentlyStale: Boolean,
+        val driftedSourceNodeIds: List<String> = emptyList(),
+    )
+
+    /**
+     * `select=clip` — single-row drill-down replacing the deleted
+     * `describe_clip` tool. Returns a rich Clip descriptor (timeRange,
+     * sourceRange, transforms, sourceBinding, per-kind fields, derived
+     * lockfile ref).
+     */
+    @Serializable data class ClipDetailRow(
+        val clipId: String,
+        val trackId: String,
+        /** `"video"` | `"audio"` | `"text"`. */
+        val clipType: String,
+        val timeRange: ClipDetailTimeRange,
+        val sourceRange: ClipDetailTimeRange? = null,
+        val sourceBindingIds: List<String> = emptyList(),
+        val transforms: List<io.talevia.core.domain.Transform> = emptyList(),
+        val assetId: String? = null,
+        val filters: List<io.talevia.core.domain.Filter>? = null,
+        val volume: Float? = null,
+        val fadeInSeconds: Float? = null,
+        val fadeOutSeconds: Float? = null,
+        val text: String? = null,
+        val textStyle: io.talevia.core.domain.TextStyle? = null,
+        val lockfile: ClipDetailLockfileRef? = null,
+    )
+
+    @Serializable data class LockfileEntryProvenance(
+        val providerId: String,
+        val modelId: String,
+        val modelVersion: String? = null,
+        val seed: Long,
+        val createdAtEpochMs: Long,
+    )
+
+    @Serializable data class LockfileEntryDriftedNode(
+        val nodeId: String,
+        val snapshotContentHash: String,
+        /** Null when the bound node has since been deleted from the project. */
+        val currentContentHash: String? = null,
+    )
+
+    @Serializable data class LockfileEntryClipRef(
+        val clipId: String,
+        val trackId: String,
+        val clipType: String,
+    )
+
+    /**
+     * `select=lockfile_entry` — single-row drill-down replacing the
+     * deleted `describe_lockfile_entry` tool. Looks up by `inputHash`;
+     * returns full provenance, source-binding snapshot / drift state,
+     * baseInputs, clip references on the current timeline.
+     */
+    @Serializable data class LockfileEntryDetailRow(
+        val inputHash: String,
+        val toolId: String,
+        val assetId: String,
+        val pinned: Boolean,
+        val provenance: LockfileEntryProvenance,
+        val sourceBindingIds: List<String> = emptyList(),
+        val sourceContentHashes: Map<String, String> = emptyMap(),
+        val baseInputs: JsonObject,
+        val baseInputsEmpty: Boolean,
+        val currentlyStale: Boolean,
+        val driftedNodes: List<LockfileEntryDriftedNode> = emptyList(),
+        val clipReferences: List<LockfileEntryClipRef> = emptyList(),
+    )
+
+    @Serializable data class ProjectMetadataProfile(
+        val resolutionWidth: Int,
+        val resolutionHeight: Int,
+        val frameRate: Int,
+        val videoCodec: String,
+        val audioCodec: String,
+    )
+
+    @Serializable data class ProjectMetadataSnapshotSummary(
+        val id: String,
+        val label: String,
+        val capturedAtEpochMs: Long,
+    )
+
+    /**
+     * `select=project_metadata` — single-row drill-down replacing the
+     * deleted `describe_project` tool. Compact aggregate across every
+     * axis: timeline, tracks-by-kind, clips-by-kind, source-nodes-by-
+     * kind, lockfile-by-tool, snapshots, plus a pre-rendered
+     * `summaryText` the LLM can quote verbatim.
+     */
+    @Serializable data class ProjectMetadataRow(
+        val title: String,
+        val createdAtEpochMs: Long,
+        val updatedAtEpochMs: Long,
+        val timelineDurationSeconds: Double,
+        val trackCount: Int,
+        val tracksByKind: Map<String, Int>,
+        val clipCount: Int,
+        val clipsByKind: Map<String, Int>,
+        val assetCount: Int,
+        val sourceNodeCount: Int,
+        val sourceNodesByKind: Map<String, Int>,
+        val lockfileEntryCount: Int,
+        val lockfileByTool: Map<String, Int>,
+        val snapshotCount: Int,
+        val recentSnapshots: List<ProjectMetadataSnapshotSummary> = emptyList(),
+        val outputProfile: ProjectMetadataProfile? = null,
+        /** Pre-rendered ~300-char human summary, LLM-quotable verbatim. */
+        val summaryText: String,
+    )
+
     override val id: String = "project_query"
     override val helpText: String =
         "Unified read-only query over a project (replaces list_tracks / list_timeline_clips / " +
@@ -245,6 +381,13 @@ class ProjectQueryTool(
             "  • clips_for_asset — required: assetId. Every clip referencing the asset.\n" +
             "  • clips_for_source — required: sourceNodeId. Every clip bound to that source node " +
             "(directly or transitively).\n" +
+            "  • clip — required: clipId. Single-row drill-down replacing describe_clip " +
+            "(timeRange, sourceRange, transforms, per-kind fields, derived lockfile ref).\n" +
+            "  • lockfile_entry — required: inputHash. Single-row drill-down replacing " +
+            "describe_lockfile_entry (provenance, source-binding drift, baseInputs, clip refs).\n" +
+            "  • project_metadata — single-row drill-down replacing describe_project " +
+            "(compact aggregate across tracks / clips / source / lockfile / snapshots plus " +
+            "pre-rendered summaryText).\n" +
             "Common: limit (default 100, clamped 1..500), offset (default 0). Setting a filter " +
             "that doesn't apply to the chosen select fails loud so typos surface instead of silently " +
             "returning an empty list."
@@ -356,6 +499,20 @@ class ProjectQueryTool(
                     "Required for select=clips_for_source. Source node id to find bound clips for.",
                 )
             }
+            putJsonObject("clipId") {
+                put("type", "string")
+                put("description", "Required for select=clip. Clip id for drill-down.")
+            }
+            putJsonObject("inputHash") {
+                put(
+                    "type",
+                    "string",
+                )
+                put(
+                    "description",
+                    "Required for select=lockfile_entry. Lockfile entry inputHash for drill-down.",
+                )
+            }
             putJsonObject("sortBy") {
                 put("type", "string")
                 put(
@@ -405,6 +562,9 @@ class ProjectQueryTool(
             SELECT_LOCKFILE_ENTRIES -> runLockfileEntriesQuery(project, input, limit, offset)
             SELECT_CLIPS_FOR_ASSET -> runClipsForAssetQuery(project, input, limit, offset)
             SELECT_CLIPS_FOR_SOURCE -> runClipsForSourceQuery(project, input, limit, offset)
+            SELECT_CLIP -> runClipDetailQuery(project, input)
+            SELECT_LOCKFILE_ENTRY -> runLockfileEntryDetailQuery(project, input)
+            SELECT_PROJECT_METADATA -> runProjectMetadataQuery(project, projects, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -447,6 +607,12 @@ class ProjectQueryTool(
             if (select != SELECT_CLIPS_FOR_SOURCE && input.sourceNodeId != null) {
                 add("sourceNodeId (select=clips_for_source only)")
             }
+            if (select != SELECT_CLIP && input.clipId != null) {
+                add("clipId (select=clip only)")
+            }
+            if (select != SELECT_LOCKFILE_ENTRY && input.inputHash != null) {
+                add("inputHash (select=lockfile_entry only)")
+            }
         }
         if (misapplied.isNotEmpty()) {
             error(
@@ -464,10 +630,14 @@ class ProjectQueryTool(
         const val SELECT_LOCKFILE_ENTRIES = "lockfile_entries"
         const val SELECT_CLIPS_FOR_ASSET = "clips_for_asset"
         const val SELECT_CLIPS_FOR_SOURCE = "clips_for_source"
+        const val SELECT_CLIP = "clip"
+        const val SELECT_LOCKFILE_ENTRY = "lockfile_entry"
+        const val SELECT_PROJECT_METADATA = "project_metadata"
         private val ALL_SELECTS = setOf(
             SELECT_TRACKS, SELECT_TIMELINE_CLIPS, SELECT_ASSETS,
             SELECT_TRANSITIONS, SELECT_LOCKFILE_ENTRIES,
             SELECT_CLIPS_FOR_ASSET, SELECT_CLIPS_FOR_SOURCE,
+            SELECT_CLIP, SELECT_LOCKFILE_ENTRY, SELECT_PROJECT_METADATA,
         )
 
         private const val DEFAULT_LIMIT = 100

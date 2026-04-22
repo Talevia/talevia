@@ -65,9 +65,6 @@ import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
-import io.talevia.core.tool.builtin.project.DescribeClipTool
-import io.talevia.core.tool.builtin.project.DescribeLockfileEntryTool
-import io.talevia.core.tool.builtin.project.DescribeProjectTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.ExportProjectTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
@@ -319,17 +316,14 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(CreateProjectFromTemplateTool(projects))
         register(ListProjectsTool(projects))
         register(GetProjectStateTool(projects))
-        register(DescribeProjectTool(projects))
         register(DeleteProjectTool(projects))
         register(RenameProjectTool(projects))
         register(FindStaleClipsTool(projects))
         register(ProjectQueryTool(projects))
-        register(DescribeClipTool(projects))
         register(RemoveAssetTool(projects))
         register(SetOutputProfileTool(projects))
         register(ValidateProjectTool(projects))
         register(RegenerateStaleClipsTool(projects, this))
-        register(DescribeLockfileEntryTool(projects))
         register(PruneLockfileTool(projects))
         register(GcLockfileTool(projects))
         register(SetLockfileEntryPinnedTool(projects))
