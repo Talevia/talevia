@@ -19,8 +19,6 @@
 
 ## P2 — 记债 / 观望
 
-- **cross-project-source-similarity** — §5.1 "跨 project 复用"：当前用户有 10 个 project，想找"之前做过的类似 character_ref"没有原语，只能手动 grep。**方向：** `search_source_nodes` 已有 body 内容 lookup（`2026-04-21-search-source-nodes-body-content-lookup.md`），扩展为 `search_source_nodes(scope="all_projects", kind="character_ref", query="cyberpunk")` 返回 `(projectId, nodeId, score)`。Rubric §5.1。
-
 - **asset-proxy-generation** — `MediaAsset.proxies` 已有 `ProxyPurpose.THUMBNAIL / LOW_RES / AUDIO_WAVEFORM` 的数据形，但没有自动生成 proxy 的 ingestion path。UI 对 4K 视频 asset 要等原片 decode 才能显示缩略图。**方向：** `ImportMediaTool` 成功后异步 dispatch 一个 `generate_proxies` job（ffmpeg -ss 取中点帧 + 缩放）填 `proxies` 列表。Rubric §5.3 性能。
 
 - **debt-consolidate-video-remove-variants** — 配合 P1 的 `debt-consolidate-video-add-variants`：`RemoveClipTool` + `RemoveFilterTool` + `RemoveTrackTool` + `RemoveTransitionTool` 四件套。**方向：** 同 add 的判断，合为 `remove_from_timeline(target=...)` 或保留四件套并在 decision 说明。Rubric 外 / debt。
