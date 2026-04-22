@@ -16,7 +16,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **debt-split-project-query-tool** — `ProjectQueryTool.kt` 目前 638 行，R.5.3 500-800 强制 debt。之前的 split 只把 JSON schema 挪到 sibling（`ProjectQueryToolSchema.kt`），tool body 本身没拆。**方向：** 参照 `SessionQueryTool` 已经建立的模式（`session/query/CacheStatsQuery.kt` / `RunStateHistoryQuery.kt`），把每个 `SELECT_*` 分派到 `project/query/<select>.kt` sibling 文件，ProjectQueryTool 只留路由。Rubric §5.2 工具压缩。
 - **debt-split-export-tool** — `ExportTool.kt` 刚过 500 线（501 行）—— cycle 32 加了 progressive-export-preview 分支让它又胖了一点。500+ 不强制，但已经是第二次碰线。**方向：** `runWholeTimelineRender` / `runPerClipRender` 各自抽到 sibling `video/export/<...>.kt`；`ExportTool` 留 dispatch + 验证 + 返回组装。Rubric §5.2。
 - **debt-consolidate-lockfile-maintenance-tools** — `PruneLockfileTool` + `GcLockfileTool` 两个 tool 同用 `LockfileEntry` 做清理，语义重叠（prune = by assetId；gc = by criterion）。LLM 每 turn 多付两份 spec。**方向：** 按 add/remove/apply 变体的先例评估：合并成一件 `maintain_lockfile(action="prune"|"gc"|"all", ...)` 还是按 divergent Input 保留两件套 —— 先跑 §3a 的 4 条结构检查再定。Rubric §5.2。
 - **source-graph-export-dot** — Source DAG 能查能搜能 diff 单节点，但没办法 "一眼看到整张图"。Expert path 调试 "为什么这条 character_ref 没传到那条 clip" 要 grep+脑补。**方向：** 新 `export_source_graph_dot(projectId) -> String` 工具（或 `source_query(select=dot)`）吐一张 Graphviz DOT，外部 `dot -Tsvg` 就能渲染。不给 KMP 加 graphviz 依赖，只生成文本。Rubric §5.1。
