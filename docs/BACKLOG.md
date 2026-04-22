@@ -23,8 +23,6 @@
 
 ## P2 — 记债 / 观望
 
-- **debt-split-create-project-from-template** — `CreateProjectFromTemplateTool.kt` 416 行，接近 500 行阈值（§R.5.3 preemptive）。5 个 genre 模板（narrative / vlog / ad / musicmv / tutorial）的 seed payload 都塞在同一个文件里，新加 genre 要在中间插一大段。**方向：** 把每个 genre template 提取到 `project/template/<genre>.kt`，主文件变 dispatcher。Rubric 外 / §R.5.3。
-
 - **describe-project-fold-snapshots** — `describe_project` 输出含 `snapshotCount: Int` 但不含最近 snapshot 列表；UI 要知道 "最近 3 个保存点" 还得再 call `project_query(select=project_snapshots)`（或现有的 `list_project_snapshots`）。**方向：** 给 `describe_project.Output` 加 `recentSnapshots: List<SnapshotSummary>` 字段（cap 3-5 条，按 capturedAt DESC），UI 一次读到。Rubric §5.4。
 
 - **agent-retry-bus-observable** — `BusEvent.AgentRetryScheduled` 已发出，但 `MetricsRegistry` 没有 per-reason counter（overload / rate_limit / http_5xx 分开计数）。ops dashboard 只能看到总 retry 数。**方向：** 给 `Metrics.counterName` 加 `agent.retry.count{reason=<slug>}` 分类 counter，`/metrics` Prometheus 端点就能按 reason label 查图。Rubric §5.4。
