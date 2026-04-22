@@ -310,7 +310,11 @@ class Agent(
             // Re-read the session every step so a `switch_project` invoked in the
             // previous turn is reflected in the next turn's system prompt and in
             // the ToolContext seen by freshly dispatched tools (VISION §5.4).
-            val currentProjectId = store.getSession(input.sessionId)?.currentProjectId
+            // Same re-read captures `spendCapCents` so a mid-run
+            // `set_session_spend_cap` takes effect on the very next tool dispatch.
+            val sessionSnapshot = store.getSession(input.sessionId)
+            val currentProjectId = sessionSnapshot?.currentProjectId
+            val spendCapCents = sessionSnapshot?.spendCapCents
 
             var providerIndex = 0
             var attempt = 0
@@ -329,7 +333,7 @@ class Agent(
                 handle.currentAssistantId = asstMsg.id
 
                 turnResult = executor.streamTurn(
-                    asstMsg, history, input, currentProjectId, providerIndex,
+                    asstMsg, history, input, currentProjectId, providerIndex, spendCapCents,
                 )
 
                 // Only retry when the turn failed and nothing useful was streamed.

@@ -54,6 +54,11 @@ object DefaultPermissionRuleset {
         PermissionRule(permission = "project.destructive", pattern = "*", action = PermissionAction.ASK),
         // AIGC providers incur external cost + seed-locked artifacts. Ask before running.
         PermissionRule(permission = "aigc.generate", pattern = "*", action = PermissionAction.ASK),
+        // Session spend-cap hit (VISION §5.2). ASK so the user has to confirm going over
+        // the limit they set; "Always" persists an override that disables the cap for the
+        // remainder of the session. Default ASK matches `aigc.generate` — both gate
+        // paid calls on explicit consent.
+        PermissionRule(permission = "aigc.budget", pattern = "*", action = PermissionAction.ASK),
         // ML enhancement (ASR / future upscale / colorize) uploads media to a third-party
         // provider. Ask the user the same way we ask for AIGC.
         PermissionRule(permission = "ml.transcribe", pattern = "*", action = PermissionAction.ASK),

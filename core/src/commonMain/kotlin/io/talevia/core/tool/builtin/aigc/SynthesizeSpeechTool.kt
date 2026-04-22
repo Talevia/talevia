@@ -162,6 +162,7 @@ class SynthesizeSpeechTool(
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        AigcBudgetGuard.enforce(id, projectStore, input.projectId?.let(::ProjectId), ctx)
         val folded = resolveVoice(input)
         val resolvedVoice = folded.voiceId ?: input.voice
 

@@ -146,6 +146,17 @@ class ToolContext(
      * for the one dispatch site that flips this.
      */
     val isReplay: Boolean = false,
+    /**
+     * Cents cap the session's AIGC spend should not exceed — snapshot of
+     * `Session.spendCapCents` at turn start, plumbed here so tools can
+     * enforce the gate without re-loading the session record per call.
+     * `null` = no cap (guard is a no-op). `0L` = "spend nothing"; positive
+     * Long = cents cap. See
+     * [AigcBudgetGuard][io.talevia.core.tool.builtin.aigc.AigcBudgetGuard].
+     * Defaulted to null so existing `ToolContext(…)` call sites (tests,
+     * one-off harnesses) keep compiling.
+     */
+    val spendCapCents: Long? = null,
 ) {
     /**
      * Resolve a project id for a tool that accepts an optional explicit
@@ -189,6 +200,7 @@ class ToolContext(
         currentProjectId = currentProjectId,
         publishEvent = publishEvent,
         isReplay = true,
+        spendCapCents = spendCapCents,
     )
 }
 

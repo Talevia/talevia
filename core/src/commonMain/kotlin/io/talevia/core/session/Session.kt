@@ -35,4 +35,19 @@ data class Session(
      * — serialization compat).
      */
     val currentProjectId: ProjectId? = null,
+    /**
+     * VISION §5.2 spend-budget guard — user-configured hard stop on AIGC
+     * cost in this session. Before every paid provider call an AIGC tool
+     * compares `project.lockfile` spend attributed to this session against
+     * [spendCapCents] and raises a `aigc.budget` permission ASK once the
+     * cumulative total meets or exceeds the cap. Flipped by
+     * `set_session_spend_cap`.
+     *
+     * **Three-state:** `null` = no cap (silent default; the agent runs
+     * without a spending guard, matching pre-cap behaviour). `0L` =
+     * "spend nothing" — every AIGC call will ASK. Positive Long = cents
+     * cap. Legacy sessions written before this field deserialize as null
+     * (default), preserving no-cap semantics.
+     */
+    val spendCapCents: Long? = null,
 )

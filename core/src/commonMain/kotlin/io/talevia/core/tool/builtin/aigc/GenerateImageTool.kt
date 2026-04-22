@@ -146,6 +146,7 @@ class GenerateImageTool(
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        AigcBudgetGuard.enforce(id, projectStore, input.projectId?.let(::ProjectId), ctx)
         val seed = AigcPipeline.ensureSeed(input.seed)
         val folded = resolveConsistency(input)
 

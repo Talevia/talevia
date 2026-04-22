@@ -139,6 +139,7 @@ class UpscaleAssetTool(
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         require(input.scale in 2..8) { "scale must be between 2 and 8; got ${input.scale}" }
+        AigcBudgetGuard.enforce(id, projectStore, input.projectId?.let(::ProjectId), ctx)
         val seed = AigcPipeline.ensureSeed(input.seed)
         val sourceAssetId = AssetId(input.assetId)
         val sourcePath = resolver.resolve(sourceAssetId)

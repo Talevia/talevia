@@ -99,6 +99,7 @@ import io.talevia.core.tool.builtin.session.ReadPartTool
 import io.talevia.core.tool.builtin.session.RenameSessionTool
 import io.talevia.core.tool.builtin.session.RevertSessionTool
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import io.talevia.core.tool.builtin.session.SetSessionSpendCapTool
 import io.talevia.core.tool.builtin.session.SwitchProjectTool
 import io.talevia.core.tool.builtin.session.UnarchiveSessionTool
 import io.talevia.core.tool.builtin.shell.BashTool
@@ -333,6 +334,7 @@ class ServerContainer(
         register(EstimateSessionTokensTool(sessions))
         register(ForkSessionTool(sessions))
         register(RenameSessionTool(sessions))
+        register(SetSessionSpendCapTool(sessions))
         register(SwitchProjectTool(sessions, projects, bus = bus))
         register(RevertSessionTool(sessions, projects, bus))
         register(ArchiveSessionTool(sessions))

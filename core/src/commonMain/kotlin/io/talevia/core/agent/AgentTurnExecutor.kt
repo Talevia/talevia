@@ -139,6 +139,7 @@ internal class AgentTurnExecutor(
         input: RunInput,
         currentProjectId: ProjectId?,
         providerIndex: Int = 0,
+        spendCapCents: Long? = null,
     ): TurnResult {
         val projectHasAssets = currentProjectId != null &&
             projects?.get(currentProjectId)?.assets?.isNotEmpty() == true
@@ -212,7 +213,7 @@ internal class AgentTurnExecutor(
                 is LlmEvent.ToolCallInputDelta -> bus.publish(
                     BusEvent.PartDelta(asstMsg.sessionId, asstMsg.id, event.partId, "input", event.jsonDelta),
                 )
-                is LlmEvent.ToolCallReady -> dispatchTool(asstMsg, history, input, event, pending, currentProjectId)
+                is LlmEvent.ToolCallReady -> dispatchTool(asstMsg, history, input, event, pending, currentProjectId, spendCapCents)
 
                 LlmEvent.StepStart -> store.upsertPart(
                     Part.StepStart(
@@ -275,6 +276,7 @@ internal class AgentTurnExecutor(
         event: LlmEvent.ToolCallReady,
         pending: MutableMap<CallId, PendingToolCall>,
         currentProjectId: ProjectId?,
+        spendCapCents: Long?,
     ) {
         val handle = pending[event.callId]
             ?: PendingToolCall(event.partId, event.toolId).also { pending[event.callId] = it }
@@ -333,6 +335,7 @@ internal class AgentTurnExecutor(
             // first tool call picks up the switch.
             currentProjectId = currentProjectId,
             publishEvent = { e -> bus.publish(e) },
+            spendCapCents = spendCapCents,
         )
 
         val toolStart = clock.now()
