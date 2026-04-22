@@ -17,8 +17,6 @@
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
 
-- **debt-consolidate-video-add-variants** — `video/AddClipTool` + `AddTrackTool` + `AddTransitionTool` + `AddSubtitlesTool` 四个 tools，每个有独立 Input 形但 共通语义都是"在 timeline 上添加一个东西"。**方向：** 评估是否通过 `add_to_timeline(target="clip"|"track"|"transition"|"subtitles", ...)` 合并；若分支 Input 的差异太大导致 discriminator 不划算，在 decision 里说明并保留四件套。Rubric 外 / debt。
-
 ## P2 — 记债 / 观望
 
 - **prompt-trace-for-aigc-calls** — `lockfile` 记录了 inputHash / seed / model version，但 fully-expanded prompt（含 ancestor consistency nodes 的 fold 结果）没落到 lockfile 条目里。用户要 debug「为什么这个 image 没 respect character_ref」时只能人脑复现 prompt。**方向：** `LockfileEntry` 增加 `resolvedPrompt: String?` 字段（optional，默认 null），AIGC 工具 dispatch 时填入最终送给 provider 的 prompt 文本。`describe_lockfile_entry`（或其替代）展示。Rubric §5.4 debug。
