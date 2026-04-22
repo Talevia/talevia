@@ -102,6 +102,11 @@ class TaleviaSystemPromptTest {
         // Dual user (VISION §4)
         "high-level",
         "precise",
+        // Bias toward action — prevents the "open a 4-bullet menu of
+        // style/duration/aspect/mood questions" failure mode on "make me a X".
+        "Bias toward action",
+        "standing order",
+        "Make it look good",
     )
 
     @Test fun promptContainsAllNorthStarKeyPhrases() {
@@ -142,6 +147,7 @@ class TaleviaSystemPromptTest {
             "# External files (fs tools)",
             "# Session-project binding",
             "# Rules",
+            "# Bias toward action",
         )
         val indices = anchors.map { it to prompt.indexOf(it) }
         indices.forEach { (anchor, idx) ->
