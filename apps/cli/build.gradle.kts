@@ -26,4 +26,11 @@ dependencies {
     implementation("com.github.ajalt.clikt:clikt:4.4.0")
     implementation("com.github.ajalt.mordant:mordant:2.7.2")
     implementation("org.jline:jline:3.26.3")
+
+    testImplementation(kotlin("test"))
+    testImplementation(libs.kotlinx.coroutines.test)
+}
+
+tasks.test {
+    useJUnitPlatform()
 }

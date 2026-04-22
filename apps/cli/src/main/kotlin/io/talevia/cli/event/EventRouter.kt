@@ -53,6 +53,14 @@ class EventRouter(
                             // finalize path: Agent fires PartUpdated on TextEnd with the
                             // canonical full text, which is exactly when we want to
                             // repaint the streamed deltas with rendered markdown.
+                            //
+                            // Skip the empty-text PartUpdated fired on TextStart —
+                            // otherwise the renderer marks the part finalised before any
+                            // delta streams, the race with the PartDelta subscriber silently
+                            // drops most or all of the response, and the user sees a
+                            // truncated (or blank) assistant message with a non-zero
+                            // out= token count.
+                            if (p.text.isEmpty()) return@collect
                             val parent = runCatching { sessions.getMessage(ev.messageId) }.getOrNull()
                             if (parent is Message.Assistant) {
                                 renderer.finalizeAssistantText(p.id, p.text)

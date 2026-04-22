@@ -143,6 +143,7 @@ class Renderer(
     }
 
     suspend fun println(text: String) = mutex.withLock {
+        breakAssistantLineLocked()
         markAllPartsUnrepaintableLocked()
         terminal.writer().println(text)
         terminal.writer().flush()
@@ -151,6 +152,7 @@ class Renderer(
     suspend fun error(text: String) = mutex.withLock {
         // stderr bypasses the terminal writer on purpose so it stays visibly
         // separate from assistant text even when stdout is redirected.
+        breakAssistantLineLocked()
         markAllPartsUnrepaintableLocked()
         System.err.println(Styles.error(text))
     }

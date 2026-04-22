@@ -9,6 +9,7 @@ import io.talevia.core.agent.RunInput
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.Timeline
+import io.talevia.core.session.FinishReason
 import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
@@ -60,10 +61,18 @@ class Repl(
 
         // ANSI is fine in any sane TTY; disable when stdout is piped or when
         // the user opts out so downstream consumers (logs, scripts) get plain
-        // text. The same flag also gates Phase-2 markdown repaints.
+        // text.
         val isTty = System.console() != null
+        // Markdown repaint (cursor-up + clear-to-EOS, then re-render via
+        // Mordant) is OFF by default: the cursor math is brittle when the
+        // streamed reply contains wide (CJK) chars, wraps on a narrow
+        // terminal, or runs after a permission prompt the Renderer didn't
+        // observe. In those cases the clear erases more than it re-renders
+        // and the user sees a blank where the reply should be. Opt in
+        // with TALEVIA_CLI_MARKDOWN=on|1|true when you want bold/bullets
+        // rendered instead of the raw streamed markdown.
         val mdEnv = System.getenv("TALEVIA_CLI_MARKDOWN").orEmpty().lowercase()
-        val markdownEnabled = isTty && mdEnv != "off" && mdEnv != "0" && mdEnv != "false"
+        val markdownEnabled = isTty && (mdEnv == "on" || mdEnv == "1" || mdEnv == "true")
         Styles.setEnabled(isTty)
 
         println("${Styles.banner("talevia cli")} ${Styles.meta("· db=${container.dbPath} · provider=${provider.id}")}")
@@ -183,7 +192,12 @@ class Repl(
                     if (t is CancellationException) renderer.println(Styles.meta("(cancelled)"))
                     else renderer.error("agent failed: ${t.message ?: t::class.simpleName}")
                 }
-                turnAssistant?.let { renderer.println(Styles.meta(turnTokenSummary(it.tokens))) }
+                turnAssistant?.let { a ->
+                    if (a.finish == FinishReason.ERROR) {
+                        renderer.error("agent failed: ${a.error ?: "unknown error"}")
+                    }
+                    renderer.println(Styles.meta(turnTokenSummary(a.tokens)))
+                }
                 renderer.endTurn()
             }
         } finally {
