@@ -25,8 +25,6 @@
 
 - **project-query-sort-by-updatedAt** — `project_query(select=tracks | timeline_clips | assets)` 当前 sortBy 都是 domain-specific 维度（index / clipCount / span / startSeconds / duration / id）；没有 "最近改过的在前" 的时间排序。**方向：** `Timeline.tracks` / `clips` / `assets` 加 optional `updatedAtEpochMs` 元数据（或从 `Project.updatedAt` 反推），在 `project_query` 里增加 `sortBy="recent"` 支持。Rubric §5.2。
 
-- **session-query-include-compaction-summary** — Session 的 `Part.Compaction` 条目今天靠 `session_query(select=parts, kind=compaction)` 拉 raw 行；没法一次拿到 "这个 session 压缩过几次 + 每次从哪到哪 + summary"。**方向：** 给 `session_query` 加 `select=compactions`，每行带 `fromMessageId` / `toMessageId` / `summaryText` / `compactedAtEpochMs`，聚合视图。Rubric §5.2。
-
 - **session-export-portable-envelope** — `export_project` / `export_source_node` 已有 portable envelope 导出；但 `Session` 没有——想把一段 session（agent 对话 + tool-call 历史）备份 / 迁移到另一机器没有工具。**方向：** 加 `export_session(sessionId, outputPath)` 打包 `Session` + `Message[]` + `Part[]` 到单一 JSON envelope（同 `export_project.kt` 风格）；配套 `import_session(from)` 留给后续 cycle。+1 tool 需在 decision 里说明（现有 `export_*` 家族命名一致性 + 无法用 `session_query` 替代写出文件）。Rubric §5.4。
 
 - **compact-session-threshold-visible-in-ui** — `Compactor` 用 `compactionTokenThreshold = 120_000` 硬编码触发；UI 没有渠道展示 "当前 session 离阈值多远"。用户看不到进度条。**方向：** 扩展 `session_query(select=status)` （P1 那条的 follow-up）返回 `estimatedTokens` + `compactionThreshold` + `percent`；UI 就能渲染占比条。Rubric §5.4。
