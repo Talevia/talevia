@@ -3,6 +3,7 @@ package io.talevia.core.domain
 import io.talevia.core.AssetId
 import io.talevia.core.ClipId
 import io.talevia.core.SourceNodeId
+import io.talevia.core.domain.source.deepContentHashOf
 import io.talevia.core.domain.source.stale
 
 /**
@@ -169,8 +170,14 @@ data class StaleClipReport(
  */
 fun Project.staleClipsFromLockfile(): List<StaleClipReport> {
     if (lockfile.entries.isEmpty()) return emptyList()
-    val currentHashByNode: Map<SourceNodeId, String> =
-        source.nodes.associate { it.id to it.contentHash }
+    // Deep-hash comparison (VISION §5.1 transitive propagation): each
+    // snapshotted binding id's **current** deep content hash (own
+    // contentHash folded with ancestors') is recomputed and diffed against
+    // the recorded snapshot. Missing node → deleted source → non-comparable
+    // (skipped), matching the pre-transitive shallow-hash behaviour for
+    // removed nodes. `deepCache` is shared across all clips so each DAG
+    // node is walked at most once per call.
+    val deepCache = mutableMapOf<SourceNodeId, String>()
     val out = mutableListOf<StaleClipReport>()
     for (track in timeline.tracks) {
         for (clip in track.clips) {
@@ -183,8 +190,9 @@ fun Project.staleClipsFromLockfile(): List<StaleClipReport> {
             if (entry.sourceContentHashes.isEmpty()) continue
             val changed = LinkedHashSet<SourceNodeId>()
             for ((nodeId, snapshot) in entry.sourceContentHashes) {
-                val now = currentHashByNode[nodeId] ?: continue
-                if (now != snapshot) changed += nodeId
+                if (source.byId[nodeId] == null) continue
+                val nowDeep = source.deepContentHashOf(nodeId, deepCache)
+                if (nowDeep != snapshot) changed += nodeId
             }
             if (changed.isNotEmpty()) {
                 out += StaleClipReport(

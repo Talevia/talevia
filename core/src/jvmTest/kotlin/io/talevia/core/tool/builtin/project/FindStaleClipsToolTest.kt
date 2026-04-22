@@ -22,6 +22,7 @@ import io.talevia.core.domain.source.consistency.CharacterRefBody
 import io.talevia.core.domain.source.consistency.StyleBibleBody
 import io.talevia.core.domain.source.consistency.addCharacterRef
 import io.talevia.core.domain.source.consistency.addStyleBible
+import io.talevia.core.domain.source.deepContentHashOf
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.domain.source.replaceNode
 import io.talevia.core.permission.PermissionDecision
@@ -106,7 +107,7 @@ class FindStaleClipsToolTest {
         store.mutateSource(pid) {
             it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Mei", visualDescription = "teal hair"))
         }
-        val nowHash = store.get(pid)!!.source.byId[SourceNodeId("mei")]!!.contentHash
+        val nowHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
         appendLockfile(
             store,
             pid,
@@ -137,7 +138,7 @@ class FindStaleClipsToolTest {
         store.mutateSource(pid) {
             it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Mei", visualDescription = "teal hair"))
         }
-        val originalHash = store.get(pid)!!.source.byId[SourceNodeId("mei")]!!.contentHash
+        val originalHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
         appendLockfile(
             store,
             pid,
@@ -185,8 +186,8 @@ class FindStaleClipsToolTest {
                 .let { s -> s.addStyleBible(SourceNodeId("noir"), StyleBibleBody(name = "noir", description = "noir, high contrast")) }
         }
         val src = store.get(pid)!!.source
-        val meiHash = src.byId[SourceNodeId("mei")]!!.contentHash
-        val noirHash = src.byId[SourceNodeId("noir")]!!.contentHash
+        val meiHash = src.deepContentHashOf(SourceNodeId("mei"))
+        val noirHash = src.deepContentHashOf(SourceNodeId("noir"))
         appendLockfile(
             store,
             pid,
@@ -329,7 +330,7 @@ class FindStaleClipsToolTest {
                 CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
             )
         }
-        val originalHash = store.get(pid)!!.source.byId[SourceNodeId("mei")]!!.contentHash
+        val originalHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
         clips.forEach { clip ->
             appendLockfile(
                 store,

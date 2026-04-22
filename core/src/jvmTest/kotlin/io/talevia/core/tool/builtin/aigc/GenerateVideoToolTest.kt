@@ -15,6 +15,7 @@ import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.source.consistency.CharacterRefBody
 import io.talevia.core.domain.source.consistency.LoraPin
 import io.talevia.core.domain.source.consistency.addCharacterRef
+import io.talevia.core.domain.source.deepContentHashOf
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.GeneratedVideo
@@ -237,7 +238,8 @@ class GenerateVideoToolTest {
                 CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
             )
         }
-        val expectedHash = store.get(projectId)!!.source.byId[SourceNodeId("mei")]!!.contentHash
+        // Deep content hash post transitive-source-hash-propagation cycle.
+        val expectedHash = store.get(projectId)!!.source.deepContentHashOf(SourceNodeId("mei"))
 
         val tool = GenerateVideoTool(engine, storage, writer, store)
         tool.execute(

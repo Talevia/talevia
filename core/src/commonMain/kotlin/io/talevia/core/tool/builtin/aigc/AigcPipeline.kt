@@ -12,6 +12,7 @@ import io.talevia.core.domain.source.consistency.FoldedVoice
 import io.talevia.core.domain.source.consistency.consistencyNodes
 import io.talevia.core.domain.source.consistency.foldConsistencyIntoPrompt
 import io.talevia.core.domain.source.consistency.resolveConsistencyBindings
+import io.talevia.core.domain.source.deepContentHashOf
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.session.Part
 import io.talevia.core.tool.ToolContext
@@ -211,9 +212,14 @@ internal object AigcPipeline {
         store.mutate(projectId) { project ->
             val snapshot: Map<SourceNodeId, String> = if (sourceBinding.isEmpty()) emptyMap()
             else buildMap {
+                // Use the deep content hash so the stale-clip lane catches edits
+                // to any ancestor in the DAG (VISION §5.1) — shallow contentHash
+                // only tracks (kind, body, parents-by-id) and silently misses
+                // body edits on grandparents.
+                val cache = mutableMapOf<SourceNodeId, String>()
                 for (id in sourceBinding) {
-                    val node = project.source.byId[id] ?: continue
-                    put(id, node.contentHash)
+                    if (project.source.byId[id] == null) continue
+                    put(id, project.source.deepContentHashOf(id, cache))
                 }
             }
             project.copy(

@@ -17,6 +17,7 @@ import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.source.consistency.CharacterRefBody
 import io.talevia.core.domain.source.consistency.LoraPin
 import io.talevia.core.domain.source.consistency.addCharacterRef
+import io.talevia.core.domain.source.deepContentHashOf
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.domain.source.removeNode
 import io.talevia.core.permission.PermissionDecision
@@ -268,7 +269,10 @@ class GenerateImageToolTest {
                 CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
             )
         }
-        val expectedHash = store.get(projectId)!!.source.byId[SourceNodeId("mei")]!!.contentHash
+        // Post transitive-source-hash-propagation cycle: the lockfile now
+        // records the deep content hash (fold over ancestors) rather than
+        // the shallow contentHash, so grandparent edits surface as stale.
+        val expectedHash = store.get(projectId)!!.source.deepContentHashOf(SourceNodeId("mei"))
 
         val tool = GenerateImageTool(engine, storage, writer, store)
         tool.execute(

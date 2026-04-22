@@ -21,6 +21,7 @@ import io.talevia.core.domain.Track
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.domain.source.consistency.CharacterRefBody
 import io.talevia.core.domain.source.consistency.addCharacterRef
+import io.talevia.core.domain.source.deepContentHashOf
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.domain.source.replaceNode
 import io.talevia.core.permission.PermissionDecision
@@ -138,7 +139,7 @@ class RegenerateStaleClipsToolTest {
         store.mutateSource(pid) {
             it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Mei", visualDescription = "teal hair"))
         }
-        val originalHash = store.get(pid)!!.source.byId[SourceNodeId("mei")]!!.contentHash
+        val originalHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
         val originalInputs = buildJsonObject {
             put("prompt", "portrait of Mei")
             put("model", "gpt-image-1")
@@ -204,7 +205,7 @@ class RegenerateStaleClipsToolTest {
         // Verify the regeneration used the *current* source — effective prompt should
         // fold "red hair" now, not "teal hair". We check the new lockfile entry.
         val newEntry = project.lockfile.entries.last()
-        val newHash = project.source.byId[SourceNodeId("mei")]!!.contentHash
+        val newHash = project.source.deepContentHashOf(SourceNodeId("mei"))
         assertEquals(mapOf(SourceNodeId("mei") to newHash), newEntry.sourceContentHashes)
         assertTrue(newHash != originalHash, "source hash must differ after edit")
         assertEquals(1, engine.calls, "engine must have been invoked exactly once for the single stale clip")
@@ -254,7 +255,7 @@ class RegenerateStaleClipsToolTest {
         store.mutateSource(pid) {
             it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Mei", visualDescription = "teal"))
         }
-        val originalHash = store.get(pid)!!.source.byId[SourceNodeId("mei")]!!.contentHash
+        val originalHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
         val originalInputs = buildJsonObject {
             put("prompt", "portrait of Mei")
             put("model", "gpt-image-1")
@@ -362,7 +363,7 @@ class RegenerateStaleClipsToolTest {
         store.mutateSource(pid) {
             it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Mei", visualDescription = "teal"))
         }
-        val originalHash = store.get(pid)!!.source.byId[SourceNodeId("mei")]!!.contentHash
+        val originalHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
         store.mutate(pid) { p ->
             p.copy(
                 lockfile = p.lockfile.append(
@@ -460,7 +461,7 @@ class RegenerateStaleClipsToolTest {
         store.mutateSource(pid) {
             it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Mei", visualDescription = "teal"))
         }
-        val originalHash = store.get(pid)!!.source.byId[SourceNodeId("mei")]!!.contentHash
+        val originalHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
         val originalInputs = buildJsonObject {
             put("prompt", "portrait of Mei")
             put("model", "gpt-image-1")
