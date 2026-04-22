@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **session-query-context-pressure** — Agent 在 120k token 自动 compact（`Agent.compactionTokenThreshold`），但 LLM 自己看不到当前 context 离阈值还有多少 —— 只能在 compaction 触发时被动感知。`session_query` 已有 13 个 select，再加一个 `context_pressure` 返回 `(currentEstimate, threshold, ratio, marginTokens)` 就能让 agent 主动决定是否提前总结 / 切 subtask。Rubric §5.4。
 - **render-provenance-manifest** — Export 产物是 mp4 but nothing in the container tells you which `Project` / `timeline hash` / `lockfile fingerprint` 产生了它。VISION §5.3 "可复现的确定性产物" 的下一步是让产物自己能反推出回归点。**方向：** `ExportTool` 组装 `ffmpeg -metadata comment="talevia:projectId=...;timelineHash=...;lockfileHash=..."`（或更结构化的 id3 tag），`probe` 返回时也把 metadata 解回来。Rubric §5.3。
 
 ## P1 — 中优，做完 P0 再排
