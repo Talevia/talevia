@@ -59,6 +59,30 @@ class TpmThrottle(
     }
 
     /**
+     * Mark the whole budget as consumed until [retryAfterMs] from now. Call this when the
+     * provider returns 429 with a Retry-After hint: the local accounting won't reflect
+     * whatever tokens the provider thinks we've burned (that number lives server-side),
+     * so we synthesize a full-budget record that will evict exactly when the cooldown
+     * expires. Any pending [acquire] will then wait out that cooldown instead of
+     * immediately re-firing the request and eating another 429.
+     *
+     * Clamps [retryAfterMs] to `[0, windowMs]` — values beyond one window don't help
+     * (the synthetic record would just live at the head forever).
+     */
+    suspend fun stallFor(retryAfterMs: Long) = mutex.withLock {
+        if (retryAfterMs <= 0) return@withLock
+        val clamp = retryAfterMs.coerceAtMost(windowMs)
+        val budget = (tpmLimit * bufferRatio).toLong().coerceAtLeast(1L)
+        val now = clock.now().toEpochMilliseconds()
+        // Replace the deque with a single full-budget synthetic record positioned so it
+        // evicts exactly `clamp` ms from now. Clearing any prior records is safe here:
+        // a 429 from the provider means the server-side window is already full, so any
+        // local accounting smaller than the synthetic reservation was stale anyway.
+        records.clear()
+        records.addLast(Record(tsMs = now - (windowMs - clamp), tokens = budget))
+    }
+
+    /**
      * Hold the caller until the window has room for [estimateTokens], then reserve the slot.
      * Returns the [Record] handle the caller must pass back to [settle] once real usage is
      * known; settle replaces the estimate with the actual token count.

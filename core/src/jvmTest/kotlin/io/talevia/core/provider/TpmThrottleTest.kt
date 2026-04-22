@@ -103,6 +103,29 @@ class TpmThrottleTest {
         assertEquals(1000L, throttle.usedTokens(), "estimate should be clamped to full budget")
     }
 
+    @Test fun stallForBlocksAcquireUntilCooldownElapses() = runTest {
+        val throttle = TpmThrottle(tpmLimit = 1000, bufferRatio = 1.0, windowMs = 60_000, clock = VirtualClock(this))
+        // Simulate a cold-start 429: local records are empty but the provider signals
+        // a 10s cooldown.
+        throttle.stallFor(10_000)
+
+        val start = currentTime
+        var acquired = false
+        val job = launch {
+            throttle.acquire(100)
+            acquired = true
+        }
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertFalse(acquired, "should still be waiting halfway through cooldown")
+
+        advanceTimeBy(5_500)
+        runCurrent()
+        assertTrue(acquired, "should release once cooldown elapses")
+        assertTrue(currentTime - start in 9_000..12_000, "wait should be ~10s, was ${currentTime - start}ms")
+        job.cancel()
+    }
+
     @Test fun estimateRequestTokensGrowsWithToolSchemaSize() {
         val base = LlmRequest(
             model = io.talevia.core.session.ModelRef("openai", "gpt-4o"),

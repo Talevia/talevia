@@ -79,12 +79,22 @@ class ProviderRegistry(
          * take precedence over the process environment; call it after to let
          * env act as the authoritative source and secrets act as fallback.
          */
-        suspend fun addSecretStore(httpClient: HttpClient, secrets: SecretStore): Builder = apply {
+        suspend fun addSecretStore(
+            httpClient: HttpClient,
+            secrets: SecretStore,
+            env: Map<String, String> = emptyMap(),
+        ): Builder = apply {
             secrets.get(SecretKeys.ANTHROPIC)?.takeIf { it.isNotBlank() }?.let {
                 add(AnthropicProvider(httpClient, apiKey = it))
             }
             secrets.get(SecretKeys.OPENAI)?.takeIf { it.isNotBlank() }?.let {
-                add(OpenAiProvider(httpClient, apiKey = it))
+                add(
+                    OpenAiProvider(
+                        httpClient,
+                        apiKey = it,
+                        tpmThrottle = openaiThrottleFrom(env),
+                    ),
+                )
             }
             (secrets.get(SecretKeys.GEMINI) ?: secrets.get(SecretKeys.GOOGLE))?.takeIf { it.isNotBlank() }?.let {
                 add(GeminiProvider(httpClient, apiKey = it))

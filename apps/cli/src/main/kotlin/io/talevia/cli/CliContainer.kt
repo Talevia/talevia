@@ -342,7 +342,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
 
     val providers: ProviderRegistry = runBlocking {
         ProviderRegistry.Builder()
-            .addSecretStore(httpClient, secrets)
+            .addSecretStore(httpClient, secrets, env)
             .addEnv(httpClient, env)
             .build()
     }

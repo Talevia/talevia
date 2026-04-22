@@ -133,10 +133,23 @@ class OpenAiProvider(
                 )
                 val status = http.status.value
                 val retriable = status >= 500 || status == 429 || status == 408
-                val retryAfterMs = io.talevia.core.provider.parseRetryAfterMs(
+                val headerRetryMs = io.talevia.core.provider.parseRetryAfterMs(
                     ms = http.headers["retry-after-ms"],
                     seconds = http.headers["retry-after"],
                 )
+                // OpenAI's 429 body usually reads "...Please try again in 3.363s." — parse it
+                // as a fallback when headers are absent. First match wins; we scan the combined
+                // error text rather than the raw body so it works whether or not JSON parse
+                // succeeded.
+                val messageRetryMs = parseRetryHintFromMessage(parsed) ?: parseRetryHintFromMessage(raw)
+                val retryAfterMs = headerRetryMs ?: messageRetryMs
+                // Teach the throttle that the server-side window is full so the next turn's
+                // acquire() actually waits instead of immediately re-sending and eating a
+                // second 429. Cold-start case: fresh CLI process with empty local records
+                // but a hot provider-side TPM window from a prior run.
+                if (status == 429 && retryAfterMs != null) {
+                    tpmThrottle?.stallFor(retryAfterMs)
+                }
                 send(
                     LlmEvent.Error(
                         message = "openai HTTP $status: $parsed",
@@ -270,6 +283,21 @@ class OpenAiProvider(
         "tool_calls", "function_call" -> FinishReason.TOOL_CALLS
         "content_filter" -> FinishReason.CONTENT_FILTER
         else -> FinishReason.STOP
+    }
+
+    /**
+     * Extract the "try again in Xs" hint OpenAI puts in the 429 error body when
+     * retry-after headers are absent. Returns ms or null when no match is found.
+     */
+    private fun parseRetryHintFromMessage(text: String): Long? {
+        val match = retryHintRegex.find(text) ?: return null
+        val seconds = match.groupValues[1].toDoubleOrNull() ?: return null
+        return (seconds * 1000.0).toLong().coerceAtLeast(0)
+    }
+
+    private companion object {
+        // Matches "Please try again in 3.363s" / "try again in 450ms" in OpenAI 429 bodies.
+        private val retryHintRegex = Regex("""try again in (\d+(?:\.\d+)?)s""")
     }
 
     private fun buildRequestBody(request: LlmRequest): JsonObject = buildJsonObject {
