@@ -14,7 +14,6 @@
 ## P0 — 高杠杆、下一步就该动
 
 - **debt-fold-set-source-node-body-helpers** — `SetBrandPaletteTool` / `SetCharacterRefTool` / `SetStyleBibleTool` 仍作为 3 个独立 tool id 存在，尽管 kind-agnostic `UpdateSourceNodeBody` + `AddSourceNode` 已经覆盖全部写路径。硬编码 genre 名称到 tool 注册表（§3a-5）同时持续在每次 turn 里烧 LLM tool-spec token。**方向：** 废弃 3 个 Set* 工具（改为 deprecated stub 或直接删），把文档 / decision 里的用例切到 kind-agnostic upsert；测试迁移到 `AddSourceNode` + `UpdateSourceNodeBody`。Rubric §5.5 + §3a-1/§3a-5。
-- **parallel-tool-dispatch** — `AgentTurnExecutor` 按序执行同一轮里的多个 `tool_use` 块。provider 返回并行 tool_calls 时本该并发（典型场景：同时读 project + 读 session、两个独立 aigc 生成）。现状把两个独立调用排成 RTT 累加。**方向：** 在 turn executor 里把一组无依赖的 tool call 包成 `coroutineScope { map { async { dispatch(it) } }.awaitAll() }`；permission 仍按调用顺序串行逐条询问，避免并发 prompt 冲突。Rubric §5.2 / §5.4。
 - **provider-retry-on-transient** — 单次 429 / 5xx / 网络抖动立即冒泡为 tool error，agent 无回退策略。`AnthropicProvider` / `OpenAiProvider` 都没看到重试 wrap。**方向：** 在 provider call site 加指数退避重试（3 次，2s/4s/8s，仅对 429/5xx/IO 异常），通过 `BusEvent.ProviderRetry` 暴露尝试次数；不改 `LlmEvent` 协议语义。Rubric §5.4。
 - **tool-spec-token-budget-metric** — agent 看不到自己这一轮为注册工具的 spec 付出了多少 token。随着 tool count 爬到 105+，这是最大的 silent cost。**方向：** 给 `session_query` 加 `select=tool_spec_budget`，返回 `(toolCount, estimatedSpecTokens, perToolBreakdown[top5])`。估算用现有 JSON Schema 序列化长度 / 4。Rubric §5.4 + §3a-10。
 
