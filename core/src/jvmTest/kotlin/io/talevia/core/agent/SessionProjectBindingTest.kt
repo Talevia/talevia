@@ -94,6 +94,38 @@ class SessionProjectBindingTest {
             sp!!.startsWith("Current project: p-vlog"),
             "expected bound banner, got:\n$sp",
         )
+        assertTrue(
+            sp.contains("Current session: binding-session"),
+            "expected session banner to carry sessionId, got:\n$sp",
+        )
+    }
+
+    @Test
+    fun systemPromptCarriesSessionIdEvenWhenUnbound() = runTest {
+        val (store, bus) = newStore()
+        val sid = primeSession(store, currentProjectId = null)
+
+        val turn = listOf(
+            LlmEvent.TextStart(PartId("t")),
+            LlmEvent.TextEnd(PartId("t"), "ok"),
+            LlmEvent.StepFinish(FinishReason.END_TURN, TokenUsage(input = 1, output = 1)),
+        )
+        val provider = FakeProvider(listOf(turn))
+        val agent = Agent(
+            provider = provider,
+            registry = ToolRegistry(),
+            store = store,
+            permissions = AllowAllPermissionService(),
+            bus = bus,
+        )
+        agent.run(RunInput(sid, "hi", ModelRef("fake", "test")))
+
+        val sp = provider.requests.single().systemPrompt
+        assertNotNull(sp)
+        assertTrue(
+            sp!!.contains("Current session: binding-session"),
+            "expected session banner even when project is unbound, got:\n$sp",
+        )
     }
 
     @Test

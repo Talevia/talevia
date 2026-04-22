@@ -3,6 +3,7 @@ package io.talevia.core.agent
 import io.talevia.core.CallId
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
+import io.talevia.core.SessionId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.logging.Loggers
@@ -51,20 +52,34 @@ internal data class TurnResult(
 internal data class PendingToolCall(val partId: PartId, val toolId: String)
 
 /**
- * Prepend a one-line "Current project" banner to the configured system prompt
- * so every turn reminds the model of the session's current binding (VISION §5.4).
- * A null binding renders explicitly so the agent knows to pick one before
- * dispatching timeline tools, rather than guessing silently.
+ * Prepend a two-line identity banner ("Current project" + "Current session")
+ * to the configured system prompt so every turn reminds the model of the
+ * session's current binding (VISION §5.4) *and* the session id it should pass
+ * to tools that require one (switch_project, fork_session, etc.). Without the
+ * session line the model tends to invent ids like "current" or
+ * "session-unknown", which every session-scoped tool correctly rejects.
+ *
+ * The project line comes first so existing `startsWith("Current project: …")`
+ * assertions keep matching. A null project renders explicitly so the agent
+ * knows to pick one before dispatching timeline tools rather than guessing.
  *
  * Pure function — package-private so both [Agent] and [AgentTurnExecutor] can
  * reach it without exposing it on the public surface.
  */
-internal fun buildSystemPrompt(base: String?, currentProjectId: ProjectId?): String? {
-    val banner = if (currentProjectId != null) {
+internal fun buildSystemPrompt(
+    base: String?,
+    currentProjectId: ProjectId?,
+    sessionId: SessionId?,
+): String? {
+    val projectLine = if (currentProjectId != null) {
         "Current project: ${currentProjectId.value} (from session binding; call switch_project to change)"
     } else {
         "Current project: <none> (session not yet bound; call list_projects / create_project / switch_project before running timeline tools)"
     }
+    val sessionLine = sessionId?.let {
+        "Current session: ${it.value} (pass this exact id as `sessionId` whenever a tool requires one; never invent one)"
+    }
+    val banner = listOfNotNull(projectLine, sessionLine).joinToString("\n")
     return when {
         base == null -> banner
         base.isBlank() -> banner
@@ -121,7 +136,7 @@ internal class AgentTurnExecutor(
             model = input.model,
             messages = history,
             tools = registry.specs(),
-            systemPrompt = buildSystemPrompt(systemPrompt, currentProjectId),
+            systemPrompt = buildSystemPrompt(systemPrompt, currentProjectId, input.sessionId),
             // Seed the OpenAI cache-routing hint from the session id so every
             // turn in a session hits the same replica — unless the caller
             // already picked a key.
