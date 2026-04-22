@@ -171,14 +171,21 @@ class AgentRetryTest {
 
     @Test
     fun delayHonorsRetryAfterHeader() {
-        val policy = RetryPolicy(initialDelayMs = 2_000, maxDelayNoHeadersMs = 10_000)
+        // Zero jitter so the assertion can compare exact values — the jitter
+        // behaviour itself is covered by RetryPolicyTest.
+        val policy = RetryPolicy(
+            initialDelayMs = 2_000,
+            maxDelayNoHeadersMs = 10_000,
+            jitterFactor = 0.0,
+            rateLimitMinDelayMs = null,
+        )
         assertEquals(5_000L, policy.delayFor(attempt = 1, retryAfterMs = 5_000))
         assertEquals(2_000L, policy.delayFor(attempt = 1))
         assertEquals(4_000L, policy.delayFor(attempt = 2))
         // Capped by maxDelayNoHeadersMs when no header.
         assertEquals(10_000L, policy.delayFor(attempt = 10))
         // Capped by global maxDelayMs when header says absurd value.
-        val capped = RetryPolicy(maxDelayMs = 1_000)
+        val capped = RetryPolicy(maxDelayMs = 1_000, jitterFactor = 0.0)
         assertEquals(1_000L, capped.delayFor(attempt = 1, retryAfterMs = 60_000))
     }
 

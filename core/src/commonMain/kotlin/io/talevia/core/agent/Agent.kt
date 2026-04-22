@@ -370,7 +370,8 @@ class Agent(
                     continue
                 }
 
-                val wait = retryPolicy.delayFor(attempt, turnResult.retryAfterMs)
+                val kind = RetryClassifier.kind(turnResult.error, turnResult.retriable)
+                val wait = retryPolicy.delayFor(attempt, turnResult.retryAfterMs, kind)
                 log.info(
                     "retry.scheduled",
                     "session" to input.sessionId.value,
