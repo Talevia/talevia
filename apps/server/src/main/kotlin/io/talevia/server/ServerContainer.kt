@@ -444,6 +444,13 @@ class ServerContainer(
     val metrics: MetricsRegistry = MetricsRegistry()
     val metricsSink: EventBusMetricsSink = EventBusMetricsSink(bus, metrics)
 
+    init {
+        // Re-register list_tools with the live MetricsRegistry so the tool
+        // can surface per-tool avg-cents hints. Same id → replaces the
+        // metrics-less instance registered up in the `tools.apply` block.
+        tools.register(io.talevia.core.tool.builtin.meta.ListToolsTool(tools, metrics))
+    }
+
     private val agentsByProvider = mutableMapOf<String, Agent>()
 
     /**

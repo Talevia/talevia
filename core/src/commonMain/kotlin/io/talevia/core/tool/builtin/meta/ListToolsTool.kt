@@ -1,5 +1,6 @@
 package io.talevia.core.tool.builtin.meta
 
+import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
@@ -43,6 +44,16 @@ import kotlinx.serialization.serializer
  */
 class ListToolsTool(
     private val registry: ToolRegistry,
+    /**
+     * Optional — when non-null, each returned tool Summary gets an
+     * average-cents-per-call hint computed from
+     * `aigc.cost.<toolId>.cents / aigc.cost.<toolId>.count`. Gives the
+     * agent a cost signal for tradeoffs ("generate_image via dall-e-3
+     * averages 50¢, via gpt-image-1 averages 15¢") without a separate
+     * metrics query. Null → hints omitted; containers that don't wire
+     * a MetricsRegistry get back the pre-metrics shape.
+     */
+    private val metrics: MetricsRegistry? = null,
 ) : Tool<ListToolsTool.Input, ListToolsTool.Output> {
 
     @Serializable data class Input(
@@ -56,6 +67,24 @@ class ListToolsTool(
         val id: String,
         val helpText: String,
         val permission: String,
+        /**
+         * Average cents per successful AIGC call for this tool, or null
+         * when the tool has no recorded priced calls in this runtime
+         * (non-AIGC tools, free-tier calls, container without a
+         * `MetricsRegistry` wired). Computed as
+         * `aigc.cost.<toolId>.cents / aigc.cost.<toolId>.count`. Integer
+         * cents rounded half-down — the precision that matters is
+         * order-of-magnitude, not sub-cent.
+         */
+        val avgCostCents: Long? = null,
+        /**
+         * Number of priced calls that fed [avgCostCents]. Helps the
+         * agent weight the average by sample size (one expensive
+         * outlier on a 1-sample set is noise). Null when metrics
+         * aren't wired, 0 is never emitted (no-data case drops
+         * [avgCostCents] to null too).
+         */
+        val costedCalls: Long? = null,
     )
 
     @Serializable data class Output(
@@ -92,24 +121,33 @@ class ListToolsTool(
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         val needle = input.prefix?.takeIf { it.isNotBlank() }
-        val allTools = registry.all().map {
+        val rawTools = registry.all()
+        val enriched = rawTools.map { rt ->
+            val (avg, count) = readCostHint(rt.id)
             Summary(
-                id = it.id,
-                helpText = it.helpText,
-                permission = it.permission.permission,
+                id = rt.id,
+                helpText = rt.helpText,
+                permission = rt.permission.permission,
+                avgCostCents = avg,
+                costedCalls = count,
             )
         }
-        val filtered = if (needle == null) allTools else allTools.filter { it.id.startsWith(needle) }
+        val filtered = if (needle == null) enriched else enriched.filter { it.id.startsWith(needle) }
         val cap = (input.limit ?: DEFAULT_LIMIT).coerceIn(1, MAX_LIMIT)
         val capped = filtered.sortedBy { it.id }.take(cap)
 
         val scope = needle?.let { " prefix=$it" } ?: ""
+        val costTail = capped.asSequence()
+            .filter { it.avgCostCents != null }
+            .take(5)
+            .joinToString(", ") { "${it.id}=${it.avgCostCents}¢" }
         val summary = if (capped.isEmpty()) {
             "No tools registered$scope."
         } else {
-            "${capped.size} of ${filtered.size} tool(s)$scope: " +
+            val head = "${capped.size} of ${filtered.size} tool(s)$scope: " +
                 capped.take(10).joinToString(", ") { it.id } +
                 if (capped.size > 10) ", …" else ""
+            if (costTail.isEmpty()) head else "$head | avg cost: $costTail"
         }
         return ToolResult(
             title = "list tools (${capped.size})",
@@ -120,6 +158,20 @@ class ListToolsTool(
                 tools = capped,
             ),
         )
+    }
+
+    /**
+     * Read the per-tool cost counters and compute (avg cents, count)
+     * or (null, null) when either counter is missing / zero. Silent
+     * null on no-metrics-wired so the Summary shape stays clean.
+     */
+    private suspend fun readCostHint(toolId: String): Pair<Long?, Long?> {
+        val reg = metrics ?: return null to null
+        val count = reg.get("aigc.cost.$toolId.count")
+        if (count <= 0L) return null to null
+        val cents = reg.get("aigc.cost.$toolId.cents")
+        val avg = cents / count
+        return avg to count
     }
 
     private companion object {

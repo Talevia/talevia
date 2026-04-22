@@ -96,6 +96,12 @@ class EventBusMetricsSink(
                     if (cents != null) {
                         registry.increment("aigc.cost.cents", by = cents)
                         registry.increment("aigc.cost.${event.toolId}.cents", by = cents)
+                        // Per-tool call count — divider for avg-cents calculations.
+                        // Without this the agent can see cumulative spend but not
+                        // "what does one call cost on average?", which is what the
+                        // VISION §5.2 cost tradeoff ("generate_image vs dall-e-3")
+                        // needs.
+                        registry.increment("aigc.cost.${event.toolId}.count")
                     } else {
                         registry.increment("aigc.cost.unknown")
                     }
