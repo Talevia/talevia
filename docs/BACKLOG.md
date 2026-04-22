@@ -19,7 +19,6 @@
 
 ## P2 — 记债 / 观望
 
-- **debt-consolidate-project-creation** — `CreateProjectTool` + `CreateProjectFromTemplateTool` 产出同一件东西（一个新 Project），只是前者空 source，后者带 template 种子。**方向：** 评估合为 `create_project(template: String? = null)`，null = 空源 path；或按先例保留两件套。Rubric §5.2。
 - **debt-consolidate-session-trash** — `ArchiveSessionTool` + `DeleteSessionTool` 都是 session "从活跃列表移出" 的 lifecycle 操作，一个可逆一个不可逆。两件套是否合为 `retire_session(mode="archive"|"delete")` 值得评估。Rubric §5.2。
 - **semantic-search-source-nodes** — `search-source-nodes-body-content-lookup` 已实现 lexical 搜索；但 "找意思相近的 character_ref" 靠关键词很脆。VISION §5.1 "改一个 source 节点，下游哪些 clip 被标为 stale" 的扩展面是概念级检索。**方向：** 集成轻量嵌入（CoreML / ONNX Runtime / 本地 MiniLM），在 `source_query` 加 `select=semantic_search(query, topK)`；platform-impl 隔离。Rubric §5.1。
 - **per-clip-render-cache-gc** — `ClipRenderCache.append` 只追加，没 eviction。长寿命项目每次 source 漂移都会留一份 orphan mezzanine；磁盘会涨到人类手动删。**方向：** 新 `gc_clip_render_cache(projectId, keepLast: Int? | keepSinceEpoch: Long?)` 或 `save_project_snapshot` 时自动 prune 陈旧条目 + 对应 mp4。Rubric §5.3。
