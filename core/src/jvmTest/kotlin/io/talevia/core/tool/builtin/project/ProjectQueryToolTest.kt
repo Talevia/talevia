@@ -22,6 +22,7 @@ import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.domain.lockfile.Lockfile
+import io.talevia.core.domain.source.addNode
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
@@ -1058,5 +1059,196 @@ class ProjectQueryToolTest {
         assertEquals(1, r.clipsByKind["audio"])
         assertEquals(1, r.clipsByKind["text"])
         assertTrue(r.summaryText.contains("'demo'"))
+    }
+
+    // -------- select=consistency_propagation (VISION §5.5 audit) --------
+
+    /**
+     * Fixture: one character_ref node ("mei" with visualDescription
+     * "young traveler") bound to two video clips. One clip's lockfile
+     * entry has the keyword in the prompt (propagation succeeded);
+     * the other clip's entry is missing "mei" entirely (propagation
+     * failed — regression symptom). A third clip binds a different
+     * source node so the audit scope check kicks in.
+     */
+    private suspend fun consistencyFixture(): Pair<SqlDelightProjectStore, ProjectId> {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val pid = ProjectId("p-consistency")
+
+        val characterNodeId = SourceNodeId("mei")
+        val styleNodeId = SourceNodeId("neon-style")
+        val characterNode = io.talevia.core.domain.source.SourceNode.create(
+            id = characterNodeId,
+            kind = io.talevia.core.domain.source.consistency.ConsistencyKinds.CHARACTER_REF,
+            body = kotlinx.serialization.json.JsonObject(
+                mapOf(
+                    "name" to kotlinx.serialization.json.JsonPrimitive("Mei"),
+                    "visualDescription" to kotlinx.serialization.json.JsonPrimitive("young traveler"),
+                ),
+            ),
+        )
+        val styleNode = io.talevia.core.domain.source.SourceNode.create(
+            id = styleNodeId,
+            kind = io.talevia.core.domain.source.consistency.ConsistencyKinds.STYLE_BIBLE,
+            body = kotlinx.serialization.json.JsonObject(
+                mapOf(
+                    "name" to kotlinx.serialization.json.JsonPrimitive("neon"),
+                    "description" to kotlinx.serialization.json.JsonPrimitive("cyberpunk palette"),
+                ),
+            ),
+        )
+        val source = io.talevia.core.domain.source.Source.EMPTY
+            .addNode(characterNode)
+            .addNode(styleNode)
+
+        val videoTrack = Track.Video(
+            id = TrackId("v"),
+            clips = listOf(
+                Clip.Video(
+                    id = ClipId("c-hit"),
+                    timeRange = TimeRange(0.seconds, 2.seconds),
+                    sourceRange = TimeRange(0.seconds, 2.seconds),
+                    assetId = AssetId("a-hit"),
+                    sourceBinding = setOf(characterNodeId),
+                ),
+                Clip.Video(
+                    id = ClipId("c-miss"),
+                    timeRange = TimeRange(2.seconds, 2.seconds),
+                    sourceRange = TimeRange(0.seconds, 2.seconds),
+                    assetId = AssetId("a-miss"),
+                    sourceBinding = setOf(characterNodeId),
+                ),
+                Clip.Video(
+                    id = ClipId("c-unbound"),
+                    timeRange = TimeRange(4.seconds, 2.seconds),
+                    sourceRange = TimeRange(0.seconds, 2.seconds),
+                    assetId = AssetId("a-unbound"),
+                    sourceBinding = setOf(styleNodeId),
+                ),
+            ),
+        )
+        val lockfile = io.talevia.core.domain.lockfile.Lockfile.EMPTY
+            .append(consistencyEntry("h-hit", "a-hit", "portrait of Mei on a bridge"))
+            .append(consistencyEntry("h-miss", "a-miss", "a random background plate"))
+            .append(consistencyEntry("h-unbound", "a-unbound", "neon bokeh background"))
+
+        store.upsert(
+            "consistency",
+            Project(
+                id = pid,
+                timeline = Timeline(tracks = listOf(videoTrack), duration = 6.seconds),
+                source = source,
+                assets = listOf(
+                    asset("a-hit", videoCodec = "h264"),
+                    asset("a-miss", videoCodec = "h264"),
+                    asset("a-unbound", videoCodec = "h264"),
+                ),
+                lockfile = lockfile,
+            ),
+        )
+        return store to pid
+    }
+
+    private fun consistencyEntry(
+        inputHash: String,
+        assetId: String,
+        prompt: String,
+    ): io.talevia.core.domain.lockfile.LockfileEntry = io.talevia.core.domain.lockfile.LockfileEntry(
+        inputHash = inputHash,
+        toolId = "generate_image",
+        assetId = AssetId(assetId),
+        provenance = io.talevia.core.platform.GenerationProvenance(
+            providerId = "fake",
+            modelId = "fake-model",
+            modelVersion = null,
+            seed = 1L,
+            parameters = kotlinx.serialization.json.JsonObject(emptyMap()),
+            createdAtEpochMs = 1_700_000_000_000L,
+        ),
+        pinned = false,
+        baseInputs = kotlinx.serialization.json.JsonObject(
+            mapOf("prompt" to kotlinx.serialization.json.JsonPrimitive(prompt)),
+        ),
+    )
+
+    @Test fun consistencyPropagationReportsHitAndMissPerClip() = runTest {
+        val (store, pid) = consistencyFixture()
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(
+                projectId = pid.value,
+                select = "consistency_propagation",
+                sourceNodeId = "mei",
+            ),
+            ctx(),
+        ).data
+        assertEquals("consistency_propagation", out.select)
+        // Two clips bind "mei" directly (c-hit, c-miss); c-unbound binds only style.
+        assertEquals(2, out.total)
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(ProjectQueryTool.ConsistencyPropagationRow.serializer()),
+            out.rows,
+        )
+        val hit = rows.single { it.clipId == "c-hit" }
+        assertTrue(hit.aigcEntryFound)
+        assertTrue(hit.promptContainsKeywords, "prompt 'portrait of Mei' should match 'Mei' keyword")
+        assertTrue("Mei" in hit.keywordsMatchedInPrompt)
+        val miss = rows.single { it.clipId == "c-miss" }
+        assertTrue(miss.aigcEntryFound)
+        assertTrue(!miss.promptContainsKeywords, "prompt 'a random background plate' has no keyword")
+        assertTrue(miss.keywordsMatchedInPrompt.isEmpty())
+        assertTrue("Mei" in hit.keywordsInBody && "young traveler" in hit.keywordsInBody)
+    }
+
+    @Test fun consistencyPropagationSkipsClipsWithoutLockfileEntry() = runTest {
+        val (store, pid) = consistencyFixture()
+        // Remove the lockfile entries so the clips are bound but not AIGC-backed.
+        store.mutate(pid) { p -> p.copy(lockfile = io.talevia.core.domain.lockfile.Lockfile.EMPTY) }
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(
+                projectId = pid.value,
+                select = "consistency_propagation",
+                sourceNodeId = "mei",
+            ),
+            ctx(),
+        ).data
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(ProjectQueryTool.ConsistencyPropagationRow.serializer()),
+            out.rows,
+        )
+        assertEquals(2, rows.size)
+        assertTrue(rows.all { !it.aigcEntryFound })
+        assertTrue(rows.all { !it.promptContainsKeywords })
+        // Still reported — auditor sees the full bound set.
+    }
+
+    @Test fun consistencyPropagationUnknownNodeFailsLoud() = runTest {
+        val (store, pid) = consistencyFixture()
+        val ex = assertFailsWith<IllegalStateException> {
+            ProjectQueryTool(store).execute(
+                ProjectQueryTool.Input(
+                    projectId = pid.value,
+                    select = "consistency_propagation",
+                    sourceNodeId = "ghost",
+                ),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("Source node ghost not found"), ex.message)
+    }
+
+    @Test fun consistencyPropagationRequiresSourceNodeId() = runTest {
+        val (store, pid) = consistencyFixture()
+        val ex = assertFailsWith<IllegalStateException> {
+            ProjectQueryTool(store).execute(
+                ProjectQueryTool.Input(
+                    projectId = pid.value,
+                    select = "consistency_propagation",
+                ),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("sourceNodeId"), ex.message)
     }
 }

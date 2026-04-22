@@ -10,6 +10,7 @@ import io.talevia.core.tool.builtin.project.query.runAssetsQuery
 import io.talevia.core.tool.builtin.project.query.runClipDetailQuery
 import io.talevia.core.tool.builtin.project.query.runClipsForAssetQuery
 import io.talevia.core.tool.builtin.project.query.runClipsForSourceQuery
+import io.talevia.core.tool.builtin.project.query.runConsistencyPropagationQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileEntriesQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileEntryDetailQuery
 import io.talevia.core.tool.builtin.project.query.runProjectMetadataQuery
@@ -236,6 +237,36 @@ class ProjectQueryTool(
         val boundVia: List<String> = emptyList(),
     )
 
+    /**
+     * `select=consistency_propagation` — verifies that a consistency-style
+     * source node (character_ref / style_bible / brand_palette / …)
+     * actually reached the prompts of clips bound to it, by substring-
+     * matching the node's body string values against each clip's lockfile
+     * entry `baseInputs.prompt`. Supports VISION §5.5 "did my
+     * character_ref really influence shot-3?" — a provider can nominally
+     * see a binding but still not incorporate it.
+     *
+     * Row per bound clip. `aigcEntryFound=false` → clip is not AIGC-
+     * backed or its lockfile entry is missing (nothing to audit).
+     * `keywordsInBody` is a deterministic slice of string values from
+     * the node's top-level body JSON; `keywordsMatchedInPrompt` is the
+     * subset that appear (case-insensitive substring) in
+     * `baseInputs.prompt`. `promptContainsKeywords` is convenience.
+     */
+    @Serializable data class ConsistencyPropagationRow(
+        val clipId: String,
+        val trackId: String,
+        val assetId: String? = null,
+        val directlyBound: Boolean,
+        val boundVia: List<String> = emptyList(),
+        val aigcEntryFound: Boolean,
+        val lockfileInputHash: String? = null,
+        val aigcToolId: String? = null,
+        val keywordsInBody: List<String> = emptyList(),
+        val keywordsMatchedInPrompt: List<String> = emptyList(),
+        val promptContainsKeywords: Boolean = false,
+    )
+
     // -----------------------------------------------------------------
     // Single-row drill-down rows — folded from the deleted describe_*
     // tools (debt-consolidate-project-describe-queries cycle).
@@ -381,6 +412,10 @@ class ProjectQueryTool(
             "  • clips_for_asset — required: assetId. Every clip referencing the asset.\n" +
             "  • clips_for_source — required: sourceNodeId. Every clip bound to that source node " +
             "(directly or transitively).\n" +
+            "  • consistency_propagation — required: sourceNodeId. Audits whether the node's " +
+            "body string values actually made it into bound clips' AIGC prompts. Returns rows " +
+            "(clipId, aigcEntryFound, keywordsInBody, keywordsMatchedInPrompt, " +
+            "promptContainsKeywords). Use to answer \"did my character_ref really influence shot-3?\".\n" +
             "  • clip — required: clipId. Single-row drill-down replacing describe_clip " +
             "(timeRange, sourceRange, transforms, per-kind fields, derived lockfile ref).\n" +
             "  • lockfile_entry — required: inputHash. Single-row drill-down replacing " +
@@ -565,6 +600,7 @@ class ProjectQueryTool(
             SELECT_CLIP -> runClipDetailQuery(project, input)
             SELECT_LOCKFILE_ENTRY -> runLockfileEntryDetailQuery(project, input)
             SELECT_PROJECT_METADATA -> runProjectMetadataQuery(project, projects, input)
+            SELECT_CONSISTENCY_PROPAGATION -> runConsistencyPropagationQuery(project, input, limit, offset)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -604,8 +640,8 @@ class ProjectQueryTool(
             if (select != SELECT_CLIPS_FOR_ASSET && input.assetId != null) {
                 add("assetId (select=clips_for_asset only)")
             }
-            if (select != SELECT_CLIPS_FOR_SOURCE && input.sourceNodeId != null) {
-                add("sourceNodeId (select=clips_for_source only)")
+            if (select != SELECT_CLIPS_FOR_SOURCE && select != SELECT_CONSISTENCY_PROPAGATION && input.sourceNodeId != null) {
+                add("sourceNodeId (select=clips_for_source or consistency_propagation only)")
             }
             if (select != SELECT_CLIP && input.clipId != null) {
                 add("clipId (select=clip only)")
@@ -633,11 +669,13 @@ class ProjectQueryTool(
         const val SELECT_CLIP = "clip"
         const val SELECT_LOCKFILE_ENTRY = "lockfile_entry"
         const val SELECT_PROJECT_METADATA = "project_metadata"
+        const val SELECT_CONSISTENCY_PROPAGATION = "consistency_propagation"
         private val ALL_SELECTS = setOf(
             SELECT_TRACKS, SELECT_TIMELINE_CLIPS, SELECT_ASSETS,
             SELECT_TRANSITIONS, SELECT_LOCKFILE_ENTRIES,
             SELECT_CLIPS_FOR_ASSET, SELECT_CLIPS_FOR_SOURCE,
             SELECT_CLIP, SELECT_LOCKFILE_ENTRY, SELECT_PROJECT_METADATA,
+            SELECT_CONSISTENCY_PROPAGATION,
         )
 
         private const val DEFAULT_LIMIT = 100
