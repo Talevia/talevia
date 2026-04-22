@@ -16,7 +16,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **source-graph-export-dot** — Source DAG 能查能搜能 diff 单节点，但没办法 "一眼看到整张图"。Expert path 调试 "为什么这条 character_ref 没传到那条 clip" 要 grep+脑补。**方向：** 新 `export_source_graph_dot(projectId) -> String` 工具（或 `source_query(select=dot)`）吐一张 Graphviz DOT，外部 `dot -Tsvg` 就能渲染。不给 KMP 加 graphviz 依赖，只生成文本。Rubric §5.1。
 - **cross-session-spend-aggregator** — `session_query(select=spend)` 只聚合单 session 的 AIGC 花费。项目总花费（跨所有 session 的 lockfile 条目）没查询入口。**方向：** 把 `SELECT_SPEND` 扩到接受 `projectId` 且不要求 `sessionId`，或在 `project_query` 加 `select=spend`；聚合口径跟单 session 保持一致（同 `costCents`、同 groupBy）。Rubric §5.2。
 - **desktop-render-preview-panel** — Cycle 32 落了 `Part.RenderProgress.thumbnailPath`，但 desktop app 的 `Main.kt:196` 对 `Part.RenderProgress` 只打一行 progress string。长 export 还是 "两头看到 started/completed" 的 UX。**方向：** desktop Compose 的 render-progress 区加一块小面板，消费最新 `thumbnailPath` 的 JPEG bytes 显示出来；监听文件 mtime 或直接用 `Part.createdAt` 换 key。Rubric §5.4 expert path。
 - **cli-streaming-tool-output-renderer** — CLI `Renderer` 把 `Part.ToolCall` 当一次性打印，`Part.RenderProgress` 每条新一行。流式工具输出（cycle 里落的 streaming-tool-output-parts）在 CLI 上没有专门的"原地覆盖 / 折叠"表现。**方向：** Renderer 对同一 CallId 的连续 ToolCall parts 做就地 rewrite（ANSI `\r` 或 `\x1b[K`），RenderProgress 同 jobId 合成一行进度条 + 最新 preview 路径。Rubric §5.4。

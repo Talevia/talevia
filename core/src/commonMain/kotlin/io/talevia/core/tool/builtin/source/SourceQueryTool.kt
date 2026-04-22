@@ -9,6 +9,7 @@ import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.source.query.runDagSummaryQuery
+import io.talevia.core.tool.builtin.source.query.runDotQuery
 import io.talevia.core.tool.builtin.source.query.runNodesAllProjectsQuery
 import io.talevia.core.tool.builtin.source.query.runNodesQuery
 import kotlinx.serialization.KSerializer
@@ -35,6 +36,10 @@ import kotlinx.serialization.serializer
  *  - `dag_summary` — bird's-eye structural summary: per-kind counts, roots,
  *    leaves, max depth, hotspots, orphans. Replaces `describe_source_dag`.
  *    Always returns exactly one [DagSummaryRow].
+ *  - `dot` — the whole source DAG as a Graphviz DOT document. Single-row
+ *    `{dot: String}`; caller pipes into `dot -Tsvg` externally to render.
+ *    Expert path for "eyeball why this character_ref isn't feeding that clip"
+ *    — we don't take a Graphviz dependency, just emit text.
  *
  * `describe_source_node` stays as a separate tool — it's single-entity deep
  * inspection (body + parents + children + bindings), not projection. Same
@@ -50,7 +55,7 @@ class SourceQueryTool(
 ) : Tool<SourceQueryTool.Input, SourceQueryTool.Output> {
 
     @Serializable data class Input(
-        /** One of [SELECT_NODES] / [SELECT_DAG_SUMMARY] (case-insensitive). */
+        /** One of [SELECT_NODES] / [SELECT_DAG_SUMMARY] / [SELECT_DOT] (case-insensitive). */
         val select: String,
         /**
          * Target project. Required when `scope == "project"` (default) or unset.
@@ -148,6 +153,18 @@ class SourceQueryTool(
         val summaryText: String,
     )
 
+    /**
+     * Single-row payload for `select=dot`. [dot] is a complete Graphviz DOT
+     * document; [nodeCount] / [edgeCount] are echoes so consumers can branch
+     * (e.g. "don't bother rendering an empty graph") without re-parsing the
+     * DOT text.
+     */
+    @Serializable data class DotRow(
+        val dot: String,
+        val nodeCount: Int,
+        val edgeCount: Int,
+    )
+
     override val id: String = "source_query"
     override val helpText: String =
         "Unified read-only query over a project's Source DAG (replaces list_source_nodes / " +
@@ -160,6 +177,10 @@ class SourceQueryTool(
             "  • dag_summary — one row: {nodeCount, nodesByKind, rootNodeIds, leafNodeIds, " +
             "maxDepth, hotspots (ranked by downstream-clip count), orphanedNodeIds, summaryText}. " +
             "filter: hotspotLimit (default 5). No limit/offset — always one row.\n" +
+            "  • dot — one row: {dot}. Emits the whole Source DAG as a Graphviz DOT document so " +
+            "you can pipe it into `dot -Tsvg` externally for a one-glance view (nodes with no " +
+            "downstream clip binding render dashed). No filters — the point of the view is the " +
+            "whole graph; use select=nodes for subsets.\n" +
             "Common: projectId (required unless scope='all_projects'), limit, offset " +
             "(select=nodes only). scope='all_projects' (select=nodes only) enumerates every " +
             "registered project and tags each row with its owning projectId — use for \"find all " +
@@ -176,7 +197,7 @@ class SourceQueryTool(
         putJsonObject("properties") {
             putJsonObject("select") {
                 put("type", "string")
-                put("description", "What to query: nodes | dag_summary (case-insensitive).")
+                put("description", "What to query: nodes | dag_summary | dot (case-insensitive).")
             }
             putJsonObject("projectId") {
                 put("type", "string")
@@ -292,6 +313,7 @@ class SourceQueryTool(
         return when (select) {
             SELECT_NODES -> runNodesQuery(project, input)
             SELECT_DAG_SUMMARY -> runDagSummaryQuery(project, input)
+            SELECT_DOT -> runDotQuery(project)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -322,7 +344,7 @@ class SourceQueryTool(
         if (scope == SCOPE_ALL_PROJECTS) {
             require(select == SELECT_NODES) {
                 "scope='$SCOPE_ALL_PROJECTS' is only valid with select=nodes (got select='$select'); " +
-                    "cross-project DAG summary isn't meaningful — each project has its own DAG."
+                    "cross-project DAG summary / DOT export isn't meaningful — each project has its own DAG."
             }
             require(input.projectId.isNullOrBlank()) {
                 "scope='$SCOPE_ALL_PROJECTS' and projectId are mutually exclusive " +
@@ -334,7 +356,8 @@ class SourceQueryTool(
     companion object {
         const val SELECT_NODES = "nodes"
         const val SELECT_DAG_SUMMARY = "dag_summary"
-        private val ALL_SELECTS = setOf(SELECT_NODES, SELECT_DAG_SUMMARY)
+        const val SELECT_DOT = "dot"
+        private val ALL_SELECTS = setOf(SELECT_NODES, SELECT_DAG_SUMMARY, SELECT_DOT)
 
         const val SCOPE_PROJECT = "project"
         const val SCOPE_ALL_PROJECTS = "all_projects"
