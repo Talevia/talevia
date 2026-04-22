@@ -102,16 +102,7 @@ class ValidateProjectTool(
         val pid = ProjectId(input.projectId)
         val project = projects.get(pid) ?: error("Project ${input.projectId} not found")
 
-        val issues = buildList {
-            addAll(timelineDurationIssues(project))
-            for (track in project.timeline.tracks) {
-                for (clip in track.clips) {
-                    addAll(clipIssues(project, track, clip))
-                }
-            }
-            addAll(sourceDagIssues(project))
-        }
-
+        val issues = computeIssues(project)
         val errorCount = issues.count { it.severity == "error" }
         val warnCount = issues.count { it.severity == "warn" }
         val out = Output(
@@ -129,102 +120,6 @@ class ValidateProjectTool(
         )
     }
 
-    private fun timelineDurationIssues(project: Project): List<Issue> {
-        val actualMax = project.timeline.tracks
-            .flatMap { it.clips }
-            .maxOfOrNull { it.timeRange.end }
-            ?: Duration.ZERO
-        if (project.timeline.duration < actualMax) {
-            return listOf(
-                Issue(
-                    severity = "warn",
-                    code = "duration-mismatch",
-                    message = "timeline.duration (${project.timeline.duration.secondsString()}s) " +
-                        "is less than the latest clip end (${actualMax.secondsString()}s); " +
-                        "engines will truncate output.",
-                ),
-            )
-        }
-        return emptyList()
-    }
-
-    private fun clipIssues(project: Project, track: Track, clip: Clip): List<Issue> {
-        val result = mutableListOf<Issue>()
-        val trackIdValue = track.id.value
-        val clipIdValue = clip.id.value
-
-        if (clip.timeRange.duration <= Duration.ZERO) {
-            result += Issue(
-                severity = "error",
-                code = "non-positive-duration",
-                message = "clip duration must be > 0 (got ${clip.timeRange.duration.secondsString()}s)",
-                trackId = trackIdValue,
-                clipId = clipIdValue,
-            )
-        }
-
-        val assetId = when (clip) {
-            is Clip.Video -> clip.assetId.value
-            is Clip.Audio -> clip.assetId.value
-            is Clip.Text -> null
-        }
-        if (assetId != null && project.assets.none { it.id.value == assetId }) {
-            result += Issue(
-                severity = "error",
-                code = "dangling-asset",
-                message = "clip references assetId '$assetId' which is not in project.assets",
-                trackId = trackIdValue,
-                clipId = clipIdValue,
-            )
-        }
-
-        for (nodeId in clip.sourceBinding) {
-            if (nodeId !in project.source.byId) {
-                result += Issue(
-                    severity = "error",
-                    code = "dangling-source-binding",
-                    message = "clip binds source node '${nodeId.value}' which is not in project.source",
-                    trackId = trackIdValue,
-                    clipId = clipIdValue,
-                )
-            }
-        }
-
-        if (clip is Clip.Audio) {
-            if (clip.volume < 0f || clip.volume > 4f) {
-                result += Issue(
-                    severity = "error",
-                    code = "volume-range",
-                    message = "audio clip volume ${clip.volume} is outside the [0, 4] range",
-                    trackId = trackIdValue,
-                    clipId = clipIdValue,
-                )
-            }
-            if (clip.fadeInSeconds < 0f || clip.fadeOutSeconds < 0f) {
-                result += Issue(
-                    severity = "error",
-                    code = "fade-negative",
-                    message = "audio clip has negative fade (in=${clip.fadeInSeconds}s, out=${clip.fadeOutSeconds}s)",
-                    trackId = trackIdValue,
-                    clipId = clipIdValue,
-                )
-            }
-            val durSec = clip.timeRange.duration.inWholeMilliseconds / 1000.0
-            val fadeTotal = (clip.fadeInSeconds + clip.fadeOutSeconds).toDouble()
-            if (fadeTotal > durSec) {
-                result += Issue(
-                    severity = "error",
-                    code = "fade-overlap",
-                    message = "audio fade-in + fade-out (${fadeTotal}s) exceeds clip duration (${durSec}s)",
-                    trackId = trackIdValue,
-                    clipId = clipIdValue,
-                )
-            }
-        }
-
-        return result
-    }
-
     private fun summarise(out: Output): String {
         if (out.issues.isEmpty()) return "Project ${out.projectId} passed validation (0 issues)."
         val head = "Project ${out.projectId}: ${out.errorCount} error(s), ${out.warnCount} warning(s)."
@@ -239,125 +134,263 @@ class ValidateProjectTool(
         return "$head\n$body"
     }
 
-    private fun Duration.secondsString(): String {
-        val millis = inWholeMilliseconds
-        val whole = millis / 1000
-        val frac = (millis % 1000).toString().padStart(3, '0').trimEnd('0')
-        return if (frac.isEmpty()) whole.toString() else "$whole.$frac"
+    companion object {
+        /**
+         * Pure structural check over [project]. Shared by [ValidateProjectTool.execute]
+         * (which has a stored project) and [ImportProjectFromJsonTool] (which has a
+         * decoded-but-not-yet-upserted envelope). Extracted so the two code paths
+         * cannot drift — an envelope that imports clean must also pass the linter on
+         * the target, and vice versa.
+         */
+        fun computeIssues(project: Project): List<Issue> = buildList {
+            addAll(timelineDurationIssues(project))
+            for (track in project.timeline.tracks) {
+                for (clip in track.clips) {
+                    addAll(clipIssues(project, track, clip))
+                }
+            }
+            addAll(sourceDagIssues(project))
+        }
+
+        /**
+         * Render a short, human-readable summary of [issues] suitable for surfacing
+         * in an `error { ... }` message at an import / ingest boundary. Caps at
+         * [maxLines] issues and appends `... (N more)` for the rest.
+         */
+        fun renderIssues(issues: List<Issue>, maxLines: Int = 5): String {
+            if (issues.isEmpty()) return ""
+            val head = issues.take(maxLines).joinToString("\n") { issue ->
+                val where = listOfNotNull(
+                    issue.trackId?.let { "track=$it" },
+                    issue.clipId?.let { "clip=$it" },
+                ).joinToString(" ")
+                val locator = if (where.isEmpty()) "" else " ($where)"
+                "- [${issue.severity}] ${issue.code}$locator: ${issue.message}"
+            }
+            val extra = issues.size - maxLines
+            return if (extra > 0) "$head\n… ($extra more)" else head
+        }
+    }
+}
+
+private fun timelineDurationIssues(project: Project): List<ValidateProjectTool.Issue> {
+    val actualMax = project.timeline.tracks
+        .flatMap { it.clips }
+        .maxOfOrNull { it.timeRange.end }
+        ?: Duration.ZERO
+    if (project.timeline.duration < actualMax) {
+        return listOf(
+            ValidateProjectTool.Issue(
+                severity = "warn",
+                code = "duration-mismatch",
+                message = "timeline.duration (${project.timeline.duration.secondsString()}s) " +
+                    "is less than the latest clip end (${actualMax.secondsString()}s); " +
+                    "engines will truncate output.",
+            ),
+        )
+    }
+    return emptyList()
+}
+
+private fun clipIssues(
+    project: Project,
+    track: Track,
+    clip: Clip,
+): List<ValidateProjectTool.Issue> {
+    val result = mutableListOf<ValidateProjectTool.Issue>()
+    val trackIdValue = track.id.value
+    val clipIdValue = clip.id.value
+
+    if (clip.timeRange.duration <= Duration.ZERO) {
+        result += ValidateProjectTool.Issue(
+            severity = "error",
+            code = "non-positive-duration",
+            message = "clip duration must be > 0 (got ${clip.timeRange.duration.secondsString()}s)",
+            trackId = trackIdValue,
+            clipId = clipIdValue,
+        )
     }
 
-    /**
-     * Source DAG integrity — detect two structural faults neither of which
-     * the source-mutation helpers (addNode / replaceNode) guard against
-     * today:
-     *
-     *  1. **Dangling parent**: a `SourceRef` whose nodeId is not present in
-     *     `project.source.byId`. Typically arises from `remove_source_node`
-     *     on a referenced node (the kdoc explicitly says it does not
-     *     cascade). Breaks staleness propagation silently — `Source.stale`
-     *     walks parents and simply skips missing ids, so an edit upstream of
-     *     the dangling edge never marks the orphaned descendant stale.
-     *
-     *  2. **Parent cycle**: a→b→c→a in the `parents` relation. Breaks DFS-
-     *     based traversals (`source_query(select=dag_summary).computeMaxDepth` has a
-     *     cycle-guard, but other walkers — including the export-time
-     *     topological ordering in `ExportSourceNodeTool.topoCollect` — assume
-     *     an acyclic DAG). Also implies the hash-driven dedup logic in
-     *     content-addressed cases could behave in surprising ways.
-     *
-     * Both are reported as errors rather than warnings: they silently
-     * corrupt downstream behaviour (stale propagation, topological export,
-     * staleness detection), and `passed=false` should block an export until
-     * the agent fixes the DAG.
-     */
-    private fun sourceDagIssues(project: Project): List<Issue> {
-        val nodes = project.source.nodes
-        if (nodes.isEmpty()) return emptyList()
-        val byId = project.source.byId
-        val issues = mutableListOf<Issue>()
+    val assetId = when (clip) {
+        is Clip.Video -> clip.assetId.value
+        is Clip.Audio -> clip.assetId.value
+        is Clip.Text -> null
+    }
+    if (assetId != null && project.assets.none { it.id.value == assetId }) {
+        result += ValidateProjectTool.Issue(
+            severity = "error",
+            code = "dangling-asset",
+            message = "clip references assetId '$assetId' which is not in project.assets",
+            trackId = trackIdValue,
+            clipId = clipIdValue,
+        )
+    }
 
-        // Tier 1 — dangling parents, reported per-edge.
-        for (node in nodes) {
-            for (parent in node.parents) {
-                if (parent.nodeId !in byId) {
-                    issues += Issue(
+    for (nodeId in clip.sourceBinding) {
+        if (nodeId !in project.source.byId) {
+            result += ValidateProjectTool.Issue(
+                severity = "error",
+                code = "dangling-source-binding",
+                message = "clip binds source node '${nodeId.value}' which is not in project.source",
+                trackId = trackIdValue,
+                clipId = clipIdValue,
+            )
+        }
+    }
+
+    if (clip is Clip.Audio) {
+        if (clip.volume < 0f || clip.volume > 4f) {
+            result += ValidateProjectTool.Issue(
+                severity = "error",
+                code = "volume-range",
+                message = "audio clip volume ${clip.volume} is outside the [0, 4] range",
+                trackId = trackIdValue,
+                clipId = clipIdValue,
+            )
+        }
+        if (clip.fadeInSeconds < 0f || clip.fadeOutSeconds < 0f) {
+            result += ValidateProjectTool.Issue(
+                severity = "error",
+                code = "fade-negative",
+                message = "audio clip has negative fade (in=${clip.fadeInSeconds}s, out=${clip.fadeOutSeconds}s)",
+                trackId = trackIdValue,
+                clipId = clipIdValue,
+            )
+        }
+        val durSec = clip.timeRange.duration.inWholeMilliseconds / 1000.0
+        val fadeTotal = (clip.fadeInSeconds + clip.fadeOutSeconds).toDouble()
+        if (fadeTotal > durSec) {
+            result += ValidateProjectTool.Issue(
+                severity = "error",
+                code = "fade-overlap",
+                message = "audio fade-in + fade-out (${fadeTotal}s) exceeds clip duration (${durSec}s)",
+                trackId = trackIdValue,
+                clipId = clipIdValue,
+            )
+        }
+    }
+
+    return result
+}
+
+private fun Duration.secondsString(): String {
+    val millis = inWholeMilliseconds
+    val whole = millis / 1000
+    val frac = (millis % 1000).toString().padStart(3, '0').trimEnd('0')
+    return if (frac.isEmpty()) whole.toString() else "$whole.$frac"
+}
+
+/**
+ * Source DAG integrity — detect two structural faults neither of which
+ * the source-mutation helpers (addNode / replaceNode) guard against
+ * today:
+ *
+ *  1. **Dangling parent**: a `SourceRef` whose nodeId is not present in
+ *     `project.source.byId`. Typically arises from `remove_source_node`
+ *     on a referenced node (the kdoc explicitly says it does not
+ *     cascade). Breaks staleness propagation silently — `Source.stale`
+ *     walks parents and simply skips missing ids, so an edit upstream of
+ *     the dangling edge never marks the orphaned descendant stale.
+ *
+ *  2. **Parent cycle**: a→b→c→a in the `parents` relation. Breaks DFS-
+ *     based traversals (`source_query(select=dag_summary).computeMaxDepth` has a
+ *     cycle-guard, but other walkers — including the export-time
+ *     topological ordering in `ExportSourceNodeTool.topoCollect` — assume
+ *     an acyclic DAG). Also implies the hash-driven dedup logic in
+ *     content-addressed cases could behave in surprising ways.
+ *
+ * Both are reported as errors rather than warnings: they silently
+ * corrupt downstream behaviour (stale propagation, topological export,
+ * staleness detection), and `passed=false` should block an export until
+ * the agent fixes the DAG.
+ */
+private fun sourceDagIssues(project: Project): List<ValidateProjectTool.Issue> {
+    val nodes = project.source.nodes
+    if (nodes.isEmpty()) return emptyList()
+    val byId = project.source.byId
+    val issues = mutableListOf<ValidateProjectTool.Issue>()
+
+    // Tier 1 — dangling parents, reported per-edge.
+    for (node in nodes) {
+        for (parent in node.parents) {
+            if (parent.nodeId !in byId) {
+                issues += ValidateProjectTool.Issue(
+                    severity = "error",
+                    code = "source-parent-dangling",
+                    message = "source node '${node.id.value}' references missing parent " +
+                        "'${parent.nodeId.value}' (call set_source_node_parents / " +
+                        "remove_source_node to fix).",
+                )
+            }
+        }
+    }
+
+    // Tier 2 — cycle detection via iterative DFS over `parents`.
+    // White = unvisited, Grey = on current DFS stack, Black = finished.
+    // A back-edge to Grey is a cycle. One issue per detected cycle
+    // (we break once a cycle is found from a given start node).
+    val white = nodes.map { it.id }.toMutableSet()
+    val grey = mutableSetOf<SourceNodeId>()
+    val black = mutableSetOf<SourceNodeId>()
+    val reported = mutableSetOf<Set<SourceNodeId>>()
+
+    fun visit(startId: SourceNodeId) {
+        // Iterative DFS with an explicit stack so we can carry the path
+        // and emit the cycle nodes without deep recursion.
+        val stack = ArrayDeque<Pair<SourceNodeId, Iterator<SourceNodeId>>>()
+        val path = ArrayDeque<SourceNodeId>()
+
+        fun push(id: SourceNodeId) {
+            white.remove(id)
+            grey += id
+            path.addLast(id)
+            val parents = byId[id]?.parents.orEmpty().map { it.nodeId }.iterator()
+            stack.addLast(id to parents)
+        }
+
+        push(startId)
+        while (stack.isNotEmpty()) {
+            val (currentId, iter) = stack.last()
+            if (!iter.hasNext()) {
+                stack.removeLast()
+                grey.remove(currentId)
+                black += currentId
+                path.removeLast()
+                continue
+            }
+            val next = iter.next()
+            if (next !in byId) continue // dangling; already reported above
+            if (next in black) continue
+            if (next in grey) {
+                // Found a cycle: the path from `next` to `currentId` +
+                // back to `next` is the cycle. Record the set of ids to
+                // avoid re-reporting the same cycle from another start.
+                val cycleStart = path.indexOf(next)
+                val cycleNodes = if (cycleStart >= 0) {
+                    path.toList().subList(cycleStart, path.size).toSet()
+                } else {
+                    setOf(next, currentId)
+                }
+                if (reported.add(cycleNodes)) {
+                    val rendered = cycleNodes.joinToString(" → ") { it.value } +
+                        " → ${next.value}"
+                    issues += ValidateProjectTool.Issue(
                         severity = "error",
-                        code = "source-parent-dangling",
-                        message = "source node '${node.id.value}' references missing parent " +
-                            "'${parent.nodeId.value}' (call set_source_node_parents / " +
-                            "remove_source_node to fix).",
+                        code = "source-parent-cycle",
+                        message = "source DAG has a parent-cycle involving: $rendered. Use " +
+                            "set_source_node_parents to break the cycle.",
                     )
                 }
+                continue
             }
+            push(next)
         }
-
-        // Tier 2 — cycle detection via iterative DFS over `parents`.
-        // White = unvisited, Grey = on current DFS stack, Black = finished.
-        // A back-edge to Grey is a cycle. One issue per detected cycle
-        // (we break once a cycle is found from a given start node).
-        val white = nodes.map { it.id }.toMutableSet()
-        val grey = mutableSetOf<SourceNodeId>()
-        val black = mutableSetOf<SourceNodeId>()
-        val reported = mutableSetOf<Set<SourceNodeId>>()
-
-        fun visit(startId: SourceNodeId) {
-            // Iterative DFS with an explicit stack so we can carry the path
-            // and emit the cycle nodes without deep recursion.
-            val stack = ArrayDeque<Pair<SourceNodeId, Iterator<SourceNodeId>>>()
-            val path = ArrayDeque<SourceNodeId>()
-
-            fun push(id: SourceNodeId) {
-                white.remove(id)
-                grey += id
-                path.addLast(id)
-                val parents = byId[id]?.parents.orEmpty().map { it.nodeId }.iterator()
-                stack.addLast(id to parents)
-            }
-
-            push(startId)
-            while (stack.isNotEmpty()) {
-                val (currentId, iter) = stack.last()
-                if (!iter.hasNext()) {
-                    stack.removeLast()
-                    grey.remove(currentId)
-                    black += currentId
-                    path.removeLast()
-                    continue
-                }
-                val next = iter.next()
-                if (next !in byId) continue // dangling; already reported above
-                if (next in black) continue
-                if (next in grey) {
-                    // Found a cycle: the path from `next` to `currentId` +
-                    // back to `next` is the cycle. Record the set of ids to
-                    // avoid re-reporting the same cycle from another start.
-                    val cycleStart = path.indexOf(next)
-                    val cycleNodes = if (cycleStart >= 0) {
-                        path.toList().subList(cycleStart, path.size).toSet()
-                    } else {
-                        setOf(next, currentId)
-                    }
-                    if (reported.add(cycleNodes)) {
-                        val rendered = cycleNodes.joinToString(" → ") { it.value } +
-                            " → ${next.value}"
-                        issues += Issue(
-                            severity = "error",
-                            code = "source-parent-cycle",
-                            message = "source DAG has a parent-cycle involving: $rendered. Use " +
-                                "set_source_node_parents to break the cycle.",
-                        )
-                    }
-                    continue
-                }
-                push(next)
-            }
-        }
-
-        while (white.isNotEmpty()) {
-            val start = white.first()
-            visit(start)
-        }
-
-        return issues
     }
+
+    while (white.isNotEmpty()) {
+        val start = white.first()
+        visit(start)
+    }
+
+    return issues
 }

@@ -33,6 +33,16 @@ import kotlinx.serialization.serializer
  *
  * Unknown `formatVersion` values are rejected loudly. Invalid JSON
  * produces a structured error with the underlying parser message.
+ *
+ * **Integrity validation.** Before the project is upserted the envelope
+ * is run through the same structural checks as [ValidateProjectTool]
+ * (clip → asset / source-binding references, source DAG parent integrity,
+ * audio envelope ranges, etc.). Any `error`-severity issue aborts the
+ * import with a rendered summary rather than upserting a project the
+ * rest of the stack (`find_stale_clips`, export, renderers) will trip
+ * over later. Warnings never block — they're reported via the Output
+ * counters. Pass `force = true` to bypass the gate (for import-to-fix
+ * workflows); counters are still populated.
  */
 class ImportProjectFromJsonTool(
     private val projects: ProjectStore,
@@ -47,6 +57,13 @@ class ImportProjectFromJsonTool(
         val newProjectId: String? = null,
         /** Optional new title. Defaults to the envelope's title. */
         val newTitle: String? = null,
+        /**
+         * Skip the integrity gate. When `true`, a project with structural
+         * `error`-severity issues is still upserted; the issues are reported
+         * in the Output so the caller can fix them post-import. Default
+         * `false` — the gate is on.
+         */
+        val force: Boolean = false,
     )
 
     @Serializable data class Output(
@@ -59,14 +76,27 @@ class ImportProjectFromJsonTool(
         val assetCount: Int,
         val lockfileEntryCount: Int,
         val snapshotCount: Int,
+        /** Total integrity issues found pre-upsert. */
+        val validationIssueCount: Int = 0,
+        /** Count of `"error"`-severity issues. A non-zero value with
+         *  `force=false` means the tool failed loudly instead of upserting. */
+        val validationErrorCount: Int = 0,
+        /** Count of `"warn"`-severity issues. Never blocks. */
+        val validationWarnCount: Int = 0,
+        /** First N issue codes, for caller triage without needing to re-run
+         *  `validate_project`. Empty when the envelope is clean. */
+        val validationIssueCodes: List<String> = emptyList(),
     )
 
     override val id: String = "import_project_from_json"
     override val helpText: String =
         "Ingest a project envelope produced by export_project. Lands at the envelope's original " +
             "projectId unless you pass newProjectId to rename. Collision on the target id fails " +
-            "loudly. Unknown formatVersions rejected. Note: asset bytes are NOT bundled — the " +
-            "importing instance needs access to the underlying media paths the assets reference."
+            "loudly. Unknown formatVersions rejected. Runs validate_project's integrity checks " +
+            "pre-upsert; structural errors (dangling asset / source-binding refs, source DAG " +
+            "parent-dangling / cycles, etc.) abort the import unless `force=true` is set. Note: " +
+            "asset bytes are NOT bundled — the importing instance needs access to the underlying " +
+            "media paths the assets reference."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.write")
@@ -88,6 +118,14 @@ class ImportProjectFromJsonTool(
             putJsonObject("newTitle") {
                 put("type", "string")
                 put("description", "Optional new title. Defaults to the envelope's title.")
+            }
+            putJsonObject("force") {
+                put("type", "boolean")
+                put(
+                    "description",
+                    "When true, skip the integrity gate: structural errors no longer abort the import. " +
+                        "Use for import-to-fix workflows. Default false.",
+                )
             }
         }
         put("required", JsonArray(listOf(JsonPrimitive("envelope"))))
@@ -117,6 +155,25 @@ class ImportProjectFromJsonTool(
         } else {
             decoded.project.copy(id = targetId)
         }
+
+        // Integrity check BEFORE upsert. Import is a trust boundary: the
+        // envelope may come from a different instance or hand-edited file,
+        // so structural errors (dangling refs, source-DAG corruption) must
+        // not leak into the store where the rest of the stack assumes them
+        // absent. `force=true` bypasses the gate for import-to-fix flows.
+        val issues = ValidateProjectTool.computeIssues(rehomed)
+        val errorIssues = issues.filter { it.severity == "error" }
+        val warnIssues = issues.filter { it.severity == "warn" }
+        val issueCodes = issues.take(10).map { it.code }
+        if (errorIssues.isNotEmpty() && !input.force) {
+            error(
+                "Envelope failed integrity checks (${errorIssues.size} error(s), " +
+                    "${warnIssues.size} warning(s)); refusing to import. Fix the envelope, pass " +
+                    "force=true to import-then-fix, or re-export from a clean project.\n" +
+                    ValidateProjectTool.renderIssues(issues),
+            )
+        }
+
         projects.upsert(targetTitle, rehomed)
 
         val sourceNodeCount = rehomed.source.nodes.size
@@ -126,12 +183,19 @@ class ImportProjectFromJsonTool(
         val lockfileEntryCount = rehomed.lockfile.entries.size
         val snapshotCount = rehomed.snapshots.size
 
+        val validationNote = when {
+            issues.isEmpty() -> ""
+            errorIssues.isEmpty() -> " — ${warnIssues.size} warning(s) recorded on the project"
+            else -> " — ${errorIssues.size} error(s) / ${warnIssues.size} warning(s) carried in under force=true"
+        }
+
         return ToolResult(
             title = "import project ${targetId.value}",
             outputForLlm = "Ingested ${decoded.formatVersion} envelope as ${targetId.value} " +
                 "'$targetTitle' ($trackCount track(s), $clipCount clip(s), $assetCount asset(s), " +
                 "$sourceNodeCount source node(s), $lockfileEntryCount lockfile entry(ies), " +
-                "$snapshotCount snapshot(s)). Asset bytes not bundled — ensure target media paths resolve.",
+                "$snapshotCount snapshot(s))$validationNote. Asset bytes not bundled — ensure " +
+                "target media paths resolve.",
             data = Output(
                 projectId = targetId.value,
                 title = targetTitle,
@@ -142,6 +206,10 @@ class ImportProjectFromJsonTool(
                 assetCount = assetCount,
                 lockfileEntryCount = lockfileEntryCount,
                 snapshotCount = snapshotCount,
+                validationIssueCount = issues.size,
+                validationErrorCount = errorIssues.size,
+                validationWarnCount = warnIssues.size,
+                validationIssueCodes = issueCodes,
             ),
         )
     }
