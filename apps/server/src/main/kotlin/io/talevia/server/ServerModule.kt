@@ -403,6 +403,7 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.SessionUpdated -> "session.updated"
     is BusEvent.SessionDeleted -> "session.deleted"
     is BusEvent.SessionCancelled -> "session.cancelled"
+    is BusEvent.SessionCancelRequested -> "session.cancel.requested"
     is BusEvent.MessageUpdated -> "message.updated"
     is BusEvent.MessageDeleted -> "message.deleted"
     is BusEvent.SessionReverted -> "session.reverted"
@@ -538,6 +539,7 @@ data class BusEventDto(
             is BusEvent.SessionUpdated -> BusEventDto("session.updated", e.sessionId.value)
             is BusEvent.SessionDeleted -> BusEventDto("session.deleted", e.sessionId.value)
             is BusEvent.SessionCancelled -> BusEventDto("session.cancelled", e.sessionId.value)
+            is BusEvent.SessionCancelRequested -> BusEventDto("session.cancel.requested", e.sessionId.value)
             is BusEvent.MessageUpdated -> BusEventDto("message.updated", e.sessionId.value, messageId = e.messageId.value)
             is BusEvent.MessageDeleted -> BusEventDto("message.deleted", e.sessionId.value, messageId = e.messageId.value)
             is BusEvent.SessionReverted -> BusEventDto(

@@ -92,6 +92,18 @@ sealed interface BusEvent {
     data class SessionCancelled(override val sessionId: SessionId) : SessionEvent
 
     /**
+     * Request that the Agent cancel an in-flight run for [sessionId]. Any
+     * subscriber (CLI signal handler, HTTP endpoint, IDE abort button) can
+     * publish this without holding an [io.talevia.core.agent.Agent] reference;
+     * the Agent subscribes on construction and calls `Agent.cancel(sessionId)`
+     * on receipt. Publishing against an idle session is a no-op. The observable
+     * effects are the follow-up [SessionCancelled] event and the assistant
+     * message's `FinishReason.CANCELLED` — subscribers watching for completion
+     * should key off those, not this request event.
+     */
+    data class SessionCancelRequested(override val sessionId: SessionId) : SessionEvent
+
+    /**
      * The Agent caught a transient provider error and scheduled a retry.
      * [attempt] is 1-based — the upcoming attempt number — and [waitMs] is
      * the backoff the Agent is about to sleep before re-streaming.

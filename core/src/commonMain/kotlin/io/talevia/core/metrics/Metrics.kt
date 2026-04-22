@@ -132,6 +132,7 @@ class EventBusMetricsSink(
             if (event.accepted) "permission.granted" else "permission.rejected"
         is BusEvent.AgentRunFailed -> "agent.run.failed"
         is BusEvent.SessionCancelled -> "session.cancelled"
+        is BusEvent.SessionCancelRequested -> "session.cancel.requested"
         is BusEvent.AgentRetryScheduled -> "agent.retry.${retryReasonSlug(event.reason)}"
         is BusEvent.AgentProviderFallback -> "agent.provider.fallback"
         is BusEvent.SessionCompactionAuto -> "session.compaction.auto"

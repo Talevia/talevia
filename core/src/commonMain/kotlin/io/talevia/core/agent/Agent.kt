@@ -22,6 +22,7 @@ import io.talevia.core.session.Part
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolRegistry
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -29,6 +30,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -152,6 +155,40 @@ class Agent(
 
     private val inflightMutex = Mutex()
     private val inflight = mutableMapOf<SessionId, RunHandle>()
+
+    /**
+     * Completes the first time the bus-driven cancel subscription is actively
+     * collecting — tests can await it before publishing a
+     * [BusEvent.SessionCancelRequested] to avoid races where the publish lands
+     * before the SharedFlow has a subscriber (in which case the event is
+     * silently dropped, matching the behaviour of a direct [cancel] call
+     * against an idle session). Production callers can ignore it.
+     */
+    private val cancelSubscriptionReady = CompletableDeferred<Unit>()
+
+    init {
+        // Subscribe once at construction so any publisher — CLI signal handler,
+        // HTTP handler, IDE abort button — can request a cancel without holding
+        // an Agent reference. Idle sessions are a no-op (Agent.cancel returns
+        // false); throwables are swallowed so a cancel during shutdown never
+        // propagates out of the background scope.
+        backgroundScope.launch {
+            // `onSubscription` is only defined on SharedFlow (which
+            // `EventBus.events` exposes), so it has to precede the
+            // `filterIsInstance` that downgrades the chain to a plain Flow.
+            bus.events
+                .onSubscription { cancelSubscriptionReady.complete(Unit) }
+                .filterIsInstance<BusEvent.SessionCancelRequested>()
+                .collect { ev ->
+                    runCatching { cancel(ev.sessionId) }
+                }
+        }
+    }
+
+    /** Test hook — suspends until the bus-driven cancel subscription is live. */
+    suspend fun awaitCancelSubscriptionReady() {
+        cancelSubscriptionReady.await()
+    }
 
     /**
      * Cancel any in-flight [run] for [sessionId]. Returns true if a run was
