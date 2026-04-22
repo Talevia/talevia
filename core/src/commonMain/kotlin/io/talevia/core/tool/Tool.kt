@@ -133,6 +133,19 @@ class ToolContext(
      * without bespoke wiring per tool.
      */
     val publishEvent: suspend (io.talevia.core.bus.BusEvent) -> Unit = { },
+    /**
+     * Signals this dispatch is part of a `replay_lockfile` run — AIGC tools
+     * must skip their `AigcPipeline.findCached` lookup so a fresh provider
+     * call happens even when an identical [LockfileEntry] already exists.
+     * Without this a replay would always fall through to the cache (same
+     * inputs → same inputHash → same cached asset id) and never re-exercise
+     * the provider, defeating VISION §5.2 "相同 source + 相同 toolchain
+     * 重跑产物是否 bit-identical". Default `false` so every existing tool
+     * call site keeps the normal cache-first behaviour. See
+     * [ReplayLockfileTool][io.talevia.core.tool.builtin.aigc.ReplayLockfileTool]
+     * for the one dispatch site that flips this.
+     */
+    val isReplay: Boolean = false,
 ) {
     /**
      * Resolve a project id for a tool that accepts an optional explicit
@@ -160,6 +173,23 @@ class ToolContext(
      */
     fun resolveSessionId(input: String?): SessionId =
         if (input != null) SessionId(input) else sessionId
+
+    /**
+     * Return a new [ToolContext] identical to this one but with [isReplay] =
+     * `true`. Used exclusively by `replay_lockfile` to re-dispatch an AIGC
+     * tool while telling it to bypass the lockfile cache.
+     */
+    fun forReplay(): ToolContext = ToolContext(
+        sessionId = sessionId,
+        messageId = messageId,
+        callId = callId,
+        askPermission = askPermission,
+        emitPart = emitPart,
+        messages = messages,
+        currentProjectId = currentProjectId,
+        publishEvent = publishEvent,
+        isReplay = true,
+    )
 }
 
 data class ToolResult<O>(

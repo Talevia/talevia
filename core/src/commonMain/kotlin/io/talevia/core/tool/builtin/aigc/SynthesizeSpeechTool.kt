@@ -179,7 +179,7 @@ class SynthesizeSpeechTool(
 
         val pid = input.projectId?.let(::ProjectId)
         val store = projectStore
-        if (pid != null && store != null) {
+        if (pid != null && store != null && !ctx.isReplay) {
             val cached = AigcPipeline.findCached(store, pid, inputHash)
             if (cached != null) {
                 return hit(cached, input, resolvedVoice, folded.appliedNodeIds)

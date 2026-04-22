@@ -51,6 +51,7 @@ import io.talevia.core.tool.builtin.aigc.CompareAigcCandidatesTool
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import io.talevia.core.tool.builtin.aigc.GenerateMusicTool
 import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
+import io.talevia.core.tool.builtin.aigc.ReplayLockfileTool
 import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
 import io.talevia.core.tool.builtin.aigc.UpscaleAssetTool
 import io.talevia.core.tool.builtin.fs.EditTool
@@ -367,6 +368,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         upscale?.let { register(UpscaleAssetTool(it, media, media, blobWriter, projects)) }
         tts?.let { register(SynthesizeSpeechTool(it, media, blobWriter, projects)) }
         register(CompareAigcCandidatesTool(this))
+        register(ReplayLockfileTool(this, projects))
         asr?.let {
             register(TranscribeAssetTool(it, media))
             register(AutoSubtitleClipTool(it, media, projects))
