@@ -147,6 +147,7 @@ import io.talevia.core.tool.builtin.video.SplitClipTool
 import io.talevia.core.tool.builtin.video.TrimClipTool
 import io.talevia.core.tool.builtin.web.WebFetchTool
 import io.talevia.core.tool.builtin.web.WebSearchTool
+import io.talevia.platform.ffmpeg.FfmpegProxyGenerator
 import io.talevia.platform.ffmpeg.FfmpegVideoEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -338,7 +339,7 @@ class ServerContainer(
         register(UnarchiveSessionTool(sessions))
         register(DeleteSessionTool(sessions))
         register(ReadPartTool(sessions))
-        register(ImportMediaTool(media, engine, projects))
+        register(ImportMediaTool(media, engine, projects, proxyGenerator = FfmpegProxyGenerator(media)))
         register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))
         register(ReplaceClipTool(projects, media))

@@ -4,6 +4,8 @@ import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.MediaStorage
+import io.talevia.core.platform.NoopProxyGenerator
+import io.talevia.core.platform.ProxyGenerator
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.tool.PathGuard
 import io.talevia.core.tool.Tool
@@ -41,6 +43,16 @@ class ImportMediaTool(
     private val engine: VideoEngine,
     private val projects: ProjectStore,
     private val clock: Clock = Clock.System,
+    /**
+     * Optional post-import hook that generates thumbnails / low-res previews /
+     * audio waveforms and merges them into `MediaAsset.proxies`. Defaults to
+     * [NoopProxyGenerator] (returns an empty list) so tests + platforms
+     * without a wired generator keep working. JVM apps (CLI / desktop /
+     * server) wire an FFmpeg-backed generator in their composition root.
+     * Generator exceptions are swallowed — proxy failure must not break
+     * the import itself.
+     */
+    private val proxyGenerator: ProxyGenerator = NoopProxyGenerator,
 ) : Tool<ImportMediaTool.Input, ImportMediaTool.Output> {
 
     @Serializable data class Input(
@@ -62,6 +74,8 @@ class ImportMediaTool(
         val audioCodec: String? = null,
         /** Total assets in the project AFTER this import — a quick sanity signal for the agent. */
         val projectAssetCount: Int,
+        /** Count of proxies (thumbnails / low-res / waveforms) generated for this asset. Zero = generator not wired or a non-fatal generation failure. */
+        val proxyCount: Int = 0,
     )
 
     override val id = "import_media"
@@ -104,7 +118,14 @@ class ImportMediaTool(
         val pid = ctx.resolveProjectId(input.projectId)
 
         val asset = storage.import(MediaSource.File(input.path)) { source -> engine.probe(source) }
-        val stamped = asset.copy(updatedAtEpochMs = clock.now().toEpochMilliseconds())
+        // Best-effort proxy pass: runs AFTER the asset lands in MediaStorage so
+        // the generator can pull bytes via the catalog; failures produce an
+        // empty list (never throw) so the import itself is always successful.
+        val proxies = runCatching { proxyGenerator.generate(asset) }.getOrDefault(emptyList())
+        val stamped = asset.copy(
+            proxies = (asset.proxies + proxies).deduplicateProxies(),
+            updatedAtEpochMs = clock.now().toEpochMilliseconds(),
+        )
 
         // Append into Project.assets. Dedupe by assetId so re-importing the same
         // file is idempotent (MediaStorage's own dedup returns the prior asset id
@@ -124,12 +145,26 @@ class ImportMediaTool(
             videoCodec = stamped.metadata.videoCodec,
             audioCodec = stamped.metadata.audioCodec,
             projectAssetCount = updated.assets.size,
+            proxyCount = stamped.proxies.size,
         )
+        val proxyTail = if (out.proxyCount > 0) " + ${out.proxyCount} proxy(s)" else ""
         return ToolResult(
             title = "import ${input.path.substringAfterLast('/')}",
-            outputForLlm = "Imported asset ${out.assetId} (${out.durationSeconds}s, ${out.width}x${out.height}) " +
-                "into project ${pid.value}; project now has ${out.projectAssetCount} asset(s).",
+            outputForLlm = "Imported asset ${out.assetId} (${out.durationSeconds}s, ${out.width}x${out.height})" +
+                proxyTail +
+                " into project ${pid.value}; project now has ${out.projectAssetCount} asset(s).",
             data = out,
         )
     }
+}
+
+/**
+ * De-dupe proxies by `(purpose, source)` so a repeated import doesn't
+ * accumulate stale thumbnails when the generator re-runs on an already-
+ * imported asset. Preserves insertion order — newer entries overwrite
+ * same-key older ones via the `associateBy { … }.values` idiom.
+ */
+private fun List<io.talevia.core.domain.ProxyAsset>.deduplicateProxies(): List<io.talevia.core.domain.ProxyAsset> {
+    if (isEmpty()) return this
+    return associateBy { it.purpose to it.source }.values.toList()
 }
