@@ -38,6 +38,7 @@ class SessionQueryStatusTest {
         val tracker: AgentRunStateTracker,
         val scopeJob: Job,
         val tool: SessionQueryTool,
+        val sessions: SqlDelightSessionStore,
         val ctx: ToolContext,
     )
 
@@ -59,7 +60,7 @@ class SessionQueryStatusTest {
             emitPart = {},
             messages = emptyList(),
         )
-        return Rig(bus, tracker, job, tool, ctx)
+        return Rig(bus, tracker, job, tool, sessions, ctx)
     }
 
     @Test fun neverRanReturnsIdleWithNeverRanFlag() = runTest {
@@ -155,6 +156,90 @@ class SessionQueryStatusTest {
             )
         }
         assertTrue(ex.message!!.contains("requires sessionId"), ex.message)
+        rig.scopeJob.cancel()
+    }
+
+    @Test fun compactionProgressFieldsPresentWithDefaultThreshold() = runTest {
+        // No messages seeded → estimatedTokens = 0, percent = 0.0, but the
+        // fields must still be populated so UI knows the threshold contract.
+        val rig = rig()
+        val out = rig.tool.execute(
+            SessionQueryTool.Input(select = "status", sessionId = "s-empty"),
+            rig.ctx,
+        ).data
+        val row = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SessionQueryTool.StatusRow.serializer()),
+            out.rows,
+        ).single()
+        assertEquals(0, row.estimatedTokens)
+        assertEquals(120_000, row.compactionThreshold)
+        assertEquals(0f, row.percent)
+        rig.scopeJob.cancel()
+    }
+
+    @Test fun compactionProgressReflectsRealTokenCount() = runTest {
+        // Seed a session with one user + one assistant message and a text part
+        // long enough to consume measurable tokens. estimatedTokens > 0, percent > 0,
+        // and staying well under the threshold keeps percent < 1 (not clamped).
+        val rig = rig()
+        val now = kotlinx.datetime.Instant.fromEpochMilliseconds(1_700_000_000_000L)
+        val sessionId = SessionId("s-token")
+        rig.sessions.createSession(
+            io.talevia.core.session.Session(
+                id = sessionId,
+                projectId = io.talevia.core.ProjectId("p"),
+                title = "token-test",
+                createdAt = now,
+                updatedAt = now,
+            ),
+        )
+        rig.sessions.appendMessage(
+            io.talevia.core.session.Message.User(
+                id = MessageId("u1"),
+                sessionId = sessionId,
+                createdAt = now,
+                agent = "default",
+                model = io.talevia.core.session.ModelRef("anthropic", "claude-opus-4-7"),
+            ),
+        )
+        rig.sessions.appendMessage(
+            io.talevia.core.session.Message.Assistant(
+                id = MessageId("a1"),
+                sessionId = sessionId,
+                createdAt = now,
+                parentId = MessageId("u1"),
+                model = io.talevia.core.session.ModelRef("anthropic", "claude-opus-4-7"),
+                tokens = io.talevia.core.session.TokenUsage(input = 10, output = 20),
+                finish = io.talevia.core.session.FinishReason.STOP,
+            ),
+        )
+        // A 400-char text payload → TokenEstimator.forText = 100 tokens.
+        val longText = "a".repeat(400)
+        rig.sessions.upsertPart(
+            io.talevia.core.session.Part.Text(
+                id = io.talevia.core.PartId("p-text"),
+                messageId = MessageId("a1"),
+                sessionId = sessionId,
+                createdAt = now,
+                text = longText,
+            ),
+        )
+
+        val out = rig.tool.execute(
+            SessionQueryTool.Input(select = "status", sessionId = "s-token"),
+            rig.ctx,
+        ).data
+        val row = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SessionQueryTool.StatusRow.serializer()),
+            out.rows,
+        ).single()
+        // TokenEstimator is a heuristic (~4 chars/token), so we assert shape not exact
+        // equality: non-zero, under threshold, percent matches the ratio.
+        assertTrue(row.estimatedTokens!! > 0, "expected token count > 0, got ${row.estimatedTokens}")
+        assertTrue(row.estimatedTokens!! < 120_000, "test payload should stay well under threshold")
+        assertEquals(120_000, row.compactionThreshold)
+        val expected = row.estimatedTokens!!.toFloat() / 120_000f
+        assertTrue(kotlin.math.abs(row.percent!! - expected) < 0.0001f, "percent=${row.percent} expected=$expected")
         rig.scopeJob.cancel()
     }
 

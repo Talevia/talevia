@@ -190,6 +190,17 @@ class SessionQueryTool(
          * case (distinct from "ran and terminated back to idle" only via this flag).
          */
         val neverRan: Boolean = false,
+        /**
+         * Estimated token footprint of the session's surviving history
+         * (`includeCompacted=false`) via [io.talevia.core.compaction.TokenEstimator].
+         * Null on rigs that don't have the store wired (not expected in production).
+         * Default null keeps legacy Output JSON forward-compatible.
+         */
+        val estimatedTokens: Int? = null,
+        /** Default auto-compaction threshold the Agent ships with (120_000 tokens). */
+        val compactionThreshold: Int? = null,
+        /** `estimatedTokens / compactionThreshold`, clamped to [0.0, 1.0]. UI progress bar. */
+        val percent: Float? = null,
     )
 
     override val id: String = "session_query"
@@ -211,7 +222,10 @@ class SessionQueryTool(
             "carries from/to messageId + full summaryText + compactedAtEpochMs. requires " +
             "sessionId. Use this instead of parts(kind=compaction) when you need the full summary " +
             "plus message-range metadata.\n" +
-            "  • status — snapshot of the agent's most recent run state (idle | generating | " +
+            "  • status — snapshot of the agent's most recent run state + compaction progress. " +
+            "Each row carries (state, cause?, neverRan, estimatedTokens, compactionThreshold, " +
+            "percent) so UI can render both a state badge and a threshold progress bar. " +
+            "State is one of (idle | generating | " +
             "awaiting_tool | compacting | cancelled | failed). requires sessionId. neverRan=true " +
             "means the tracker has not seen any run on this session yet.\n" +
             "Common: limit (default 100, clamped 1..1000), offset (default 0). Setting a filter " +
@@ -310,7 +324,7 @@ class SessionQueryTool(
             SELECT_ANCESTORS -> runAncestorsQuery(sessions, input, limit, offset)
             SELECT_TOOL_CALLS -> runToolCallsQuery(sessions, input, limit, offset)
             SELECT_COMPACTIONS -> runCompactionsQuery(sessions, input, limit, offset)
-            SELECT_STATUS -> runStatusQuery(agentStates, input)
+            SELECT_STATUS -> runStatusQuery(sessions, agentStates, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
