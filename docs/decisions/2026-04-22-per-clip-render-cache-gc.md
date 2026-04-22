@@ -52,8 +52,12 @@ primitive for on-disk deletion.
      entries fall back to insertion order).
    - Both null → explicit no-op (returns empty `policiesApplied`,
      surfaces an output-for-llm nudge suggesting a policy arg).
-   - Both set → OR semantics: an entry failing EITHER drops
-     (tagged with reason `"age"` / `"count"` / `"age+count"`).
+   - Both set → AND semantics on the keep side (row survives
+     only if it passes BOTH policies). Equivalently: an entry
+     drops if it fails EITHER policy (tagged with reason
+     `"age"` / `"count"` / `"age+count"`). Matches the
+     `GcLockfileTool` precedent (2026-04-20) — OR on the keep
+     side would make the size cap meaningless.
    - `dryRun=true` → compute the prune set, never call
      `deleteMezzanine`, never mutate the cache. Every
      `PrunedSummary.fileDeleted` stays `false`.
