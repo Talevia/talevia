@@ -446,4 +446,79 @@ class SessionQueryToolTest {
             "pages should not overlap",
         )
     }
+
+    // -------- select=compactions --------
+
+    @Test fun compactionsAggregatesFullSummaryMostRecentFirst() = runTest {
+        val rig = rig()
+        seedSession(rig.store, "sc")
+        addUserMessage(rig.store, "sc", "u1")
+        addAssistantMessage(rig.store, "sc", "a1", parentId = "u1")
+        addAssistantMessage(rig.store, "sc", "a2", parentId = "u1")
+
+        // Two compactions on the same session, different summaries + ranges.
+        val first = Part.Compaction(
+            id = PartId("cp-1"),
+            messageId = MessageId("a1"),
+            sessionId = SessionId("sc"),
+            createdAt = Instant.fromEpochMilliseconds(1_000L),
+            replacedFromMessageId = MessageId("u1"),
+            replacedToMessageId = MessageId("a1"),
+            summary = "first pass: compacted 2 msgs into a one-paragraph summary",
+        )
+        val second = Part.Compaction(
+            id = PartId("cp-2"),
+            messageId = MessageId("a2"),
+            sessionId = SessionId("sc"),
+            createdAt = Instant.fromEpochMilliseconds(5_000L),
+            replacedFromMessageId = MessageId("a1"),
+            replacedToMessageId = MessageId("a2"),
+            summary = "second pass: captured the newer turn, prior summary still intact",
+        )
+        rig.store.upsertPart(first)
+        rig.store.upsertPart(second)
+
+        val out = SessionQueryTool(rig.store).execute(
+            SessionQueryTool.Input(select = "compactions", sessionId = "sc"),
+            rig.ctx,
+        ).data
+
+        assertEquals(2, out.total)
+        assertEquals(2, out.returned)
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SessionQueryTool.CompactionRow.serializer()),
+            out.rows,
+        )
+        // Most recent first.
+        assertEquals(listOf("cp-2", "cp-1"), rows.map { it.partId })
+        // Full summary, NOT truncated (unlike select=parts preview cap at 80 chars).
+        assertEquals(second.summary, rows[0].summaryText)
+        assertEquals(first.summary, rows[1].summaryText)
+        // Message-range metadata present.
+        assertEquals("a1", rows[0].fromMessageId)
+        assertEquals("a2", rows[0].toMessageId)
+    }
+
+    @Test fun compactionsEmptyWhenSessionHasNoCompactionParts() = runTest {
+        val rig = rig()
+        seedSession(rig.store, "s-fresh")
+        val result = SessionQueryTool(rig.store).execute(
+            SessionQueryTool.Input(select = "compactions", sessionId = "s-fresh"),
+            rig.ctx,
+        )
+        assertEquals(0, result.data.total)
+        assertEquals(0, result.data.returned)
+        assertTrue(result.outputForLlm.contains("not been compacted"), result.outputForLlm)
+    }
+
+    @Test fun compactionsRequiresSessionId() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalStateException> {
+            SessionQueryTool(rig.store).execute(
+                SessionQueryTool.Input(select = "compactions"),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("requires sessionId"), ex.message)
+    }
 }

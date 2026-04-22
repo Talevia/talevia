@@ -8,6 +8,7 @@ import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.query.runAncestorsQuery
+import io.talevia.core.tool.builtin.session.query.runCompactionsQuery
 import io.talevia.core.tool.builtin.session.query.runForksQuery
 import io.talevia.core.tool.builtin.session.query.runMessagesQuery
 import io.talevia.core.tool.builtin.session.query.runPartsQuery
@@ -165,6 +166,18 @@ class SessionQueryTool(
         val compactedAtEpochMs: Long? = null,
     )
 
+    @Serializable data class CompactionRow(
+        val partId: String,
+        val messageId: String,
+        /** First message-id in the range the compaction replaced. */
+        val fromMessageId: String,
+        /** Last message-id in the range the compaction replaced (inclusive). */
+        val toMessageId: String,
+        /** Full summary produced by the compactor — not truncated, unlike `select=parts` preview. */
+        val summaryText: String,
+        val compactedAtEpochMs: Long,
+    )
+
     @Serializable data class StatusRow(
         val sessionId: String,
         /** `"idle"` | `"generating"` | `"awaiting_tool"` | `"compacting"` | `"cancelled"` | `"failed"`. */
@@ -194,6 +207,10 @@ class SessionQueryTool(
             "  • ancestors — parent chain up to root (child→root). requires sessionId. Depth-bounded.\n" +
             "  • tool_calls — Part.Tool only. filter: toolId, includeCompacted. requires sessionId. " +
             "Most-recent first.\n" +
+            "  • compactions — Part.Compaction aggregate view, most-recent first. Each row " +
+            "carries from/to messageId + full summaryText + compactedAtEpochMs. requires " +
+            "sessionId. Use this instead of parts(kind=compaction) when you need the full summary " +
+            "plus message-range metadata.\n" +
             "  • status — snapshot of the agent's most recent run state (idle | generating | " +
             "awaiting_tool | compacting | cancelled | failed). requires sessionId. neverRan=true " +
             "means the tracker has not seen any run on this session yet.\n" +
@@ -212,7 +229,7 @@ class SessionQueryTool(
                 put("type", "string")
                 put(
                     "description",
-                    "What to query: sessions | messages | parts | forks | ancestors | tool_calls | status " +
+                    "What to query: sessions | messages | parts | forks | ancestors | tool_calls | compactions | status " +
                         "(case-insensitive).",
                 )
             }
@@ -220,7 +237,7 @@ class SessionQueryTool(
                 put("type", "string")
                 put(
                     "description",
-                    "Session id. Required for messages/parts/forks/ancestors/tool_calls/status. " +
+                    "Session id. Required for messages/parts/forks/ancestors/tool_calls/compactions/status. " +
                         "Rejected for select=sessions.",
                 )
             }
@@ -292,6 +309,7 @@ class SessionQueryTool(
             SELECT_FORKS -> runForksQuery(sessions, input, limit, offset)
             SELECT_ANCESTORS -> runAncestorsQuery(sessions, input, limit, offset)
             SELECT_TOOL_CALLS -> runToolCallsQuery(sessions, input, limit, offset)
+            SELECT_COMPACTIONS -> runCompactionsQuery(sessions, input, limit, offset)
             SELECT_STATUS -> runStatusQuery(agentStates, input)
             else -> error("unreachable — select validated above: '$select'")
         }
@@ -338,10 +356,11 @@ class SessionQueryTool(
         const val SELECT_FORKS = "forks"
         const val SELECT_ANCESTORS = "ancestors"
         const val SELECT_TOOL_CALLS = "tool_calls"
+        const val SELECT_COMPACTIONS = "compactions"
         const val SELECT_STATUS = "status"
         private val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
-            SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_STATUS,
+            SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
         )
 
         private const val DEFAULT_LIMIT = 100
