@@ -23,8 +23,6 @@
 
 ## P2 — 记债 / 观望
 
-- **agent-retry-bus-observable** — `BusEvent.AgentRetryScheduled` 已发出，但 `MetricsRegistry` 没有 per-reason counter（overload / rate_limit / http_5xx 分开计数）。ops dashboard 只能看到总 retry 数。**方向：** 给 `Metrics.counterName` 加 `agent.retry.count{reason=<slug>}` 分类 counter，`/metrics` Prometheus 端点就能按 reason label 查图。Rubric §5.4。
-
 - **project-query-sort-by-updatedAt** — `project_query(select=tracks | timeline_clips | assets)` 当前 sortBy 都是 domain-specific 维度（index / clipCount / span / startSeconds / duration / id）；没有 "最近改过的在前" 的时间排序。**方向：** `Timeline.tracks` / `clips` / `assets` 加 optional `updatedAtEpochMs` 元数据（或从 `Project.updatedAt` 反推），在 `project_query` 里增加 `sortBy="recent"` 支持。Rubric §5.2。
 
 - **session-query-include-compaction-summary** — Session 的 `Part.Compaction` 条目今天靠 `session_query(select=parts, kind=compaction)` 拉 raw 行；没法一次拿到 "这个 session 压缩过几次 + 每次从哪到哪 + summary"。**方向：** 给 `session_query` 加 `select=compactions`，每行带 `fromMessageId` / `toMessageId` / `summaryText` / `compactedAtEpochMs`，聚合视图。Rubric §5.2。
