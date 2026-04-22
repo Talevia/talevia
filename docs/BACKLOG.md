@@ -15,8 +15,6 @@
 
 - **aigc-cost-tracking-per-session** — 当前有 `estimate_session_tokens`（Chat token 计数）和 agent.retry 计数器，但没有 AIGC 调用（image / music / upscale / TTS）的花费累计。用户跑了一个 vlog，不知道花了多少 $；老板问"这项目烧了多少 API 费"也答不出。**方向：** 在 `BusEvent.AigcProduced` / 每个 Replicate / Anthropic / OpenAI 工具 dispatch 完成时带出 `cost: MoneyCents?`，metrics 侧聚合 per-session 和 per-project 的 `spend_cents`。通过 `session_query(select=spend)` / `project_query(select=spend)` 可读。Rubric §5.2 / §5.4。
 
-- **debt-consolidate-project-describe-queries** — `core/tool/builtin/project/` 下有 `DescribeClipTool` / `DescribeLockfileEntryTool` / `DescribeProjectTool` 三个近似 drill-down 工具，每个都是「拿 ID，返回结构化细节」。LLM 每轮付 3 份 tool spec。**方向：** 折到 `project_query(select=clip|lockfile_entry|project_metadata, id=...)` 的 drill-down 变体里，删掉三个独立 `Describe*Tool.kt`。参考 `2026-04-21-unify-project-query.md` 的合并模式。Rubric 外 / debt。
-
 ## P1 — 中优，做完 P0 再排
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
