@@ -97,17 +97,21 @@ class OpenAiImageGenEngine(
         return ImageGenResult(images = images, provenance = provenance)
     }
 
-    private fun buildWireBody(request: ImageGenRequest): JsonObject = buildJsonObject {
+    internal fun buildWireBody(request: ImageGenRequest): JsonObject = buildJsonObject {
         put("model", JsonPrimitive(request.modelId))
         put("prompt", JsonPrimitive(request.prompt))
         put("size", JsonPrimitive("${request.width}x${request.height}"))
         put("n", JsonPrimitive(request.n))
-        put("seed", JsonPrimitive(request.seed))
         put("response_format", JsonPrimitive("b64_json"))
-        // Merge any provider-specific extras verbatim. These go straight into
-        // the request and into provenance so later replays are byte-identical
-        // to what the user asked for.
-        for ((k, v) in request.parameters) put(k, JsonPrimitive(v))
+        // NO `seed` — the current `/v1/images/generations` models (gpt-image-1,
+        // dall-e-3) reject it with 400 `Unknown parameter: 'seed'`. Seed stays
+        // on [GenerationProvenance.seed] for lockfile cache-key discipline but
+        // is never put on the wire; callers that try to smuggle it via
+        // `parameters` are filtered too.
+        for ((k, v) in request.parameters) {
+            if (k == "seed") continue
+            put(k, JsonPrimitive(v))
+        }
     }
 
     /**
