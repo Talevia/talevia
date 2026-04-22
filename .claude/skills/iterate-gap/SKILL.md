@@ -64,7 +64,7 @@ git pull --rebase origin main
 
 依次读：
 
-1. `docs/VISION.md` §5（Gap-finding rubric）—— 5 个 rubric 小节就是打分轴。
+1. `docs/VISION.md` §5（Gap-finding rubric）—— 6 个 rubric 小节（§5.1–§5.6）就是打分轴。§5.6 系统健康 / 技术债与前 5 节 feature 轴一视同仁竞争优先级窗口。
 2. `CLAUDE.md` 的「Platform priority — 当前阶段」小节定优先级；「Known incomplete」小节列出已承认的非回归项，别把它们当缺口重复报。
 3. `docs/decisions/` 最近 ~20 个文件（`ls docs/decisions | sort -r | head -20`）—— 近期已做决策约束了不该再做一遍的内容。
 4. `git log --oneline -30` —— 看最近落地了什么。
@@ -242,7 +242,7 @@ docs(backlog): repopulate <N> tasks from rubric analysis
 
 Commit: `<shorthash>`
 
-**Context.** 这个 gap 为何是本轮第一。对应的 rubric 轴 + 当前代码里观察到了什么。
+**Context.** 这个 gap 为何是本轮第一。对应的 rubric 轴 + 当前代码里观察到了什么 + 本轮 rubric delta（例："§5.1 source-layer 序列化 无 → 部分"）—— delta 是 VISION §5 "怎么用" 要求的系统演进曲线，必须留。
 如果参考了 OpenCode，引用具体文件。
 
 **Decision.** 落地了什么。关键类型名、tool 名、文件。
