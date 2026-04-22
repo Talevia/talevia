@@ -11,6 +11,15 @@ data class MediaAsset(
     val source: MediaSource,
     val metadata: MediaMetadata,
     val proxies: List<ProxyAsset> = emptyList(),
+    /**
+     * Epoch-millis of the last structural change to this asset, or `null`
+     * when the backing project blob predates recency tracking. Stamped by
+     * [io.talevia.core.domain.SqlDelightProjectStore] on `upsert` against
+     * the prior blob. Powers `project_query(select=assets, sortBy="recent")`;
+     * nulls sort last so projects imported from older blobs tail
+     * deterministically until their next mutation restamps them.
+     */
+    val updatedAtEpochMs: Long? = null,
 )
 
 @Serializable

@@ -19,27 +19,41 @@ sealed class Track {
     /** Must be ordered by `clip.timeRange.start`. Enforced at construction time. */
     abstract val clips: List<Clip>
 
+    /**
+     * Epoch-millis of the last structural change to this track (its own
+     * identity OR any of its clips), or `null` for pre-recency blobs.
+     * Stamped by [SqlDelightProjectStore.upsert] — cascades from clip
+     * diffs so "track was touched" covers both clip list membership
+     * and clip content edits. Drives `project_query(select=tracks,
+     * sortBy="recent")`.
+     */
+    abstract val updatedAtEpochMs: Long?
+
     @Serializable @SerialName("video")
     data class Video(
         override val id: TrackId,
         override val clips: List<Clip> = emptyList(),
+        override val updatedAtEpochMs: Long? = null,
     ) : Track()
 
     @Serializable @SerialName("audio")
     data class Audio(
         override val id: TrackId,
         override val clips: List<Clip> = emptyList(),
+        override val updatedAtEpochMs: Long? = null,
     ) : Track()
 
     @Serializable @SerialName("subtitle")
     data class Subtitle(
         override val id: TrackId,
         override val clips: List<Clip> = emptyList(),
+        override val updatedAtEpochMs: Long? = null,
     ) : Track()
 
     @Serializable @SerialName("effect")
     data class Effect(
         override val id: TrackId,
         override val clips: List<Clip> = emptyList(),
+        override val updatedAtEpochMs: Long? = null,
     ) : Track()
 }

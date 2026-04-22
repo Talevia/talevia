@@ -129,8 +129,19 @@ class SqlDelightProjectStoreSplitTest {
         assertNotNull(reassembled)
         assertEquals(project.snapshots.map { it.id }, reassembled!!.snapshots.map { it.id })
         assertEquals(project.lockfile.entries.map { it.inputHash }, reassembled.lockfile.entries.map { it.inputHash })
-        // The in-memory Project should match field-for-field.
-        assertEquals(project, reassembled)
+        // Field-for-field match after clearing `updatedAtEpochMs` recency stamps
+        // (which upsert adds — covered in ProjectStoreRecencyStampingTest).
+        val clearedInput = project.copy(
+            timeline = project.timeline.copy(
+                tracks = project.timeline.tracks.map { (it as Track.Video).copy(updatedAtEpochMs = null) },
+            ),
+        )
+        val clearedOutput = reassembled.copy(
+            timeline = reassembled.timeline.copy(
+                tracks = reassembled.timeline.tracks.map { (it as Track.Video).copy(updatedAtEpochMs = null) },
+            ),
+        )
+        assertEquals(clearedInput, clearedOutput)
     }
 
     @Test fun lockfileOrdinalPreservesAppendOrderAcrossUpserts() = runTest {

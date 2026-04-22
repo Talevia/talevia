@@ -26,6 +26,18 @@ sealed class Clip {
      */
     abstract val sourceBinding: Set<SourceNodeId>
 
+    /**
+     * Epoch-millis of the last structural change to this clip, or `null`
+     * when the backing project blob was written before recency tracking
+     * existed. Stamped by [SqlDelightProjectStore] on `upsert` — new
+     * clips get `now`, unchanged clips preserve their prior stamp,
+     * content-changed clips get `now`. Tools do NOT stamp manually.
+     * Exposed to the LLM via `project_query(select=timeline_clips,
+     * sortBy="recent")`; nulls sort last so pre-recency projects degrade
+     * gracefully to a deterministic tail.
+     */
+    abstract val updatedAtEpochMs: Long?
+
     @Serializable @SerialName("video")
     data class Video(
         override val id: ClipId,
@@ -35,6 +47,7 @@ sealed class Clip {
         val assetId: AssetId,
         val filters: List<Filter> = emptyList(),
         override val sourceBinding: Set<SourceNodeId> = emptySet(),
+        override val updatedAtEpochMs: Long? = null,
     ) : Clip()
 
     @Serializable @SerialName("audio")
@@ -60,6 +73,7 @@ sealed class Clip {
          */
         val fadeOutSeconds: Float = 0.0f,
         override val sourceBinding: Set<SourceNodeId> = emptySet(),
+        override val updatedAtEpochMs: Long? = null,
     ) : Clip()
 
     @Serializable @SerialName("text")
@@ -70,6 +84,7 @@ sealed class Clip {
         val text: String,
         val style: TextStyle = TextStyle(),
         override val sourceBinding: Set<SourceNodeId> = emptySet(),
+        override val updatedAtEpochMs: Long? = null,
     ) : Clip() {
         override val sourceRange: TimeRange? = null
     }

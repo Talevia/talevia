@@ -53,6 +53,7 @@ internal fun runTimelineClipsQuery(
     val sorted = when (sortBy) {
         null, "startseconds" -> filtered
         "durationseconds" -> filtered.sortedByDescending { it.durationSeconds }
+        "recent" -> filtered.sortedWith(recentComparator({ it.updatedAtEpochMs }, { it.clipId }))
         else -> error("unreachable")
     }
 
@@ -128,6 +129,7 @@ private fun buildClipRow(clip: Clip, track: Track, trackKind: String): ProjectQu
             sourceDurationSeconds = clip.sourceRange.duration.toSecondsDouble(),
             filterCount = clip.filters.size,
             sourceBindingNodeIds = clip.sourceBinding.map { it.value }.sorted(),
+            updatedAtEpochMs = clip.updatedAtEpochMs,
         )
         is Clip.Audio -> ProjectQueryTool.ClipRow(
             clipId = clip.id.value,
@@ -144,6 +146,7 @@ private fun buildClipRow(clip: Clip, track: Track, trackKind: String): ProjectQu
             fadeInSeconds = clip.fadeInSeconds,
             fadeOutSeconds = clip.fadeOutSeconds,
             sourceBindingNodeIds = clip.sourceBinding.map { it.value }.sorted(),
+            updatedAtEpochMs = clip.updatedAtEpochMs,
         )
         is Clip.Text -> ProjectQueryTool.ClipRow(
             clipId = clip.id.value,
@@ -155,6 +158,7 @@ private fun buildClipRow(clip: Clip, track: Track, trackKind: String): ProjectQu
             endSeconds = start + dur,
             textPreview = clip.text.take(80),
             sourceBindingNodeIds = clip.sourceBinding.map { it.value }.sorted(),
+            updatedAtEpochMs = clip.updatedAtEpochMs,
         )
     }
 }

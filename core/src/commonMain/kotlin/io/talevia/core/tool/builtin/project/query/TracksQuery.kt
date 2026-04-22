@@ -40,6 +40,7 @@ internal fun runTracksQuery(
         null, "index" -> filtered
         "clipcount" -> filtered.sortedByDescending { it.clipCount }
         "span" -> filtered.sortedByDescending { it.spanSeconds ?: 0.0 }
+        "recent" -> filtered.sortedWith(recentComparator({ it.updatedAtEpochMs }, { it.trackId }))
         else -> error("unreachable")
     }
 
@@ -83,6 +84,7 @@ private fun buildTrackRow(track: Track, index: Int, kind: String): ProjectQueryT
             index = index,
             clipCount = 0,
             isEmpty = true,
+            updatedAtEpochMs = track.updatedAtEpochMs,
         )
     }
     val firstStart = clips.minOf { it.timeRange.start }
@@ -96,5 +98,6 @@ private fun buildTrackRow(track: Track, index: Int, kind: String): ProjectQueryT
         firstClipStartSeconds = firstStart.toSecondsDouble(),
         lastClipEndSeconds = lastEnd.toSecondsDouble(),
         spanSeconds = (lastEnd - firstStart).toSecondsDouble(),
+        updatedAtEpochMs = track.updatedAtEpochMs,
     )
 }

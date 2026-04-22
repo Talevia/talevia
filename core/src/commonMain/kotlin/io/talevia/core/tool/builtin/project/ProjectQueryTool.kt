@@ -147,6 +147,8 @@ class ProjectQueryTool(
         val firstClipStartSeconds: Double? = null,
         val lastClipEndSeconds: Double? = null,
         val spanSeconds: Double? = null,
+        /** Stamped by [io.talevia.core.domain.SqlDelightProjectStore]; null on pre-recency blobs. */
+        val updatedAtEpochMs: Long? = null,
     )
 
     @Serializable data class ClipRow(
@@ -166,6 +168,8 @@ class ProjectQueryTool(
         val fadeOutSeconds: Float? = null,
         val textPreview: String? = null,
         val sourceBindingNodeIds: List<String> = emptyList(),
+        /** Stamped by [io.talevia.core.domain.SqlDelightProjectStore]; null on pre-recency blobs. */
+        val updatedAtEpochMs: Long? = null,
     )
 
     @Serializable data class AssetRow(
@@ -178,6 +182,8 @@ class ProjectQueryTool(
         val hasAudioTrack: Boolean,
         val sourceKind: String,
         val inUseByClips: Int,
+        /** Stamped by [io.talevia.core.domain.SqlDelightProjectStore]; null on pre-recency blobs. */
+        val updatedAtEpochMs: Long? = null,
     )
 
     @Serializable data class TransitionRow(
@@ -226,11 +232,14 @@ class ProjectQueryTool(
         "Unified read-only query over a project (replaces list_tracks / list_timeline_clips / " +
             "list_assets / list_transitions / list_lockfile_entries / list_clips_bound_to_asset / " +
             "list_clips_for_source). Pick one `select`:\n" +
-            "  • tracks — filter: trackKind, onlyNonEmpty. sortBy: index (default) | clipCount | span.\n" +
+            "  • tracks — filter: trackKind, onlyNonEmpty. sortBy: index (default) | clipCount | span | " +
+            "recent.\n" +
             "  • timeline_clips — filter: trackKind, trackId, fromSeconds, toSeconds, onlySourceBound, " +
-            "onlyPinned. sortBy: startSeconds (default) | durationSeconds.\n" +
+            "onlyPinned. sortBy: startSeconds (default) | durationSeconds | recent.\n" +
             "  • assets — filter: kind (video|audio|image|all), onlyUnused, onlyReferenced. sortBy: " +
-            "insertion (default) | duration | duration-asc | id.\n" +
+            "insertion (default) | duration | duration-asc | id | recent.\n" +
+            "  sortBy=\"recent\" orders by most-recently-mutated entity first (null stamps — pre-recency " +
+            "blobs — sort last, stable tie-break by id).\n" +
             "  • transitions — filter: onlyOrphaned. Chronological order.\n" +
             "  • lockfile_entries — filter: toolId (e.g. generate_image), onlyPinned. Most-recent first.\n" +
             "  • clips_for_asset — required: assetId. Every clip referencing the asset.\n" +

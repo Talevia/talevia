@@ -161,10 +161,16 @@ class SqlDelightProjectStore(
         val now = clock.now().toEpochMilliseconds()
         val existing = db.projectsQueries.selectById(project.id.value).executeAsOneOrNull()
 
+        // Stamp `updatedAtEpochMs` on tracks / clips / assets based on a
+        // structural diff against the prior blob. Done here (not in tools)
+        // so 14+ mutation tools don't each need recency bookkeeping — the
+        // one centralised hook covers every write path.
+        val stamped = stampRecency(project, existing?.data_, now)
+
         // Blob carries only the "always re-written together" fields. The two
         // append-only lists are stored in sibling tables so `add_clip` doesn't
         // pay the write-amplification of re-encoding all history.
-        val slim = project.copy(snapshots = emptyList(), lockfile = Lockfile.EMPTY)
+        val slim = stamped.copy(snapshots = emptyList(), lockfile = Lockfile.EMPTY)
 
         db.transaction {
             db.projectsQueries.upsert(
@@ -177,7 +183,7 @@ class SqlDelightProjectStore(
             // Full-reset sibling tables — the mutex already serializes upsert
             // calls so this is safe. Cheaper than diffing given typical sizes.
             db.projectSnapshotsQueries.deleteAllForProject(project.id.value)
-            project.snapshots.forEach { snap ->
+            stamped.snapshots.forEach { snap ->
                 db.projectSnapshotsQueries.insert(
                     project_id = project.id.value,
                     snapshot_id = snap.id.value,
@@ -187,7 +193,7 @@ class SqlDelightProjectStore(
                 )
             }
             db.projectLockfileEntriesQueries.deleteAllForProject(project.id.value)
-            project.lockfile.entries.forEachIndexed { index, entry ->
+            stamped.lockfile.entries.forEachIndexed { index, entry ->
                 db.projectLockfileEntriesQueries.insert(
                     project_id = project.id.value,
                     ordinal = index.toLong(),
@@ -239,5 +245,102 @@ class SqlDelightProjectStore(
         val title = db.projectsQueries.selectById(id.value).executeAsOneOrNull()?.title ?: id.value
         upsert(title, updated)
         updated
+    }
+
+    /**
+     * Produce a copy of [project] with `updatedAtEpochMs` stamped on each
+     * clip / track / asset per the rule:
+     *  - brand-new entity (id absent in the prior blob) → `now`,
+     *  - structurally unchanged entity (all non-recency fields equal) →
+     *    preserve old stamp (or `now` if old was null / blob predated recency),
+     *  - structurally changed entity → `now`.
+     *
+     * Track stamps cascade from clips: a track whose own fields AND clips
+     * list membership are unchanged but whose individual clip content
+     * changed still counts as "touched". That matches how agents use
+     * `sortBy="recent"` for orientation ("what did I just edit?").
+     *
+     * The prior blob is the slim form (snapshots / lockfile emptied), but
+     * recency only looks at timeline + assets so that's fine. A decoding
+     * error (e.g. schema drift) degrades to "treat everything as new"
+     * — strictly more conservative than losing the feature entirely.
+     */
+    private fun stampRecency(project: Project, existingBlob: String?, now: Long): Project {
+        val old = existingBlob?.let {
+            runCatching { json.decodeFromString(Project.serializer(), it) }.getOrNull()
+        }
+        val oldClipsById: Map<String, Clip> = old?.timeline?.tracks
+            ?.flatMap { it.clips }
+            ?.associateBy { it.id.value }
+            ?: emptyMap()
+        val oldTracksById: Map<String, Track> = old?.timeline?.tracks
+            ?.associateBy { it.id.value }
+            ?: emptyMap()
+        val oldAssetsById: Map<String, MediaAsset> = old?.assets?.associateBy { it.id.value } ?: emptyMap()
+
+        val newTracks = project.timeline.tracks.map { newTrack ->
+            val stampedClips = newTrack.clips.map { stampClip(it, oldClipsById[it.id.value], now) }
+            val trackWithClips = withClips(newTrack, stampedClips)
+            stampTrack(trackWithClips, oldTracksById[newTrack.id.value], now)
+        }
+        val newAssets = project.assets.map { stampAsset(it, oldAssetsById[it.id.value], now) }
+        return project.copy(
+            timeline = project.timeline.copy(tracks = newTracks),
+            assets = newAssets,
+        )
+    }
+
+    private fun stampClip(new: Clip, old: Clip?, now: Long): Clip {
+        val stamp = when {
+            old == null -> now
+            clipStructure(new) == clipStructure(old) -> old.updatedAtEpochMs ?: now
+            else -> now
+        }
+        return applyClipStamp(new, stamp)
+    }
+
+    private fun stampTrack(new: Track, old: Track?, now: Long): Track {
+        val stamp = when {
+            old == null -> now
+            trackStructure(new) == trackStructure(old) -> old.updatedAtEpochMs ?: now
+            else -> now
+        }
+        return applyTrackStamp(new, stamp)
+    }
+
+    private fun stampAsset(new: MediaAsset, old: MediaAsset?, now: Long): MediaAsset {
+        val stamp = when {
+            old == null -> now
+            new.copy(updatedAtEpochMs = null) == old.copy(updatedAtEpochMs = null) -> old.updatedAtEpochMs ?: now
+            else -> now
+        }
+        return new.copy(updatedAtEpochMs = stamp)
+    }
+
+    private fun clipStructure(c: Clip): Clip = applyClipStamp(c, null)
+
+    private fun trackStructure(t: Track): Track = applyTrackStamp(
+        withClips(t, t.clips.map(::clipStructure)),
+        null,
+    )
+
+    private fun applyClipStamp(c: Clip, stamp: Long?): Clip = when (c) {
+        is Clip.Video -> c.copy(updatedAtEpochMs = stamp)
+        is Clip.Audio -> c.copy(updatedAtEpochMs = stamp)
+        is Clip.Text -> c.copy(updatedAtEpochMs = stamp)
+    }
+
+    private fun applyTrackStamp(t: Track, stamp: Long?): Track = when (t) {
+        is Track.Video -> t.copy(updatedAtEpochMs = stamp)
+        is Track.Audio -> t.copy(updatedAtEpochMs = stamp)
+        is Track.Subtitle -> t.copy(updatedAtEpochMs = stamp)
+        is Track.Effect -> t.copy(updatedAtEpochMs = stamp)
+    }
+
+    private fun withClips(t: Track, clips: List<Clip>): Track = when (t) {
+        is Track.Video -> t.copy(clips = clips)
+        is Track.Audio -> t.copy(clips = clips)
+        is Track.Subtitle -> t.copy(clips = clips)
+        is Track.Effect -> t.copy(clips = clips)
     }
 }

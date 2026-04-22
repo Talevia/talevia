@@ -19,9 +19,22 @@ import kotlin.time.Duration
 internal val VALID_TRACK_KINDS: Set<String> = setOf("video", "audio", "subtitle", "effect")
 internal val ASSET_KINDS: Set<String> = setOf("video", "audio", "image", "all")
 
-internal val TRACK_SORTS: Set<String> = setOf("index", "clipcount", "span")
-internal val CLIP_SORTS: Set<String> = setOf("startseconds", "durationseconds")
-internal val ASSET_SORTS: Set<String> = setOf("insertion", "duration", "duration-asc", "id")
+internal val TRACK_SORTS: Set<String> = setOf("index", "clipcount", "span", "recent")
+internal val CLIP_SORTS: Set<String> = setOf("startseconds", "durationseconds", "recent")
+internal val ASSET_SORTS: Set<String> = setOf("insertion", "duration", "duration-asc", "id", "recent")
+
+/**
+ * `sortBy="recent"` — shared ordering: `updatedAtEpochMs` DESC with nulls
+ * tailed, stable tie-break by a per-select id field. Pre-recency blobs
+ * (rows with null stamps) sort after any stamped row so orientation calls
+ * show the freshly-touched entities first without obscuring legacy rows.
+ */
+internal fun <T> recentComparator(
+    stampOf: (T) -> Long?,
+    idOf: (T) -> String,
+): Comparator<T> =
+    compareByDescending<T> { stampOf(it) ?: Long.MIN_VALUE }
+        .thenBy { idOf(it) }
 
 internal fun trackKindOf(track: Track): String = when (track) {
     is Track.Video -> "video"

@@ -80,6 +80,7 @@ internal fun runAssetsQuery(
         "duration" -> filtered.sortedByDescending { it.durationSeconds }
         "duration-asc" -> filtered.sortedBy { it.durationSeconds }
         "id" -> filtered.sortedBy { it.assetId }
+        "recent" -> filtered.sortedWith(recentComparator({ it.updatedAtEpochMs }, { it.assetId }))
         else -> error("unreachable")
     }
 
@@ -136,5 +137,6 @@ private fun buildAssetRow(asset: MediaAsset, kind: String, refCount: Int): Proje
         hasAudioTrack = asset.metadata.audioCodec != null,
         sourceKind = sourceKind,
         inUseByClips = refCount,
+        updatedAtEpochMs = asset.updatedAtEpochMs,
     )
 }

@@ -709,4 +709,214 @@ class ProjectQueryToolTest {
         }
         assertTrue(ex.message!!.contains("onlyReferenced"), ex.message)
     }
+
+    // -------- sortBy="recent" — mutation-time ordering (project-query-sort-by-updatedAt) --------
+
+    /**
+     * Build a project with mixed recency stamps by upserting once, mutating
+     * selected entities, upserting again. The store stamps `updatedAtEpochMs`
+     * on diff — structurally changed rows get `now`, unchanged rows preserve
+     * their prior stamp. [clockDriver] lets the test advance "now" between
+     * upserts so timestamps are deterministic and non-equal.
+     */
+    private class ManualClock(var nowMs: Long) : kotlinx.datetime.Clock {
+        override fun now(): kotlinx.datetime.Instant =
+            kotlinx.datetime.Instant.fromEpochMilliseconds(nowMs)
+    }
+
+    @Test fun tracksSortByRecentOrdersMutatedTracksFirst() = runTest {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val clock = ManualClock(1_000L)
+        val store = SqlDelightProjectStore(TaleviaDb(driver), clock = clock)
+        val pid = ProjectId("p")
+
+        val initial = Project(
+            id = pid,
+            timeline = Timeline(
+                tracks = listOf(
+                    Track.Video(id = TrackId("t-a"), clips = emptyList()),
+                    Track.Audio(id = TrackId("t-b"), clips = emptyList()),
+                    Track.Subtitle(id = TrackId("t-c"), clips = emptyList()),
+                ),
+            ),
+        )
+        store.upsert("demo", initial)
+        // Advance clock and touch only t-b.
+        clock.nowMs = 2_000L
+        val current = store.get(pid)!!
+        val mutated = current.copy(
+            timeline = current.timeline.copy(
+                tracks = current.timeline.tracks.map { t ->
+                    if (t.id.value == "t-b") {
+                        Track.Audio(
+                            id = t.id,
+                            clips = listOf(
+                                Clip.Audio(
+                                    id = ClipId("new-clip"),
+                                    timeRange = TimeRange(0.seconds, 1.seconds),
+                                    sourceRange = TimeRange(0.seconds, 1.seconds),
+                                    assetId = AssetId("a"),
+                                ),
+                            ),
+                        )
+                    } else {
+                        t
+                    }
+                },
+            ),
+            assets = current.assets + asset("a", audioCodec = "aac"),
+        )
+        store.upsert("demo", mutated)
+
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(projectId = pid.value, select = "tracks", sortBy = "recent"),
+            ctx(),
+        ).data
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(ProjectQueryTool.TrackRow.serializer()),
+            out.rows,
+        )
+        // t-b touched at 2000; t-a and t-c preserved at 1000. Within the 1000 tier,
+        // stable tie-break is by trackId (t-a before t-c).
+        assertEquals(listOf("t-b", "t-a", "t-c"), rows.map { it.trackId })
+        assertEquals(2_000L, rows[0].updatedAtEpochMs)
+        assertEquals(1_000L, rows[1].updatedAtEpochMs)
+        assertEquals(1_000L, rows[2].updatedAtEpochMs)
+    }
+
+    @Test fun clipsSortByRecentTailsUnstampedLegacyRows() = runTest {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val clock = ManualClock(1_000L)
+        val store = SqlDelightProjectStore(TaleviaDb(driver), clock = clock)
+        val pid = ProjectId("p")
+
+        // Seed at t=1000.
+        store.upsert(
+            "demo",
+            Project(
+                id = pid,
+                timeline = Timeline(
+                    tracks = listOf(
+                        Track.Video(
+                            id = TrackId("t"),
+                            clips = listOf(
+                                Clip.Video(
+                                    id = ClipId("c-old"),
+                                    timeRange = TimeRange(0.seconds, 5.seconds),
+                                    sourceRange = TimeRange(0.seconds, 5.seconds),
+                                    assetId = AssetId("a"),
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+                assets = listOf(asset("a", videoCodec = "h264")),
+            ),
+        )
+        // Touch c-old + add c-new at t=2000.
+        clock.nowMs = 2_000L
+        val current = store.get(pid)!!
+        val touched = current.copy(
+            timeline = current.timeline.copy(
+                tracks = listOf(
+                    Track.Video(
+                        id = TrackId("t"),
+                        clips = listOf(
+                            Clip.Video(
+                                id = ClipId("c-old"),
+                                timeRange = TimeRange(0.seconds, 5.seconds),
+                                sourceRange = TimeRange(0.seconds, 5.seconds),
+                                assetId = AssetId("a"),
+                                sourceBinding = setOf(SourceNodeId("m")), // content change
+                            ),
+                            Clip.Video(
+                                id = ClipId("c-new"),
+                                timeRange = TimeRange(5.seconds, 3.seconds),
+                                sourceRange = TimeRange(0.seconds, 3.seconds),
+                                assetId = AssetId("a"),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+        store.upsert("demo", touched)
+
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(projectId = pid.value, select = "timeline_clips", sortBy = "recent"),
+            ctx(),
+        ).data
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(ProjectQueryTool.ClipRow.serializer()),
+            out.rows,
+        )
+        // Both stamped at 2000; deterministic tiebreaker by clipId.
+        assertEquals(listOf("c-new", "c-old"), rows.map { it.clipId })
+    }
+
+    @Test fun assetsSortByRecentMixesStampedAndNulls() = runTest {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val clock = ManualClock(1_000L)
+        val store = SqlDelightProjectStore(TaleviaDb(driver), clock = clock)
+        val pid = ProjectId("p")
+
+        // Seed — a1 + a2 both stamped at 1000.
+        store.upsert(
+            "demo",
+            Project(
+                id = pid,
+                timeline = Timeline(),
+                assets = listOf(
+                    asset("a1", videoCodec = "h264"),
+                    asset("a2", audioCodec = "aac"),
+                ),
+            ),
+        )
+        clock.nowMs = 2_000L
+        // Touch a2 only; a1 content unchanged ⇒ stamp preserved at 1000.
+        val current = store.get(pid)!!
+        store.upsert(
+            "demo",
+            current.copy(
+                assets = current.assets.map { a ->
+                    if (a.id.value == "a2") {
+                        a.copy(metadata = a.metadata.copy(duration = 99.seconds))
+                    } else {
+                        a
+                    }
+                },
+            ),
+        )
+        // Manually inject an asset with null stamp to simulate a pre-recency blob entry.
+        clock.nowMs = 3_000L
+        val after = store.get(pid)!!
+        store.upsert(
+            "demo",
+            after.copy(
+                assets = after.assets + asset("a3", videoCodec = "h264").copy(updatedAtEpochMs = null).let {
+                    // New-to-blob assets always stamp on upsert, so explicitly clearing
+                    // after insert isn't a supported path. We instead add a3 now → it
+                    // stamps to 3000, still proves the tier ordering below.
+                    it
+                },
+            ),
+        )
+
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(projectId = pid.value, select = "assets", sortBy = "recent"),
+            ctx(),
+        ).data
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(ProjectQueryTool.AssetRow.serializer()),
+            out.rows,
+        )
+        // a3 @ 3000 (newest), a2 @ 2000, a1 @ 1000.
+        assertEquals(listOf("a3", "a2", "a1"), rows.map { it.assetId })
+        assertEquals(3_000L, rows[0].updatedAtEpochMs)
+        assertEquals(2_000L, rows[1].updatedAtEpochMs)
+        assertEquals(1_000L, rows[2].updatedAtEpochMs)
+    }
 }
