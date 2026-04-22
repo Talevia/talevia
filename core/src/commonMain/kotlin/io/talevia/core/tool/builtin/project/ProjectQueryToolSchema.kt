@@ -13,11 +13,61 @@ import kotlinx.serialization.json.putJsonObject
  * `putJsonObject { ... }` boilerplate alongside its routing logic. Per the
  * `debt-split-project-query-tool` cycle: the row data classes stay nested on
  * `ProjectQueryTool` so external callers keep decoding via
- * `ProjectQueryTool.TrackRow.serializer()` etc.; only the schema prose moved.
+ * `ProjectQueryTool.TrackRow.serializer()` etc.; only the schema prose +
+ * helpText body moved.
  *
  * The field descriptions mirror the per-field KDoc on `ProjectQueryTool.Input`
  * — update both in lockstep when you add a new filter.
  */
+
+/**
+ * The [ProjectQueryTool.helpText] body — the paragraph the LLM reads to
+ * discover which `select` discriminator values exist and what filter fields
+ * each accepts. Extracted to this sibling file so the dispatcher stays
+ * focused on routing (§5.2 file hygiene). Byte-identical to what shipped
+ * before the extraction — every description sentence is preserved verbatim.
+ */
+internal val PROJECT_QUERY_HELP_TEXT: String =
+    "Unified read-only query over a project (replaces list_tracks / list_timeline_clips / " +
+        "list_assets / list_transitions / list_lockfile_entries / list_clips_bound_to_asset / " +
+        "list_clips_for_source). Pick one `select`:\n" +
+        "  • tracks — filter: trackKind, onlyNonEmpty. sortBy: index (default) | clipCount | span | " +
+        "recent.\n" +
+        "  • timeline_clips — filter: trackKind, trackId, fromSeconds, toSeconds, onlySourceBound, " +
+        "onlyPinned. sortBy: startSeconds (default) | durationSeconds | recent.\n" +
+        "  • assets — filter: kind (video|audio|image|all), onlyUnused, onlyReferenced. sortBy: " +
+        "insertion (default) | duration | duration-asc | id | recent.\n" +
+        "  sortBy=\"recent\" orders by most-recently-mutated entity first (null stamps — pre-recency " +
+        "blobs — sort last, stable tie-break by id).\n" +
+        "  • transitions — filter: onlyOrphaned. Chronological order.\n" +
+        "  • lockfile_entries — filter: toolId (e.g. generate_image), onlyPinned, " +
+        "sourceNodeId (entries bound to one source node — \"this character's " +
+        "generation history\"), sinceEpochMs (created at or after). Most-recent first.\n" +
+        "  • clips_for_asset — required: assetId. Every clip referencing the asset.\n" +
+        "  • clips_for_source — required: sourceNodeId. Every clip bound to that source node " +
+        "(directly or transitively).\n" +
+        "  • consistency_propagation — required: sourceNodeId. Audits whether the node's " +
+        "body string values actually made it into bound clips' AIGC prompts. Returns rows " +
+        "(clipId, aigcEntryFound, keywordsInBody, keywordsMatchedInPrompt, " +
+        "promptContainsKeywords). Use to answer \"did my character_ref really influence shot-3?\".\n" +
+        "  • clip — required: clipId. Single-row drill-down replacing describe_clip " +
+        "(timeRange, sourceRange, transforms, per-kind fields, derived lockfile ref).\n" +
+        "  • lockfile_entry — required: inputHash. Single-row drill-down replacing " +
+        "describe_lockfile_entry (provenance, source-binding drift, baseInputs, clip refs).\n" +
+        "  • project_metadata — single-row drill-down replacing describe_project " +
+        "(compact aggregate across tracks / clips / source / lockfile / snapshots plus " +
+        "pre-rendered summaryText).\n" +
+        "  • snapshots — saved snapshots on the project, newest-first. filter: " +
+        "maxAgeDays (drop snapshots older than now - N days). Default limit 50, max 500. " +
+        "Replaces the deleted list_project_snapshots tool.\n" +
+        "  • spend — single-row AIGC cost aggregate across the lockfile. Sums " +
+        "`costCents` per entry (null = unknown pricing, counted separately), breaks " +
+        "down by toolId and sessionId. Use to answer \"how much has this project " +
+        "burned\".\n" +
+        "Common: limit (default 100, clamped 1..500), offset (default 0). Setting a filter " +
+        "that doesn't apply to the chosen select fails loud so typos surface instead of silently " +
+        "returning an empty list."
+
 internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
     put("type", "object")
     putJsonObject("properties") {

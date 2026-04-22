@@ -7,6 +7,7 @@ import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.project.query.rejectIncompatibleProjectQueryFilters
 import io.talevia.core.tool.builtin.project.query.runAssetsQuery
 import io.talevia.core.tool.builtin.project.query.runClipDetailQuery
 import io.talevia.core.tool.builtin.project.query.runClipsForAssetQuery
@@ -462,46 +463,7 @@ class ProjectQueryTool(
     )
 
     override val id: String = "project_query"
-    override val helpText: String =
-        "Unified read-only query over a project (replaces list_tracks / list_timeline_clips / " +
-            "list_assets / list_transitions / list_lockfile_entries / list_clips_bound_to_asset / " +
-            "list_clips_for_source). Pick one `select`:\n" +
-            "  • tracks — filter: trackKind, onlyNonEmpty. sortBy: index (default) | clipCount | span | " +
-            "recent.\n" +
-            "  • timeline_clips — filter: trackKind, trackId, fromSeconds, toSeconds, onlySourceBound, " +
-            "onlyPinned. sortBy: startSeconds (default) | durationSeconds | recent.\n" +
-            "  • assets — filter: kind (video|audio|image|all), onlyUnused, onlyReferenced. sortBy: " +
-            "insertion (default) | duration | duration-asc | id | recent.\n" +
-            "  sortBy=\"recent\" orders by most-recently-mutated entity first (null stamps — pre-recency " +
-            "blobs — sort last, stable tie-break by id).\n" +
-            "  • transitions — filter: onlyOrphaned. Chronological order.\n" +
-            "  • lockfile_entries — filter: toolId (e.g. generate_image), onlyPinned, " +
-            "sourceNodeId (entries bound to one source node — \"this character's " +
-            "generation history\"), sinceEpochMs (created at or after). Most-recent first.\n" +
-            "  • clips_for_asset — required: assetId. Every clip referencing the asset.\n" +
-            "  • clips_for_source — required: sourceNodeId. Every clip bound to that source node " +
-            "(directly or transitively).\n" +
-            "  • consistency_propagation — required: sourceNodeId. Audits whether the node's " +
-            "body string values actually made it into bound clips' AIGC prompts. Returns rows " +
-            "(clipId, aigcEntryFound, keywordsInBody, keywordsMatchedInPrompt, " +
-            "promptContainsKeywords). Use to answer \"did my character_ref really influence shot-3?\".\n" +
-            "  • clip — required: clipId. Single-row drill-down replacing describe_clip " +
-            "(timeRange, sourceRange, transforms, per-kind fields, derived lockfile ref).\n" +
-            "  • lockfile_entry — required: inputHash. Single-row drill-down replacing " +
-            "describe_lockfile_entry (provenance, source-binding drift, baseInputs, clip refs).\n" +
-            "  • project_metadata — single-row drill-down replacing describe_project " +
-            "(compact aggregate across tracks / clips / source / lockfile / snapshots plus " +
-            "pre-rendered summaryText).\n" +
-            "  • snapshots — saved snapshots on the project, newest-first. filter: " +
-            "maxAgeDays (drop snapshots older than now - N days). Default limit 50, max 500. " +
-            "Replaces the deleted list_project_snapshots tool.\n" +
-            "  • spend — single-row AIGC cost aggregate across the lockfile. Sums " +
-            "`costCents` per entry (null = unknown pricing, counted separately), breaks " +
-            "down by toolId and sessionId. Use to answer \"how much has this project " +
-            "burned\".\n" +
-            "Common: limit (default 100, clamped 1..500), offset (default 0). Setting a filter " +
-            "that doesn't apply to the chosen select fails loud so typos surface instead of silently " +
-            "returning an empty list."
+    override val helpText: String = PROJECT_QUERY_HELP_TEXT
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.read")
@@ -546,68 +508,8 @@ class ProjectQueryTool(
         }
     }
 
-    private fun rejectIncompatibleFilters(select: String, input: Input) {
-        // Each filter field belongs to a specific select; setting it on the wrong
-        // select usually means the LLM typed the wrong field name — fail loud so
-        // the typo surfaces instead of silently returning a generic list.
-        val misapplied = buildList {
-            if (select != SELECT_TRACKS && input.onlyNonEmpty != null) {
-                add("onlyNonEmpty (select=tracks only)")
-            }
-            if (select != SELECT_TIMELINE_CLIPS) {
-                if (input.trackId != null) add("trackId (select=timeline_clips only)")
-                if (input.fromSeconds != null) add("fromSeconds (select=timeline_clips only)")
-                if (input.toSeconds != null) add("toSeconds (select=timeline_clips only)")
-                if (input.onlySourceBound != null) add("onlySourceBound (select=timeline_clips only)")
-            }
-            // onlyPinned is valid for timeline_clips AND lockfile_entries; reject elsewhere.
-            if (select != SELECT_TIMELINE_CLIPS && select != SELECT_LOCKFILE_ENTRIES && input.onlyPinned != null) {
-                add("onlyPinned (select=timeline_clips or lockfile_entries only)")
-            }
-            if (select != SELECT_ASSETS) {
-                if (input.kind != null) add("kind (select=assets only)")
-                if (input.onlyUnused != null) add("onlyUnused (select=assets only)")
-                if (input.onlyReferenced != null) add("onlyReferenced (select=assets only)")
-            }
-            if (select == SELECT_ASSETS && input.trackKind != null) {
-                add("trackKind (select=tracks or timeline_clips only)")
-            }
-            if (select != SELECT_TRANSITIONS && input.onlyOrphaned != null) {
-                add("onlyOrphaned (select=transitions only)")
-            }
-            if (select != SELECT_LOCKFILE_ENTRIES && input.toolId != null) {
-                add("toolId (select=lockfile_entries only)")
-            }
-            if (select != SELECT_CLIPS_FOR_ASSET && input.assetId != null) {
-                add("assetId (select=clips_for_asset only)")
-            }
-            if (select != SELECT_CLIPS_FOR_SOURCE &&
-                select != SELECT_CONSISTENCY_PROPAGATION &&
-                select != SELECT_LOCKFILE_ENTRIES &&
-                input.sourceNodeId != null
-            ) {
-                add("sourceNodeId (select=clips_for_source, consistency_propagation, or lockfile_entries only)")
-            }
-            if (select != SELECT_LOCKFILE_ENTRIES && input.sinceEpochMs != null) {
-                add("sinceEpochMs (select=lockfile_entries only)")
-            }
-            if (select != SELECT_SNAPSHOTS && input.maxAgeDays != null) {
-                add("maxAgeDays (select=snapshots only)")
-            }
-            if (select != SELECT_CLIP && input.clipId != null) {
-                add("clipId (select=clip only)")
-            }
-            if (select != SELECT_LOCKFILE_ENTRY && input.inputHash != null) {
-                add("inputHash (select=lockfile_entry only)")
-            }
-        }
-        if (misapplied.isNotEmpty()) {
-            error(
-                "The following filter fields do not apply to select='$select': " +
-                    misapplied.joinToString(", "),
-            )
-        }
-    }
+    private fun rejectIncompatibleFilters(select: String, input: Input) =
+        rejectIncompatibleProjectQueryFilters(select, input)
 
     companion object {
         const val SELECT_TRACKS = "tracks"
