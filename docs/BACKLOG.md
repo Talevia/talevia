@@ -17,8 +17,6 @@
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
 
-- **plan-execution-follow-through** — `draft_plan` 把"我打算这么做"的 steps 列出来，approvalStatus flip 为 approved 后，**agent 仍然要一条条人工 emit tool call**。没有自动化"按 plan 走"的闸门。VISION §5.4 的专家路径 batch-approval UX 少一半。**方向：** 新 tool `execute_plan(planId, dryRun?)` 按 plan 的 steps 顺序 dispatch 每个 step；遇到 `FAILED` 或用户新消息就暂停。单 tool 合并老 direction 里的 `execute_plan(planId)`。Rubric §5.4。
-
 - **batch-asset-import** — `import_media` 一次只收一个 path，Vlog 用户从手机 rsync 过来 40 个片段要 40 次 tool call。VISION §5.4 小白路径摩擦项。**方向：** 扩展 `import_media.paths: List<String>` （`path` 仍保留为单文件便利），并发走 `engine.probe`，返回 `(successful: List<assetId>, failed: List<(path, error)>)`。Rubric §5.4。
 
 - **per-tool-cost-hints-in-context** — `aigc.cost.<tool>.cents` metrics 存在但 agent 看不见：它没法回答"这次用 generate_image 还是 dall-e-3 省钱"。**方向：** 在 `list_tools` / tool 的 helpText 里注入最近 N 次调用的平均 cents（从 MetricsRegistry 读），agent 能在一次意图里做 cost tradeoff。Rubric §5.2。
