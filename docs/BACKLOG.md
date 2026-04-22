@@ -19,8 +19,6 @@
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
 
-- **ab-compare-models** — §5.2 rubric: "新效果接入成本"。当前不能在一次 invocation 里用同一 prompt / 同一 source 跑两个 model（例如 `sdxl` vs `flux-dev` 对 character-ref 图）做对比。想选优得手动跑两次、手动比较。**方向：** 新增 `compare_aigc_candidates(toolId, input, models: List<String>)` 原语，内部并行 dispatch、返回 `{modelId → assetId}` 映射；产物自动入 lockfile（不 pin），UI 侧可以双帧对比。Rubric §5.2。
-
 - **tts-regen-by-language** — `2026-04-21-generate-project-variant.md` 的 extension point：`fork_project(variantSpec)` 目前不处理 `language` 维度，需要显式重算 TTS。用户做「同一 vlog 的西班牙语版」仍需手动重新 `synthesize_speech` 每个 text clip。**方向：** 给 `fork_project.variantSpec` 加 `language: String?`；当 set 时 iterate timeline 的 text clip，每一个 re-dispatch `synthesize_speech` with target language，绑定到 fork 的新 asset。provider 路径 + lockfile 条目照常走。Rubric §5.2 / §5.5。
 
 - **consistency-propagation-audit** — §5.5 rubric: "这些约束有没有真的传导到 AIGC 调用的 prompt / 参数 / LoRA 里?"。当前 agent 只能通过读源码推断 character_ref 是否真的影响了 shot-1 的 prompt。缺一个"审计"原语。**方向：** `project_query(select=consistency_propagation, sourceNodeId=X)` 返回 X 作为 ancestor 的所有 clip（或 AIGC lockfile entry），附带"prompt 里是否出现了 X 的 body 关键字段（name / description）"的简单命中检查。Rubric §5.5。
