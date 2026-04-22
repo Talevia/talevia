@@ -1,6 +1,7 @@
 package io.talevia.core.domain.lockfile
 
 import io.talevia.core.AssetId
+import io.talevia.core.MessageId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.platform.GenerationProvenance
 import kotlinx.serialization.Serializable
@@ -150,6 +151,13 @@ data class Lockfile(
  *   field. VISION §5.4 debug: lets the user answer "why didn't this image
  *   respect character_ref?" by comparing the stamped prompt against today's
  *   folded one, without having to re-run the fold in their head.
+ * @property originatingMessageId The session message id whose tool call
+ *   produced this entry. Lets the audit path answer "which prompt generated
+ *   this image?" without having to `grep` session parts for the matching
+ *   tool-call payload. Filled from [io.talevia.core.tool.ToolContext.messageId]
+ *   at write time by every AIGC tool. Null on legacy entries and on
+ *   dispatches that somehow ran without a ToolContext (not expected in
+ *   production — every Agent turn has a messageId). VISION §5.2 audit trail.
  */
 @Serializable
 data class LockfileEntry(
@@ -164,4 +172,5 @@ data class LockfileEntry(
     val costCents: Long? = null,
     val sessionId: String? = null,
     val resolvedPrompt: String? = null,
+    val originatingMessageId: MessageId? = null,
 )

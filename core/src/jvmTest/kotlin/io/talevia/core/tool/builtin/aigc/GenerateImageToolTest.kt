@@ -436,4 +436,41 @@ class GenerateImageToolTest {
         val second = tool.execute(input, ctx())
         assertEquals(false, second.data.cacheHit, "changing LoRA weight must bust the cache")
     }
+
+    @Test fun lockfileEntryStampsOriginatingMessageIdFromContext() = runTest {
+        val tmpDir = createTempDirectory("gen-image-origin").toFile()
+        val engine = FakeImageGenEngine(tinyPng)
+        val storage = InMemoryMediaStorage()
+        val writer = FakeBlobWriter(tmpDir)
+
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val projectId = ProjectId("p-origin")
+        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
+
+        val tool = GenerateImageTool(engine, storage, writer, store)
+        val ctxWithMsg = ToolContext(
+            sessionId = SessionId("s"),
+            messageId = MessageId("msg-42"),
+            callId = CallId("c"),
+            askPermission = { PermissionDecision.Once },
+            emitPart = { },
+            messages = emptyList(),
+        )
+
+        tool.execute(
+            GenerateImageTool.Input(
+                prompt = "who asked",
+                width = 32,
+                height = 32,
+                seed = 7L,
+                projectId = projectId.value,
+            ),
+            ctxWithMsg,
+        )
+
+        val entry = store.get(projectId)!!.lockfile.entries.single()
+        assertEquals(MessageId("msg-42"), entry.originatingMessageId)
+    }
 }

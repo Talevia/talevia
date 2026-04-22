@@ -2,6 +2,7 @@ package io.talevia.core.domain.lockfile
 
 import io.talevia.core.AssetId
 import io.talevia.core.JsonConfig
+import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.Project
@@ -138,5 +139,38 @@ class LockfileTest {
             json.encodeToString(LockfileEntry.serializer(), original),
         )
         assertEquals(folded, roundTripped.resolvedPrompt)
+    }
+
+    @Test fun entryMissingOriginatingMessageIdDecodesAsNull() {
+        // Legacy entries written before originatingMessageId existed must
+        // still decode; audit-path callers treat null as "unknown — this
+        // entry pre-dates provenance stamping" rather than crashing.
+        val legacy = """
+            {
+              "inputHash": "h1",
+              "toolId": "generate_image",
+              "assetId": "asset-1",
+              "provenance": {
+                "providerId": "fake",
+                "modelId": "m",
+                "modelVersion": "v1",
+                "seed": 42,
+                "parameters": { "prompt": "p" },
+                "createdAtEpochMs": 1700000000000
+              }
+            }
+        """.trimIndent()
+        val entry = json.decodeFromString(LockfileEntry.serializer(), legacy)
+        assertNull(entry.originatingMessageId)
+    }
+
+    @Test fun entryWithOriginatingMessageIdRoundTrips() {
+        val msgId = MessageId("msg-abc")
+        val original = entry("h1", "asset-1").copy(originatingMessageId = msgId)
+        val roundTripped = json.decodeFromString(
+            LockfileEntry.serializer(),
+            json.encodeToString(LockfileEntry.serializer(), original),
+        )
+        assertEquals(msgId, roundTripped.originatingMessageId)
     }
 }

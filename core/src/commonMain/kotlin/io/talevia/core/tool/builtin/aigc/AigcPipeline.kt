@@ -1,6 +1,7 @@
 package io.talevia.core.tool.builtin.aigc
 
 import io.talevia.core.AssetId
+import io.talevia.core.MessageId
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
@@ -208,6 +209,7 @@ internal object AigcPipeline {
         costCents: Long? = null,
         sessionId: io.talevia.core.SessionId? = null,
         resolvedPrompt: String? = null,
+        originatingMessageId: MessageId? = null,
     ) {
         store.mutate(projectId) { project ->
             val snapshot: Map<SourceNodeId, String> = if (sourceBinding.isEmpty()) emptyMap()
@@ -235,6 +237,7 @@ internal object AigcPipeline {
                         costCents = costCents,
                         sessionId = sessionId?.value,
                         resolvedPrompt = resolvedPrompt,
+                        originatingMessageId = originatingMessageId,
                     ),
                 ),
             )

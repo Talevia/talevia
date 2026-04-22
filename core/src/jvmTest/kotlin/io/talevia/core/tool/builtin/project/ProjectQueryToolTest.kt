@@ -1007,6 +1007,49 @@ class ProjectQueryToolTest {
         assertFalse(r.currentlyStale)
     }
 
+    @Test fun lockfileEntryDrillDownSurfacesOriginatingMessageId() = runTest {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val pid = ProjectId("p-origin")
+        val stamped = io.talevia.core.domain.lockfile.LockfileEntry(
+            inputHash = "h-stamped",
+            toolId = "generate_image",
+            assetId = AssetId("a-stamped"),
+            provenance = io.talevia.core.platform.GenerationProvenance(
+                providerId = "fake",
+                modelId = "fake-model",
+                modelVersion = null,
+                seed = 1L,
+                parameters = kotlinx.serialization.json.JsonObject(emptyMap()),
+                createdAtEpochMs = 1_700_000_000_000L,
+            ),
+            originatingMessageId = io.talevia.core.MessageId("msg-77"),
+        )
+        store.upsert(
+            "demo",
+            Project(
+                id = pid,
+                timeline = Timeline(),
+                lockfile = Lockfile.EMPTY.append(stamped),
+            ),
+        )
+
+        val out = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(
+                projectId = pid.value,
+                select = "lockfile_entry",
+                inputHash = "h-stamped",
+            ),
+            ctx(),
+        ).data
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(ProjectQueryTool.LockfileEntryDetailRow.serializer()),
+            out.rows,
+        )
+        assertEquals("msg-77", rows.single().originatingMessageId)
+    }
+
     @Test fun lockfileEntryDrillDownMissingHashFailsLoud() = runTest {
         val (store, pid) = lockfileFixture()
         val ex = assertFailsWith<IllegalStateException> {

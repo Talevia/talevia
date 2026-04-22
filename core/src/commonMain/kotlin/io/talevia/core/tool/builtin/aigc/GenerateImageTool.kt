@@ -223,6 +223,7 @@ class GenerateImageTool(
                 costCents = costCents,
                 sessionId = ctx.sessionId,
                 resolvedPrompt = folded.effectivePrompt,
+                originatingMessageId = ctx.messageId,
             )
             ctx.publishEvent(
                 BusEvent.AigcCostRecorded(

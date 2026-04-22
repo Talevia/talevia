@@ -231,6 +231,7 @@ class SynthesizeSpeechTool(
                 baseInputs = baseInputs,
                 costCents = costCents,
                 sessionId = ctx.sessionId,
+                originatingMessageId = ctx.messageId,
             )
             ctx.publishEvent(
                 BusEvent.AigcCostRecorded(

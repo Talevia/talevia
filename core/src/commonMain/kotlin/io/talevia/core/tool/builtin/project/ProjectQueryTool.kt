@@ -379,6 +379,13 @@ class ProjectQueryTool(
          * synthesize_speech) and for pre-cycle-7 legacy entries.
          */
         val resolvedPrompt: String? = null,
+        /**
+         * Session message id whose tool call produced this entry. Lets
+         * the audit path trace "which prompt generated this image?"
+         * without grepping session parts. Null for pre-provenance-cycle
+         * legacy entries. VISION §5.2.
+         */
+        val originatingMessageId: String? = null,
     )
 
     @Serializable data class ProjectMetadataProfile(
