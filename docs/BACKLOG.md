@@ -17,8 +17,6 @@
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
 
-- **debt-consolidate-provider-queries** — `core/tool/builtin/provider/` 下只有两个工具：`ListProvidersTool` + `ListProviderModelsTool`，本质是"查 provider 注册表"的一层切片。**方向：** 合为 `provider_query(select=providers | models, providerId?=...)`；删两个 List*Tool.kt。Rubric 外 / debt。
-
 - **debt-consolidate-video-add-variants** — `video/AddClipTool` + `AddTrackTool` + `AddTransitionTool` + `AddSubtitlesTool` 四个 tools，每个有独立 Input 形但 共通语义都是"在 timeline 上添加一个东西"。**方向：** 评估是否通过 `add_to_timeline(target="clip"|"track"|"transition"|"subtitles", ...)` 合并；若分支 Input 的差异太大导致 discriminator 不划算，在 decision 里说明并保留四件套。Rubric 外 / debt。
 
 ## P2 — 记债 / 观望
