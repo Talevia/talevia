@@ -19,6 +19,4 @@
 
 ## P2 — 记债 / 观望
 
-- **debt-consolidate-video-remove-variants** — 配合 P1 的 `debt-consolidate-video-add-variants`：`RemoveClipTool` + `RemoveFilterTool` + `RemoveTrackTool` + `RemoveTransitionTool` 四件套。**方向：** 同 add 的判断，合为 `remove_from_timeline(target=...)` 或保留四件套并在 decision 说明。Rubric 外 / debt。
-
 - **debt-fold-list-project-snapshots** — `ListProjectSnapshotsTool` 是 `project_query` 之外唯一还单独存在的 list_* 工具。**方向：** 加 `project_query(select=snapshots)`，删 `ListProjectSnapshotsTool.kt`。Rubric 外 / debt。
