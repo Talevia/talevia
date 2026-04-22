@@ -27,10 +27,13 @@ import kotlin.time.DurationUnit
  *    choice — title frame is often letterbox, last frame is often a fade to
  *    black.
  *  - **Image**: single-pass scale to `THUMB_WIDTH`.
- *  - **Audio**: skipped this round (waveform rendering is a distinct
- *    follow-up; `ProxyPurpose.AUDIO_WAVEFORM` exists but needs a different
- *    pipeline). Callers see an empty list and fall back to the decode-original
- *    path that already worked before this feature.
+ *  - **Audio-only**: render a waveform PNG via
+ *    `ffmpeg -filter_complex "showwavespic=s=<WxH>:colors=white"` (VISION §5.3
+ *    performance lane — audio UIs can then render the scrub strip from the
+ *    PNG instead of decoding the full container each time). The resulting
+ *    proxy lands with `purpose=AUDIO_WAVEFORM`, distinct from the
+ *    `THUMBNAIL` proxies video/image assets get, so consumers can route on
+ *    purpose.
  *
  * Output lives in a dedicated sibling directory under the media dir
  * (`<media>/proxies/<assetId>/`) so the UI can cheap-list them and the proxy
@@ -64,6 +67,21 @@ class FfmpegProxyGenerator(
             asset.metadata.duration <= Duration.ZERO &&
             asset.metadata.resolution != null
         val hasVideo = asset.metadata.videoCodec != null
+        val isAudioOnly = asset.metadata.videoCodec == null &&
+            asset.metadata.audioCodec != null &&
+            asset.metadata.duration > Duration.ZERO
+
+        if (isAudioOnly) {
+            val waveformFile = File(outDir, "waveform.png")
+            val generated = generateWaveform(sourcePath, waveformFile) ?: return emptyList()
+            return listOf(
+                ProxyAsset(
+                    source = MediaSource.File(generated.absolutePath),
+                    purpose = ProxyPurpose.AUDIO_WAVEFORM,
+                    resolution = Resolution(width = WAVEFORM_WIDTH, height = WAVEFORM_HEIGHT),
+                ),
+            )
+        }
 
         val thumbFile = File(outDir, "thumb.jpg")
         val thumbMs: Long = when {
@@ -99,6 +117,38 @@ class FfmpegProxyGenerator(
         val tmp = System.getProperty("java.io.tmpdir") ?: "/tmp"
         val root = File(tmp, "talevia-proxies")
         return runCatching { Files.createDirectories(root.toPath()).toFile() }.getOrDefault(root)
+    }
+
+    /**
+     * Run the `showwavespic` filter to emit a single PNG rendering the full
+     * audio waveform. `s=WIDTHxHEIGHT` sizes the output; `colors=white`
+     * picks a foreground that reads on dark UI backgrounds (consumers can
+     * tint post-hoc). Best-effort: missing ffmpeg / unreadable audio / a
+     * container with no decodable audio stream → null, caller returns an
+     * empty list the same way thumbnail generation does.
+     */
+    private suspend fun generateWaveform(
+        sourcePath: String,
+        outputFile: File,
+    ): File? = runInterruptible(ioDispatcher) {
+        val args = listOf(
+            ffmpegPath,
+            "-y",
+            "-i", sourcePath,
+            "-filter_complex", "showwavespic=s=${WAVEFORM_WIDTH}x$WAVEFORM_HEIGHT:colors=white",
+            "-frames:v", "1",
+            outputFile.absolutePath,
+        )
+        val debug = System.getenv("FFMPEG_PROXY_DEBUG") == "1"
+        val process = ProcessBuilder(args)
+            .redirectErrorStream(debug)
+            .redirectOutput(if (debug) ProcessBuilder.Redirect.INHERIT else ProcessBuilder.Redirect.DISCARD)
+            .also {
+                if (!debug) it.redirectError(ProcessBuilder.Redirect.DISCARD)
+            }
+            .start()
+        val code = process.waitFor()
+        if (code == 0 && outputFile.exists() && outputFile.length() > 0) outputFile else null
     }
 
     private suspend fun generateThumbnail(
@@ -153,5 +203,12 @@ class FfmpegProxyGenerator(
 
     private companion object {
         private const val THUMB_WIDTH = 320
+
+        // Waveform sized for UI scrub strips (compact banner, not album art).
+        // 640×80 gives ~2px per second on a 5-minute track, enough peak
+        // resolution to read transient energy without blowing up the PNG
+        // size past the thumbnail band.
+        private const val WAVEFORM_WIDTH = 640
+        private const val WAVEFORM_HEIGHT = 80
     }
 }

@@ -101,8 +101,20 @@ class FfmpegEndToEndTest {
 
         // 3. Drive the chain. AssetIds come back from import_media; MediaPathResolver
         //    (InMemoryMediaStorage) resolves them to the original file paths at render time.
-        val importA = registry["import_media"]!!.dispatch(buildJsonObject { put("path", inputA.absolutePath) }, ctx)
-        val importB = registry["import_media"]!!.dispatch(buildJsonObject { put("path", inputB.absolutePath) }, ctx)
+        val importA = registry["import_media"]!!.dispatch(
+            buildJsonObject {
+                put("path", inputA.absolutePath)
+                put("projectId", projectId.value)
+            },
+            ctx,
+        )
+        val importB = registry["import_media"]!!.dispatch(
+            buildJsonObject {
+                put("path", inputB.absolutePath)
+                put("projectId", projectId.value)
+            },
+            ctx,
+        )
         val assetIdA = (importA.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
         val assetIdB = (importB.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
 
@@ -183,7 +195,13 @@ class FfmpegEndToEndTest {
             messages = emptyList(),
         )
 
-        val import = registry["import_media"]!!.dispatch(buildJsonObject { put("path", inputA.absolutePath) }, ctx)
+        val import = registry["import_media"]!!.dispatch(
+            buildJsonObject {
+                put("path", inputA.absolutePath)
+                put("projectId", projectId.value)
+            },
+            ctx,
+        )
         val assetId = (import.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
         registry["add_clip"]!!.dispatch(
             buildJsonObject {
@@ -269,8 +287,20 @@ class FfmpegEndToEndTest {
             messages = emptyList(),
         )
 
-        val importA = registry["import_media"]!!.dispatch(buildJsonObject { put("path", inputA.absolutePath) }, ctx)
-        val importB = registry["import_media"]!!.dispatch(buildJsonObject { put("path", inputB.absolutePath) }, ctx)
+        val importA = registry["import_media"]!!.dispatch(
+            buildJsonObject {
+                put("path", inputA.absolutePath)
+                put("projectId", projectId.value)
+            },
+            ctx,
+        )
+        val importB = registry["import_media"]!!.dispatch(
+            buildJsonObject {
+                put("path", inputB.absolutePath)
+                put("projectId", projectId.value)
+            },
+            ctx,
+        )
         val assetIdA = (importA.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
         val assetIdB = (importB.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
 

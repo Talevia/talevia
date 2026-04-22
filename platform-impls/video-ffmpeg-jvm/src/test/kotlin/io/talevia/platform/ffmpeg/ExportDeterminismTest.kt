@@ -124,7 +124,10 @@ class ExportDeterminismTest {
             )
 
             val import = registry["import_media"]!!.dispatch(
-                buildJsonObject { put("path", input.absolutePath) },
+                buildJsonObject {
+                    put("path", input.absolutePath)
+                    put("projectId", projectId.value)
+                },
                 ctx,
             )
             val assetId = (import.data as ImportMediaTool.Output).assetId
