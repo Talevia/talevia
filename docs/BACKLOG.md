@@ -19,8 +19,6 @@
 
 ## P2 — 记债 / 观望
 
-- **prompt-trace-for-aigc-calls** — `lockfile` 记录了 inputHash / seed / model version，但 fully-expanded prompt（含 ancestor consistency nodes 的 fold 结果）没落到 lockfile 条目里。用户要 debug「为什么这个 image 没 respect character_ref」时只能人脑复现 prompt。**方向：** `LockfileEntry` 增加 `resolvedPrompt: String?` 字段（optional，默认 null），AIGC 工具 dispatch 时填入最终送给 provider 的 prompt 文本。`describe_lockfile_entry`（或其替代）展示。Rubric §5.4 debug。
-
 - **copy-source-node-across-projects** — `export_source_node` + `import_source_node` 已经存在，但跨 project 复用一个 character_ref / style_bible 要两步手工。**方向：** 新增 `copy_source_node(fromProjectId, sourceNodeId, toProjectId)` 便利 wrapper，或把 `import_source_node` 扩展为从另一个项目拉取（带 `fromProject: String?`）。Rubric §5.1。
 
 - **lockfile-history-explorer** — `project_query(select=lockfile_entries)` 可以列条目，但不能按"asset 产出时间线"或"同一 source node 的多次 generation history"筛。**方向：** 扩展 `lockfile_entries` select 支持 `groupBy="sourceNode"` 或 `sinceEpochMs` 过滤；给 UI 做一个"这个角色被生成过 5 次"的 timeline。Rubric §5.4 debug。
