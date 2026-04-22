@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.project
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
@@ -10,11 +9,10 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
@@ -31,7 +29,7 @@ import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.ImageGenRequest
 import io.talevia.core.platform.ImageGenResult
 import io.talevia.core.platform.InMemoryMediaStorage
-import io.talevia.core.platform.MediaBlobWriter
+import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
@@ -80,12 +78,17 @@ class RegenerateStaleClipsToolTest {
         }
     }
 
-    private class FakeBlobWriter(private val rootDir: File) : MediaBlobWriter {
-        override suspend fun writeBlob(bytes: ByteArray, suggestedExtension: String): MediaSource {
-            val file = File(rootDir, "${Files.list(rootDir.toPath()).count()}.$suggestedExtension")
+    private class FakeBlobWriter(private val rootDir: File) : BundleBlobWriter {
+        override suspend fun writeBlob(
+                projectId: io.talevia.core.ProjectId,
+                assetId: io.talevia.core.AssetId,
+                bytes: ByteArray,
+                format: String,
+            ): MediaSource.BundleFile {
+            val file = File(rootDir, "${assetId.value}.$format")
             file.writeBytes(bytes)
-            return MediaSource.File(file.absolutePath)
-        }
+            return MediaSource.BundleFile("media/${file.name}")
+}
     }
 
     private fun ctx(): ToolContext = ToolContext(
@@ -99,9 +102,7 @@ class RegenerateStaleClipsToolTest {
 
     @Test fun regeneratesEachStaleClipAndSwapsAssetIdOnTimeline() = runTest {
         val tmpDir = createTempDirectory("regen-test").toFile()
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val storage = InMemoryMediaStorage()
         val engine = CountingImageEngine()
         val writer = FakeBlobWriter(tmpDir)
@@ -213,9 +214,7 @@ class RegenerateStaleClipsToolTest {
 
     @Test fun clipIdsFilterRegeneratesOnlyListedClips() = runTest {
         val tmpDir = createTempDirectory("regen-filter").toFile()
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val storage = InMemoryMediaStorage()
         val engine = CountingImageEngine()
         val writer = FakeBlobWriter(tmpDir)
@@ -324,9 +323,7 @@ class RegenerateStaleClipsToolTest {
 
     @Test fun skipsLegacyEntriesWithoutBaseInputs() = runTest {
         val tmpDir = createTempDirectory("regen-legacy").toFile()
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val storage = InMemoryMediaStorage()
         val engine = CountingImageEngine()
         val writer = FakeBlobWriter(tmpDir)
@@ -407,9 +404,7 @@ class RegenerateStaleClipsToolTest {
     }
 
     @Test fun emptyProjectReturnsZeroWithoutDispatching() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val registry = ToolRegistry()
         val pid = ProjectId("p-empty")
         store.upsert("demo", Project(id = pid, timeline = Timeline()))
@@ -422,9 +417,7 @@ class RegenerateStaleClipsToolTest {
 
     @Test fun skipsPinnedEntriesWithoutDispatching() = runTest {
         val tmpDir = createTempDirectory("regen-pinned").toFile()
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val storage = InMemoryMediaStorage()
         val engine = CountingImageEngine()
         val writer = FakeBlobWriter(tmpDir)

@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.project
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.JsonConfig
@@ -8,9 +7,9 @@ import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
-import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
@@ -62,10 +61,8 @@ class ProjectQueryLockfileFiltersTest {
         sourceBinding = bindings.map { SourceNodeId(it) }.toSet(),
     )
 
-    private suspend fun fixture(entries: List<LockfileEntry>): Pair<SqlDelightProjectStore, ProjectId> {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+    private suspend fun fixture(entries: List<LockfileEntry>): Pair<FileProjectStore, ProjectId> {
+        val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p")
         store.upsert(
             "demo",

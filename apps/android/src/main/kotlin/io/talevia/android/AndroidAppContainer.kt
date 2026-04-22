@@ -9,12 +9,17 @@ import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.ProjectStore
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.RecentsRegistry
 import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.permission.DefaultPermissionService
+import io.talevia.core.platform.BundleBlobWriter
+import io.talevia.core.platform.FileBundleBlobWriter
+import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.InMemorySecretStore
 import io.talevia.core.platform.MediaBlobWriter
+import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
@@ -106,6 +111,7 @@ import io.talevia.core.tool.builtin.video.TrimClipTool
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import okio.Path.Companion.toPath
 
 /**
  * Composition root for the Android app. Mirrors `apps/desktop/AppContainer.kt` and
@@ -121,11 +127,51 @@ class AndroidAppContainer(context: Context) {
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
     val sessions: SessionStore = SqlDelightSessionStore(db, bus)
-    val projects: ProjectStore = SqlDelightProjectStore(db, bus = bus)
-    val media: MediaStorage = AndroidPersistentMediaStorage(
-        java.io.File(context.filesDir, "talevia-media"),
+
+    /**
+     * File-bundle [ProjectStore]. Bundles default to `<filesDir>/projects/...`
+     * and the per-machine recents catalog lives at `<filesDir>/recents.json`.
+     * Both directories are app-private (Android scoped storage) — `git` and
+     * inter-app access are out of scope for the phone form factor.
+     */
+    val recentsRegistry: RecentsRegistry = RecentsRegistry(
+        path = context.filesDir.resolve("recents.json").absolutePath.toPath(),
     )
-    val engine: VideoEngine = Media3VideoEngine(context, media)
+    val projectsHome = context.filesDir.resolve("projects").absolutePath.toPath()
+    val projects: ProjectStore = FileProjectStore(
+        registry = recentsRegistry,
+        defaultProjectsHome = projectsHome,
+        bus = bus,
+    )
+
+    /**
+     * Bundle-local blob writer for AIGC tools (when wired). On Android only
+     * `import_media` consumes this today — the AIGC tools aren't registered
+     * here yet — but we wire it for parity with desktop / server.
+     */
+    val bundleBlobWriter: BundleBlobWriter = FileBundleBlobWriter(projects)
+
+    /**
+     * TODO(file-bundle-migration): legacy [MediaStorage] kept alive for tools
+     * that still receive it as a constructor arg (`ImportMediaTool`,
+     * `ExtractFrameTool`, `AddClipTool`, `ApplyLutTool`, …). Their migration
+     * to `Project.assets` happens in a separate task; once they're done this
+     * field can be deleted along with the in-memory placeholder.
+     */
+    val media: MediaStorage = InMemoryMediaStorage()
+
+    /**
+     * TODO(file-bundle-migration): the Media3 engine takes a [MediaPathResolver]
+     * for source-clip path resolution, but [io.talevia.core.tool.builtin.video.ExportTool]
+     * now hands a per-render [io.talevia.core.platform.BundleMediaPathResolver]
+     * through `render(...)`. The constructor-time resolver is therefore
+     * unreachable on the happy path; this stub yells if anything ever falls
+     * through to it.
+     */
+    private val stubResolver: MediaPathResolver = MediaPathResolver { _ ->
+        error("call site must pass per-render BundleMediaPathResolver via render(resolver=...)")
+    }
+    val engine: VideoEngine = Media3VideoEngine(context, stubResolver)
     /**
      * Cache-tier blob writer. Generated frames live under the app cache dir;
      * Project state holds the canonical asset reference, so OS eviction is
@@ -142,6 +188,10 @@ class AndroidAppContainer(context: Context) {
      * `FfmpegProxyGenerator`. Cache-tier output under
      * `<cacheDir>/talevia-proxies/`, recoverable via re-import.
      */
+    // TODO(file-bundle-migration): Media3ProxyGenerator's pathResolver should be
+    // a per-import BundleMediaPathResolver. Today it falls back to the in-memory
+    // [media] which won't resolve any real asset; ImportMediaTool migration will
+    // replace this.
     val proxyGenerator = io.talevia.android.Media3ProxyGenerator(
         pathResolver = media,
         proxyDir = java.io.File(context.cacheDir, "talevia-proxies"),

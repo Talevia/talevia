@@ -1,27 +1,22 @@
 package io.talevia.core.tool.builtin.aigc
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
-import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.MediaSource
-import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
-import io.talevia.core.domain.Timeline
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.source.consistency.CharacterRefBody
 import io.talevia.core.domain.source.consistency.LoraPin
 import io.talevia.core.domain.source.consistency.addCharacterRef
 import io.talevia.core.domain.source.deepContentHashOf
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.permission.PermissionDecision
+import io.talevia.core.platform.FileBundleBlobWriter
 import io.talevia.core.platform.GeneratedVideo
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.platform.InMemoryMediaStorage
-import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.VideoGenEngine
 import io.talevia.core.platform.VideoGenRequest
 import io.talevia.core.platform.VideoGenResult
@@ -29,8 +24,8 @@ import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import okio.Path.Companion.toPath
 import java.io.File
-import java.nio.file.Files
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -77,16 +72,6 @@ class GenerateVideoToolTest {
         }
     }
 
-    private class FakeBlobWriter(private val rootDir: File) : MediaBlobWriter {
-        val written = mutableListOf<File>()
-        override suspend fun writeBlob(bytes: ByteArray, suggestedExtension: String): MediaSource {
-            val file = File(rootDir, "${Files.list(rootDir.toPath()).count()}.$suggestedExtension")
-            file.writeBytes(bytes)
-            written += file
-            return MediaSource.File(file.absolutePath)
-        }
-    }
-
     private fun ctx(): ToolContext = ToolContext(
         sessionId = SessionId("s"),
         messageId = MessageId("m"),
@@ -96,12 +81,12 @@ class GenerateVideoToolTest {
         messages = emptyList(),
     )
 
-    @Test fun persistsAssetAndExposesProvenance() = runTest {
-        val tmpDir = createTempDirectory("gen-video-test").toFile()
+    @Test fun persistsAssetIntoBundleAndExposesProvenance() = runTest {
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val bundleRoot = "/projects/vid".toPath()
+        val pid = store.createAt(path = bundleRoot, title = "vid").id
         val engine = FakeVideoGenEngine(tinyMp4, fixedModelVersion = "v1")
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-        val tool = GenerateVideoTool(engine, storage, writer)
+        val tool = GenerateVideoTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             GenerateVideoTool.Input(
@@ -111,14 +96,19 @@ class GenerateVideoToolTest {
                 height = 720,
                 durationSeconds = 4.0,
                 seed = 42L,
+                projectId = pid.value,
             ),
             ctx(),
         )
 
         val out = result.data
-        val resolvedPath = storage.resolve(AssetId(out.assetId))
-        assertTrue(File(resolvedPath).exists(), "resolved asset file should exist on disk")
-        assertEquals(tinyMp4.toList(), File(resolvedPath).readBytes().toList())
+        val project = store.get(pid)!!
+        val asset = assertNotNull(project.assets.find { it.id == AssetId(out.assetId) })
+        val src = asset.source as MediaSource.BundleFile
+        assertTrue(src.relativePath.endsWith(".mp4"))
+        val onDisk = bundleRoot.resolve(src.relativePath)
+        assertTrue(fs.exists(onDisk))
+        assertEquals(tinyMp4.toList(), fs.read(onDisk) { readByteArray() }.toList())
 
         assertEquals("fake-sora", out.providerId)
         assertEquals("sora-2", out.modelId)
@@ -130,14 +120,13 @@ class GenerateVideoToolTest {
     }
 
     @Test fun picksSeedClientSideWhenInputOmitsIt() = runTest {
-        val tmpDir = createTempDirectory("gen-video-test-seed").toFile()
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/seed".toPath(), title = "seed").id
         val engine = FakeVideoGenEngine(tinyMp4)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-        val tool = GenerateVideoTool(engine, storage, writer)
+        val tool = GenerateVideoTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
-            GenerateVideoTool.Input(prompt = "no seed", seed = null),
+            GenerateVideoTool.Input(prompt = "no seed", seed = null, projectId = pid.value),
             ctx(),
         )
 
@@ -146,30 +135,22 @@ class GenerateVideoToolTest {
     }
 
     @Test fun consistencyBindingFoldsCharacterIntoPrompt() = runTest {
-        val tmpDir = createTempDirectory("gen-video-test-fold").toFile()
-        val engine = FakeVideoGenEngine(tinyMp4)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
-        val projectId = ProjectId("p-1")
-        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
-        store.mutateSource(projectId) {
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/fold".toPath(), title = "fold").id
+        store.mutateSource(pid) {
             it.addCharacterRef(
                 SourceNodeId("mei"),
                 CharacterRefBody(name = "Mei", visualDescription = "teal hair, round glasses"),
             )
         }
-
-        val tool = GenerateVideoTool(engine, storage, writer, store)
+        val engine = FakeVideoGenEngine(tinyMp4)
+        val tool = GenerateVideoTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             GenerateVideoTool.Input(
                 prompt = "walking in the rain",
                 seed = 7L,
-                projectId = projectId.value,
+                projectId = pid.value,
                 consistencyBindingIds = listOf("mei"),
             ),
             ctx(),
@@ -184,75 +165,58 @@ class GenerateVideoToolTest {
     }
 
     @Test fun secondCallWithIdenticalInputsIsLockfileCacheHit() = runTest {
-        val tmpDir = createTempDirectory("gen-video-cache").toFile()
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/cache".toPath(), title = "cache").id
         val engine = FakeVideoGenEngine(tinyMp4)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
+        val tool = GenerateVideoTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
 
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
-        val projectId = ProjectId("p-cache")
-        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
-
-        val tool = GenerateVideoTool(engine, storage, writer, store)
         val input = GenerateVideoTool.Input(
             prompt = "a cat on a mat",
             durationSeconds = 4.0,
             seed = 1234L,
-            projectId = projectId.value,
+            projectId = pid.value,
         )
 
         val first = tool.execute(input, ctx())
         assertEquals(false, first.data.cacheHit)
-        val writesAfterFirst = writer.written.size
 
         val second = tool.execute(input, ctx())
         assertEquals(true, second.data.cacheHit)
         assertEquals(first.data.assetId, second.data.assetId)
-        assertEquals(writesAfterFirst, writer.written.size, "cache hit must not write new blob bytes")
 
         // Change duration — distinct output, should bust.
         val third = tool.execute(input.copy(durationSeconds = 8.0), ctx())
         assertEquals(false, third.data.cacheHit)
         assertTrue(third.data.assetId != first.data.assetId)
 
-        val lockfile = store.get(projectId)!!.lockfile
+        val lockfile = store.get(pid)!!.lockfile
         assertEquals(2, lockfile.entries.size)
     }
 
     @Test fun lockfileEntrySnapshotsBoundSourceContentHashes() = runTest {
-        val tmpDir = createTempDirectory("gen-video-snap").toFile()
-        val engine = FakeVideoGenEngine(tinyMp4)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
-        val projectId = ProjectId("p-snap")
-        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
-        store.mutateSource(projectId) {
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/snap".toPath(), title = "snap").id
+        store.mutateSource(pid) {
             it.addCharacterRef(
                 SourceNodeId("mei"),
                 CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
             )
         }
-        // Deep content hash post transitive-source-hash-propagation cycle.
-        val expectedHash = store.get(projectId)!!.source.deepContentHashOf(SourceNodeId("mei"))
+        val expectedHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
 
-        val tool = GenerateVideoTool(engine, storage, writer, store)
+        val engine = FakeVideoGenEngine(tinyMp4)
+        val tool = GenerateVideoTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
         tool.execute(
             GenerateVideoTool.Input(
                 prompt = "portrait pan",
                 seed = 7L,
-                projectId = projectId.value,
+                projectId = pid.value,
                 consistencyBindingIds = listOf("mei"),
             ),
             ctx(),
         )
 
-        val entry = store.get(projectId)!!.lockfile.entries.single()
+        val entry = store.get(pid)!!.lockfile.entries.single()
         assertEquals(setOf(SourceNodeId("mei")), entry.sourceBinding)
         assertEquals(
             mapOf(SourceNodeId("mei") to expectedHash),
@@ -262,22 +226,18 @@ class GenerateVideoToolTest {
     }
 
     @Test fun loraAndReferenceAssetsFlowToEngine() = runTest {
-        val tmpDir = createTempDirectory("gen-video-lora").toFile()
-        val engine = FakeVideoGenEngine(tinyMp4)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/lora".toPath(), title = "lora").id
 
+        // Reference image is outside the bundle.
+        val tmpDir = createTempDirectory("gen-video-ref").toFile()
         val refFile = File(tmpDir, "ref.png").also { it.writeBytes(tinyMp4) }
+        val storage = InMemoryMediaStorage()
         val refAsset = storage.import(MediaSource.File(refFile.absolutePath)) { _ ->
             io.talevia.core.domain.MediaMetadata(duration = kotlin.time.Duration.ZERO)
         }
 
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
-        val projectId = ProjectId("p-lora")
-        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
-        store.mutateSource(projectId) {
+        store.mutateSource(pid) {
             it.addCharacterRef(
                 SourceNodeId("mei"),
                 CharacterRefBody(
@@ -288,13 +248,14 @@ class GenerateVideoToolTest {
                 ),
             )
         }
+        val engine = FakeVideoGenEngine(tinyMp4)
+        val tool = GenerateVideoTool(engine, storage, FileBundleBlobWriter(store, fs), store)
 
-        val tool = GenerateVideoTool(engine, storage, writer, store)
         val result = tool.execute(
             GenerateVideoTool.Input(
                 prompt = "pan across Mei",
                 seed = 1L,
-                projectId = projectId.value,
+                projectId = pid.value,
                 consistencyBindingIds = listOf("mei"),
             ),
             ctx(),

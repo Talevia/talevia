@@ -7,8 +7,9 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.session.Session
@@ -35,7 +36,7 @@ class SwitchProjectToolTest {
 
     private data class Rig(
         val sessions: SqlDelightSessionStore,
-        val projects: SqlDelightProjectStore,
+        val projects: FileProjectStore,
         val ctx: ToolContext,
     )
 
@@ -44,7 +45,7 @@ class SwitchProjectToolTest {
         TaleviaDb.Schema.create(driver)
         val db = TaleviaDb(driver)
         val sessions = SqlDelightSessionStore(db, EventBus())
-        val projects = SqlDelightProjectStore(db)
+        val projects = ProjectStoreTestKit.create()
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),
@@ -75,7 +76,7 @@ class SwitchProjectToolTest {
         return s
     }
 
-    private suspend fun seedProject(projects: SqlDelightProjectStore, id: String) {
+    private suspend fun seedProject(projects: FileProjectStore, id: String) {
         projects.upsert(id, Project(id = ProjectId(id), timeline = Timeline()))
     }
 

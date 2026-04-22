@@ -222,11 +222,18 @@ class ExportTool(
             }
         }
 
+        // Build a per-export resolver bound to this project's bundle. AIGC and
+        // imported-into-bundle assets resolve relative to bundleRoot; external
+        // source files (MediaSource.File) keep their absolute paths.
+        val resolver = store.pathOf(project.id)?.let {
+            io.talevia.core.platform.BundleMediaPathResolver(project, it)
+        }
+
         val perClipShape = timelineFitsPerClipPath(timeline)
         val perClipStats = if (engine.supportsPerClipCache && perClipShape != null) {
-            runPerClipRender(engine, store, project, perClipShape, output, input.outputPath, ctx, clock)
+            runPerClipRender(engine, store, project, perClipShape, output, input.outputPath, ctx, clock, resolver)
         } else {
-            runWholeTimelineRender(engine, timeline, output, ctx, clock)
+            runWholeTimelineRender(engine, timeline, output, ctx, clock, resolver)
             PerClipStats(hits = 0, misses = 0)
         }
 

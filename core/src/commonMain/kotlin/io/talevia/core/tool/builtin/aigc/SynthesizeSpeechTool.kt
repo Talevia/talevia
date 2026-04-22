@@ -1,20 +1,22 @@
 package io.talevia.core.tool.builtin.aigc
 
+import io.talevia.core.AssetId
 import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.cost.AigcPricing
+import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.permission.PermissionSpec
-import io.talevia.core.platform.MediaBlobWriter
-import io.talevia.core.platform.MediaStorage
+import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.TtsRequest
 import io.talevia.core.tool.Tool
+import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import kotlinx.serialization.KSerializer
@@ -28,13 +30,18 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 import kotlin.time.Duration
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
- * Synthesize a voiceover via a [TtsEngine], persist the bytes through a
- * [MediaBlobWriter], register the result with [MediaStorage], and surface an
- * `AssetId` `add_clip` can drop onto an audio track. The first AIGC audio
- * tool — pairs with `transcribe_asset` (audio → text) to close the round-trip
- * for VISION §2's audio compiler lane.
+ * Synthesize a voiceover via a [TtsEngine], persist the bytes into the project
+ * bundle via a [BundleBlobWriter], append the resulting [MediaAsset] to
+ * `Project.assets`, and surface an `AssetId` `add_clip` can drop onto an audio
+ * track. The first AIGC audio tool — pairs with `transcribe_asset` (audio →
+ * text) to close the round-trip for VISION §2's audio compiler lane.
+ *
+ * Bytes land at `<bundleRoot>/media/<assetId>.<format>` so the synthesized
+ * voiceover travels with the project bundle.
  *
  * Lockfile cache (VISION §3.1): hash key is `(tool, model, voice, format,
  * speed, text)`. The `voice` folded in is the *resolved* voice — character_ref
@@ -58,9 +65,8 @@ import kotlin.time.Duration
  */
 class SynthesizeSpeechTool(
     private val engine: TtsEngine,
-    private val storage: MediaStorage,
-    private val blobWriter: MediaBlobWriter,
-    private val projectStore: ProjectStore? = null,
+    private val bundleBlobWriter: BundleBlobWriter,
+    private val projectStore: ProjectStore,
 ) : Tool<SynthesizeSpeechTool.Input, SynthesizeSpeechTool.Output> {
 
     @Serializable
@@ -101,14 +107,16 @@ class SynthesizeSpeechTool(
     override val id: String = "synthesize_speech"
     override val helpText: String =
         "Synthesize speech from text via a TTS provider (default: tts-1 / alloy / mp3) and " +
-            "import it as a project asset. Pass projectId to enable lockfile caching — a second " +
-            "call with identical (text, voice, model, format, speed) returns the same asset " +
-            "without re-billing the provider. Pass consistencyBindingIds with a character_ref id " +
-            "whose voiceId is set to use that character's voice automatically (overrides the " +
+            "import it as a project asset. Bytes land in the project bundle's media/ directory " +
+            "so the voiceover travels with the project. Lockfile caching kicks in automatically — " +
+            "a second call with identical (text, voice, model, format, speed) returns the same " +
+            "asset without re-billing the provider. Pass consistencyBindingIds with a character_ref " +
+            "id whose voiceId is set to use that character's voice automatically (overrides the " +
             "explicit voice input). Use add_clip to drop the result onto an audio track."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("aigc.generate")
+    override val applicability: ToolApplicability = ToolApplicability.RequiresProjectBinding
 
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
@@ -161,9 +169,11 @@ class SynthesizeSpeechTool(
         put("additionalProperties", false)
     }
 
+    @OptIn(ExperimentalUuidApi::class)
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        AigcBudgetGuard.enforce(id, projectStore, input.projectId?.let(::ProjectId), ctx)
-        val folded = resolveVoice(input)
+        val pid = ctx.resolveProjectId(input.projectId)
+        AigcBudgetGuard.enforce(id, projectStore, pid, ctx)
+        val folded = resolveVoice(input, pid)
         val resolvedVoice = folded.voiceId ?: input.voice
 
         val inputHash = AigcPipeline.inputHash(
@@ -178,10 +188,8 @@ class SynthesizeSpeechTool(
             ),
         )
 
-        val pid = input.projectId?.let(::ProjectId)
-        val store = projectStore
-        if (pid != null && store != null && !ctx.isReplay) {
-            val cached = AigcPipeline.findCached(store, pid, inputHash)
+        if (!ctx.isReplay) {
+            val cached = AigcPipeline.findCached(projectStore, pid, inputHash)
             if (cached != null) {
                 return hit(cached, input, resolvedVoice, folded.appliedNodeIds)
             }
@@ -204,49 +212,51 @@ class SynthesizeSpeechTool(
             )
         }
 
-        val source = blobWriter.writeBlob(result.audio.audioBytes, result.audio.format)
-        val asset = storage.import(source) { _ ->
-            // Duration / sample rate would need an audio probe to fill in honestly. The TTS
-            // endpoint doesn't echo a duration and we have no portable audio probe in
-            // commonMain — leaving it Duration.ZERO is the same compromise the image
-            // engine makes for non-image dimensions.
-            MediaMetadata(
+        val newAssetId = AssetId(Uuid.random().toString())
+        val bundleSource = bundleBlobWriter.writeBlob(pid, newAssetId, result.audio.audioBytes, result.audio.format)
+        // Duration / sample rate would need an audio probe to fill in honestly. The TTS
+        // endpoint doesn't echo a duration and we have no portable audio probe in
+        // commonMain — leaving it Duration.ZERO is the same compromise the image
+        // engine makes for non-image dimensions.
+        val newAsset = MediaAsset(
+            id = newAssetId,
+            source = bundleSource,
+            metadata = MediaMetadata(
                 duration = Duration.ZERO,
                 resolution = Resolution(0, 0),
                 frameRate = null,
-            )
-        }
+            ),
+        )
 
         val baseInputs = JsonConfig.default.encodeToJsonElement(Input.serializer(), input).jsonObject
         val costCents = AigcPricing.estimateCents(id, result.provenance, baseInputs)
-        if (pid != null && store != null) {
-            AigcPipeline.record(
-                store = store,
+        AigcPipeline.record(
+            store = projectStore,
+            projectId = pid,
+            toolId = id,
+            inputHash = inputHash,
+            assetId = newAssetId,
+            provenance = result.provenance,
+            sourceBinding = folded.appliedNodeIds.map(::SourceNodeId).toSet(),
+            baseInputs = baseInputs,
+            costCents = costCents,
+            sessionId = ctx.sessionId,
+            originatingMessageId = ctx.messageId,
+            newAsset = newAsset,
+        )
+        ctx.publishEvent(
+            BusEvent.AigcCostRecorded(
+                sessionId = ctx.sessionId,
                 projectId = pid,
                 toolId = id,
-                inputHash = inputHash,
-                assetId = asset.id,
-                provenance = result.provenance,
-                sourceBinding = folded.appliedNodeIds.map(::SourceNodeId).toSet(),
-                baseInputs = baseInputs,
+                assetId = newAssetId.value,
                 costCents = costCents,
-                sessionId = ctx.sessionId,
-                originatingMessageId = ctx.messageId,
-            )
-            ctx.publishEvent(
-                BusEvent.AigcCostRecorded(
-                    sessionId = ctx.sessionId,
-                    projectId = pid,
-                    toolId = id,
-                    assetId = asset.id.value,
-                    costCents = costCents,
-                ),
-            )
-        }
+            ),
+        )
 
         val prov = result.provenance
         val out = Output(
-            assetId = asset.id.value,
+            assetId = newAssetId.value,
             format = result.audio.format,
             providerId = prov.providerId,
             modelId = prov.modelId,
@@ -267,21 +277,13 @@ class SynthesizeSpeechTool(
         )
     }
 
-    private suspend fun resolveVoice(input: Input): io.talevia.core.domain.source.consistency.FoldedVoice {
+    private suspend fun resolveVoice(input: Input, pid: ProjectId): io.talevia.core.domain.source.consistency.FoldedVoice {
         val bindingIds = input.consistencyBindingIds
         if (bindingIds != null && bindingIds.isEmpty()) {
             return io.talevia.core.domain.source.consistency.FoldedVoice(voiceId = null, appliedNodeIds = emptyList())
         }
-        val store = projectStore ?: run {
-            if (bindingIds != null) error("consistencyBindingIds supplied but this SynthesizeSpeechTool has no ProjectStore wired")
-            return io.talevia.core.domain.source.consistency.FoldedVoice(voiceId = null, appliedNodeIds = emptyList())
-        }
-        val pid = input.projectId ?: run {
-            if (bindingIds != null) error("consistencyBindingIds require projectId to locate the source graph")
-            return io.talevia.core.domain.source.consistency.FoldedVoice(voiceId = null, appliedNodeIds = emptyList())
-        }
-        val project = store.get(ProjectId(pid))
-            ?: error("Project $pid not found when resolving consistency bindings")
+        val project = projectStore.get(pid)
+            ?: error("Project ${pid.value} not found when resolving consistency bindings")
         return if (bindingIds == null) {
             // Auto: soft-fail on ambiguous voices rather than crashing the generation.
             runCatching { AigcPipeline.foldVoice(project, null) }

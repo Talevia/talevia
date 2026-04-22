@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.project
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
 import io.talevia.core.JsonConfig
@@ -9,18 +8,18 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.platform.InMemoryMediaStorage
-import io.talevia.core.platform.MediaBlobWriter
+import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.SynthesizedAudio
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.TtsRequest
@@ -69,16 +68,21 @@ class ForkProjectLanguageVariantTest {
         }
     }
 
-    private class FakeBlobWriter(private val rootDir: File) : MediaBlobWriter {
-        override suspend fun writeBlob(bytes: ByteArray, suggestedExtension: String): MediaSource {
-            val file = File(rootDir, "${System.nanoTime()}.$suggestedExtension")
+    private class FakeBlobWriter(private val rootDir: File) : BundleBlobWriter {
+        override suspend fun writeBlob(
+                projectId: io.talevia.core.ProjectId,
+                assetId: io.talevia.core.AssetId,
+                bytes: ByteArray,
+                format: String,
+            ): MediaSource.BundleFile {
+            val file = File(rootDir, "${assetId.value}.$format")
             file.writeBytes(bytes)
-            return MediaSource.File(file.absolutePath)
-        }
+            return MediaSource.BundleFile("media/${file.name}")
+}
     }
 
     private data class Rig(
-        val store: SqlDelightProjectStore,
+        val store: FileProjectStore,
         val registry: ToolRegistry,
         val tts: FakeTtsEngine,
         val ctx: ToolContext,
@@ -86,14 +90,12 @@ class ForkProjectLanguageVariantTest {
 
     private fun rig(): Rig {
         val tmpDir = createTempDirectory("fork-lang-test").toFile()
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val tts = FakeTtsEngine(fakeMp3)
         val storage = InMemoryMediaStorage()
         val writer = FakeBlobWriter(tmpDir)
         val registry = ToolRegistry()
-        registry.register(SynthesizeSpeechTool(tts, storage, writer, store))
+        registry.register(SynthesizeSpeechTool(tts, writer, store))
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),
@@ -112,7 +114,7 @@ class ForkProjectLanguageVariantTest {
         sourceBinding = binding?.let { setOf(SourceNodeId(it)) } ?: emptySet(),
     )
 
-    private suspend fun seedProject(store: SqlDelightProjectStore, clips: List<Clip>) {
+    private suspend fun seedProject(store: FileProjectStore, clips: List<Clip>) {
         store.upsert(
             "test",
             Project(

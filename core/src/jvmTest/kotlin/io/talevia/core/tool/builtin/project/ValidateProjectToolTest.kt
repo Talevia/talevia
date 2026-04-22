@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.project
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
@@ -9,15 +8,14 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.FrameRate
 import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Resolution
-import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
@@ -49,9 +47,7 @@ class ValidateProjectToolTest {
     )
 
     private fun newRig(project: Project): Rig {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         kotlinx.coroutines.runBlocking { store.upsert("t", project) }
         val ctx = ToolContext(
             sessionId = SessionId("s"),

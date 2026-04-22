@@ -1,14 +1,12 @@
 package io.talevia.platform.ffmpeg
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.AllowAllPermissionService
 import io.talevia.core.platform.InMemoryMediaStorage
@@ -83,7 +81,7 @@ class ExportDeterminismTest {
         //    `comment` tag (VISION §5.3) depends on (projectId, timeline,
         //    lockfile). Two freshly-upserted projects would legitimately
         //    mint different manifests (different `Track.updatedAtEpochMs`
-        //    stamped by SqlDelightProjectStore.upsert at wall-clock time);
+        //    stamped by FileProjectStore.upsert at wall-clock time);
         //    two renders of the **same** project produce the same manifest
         //    and therefore the same bytes.
         val hashA = renderAndHash(outputA, forceRender = false)
@@ -123,23 +121,15 @@ class ExportDeterminismTest {
     }
 
     private data class DeterminismFixture(
-        val driver: JdbcSqliteDriver,
         val projectId: ProjectId,
         val registry: ToolRegistry,
         val ctx: ToolContext,
     )
 
-    @AfterTest
-    fun closeFixtureDriver() {
-        fixture?.driver?.close()
-    }
-
     private suspend fun buildFixture(): DeterminismFixture {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
-        val db = TaleviaDb(driver)
         val media = InMemoryMediaStorage()
         val engine = FfmpegVideoEngine(pathResolver = media)
-        val projects = SqlDelightProjectStore(db)
+        val projects = ProjectStoreTestKit.create()
         val perms = AllowAllPermissionService()
 
         val projectId = ProjectId(Uuid.random().toString())
@@ -178,7 +168,7 @@ class ExportDeterminismTest {
             },
             ctx,
         )
-        return DeterminismFixture(driver, projectId, registry, ctx)
+        return DeterminismFixture(projectId, registry, ctx)
     }
 
     private fun sha256(file: File): String {

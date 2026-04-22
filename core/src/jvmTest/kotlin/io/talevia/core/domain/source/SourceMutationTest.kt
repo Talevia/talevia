@@ -1,13 +1,12 @@
 package io.talevia.core.domain.source
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
-import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.source.genre.vlog.VlogNodeKinds
 import io.talevia.core.domain.source.genre.vlog.VlogRawFootageBody
@@ -29,11 +28,8 @@ import kotlin.test.assertNotNull
  */
 class SourceMutationTest {
 
-    private fun newStore(): Pair<SqlDelightProjectStore, ProjectId> {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val db = TaleviaDb(driver)
-        val store = SqlDelightProjectStore(db)
+    private fun newStore(): Pair<FileProjectStore, ProjectId> {
+        val store = ProjectStoreTestKit.create()
         val id = ProjectId("p-src")
         runBlocking { store.upsert("demo", Project(id = id, timeline = Timeline())) }
         return store to id

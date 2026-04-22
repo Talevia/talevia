@@ -2,6 +2,7 @@ package io.talevia.core.tool.builtin.video.export
 
 import io.talevia.core.PartId
 import io.talevia.core.domain.Timeline
+import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
@@ -26,9 +27,10 @@ internal suspend fun runWholeTimelineRender(
     output: OutputSpec,
     ctx: ToolContext,
     clock: Clock,
+    resolver: MediaPathResolver? = null,
 ) {
     var failure: String? = null
-    engine.render(timeline, output).collect { ev ->
+    engine.render(timeline, output, resolver).collect { ev ->
         val partId = PartId(Uuid.random().toString())
         when (ev) {
             is RenderProgress.Started -> ctx.emitPart(

@@ -6,8 +6,9 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
@@ -26,7 +27,7 @@ class ArtifactTimelineProjectorTest {
 
     private data class Rig(
         val sessions: SqlDelightSessionStore,
-        val projects: SqlDelightProjectStore,
+        val projects: FileProjectStore,
     )
 
     private fun rig(): Rig {
@@ -35,7 +36,7 @@ class ArtifactTimelineProjectorTest {
         val db = TaleviaDb(driver)
         return Rig(
             sessions = SqlDelightSessionStore(db, EventBus()),
-            projects = SqlDelightProjectStore(db),
+            projects = ProjectStoreTestKit.create(),
         )
     }
 

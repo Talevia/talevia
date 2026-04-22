@@ -17,10 +17,16 @@ final class AppContainer {
     let bus: EventBus
     let agentStates: AgentRunStateTracker
     let sessions: SqlDelightSessionStore
-    let projects: SqlDelightProjectStore
-    /// [InMemoryMediaStorage] already implements [MediaPathResolver], so we
-    /// pass the same instance to the engine — keeping architecture rule #4
-    /// (all asset paths route through a resolver) on iOS.
+    /// File-bundle [ProjectStore]. Bundles default to
+    /// `<Documents>/projects/...`; the per-machine recents catalog lives at
+    /// `<Documents>/recents.json`. Replaces the SQL-backed store the iOS app
+    /// used during M3.
+    let recentsRegistry: RecentsRegistry
+    let projects: FileProjectStore
+    let bundleBlobWriter: FileBundleBlobWriter
+    /// TODO(file-bundle-migration): legacy [InMemoryMediaStorage] kept alive
+    /// for tools that still take a `MediaStorage` constructor arg. Their
+    /// migration to `Project.assets` happens in a separate task.
     let media: InMemoryMediaStorage
     let engine: AVFoundationVideoEngine
     let blobWriter: IosFileBlobWriter
@@ -59,16 +65,44 @@ final class AppContainer {
     }
 
     private init() {
+        // Sessions DB: switch to a file-backed driver so iOS sessions /
+        // messages / parts survive app restarts (parity with desktop /
+        // Android).
         let factory = TaleviaDatabaseFactory()
-        self.driver = factory.createInMemoryDriver()
+        self.driver = factory.createPersistentDriver(name: "talevia.db")
         self.db = TaleviaDbCompanion.shared.invoke(driver: self.driver)
         self.bus = EventBus(extraBufferCapacity: 0)
         self.agentStates = AgentRunStateTrackerCompanion.shared.withSupervisor(bus: self.bus)
         let clock = ClockSystem.shared
         let json = JsonConfig.shared.default
         self.sessions = SqlDelightSessionStore(db: self.db, bus: self.bus, clock: clock, json: json)
-        self.projects = SqlDelightProjectStore(db: self.db, clock: clock, json: json, bus: self.bus)
+
+        // File-bundle ProjectStore rooted at <Documents>/projects/, recents
+        // at <Documents>/recents.json. Bypasses the SqlDelight ProjectStore
+        // entirely on iOS (it's gone in the file-bundle migration).
+        let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+        let projectsHome = docsDir.appendingPathComponent("projects").path
+        let recentsPath = docsDir.appendingPathComponent("recents.json").path
+        self.recentsRegistry = newRecentsRegistry(path: recentsPath)
+        self.projects = newFileProjectStore(
+            registry: self.recentsRegistry,
+            projectsHome: projectsHome,
+            bus: self.bus
+        )
+        self.bundleBlobWriter = newFileBundleBlobWriter(projects: self.projects)
+
+        // TODO(file-bundle-migration): legacy [InMemoryMediaStorage] kept
+        // alive for tools that still take a `MediaStorage` constructor arg
+        // (ImportMediaTool, ExtractFrameTool, AddClipTool, …). Once those
+        // migrate to `Project.assets`, this field — and every `media:`
+        // argument below — can be deleted.
         self.media = InMemoryMediaStorage()
+        // TODO(file-bundle-migration): the engine + proxy generator both take a
+        // MediaPathResolver, but ExportTool now passes a per-render
+        // BundleMediaPathResolver via render(resolver:). The constructor-time
+        // resolver is unreachable on the happy path; today we still hand it
+        // [media] which won't resolve real bundle assets. ImportMediaTool
+        // migration will swap this for a per-call BundleMediaPathResolver.
         self.engine = AVFoundationVideoEngine(resolver: self.media)
         self.blobWriter = IosFileBlobWriter(rootDir: IosFileBlobWriter.defaultRoot())
         self.proxyGenerator = AVFoundationProxyGenerator(

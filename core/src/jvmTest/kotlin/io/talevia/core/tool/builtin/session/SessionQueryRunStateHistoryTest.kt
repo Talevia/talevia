@@ -11,7 +11,7 @@ import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
@@ -78,9 +78,7 @@ class SessionQueryRunStateHistoryTest {
         sessions: SqlDelightSessionStore,
         tracker: AgentRunStateTracker,
     ): SessionQueryTool {
-        val projects = SqlDelightProjectStore(
-            TaleviaDb(JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }),
-        )
+        val projects = ProjectStoreTestKit.create()
         return SessionQueryTool(sessions, tracker, projects)
     }
 
@@ -186,9 +184,7 @@ class SessionQueryRunStateHistoryTest {
         val out = SessionQueryTool(
             sessions,
             tracker,
-            SqlDelightProjectStore(
-                TaleviaDb(JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }),
-            ),
+            ProjectStoreTestKit.create(),
         ).execute(
             SessionQueryTool.Input(
                 select = "run_state_history",

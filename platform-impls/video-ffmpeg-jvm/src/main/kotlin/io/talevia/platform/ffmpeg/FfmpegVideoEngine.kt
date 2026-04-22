@@ -98,7 +98,12 @@ class FfmpegVideoEngine(
         )
     }
 
-    override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> = flow {
+    override fun render(
+        timeline: Timeline,
+        output: OutputSpec,
+        resolver: MediaPathResolver?,
+    ): Flow<RenderProgress> = flow {
+        val effectiveResolver = resolver ?: pathResolver
         val jobId = Uuid.random().toString()
         emit(RenderProgress.Started(jobId))
 
@@ -113,14 +118,14 @@ class FfmpegVideoEngine(
             return@flow
         }
 
-        val resolvedPaths = videoClips.map { clip -> pathResolver.resolve(clip.assetId) }
+        val resolvedPaths = videoClips.map { clip -> effectiveResolver.resolve(clip.assetId) }
         // Pre-resolve asset-backed filter references (e.g. LUT files) to absolute
         // paths. Done here so filterChainFor() stays non-suspend and unit-testable.
         val filterAssetPaths: Map<AssetId, String> = videoClips
             .flatMap { it.filters }
             .mapNotNull { it.assetId }
             .distinct()
-            .associateWith { pathResolver.resolve(it) }
+            .associateWith { effectiveResolver.resolve(it) }
         // Transition pass. AddTransitionTool records a transition as a clip on
         // an Effect track, centered at the boundary between two adjacent video
         // clips. For v1 we render every transition name as a dip-to-black fade
@@ -373,17 +378,20 @@ class FfmpegVideoEngine(
         fades: TransitionFades?,
         output: OutputSpec,
         mezzaninePath: String,
+        resolver: MediaPathResolver?,
     ) {
+        val effectiveResolver = resolver ?: pathResolver
+
         // Make sure the target directory exists — callers pass a path under
         // `<outputDir>/.talevia-render-cache/<projectId>/` which may not exist
         // on the first mezzanine write.
         Files.createDirectories(java.nio.file.Path.of(mezzaninePath).parent)
 
-        val sourceMediaPath = pathResolver.resolve(clip.assetId)
+        val sourceMediaPath = effectiveResolver.resolve(clip.assetId)
         val filterAssetPaths: Map<AssetId, String> = clip.filters
             .mapNotNull { it.assetId }
             .distinct()
-            .associateWith { pathResolver.resolve(it) }
+            .associateWith { effectiveResolver.resolve(it) }
 
         val filterChain = filterChainFor(clip.filters, filterAssetPaths)
         val fadeChain = buildFadeChain(clip, fades)
@@ -682,6 +690,10 @@ class FfmpegVideoEngine(
 
     private fun sourceToLocalPath(source: MediaSource): String = when (source) {
         is MediaSource.File -> source.path
+        is MediaSource.BundleFile -> error(
+            "BundleFile MediaSource ('${source.relativePath}') cannot be resolved by FfmpegVideoEngine.probe directly — " +
+                "callers must resolve relative paths via BundleMediaPathResolver before invoking probe.",
+        )
         is MediaSource.Http -> error("Http MediaSource not supported by FfmpegVideoEngine yet (download first)")
         is MediaSource.Platform -> error("Platform MediaSource not supported on JVM (${source.scheme})")
     }

@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.source
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
@@ -9,10 +8,10 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
@@ -46,7 +45,7 @@ import kotlin.time.Duration.Companion.seconds
 class RenameSourceNodeToolTest {
 
     private data class Rig(
-        val store: SqlDelightProjectStore,
+        val store: FileProjectStore,
         val tool: RenameSourceNodeTool,
         val ctx: ToolContext,
         val pid: ProjectId,
@@ -54,9 +53,7 @@ class RenameSourceNodeToolTest {
     )
 
     private suspend fun rig(project: Project = Project(id = ProjectId("p"), timeline = Timeline())): Rig {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         store.upsert("demo", project)
         val emitted = mutableListOf<Part>()
         val ctx = ToolContext(
@@ -71,7 +68,7 @@ class RenameSourceNodeToolTest {
     }
 
     private suspend fun seedShot(
-        store: SqlDelightProjectStore,
+        store: FileProjectStore,
         pid: ProjectId,
         nodeId: String,
         parents: List<String> = emptyList(),

@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
@@ -8,10 +7,10 @@ import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
@@ -81,10 +80,8 @@ class AutoSubtitleClipToolTest {
     private suspend fun newFixture(
         clipStart: Duration = 2.seconds,
         clipDuration: Duration = 10.seconds,
-    ): Triple<SqlDelightProjectStore, ProjectId, ClipId> {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+    ): Triple<FileProjectStore, ProjectId, ClipId> {
+        val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p-auto")
         val clipId = ClipId("c-1")
         val clip = Clip.Video(
@@ -180,9 +177,7 @@ class AutoSubtitleClipToolTest {
     }
 
     @Test fun errorsWhenClipHasNoAsset() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p-text")
         val clipId = ClipId("c-text")
         val textClip = Clip.Text(

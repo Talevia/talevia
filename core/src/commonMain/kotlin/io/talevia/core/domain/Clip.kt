@@ -29,7 +29,7 @@ sealed class Clip {
     /**
      * Epoch-millis of the last structural change to this clip, or `null`
      * when the backing project blob was written before recency tracking
-     * existed. Stamped by [SqlDelightProjectStore] on `upsert` — new
+     * existed. Stamped by [FileProjectStore] on `upsert` — new
      * clips get `now`, unchanged clips preserve their prior stamp,
      * content-changed clips get `now`. Tools do NOT stamp manually.
      * Exposed to the LLM via `project_query(select=timeline_clips,

@@ -1,20 +1,19 @@
 package io.talevia.core.tool.builtin.video
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
-import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.ProxyAsset
 import io.talevia.core.domain.ProxyPurpose
 import io.talevia.core.domain.Resolution
-import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.InMemoryMediaStorage
@@ -49,7 +48,7 @@ class ImportMediaProxyTest {
             resolution = Resolution(1920, 1080),
             videoCodec = "h264",
         )
-        override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> =
+        override fun render(timeline: Timeline, output: OutputSpec, resolver: io.talevia.core.platform.MediaPathResolver?): Flow<RenderProgress> =
             flowOf(RenderProgress.Failed("no-op", "StubVideoEngine cannot render"))
         override suspend fun thumbnail(
             asset: AssetId,
@@ -89,10 +88,8 @@ class ImportMediaProxyTest {
 
     private suspend fun rig(
         generator: ProxyGenerator,
-    ): Triple<SqlDelightProjectStore, InMemoryMediaStorage, ImportMediaTool> {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val projects = SqlDelightProjectStore(TaleviaDb(driver))
+    ): Triple<FileProjectStore, InMemoryMediaStorage, ImportMediaTool> {
+        val projects = ProjectStoreTestKit.create()
         projects.upsert(
             "demo",
             Project(id = ProjectId("p"), timeline = Timeline()),
@@ -195,9 +192,7 @@ class ImportMediaProxyTest {
         // Exercise the path where a caller constructs ImportMediaTool without
         // touching the new parameter — the default NoopProxyGenerator must
         // keep import returning zero proxies and no Part side-effects.
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val projects = SqlDelightProjectStore(TaleviaDb(driver))
+        val projects = ProjectStoreTestKit.create()
         projects.upsert("demo", Project(id = ProjectId("p"), timeline = Timeline()))
         val storage = InMemoryMediaStorage()
         val tool = ImportMediaTool(storage, StubVideoEngine(), projects)

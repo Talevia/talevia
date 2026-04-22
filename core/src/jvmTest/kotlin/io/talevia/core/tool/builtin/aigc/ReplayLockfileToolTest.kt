@@ -1,17 +1,16 @@
 package io.talevia.core.tool.builtin.aigc
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
-import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.permission.PermissionDecision
@@ -21,7 +20,7 @@ import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.ImageGenRequest
 import io.talevia.core.platform.ImageGenResult
 import io.talevia.core.platform.InMemoryMediaStorage
-import io.talevia.core.platform.MediaBlobWriter
+import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import kotlinx.coroutines.test.runTest
@@ -84,12 +83,17 @@ class ReplayLockfileToolTest {
         }
     }
 
-    private class FakeBlobWriter(private val rootDir: File) : MediaBlobWriter {
-        override suspend fun writeBlob(bytes: ByteArray, suggestedExtension: String): MediaSource {
-            val file = File(rootDir, "${Files.list(rootDir.toPath()).count()}.$suggestedExtension")
+    private class FakeBlobWriter(private val rootDir: File) : BundleBlobWriter {
+        override suspend fun writeBlob(
+                projectId: io.talevia.core.ProjectId,
+                assetId: io.talevia.core.AssetId,
+                bytes: ByteArray,
+                format: String,
+            ): MediaSource.BundleFile {
+            val file = File(rootDir, "${assetId.value}.$format")
             file.writeBytes(bytes)
-            return MediaSource.File(file.absolutePath)
-        }
+            return MediaSource.BundleFile("media/${file.name}")
+}
     }
 
     private fun ctx(): ToolContext = ToolContext(
@@ -101,10 +105,8 @@ class ReplayLockfileToolTest {
         messages = emptyList(),
     )
 
-    private fun freshStore(): SqlDelightProjectStore {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        return SqlDelightProjectStore(TaleviaDb(driver))
+    private fun freshStore(): FileProjectStore {
+        return ProjectStoreTestKit.create()
     }
 
     @Test fun replaySkipsCacheAndAppendsNewLockfileEntry() = runTest {

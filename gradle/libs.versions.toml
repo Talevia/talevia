@@ -7,6 +7,7 @@ sqldelight = "2.0.2"
 ktor = "3.0.3"
 kermit = "2.0.5"
 turbine = "1.2.0"
+okio = "3.9.1"
 compose = "1.7.3"
 skie = "0.10.4"
 agp = "8.8.0"
@@ -56,6 +57,9 @@ logback-classic = { module = "ch.qos.logback:logback-classic", version = "1.5.12
 
 kermit = { module = "co.touchlab:kermit", version.ref = "kermit" }
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
+
+okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
+okio-fakefilesystem = { module = "com.squareup.okio:okio-fakefilesystem", version.ref = "okio" }
 
 [plugins]
 kotlin-multiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }

@@ -2,6 +2,7 @@ package io.talevia.core
 
 import app.cash.sqldelight.driver.native.NativeSqliteDriver
 import io.ktor.client.HttpClient
+import okio.Path.Companion.toPath
 import io.ktor.client.engine.darwin.Darwin
 import io.talevia.core.agent.Agent
 import io.talevia.core.agent.RunInput
@@ -48,14 +49,30 @@ import kotlin.time.DurationUnit
  * Helpers exposed to Swift via SKIE so the iOS app composition root can stand up
  * the SQLDelight database without touching Kotlin/Native APIs directly.
  *
- * For M3 we only ship in-memory mode; persistent on-device storage (with proper
- * file-based driver and Documents-directory paths) lands when the iOS UX needs it.
+ * Two driver flavours:
+ *  - [createInMemoryDriver] — ephemeral, used by tests and the simulator-with-no-state path.
+ *  - [createPersistentDriver] — file-backed driver under the iOS Documents
+ *    directory so sessions / messages / parts survive app restarts. The
+ *    file-bundle ProjectStore migration moved Project state out of SQL into
+ *    on-disk bundles, but sessions still live in the SQL DB and now persist
+ *    on iOS for parity with desktop / Android.
  */
 class TaleviaDatabaseFactory {
     fun createInMemoryDriver(): app.cash.sqldelight.db.SqlDriver {
         val driver = NativeSqliteDriver(TaleviaDb.Schema, name = "talevia.db", onConfiguration = { it })
         return driver
     }
+
+    /**
+     * File-backed driver. [name] becomes the SQLite filename inside the iOS
+     * SQLite default directory; pass e.g. `"talevia.db"` to keep parity with
+     * the desktop default. NativeSqliteDriver internally writes to
+     * `~/Library/Application Support/databases/<name>` on iOS — that's the
+     * correct platform-private store; the Swift caller doesn't need to plumb a
+     * path through.
+     */
+    fun createPersistentDriver(name: String = "talevia.db"): app.cash.sqldelight.db.SqlDriver =
+        NativeSqliteDriver(TaleviaDb.Schema, name = name, onConfiguration = { it })
 }
 
 // =============================================================================
@@ -403,6 +420,42 @@ suspend fun importWithKnownMetadata(
     source: io.talevia.core.domain.MediaSource,
     metadata: io.talevia.core.domain.MediaMetadata,
 ): io.talevia.core.domain.MediaAsset = storage.import(source) { metadata }
+
+// =============================================================================
+// SKIE bridging: file-bundle ProjectStore factories
+// =============================================================================
+//
+// `RecentsRegistry` and `FileProjectStore` both take an `okio.Path`, but Swift
+// can't easily call `String.toPath()` (Kotlin extension on a third-party type
+// erases through SKIE). These two helpers accept a plain `String` path the
+// Swift caller already has, so the iOS composition root stays one liner per
+// dependency.
+
+/** Build a [io.talevia.core.domain.RecentsRegistry] backed by [path]. */
+fun newRecentsRegistry(path: String): io.talevia.core.domain.RecentsRegistry =
+    io.talevia.core.domain.RecentsRegistry(path = path.toPath())
+
+/**
+ * Build a [io.talevia.core.domain.FileProjectStore] rooted at [projectsHome]
+ * with the supplied [registry] and [bus]. Mirrors the desktop / CLI
+ * composition-root call.
+ */
+fun newFileProjectStore(
+    registry: io.talevia.core.domain.RecentsRegistry,
+    projectsHome: String,
+    bus: io.talevia.core.bus.EventBus? = null,
+): io.talevia.core.domain.FileProjectStore =
+    io.talevia.core.domain.FileProjectStore(
+        registry = registry,
+        defaultProjectsHome = projectsHome.toPath(),
+        bus = bus,
+    )
+
+/** Build a [io.talevia.core.platform.FileBundleBlobWriter] over the supplied [projects]. */
+fun newFileBundleBlobWriter(
+    projects: io.talevia.core.domain.ProjectStore,
+): io.talevia.core.platform.FileBundleBlobWriter =
+    io.talevia.core.platform.FileBundleBlobWriter(projects = projects)
 
 // =============================================================================
 // SKIE bridging: provider registry + agent factory for the iOS app container

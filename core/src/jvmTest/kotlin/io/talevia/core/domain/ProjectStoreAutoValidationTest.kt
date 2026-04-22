@@ -1,11 +1,11 @@
 package io.talevia.core.domain
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
-import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.FileProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.source.Source
 import io.talevia.core.domain.source.SourceNode
 import io.talevia.core.domain.source.SourceRef
@@ -21,7 +21,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * `SqlDelightProjectStore.get` runs a lightweight source-DAG validation on
+ * `FileProjectStore.get` runs a lightweight source-DAG validation on
  * every successful load and publishes `BusEvent.ProjectValidationWarning`
  * if issues surface. The load itself **does not throw** — the project is
  * returned verbatim, so pre-existing bad blobs stay readable and the user
@@ -38,9 +38,6 @@ class ProjectStoreAutoValidationTest {
         )
 
     @Test fun cleanProjectDoesNotPublish() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val db = TaleviaDb(driver)
         val bus = EventBus()
         val warnings = mutableListOf<BusEvent.ProjectValidationWarning>()
         val job = CoroutineScope(Dispatchers.Unconfined).launch {
@@ -48,7 +45,7 @@ class ProjectStoreAutoValidationTest {
                 if (e is BusEvent.ProjectValidationWarning) warnings.add(e)
             }
         }
-        val store = SqlDelightProjectStore(db, bus = bus)
+        val store = ProjectStoreTestKit.create(bus = bus)
 
         var source: Source = Source.EMPTY
         source = source.addNode(node("a"))
@@ -63,9 +60,6 @@ class ProjectStoreAutoValidationTest {
     }
 
     @Test fun projectWithDanglingParentPublishesWarningButStillReturns() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val db = TaleviaDb(driver)
         val bus = EventBus()
         val warnings = mutableListOf<BusEvent.ProjectValidationWarning>()
         val job = CoroutineScope(Dispatchers.Unconfined).launch {
@@ -73,7 +67,7 @@ class ProjectStoreAutoValidationTest {
                 if (e is BusEvent.ProjectValidationWarning) warnings.add(e)
             }
         }
-        val store = SqlDelightProjectStore(db, bus = bus)
+        val store = ProjectStoreTestKit.create(bus = bus)
 
         // Project with a dangling parent (child references ghost id).
         var source: Source = Source.EMPTY
@@ -96,10 +90,7 @@ class ProjectStoreAutoValidationTest {
 
     @Test fun nullBusRigStillReadsCleanly() = runTest {
         // Without a bus, no warning is published but get() must still work.
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val db = TaleviaDb(driver)
-        val store = SqlDelightProjectStore(db) // bus = null by default
+        val store = ProjectStoreTestKit.create() // bus = null by default
 
         var source: Source = Source.EMPTY
         source = source.addNode(node("child", parents = listOf("ghost")))
@@ -110,9 +101,6 @@ class ProjectStoreAutoValidationTest {
     }
 
     @Test fun getOfMissingProjectReturnsNullWithNoWarning() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val db = TaleviaDb(driver)
         val bus = EventBus()
         val warnings = mutableListOf<BusEvent.ProjectValidationWarning>()
         val job = CoroutineScope(Dispatchers.Unconfined).launch {
@@ -120,7 +108,7 @@ class ProjectStoreAutoValidationTest {
                 if (e is BusEvent.ProjectValidationWarning) warnings.add(e)
             }
         }
-        val store = SqlDelightProjectStore(db, bus = bus)
+        val store = ProjectStoreTestKit.create(bus = bus)
 
         val reloaded = store.get(ProjectId("does-not-exist"))
         yield()

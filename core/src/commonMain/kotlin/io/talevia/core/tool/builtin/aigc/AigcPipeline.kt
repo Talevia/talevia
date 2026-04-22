@@ -5,6 +5,7 @@ import io.talevia.core.MessageId
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
+import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.lockfile.LockfileEntry
@@ -210,6 +211,16 @@ internal object AigcPipeline {
         sessionId: io.talevia.core.SessionId? = null,
         resolvedPrompt: String? = null,
         originatingMessageId: MessageId? = null,
+        /**
+         * When non-null, the asset is appended to `Project.assets` in the same
+         * mutate cycle as the lockfile entry. Skipped when the asset id is
+         * already present (idempotent — replaying a generation against the
+         * same id won't double-append). File-bundle AIGC tools pass the
+         * freshly-minted [MediaAsset] here so the bundle's catalog stays in
+         * lockstep with the bytes the [io.talevia.core.platform.BundleBlobWriter]
+         * just wrote under `<bundleRoot>/media/<assetId>.<ext>`.
+         */
+        newAsset: MediaAsset? = null,
     ) {
         store.mutate(projectId) { project ->
             val snapshot: Map<SourceNodeId, String> = if (sourceBinding.isEmpty()) emptyMap()
@@ -224,7 +235,13 @@ internal object AigcPipeline {
                     put(id, project.source.deepContentHashOf(id, cache))
                 }
             }
+            val updatedAssets = if (newAsset != null && project.assets.none { it.id == newAsset.id }) {
+                project.assets + newAsset
+            } else {
+                project.assets
+            }
             project.copy(
+                assets = updatedAssets,
                 lockfile = project.lockfile.append(
                     LockfileEntry(
                         inputHash = inputHash,

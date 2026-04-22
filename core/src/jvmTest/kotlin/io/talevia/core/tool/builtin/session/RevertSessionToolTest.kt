@@ -7,8 +7,9 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.session.Message
@@ -29,7 +30,7 @@ class RevertSessionToolTest {
     private data class Rig(
         val tool: RevertSessionTool,
         val sessions: SqlDelightSessionStore,
-        val projects: SqlDelightProjectStore,
+        val projects: FileProjectStore,
         val ctx: ToolContext,
     )
 
@@ -39,7 +40,7 @@ class RevertSessionToolTest {
         val db = TaleviaDb(driver)
         val bus = EventBus()
         val sessions = SqlDelightSessionStore(db, bus)
-        val projects = SqlDelightProjectStore(db)
+        val projects = ProjectStoreTestKit.create()
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),

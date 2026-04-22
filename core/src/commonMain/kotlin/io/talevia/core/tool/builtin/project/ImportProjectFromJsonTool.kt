@@ -17,6 +17,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
+import okio.Path.Companion.toPath
 
 /**
  * Ingest a project envelope produced by [ExportProjectTool]. Closes
@@ -64,6 +65,11 @@ class ImportProjectFromJsonTool(
          * `false` — the gate is on.
          */
         val force: Boolean = false,
+        /**
+         * Optional filesystem path for the imported bundle. See
+         * [CreateProjectTool.Input.path] for semantics.
+         */
+        val path: String? = null,
     )
 
     @Serializable data class Output(
@@ -127,6 +133,15 @@ class ImportProjectFromJsonTool(
                         "Use for import-to-fix workflows. Default false.",
                 )
             }
+            putJsonObject("path") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional absolute filesystem path for the imported bundle. Defaults to the " +
+                        "store's default-projects-home. The directory must not already contain a " +
+                        "talevia.json.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("envelope"))))
         put("additionalProperties", false)
@@ -174,7 +189,21 @@ class ImportProjectFromJsonTool(
             )
         }
 
-        projects.upsert(targetTitle, rehomed)
+        val targetIdAfterPersist: ProjectId = if (input.path != null && input.path.isNotBlank()) {
+            // createAt mints a fresh id; layer the imported body on via mutate
+            // so the bundle reflects the envelope's payload exactly.
+            val created = projects.createAt(
+                path = input.path.toPath(),
+                title = targetTitle,
+                timeline = rehomed.timeline,
+                outputProfile = rehomed.outputProfile,
+            )
+            projects.mutate(created.id) { rehomed.copy(id = created.id) }
+            created.id
+        } else {
+            projects.upsert(targetTitle, rehomed)
+            targetId
+        }
 
         val sourceNodeCount = rehomed.source.nodes.size
         val trackCount = rehomed.timeline.tracks.size
@@ -190,14 +219,14 @@ class ImportProjectFromJsonTool(
         }
 
         return ToolResult(
-            title = "import project ${targetId.value}",
-            outputForLlm = "Ingested ${decoded.formatVersion} envelope as ${targetId.value} " +
+            title = "import project ${targetIdAfterPersist.value}",
+            outputForLlm = "Ingested ${decoded.formatVersion} envelope as ${targetIdAfterPersist.value} " +
                 "'$targetTitle' ($trackCount track(s), $clipCount clip(s), $assetCount asset(s), " +
                 "$sourceNodeCount source node(s), $lockfileEntryCount lockfile entry(ies), " +
                 "$snapshotCount snapshot(s))$validationNote. Asset bytes not bundled — ensure " +
                 "target media paths resolve.",
             data = Output(
-                projectId = targetId.value,
+                projectId = targetIdAfterPersist.value,
                 title = targetTitle,
                 formatVersion = decoded.formatVersion,
                 sourceNodeCount = sourceNodeCount,

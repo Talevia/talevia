@@ -23,6 +23,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
+import okio.Path.Companion.toPath
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
@@ -79,6 +80,11 @@ class ForkProjectTool(
          * behavior).
          */
         val variantSpec: VariantSpec? = null,
+        /**
+         * Optional filesystem path for the forked bundle. See
+         * [CreateProjectTool.Input.path] for semantics.
+         */
+        val path: String? = null,
     )
 
     /**
@@ -207,6 +213,15 @@ class ForkProjectTool(
                     "Optional snapshot to fork from; defaults to the source project's current state.",
                 )
             }
+            putJsonObject("path") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional absolute filesystem path for the fork's bundle. Defaults to the " +
+                        "store's default-projects-home. The directory must not already contain a " +
+                        "talevia.json.",
+                )
+            }
             putJsonObject("variantSpec") {
                 put("type", "object")
                 put(
@@ -266,24 +281,49 @@ class ForkProjectTool(
                 )
         }
 
-        val rawId = input.newProjectId?.takeIf { it.isNotBlank() }
-            ?: slugifyProjectId(input.newTitle)
-        val newPid = ProjectId(rawId)
-        require(projects.get(newPid) == null) {
-            "project ${newPid.value} already exists; pick a different newProjectId or call list_projects to find an unused id"
+        // Compute reshape (variantSpec) from the source payload BEFORE persistence
+        // so the dropped/truncated counters are accurate; replaying it against
+        // the post-persist shape would always count zero (the body is already
+        // trimmed).
+        data class PersistResult(val pid: ProjectId, val reshape: VariantReshape?)
+        val persisted: PersistResult = if (input.path != null && input.path.isNotBlank()) {
+            val created = projects.createAt(
+                path = input.path.toPath(),
+                title = input.newTitle,
+                timeline = payload.timeline,
+                outputProfile = payload.outputProfile,
+            )
+            val baseFork = payload.copy(
+                id = created.id,
+                snapshots = emptyList(),
+                parentProjectId = sourcePid,
+            )
+            val reshape = input.variantSpec?.let { spec -> applyVariantSpec(baseFork, spec) }
+            val forkBody = reshape?.project ?: baseFork
+            projects.mutate(created.id) { forkBody }
+            PersistResult(created.id, reshape)
+        } else {
+            val rawId = input.newProjectId?.takeIf { it.isNotBlank() }
+                ?: slugifyProjectId(input.newTitle)
+            val candidate = ProjectId(rawId)
+            require(projects.get(candidate) == null) {
+                "project ${candidate.value} already exists; pick a different newProjectId or call list_projects to find an unused id"
+            }
+            val baseFork = payload.copy(
+                id = candidate,
+                snapshots = emptyList(),
+                parentProjectId = sourcePid,
+            )
+            val reshape = input.variantSpec?.let { spec -> applyVariantSpec(baseFork, spec) }
+            val forkBody = reshape?.project ?: baseFork
+            projects.upsert(input.newTitle, forkBody)
+            PersistResult(candidate, reshape)
         }
-
-        // Fresh id, empty snapshots list, parent pointer at the source.
-        // Everything else carries over from the chosen payload (current state
-        // or a captured snapshot).
-        val baseFork = payload.copy(
-            id = newPid,
-            snapshots = emptyList(),
-            parentProjectId = sourcePid,
-        )
-        val reshape = input.variantSpec?.let { spec -> applyVariantSpec(baseFork, spec) }
-        val forked = reshape?.project ?: baseFork
-        projects.upsert(input.newTitle, forked)
+        val newPid = persisted.pid
+        val reshape = persisted.reshape
+        // Reload the persisted form so subsequent steps see the post-store
+        // shape (with stamping etc.).
+        val forked = projects.get(newPid) ?: error("Fork ${newPid.value} not found after persist")
 
         val regenerations = input.variantSpec?.language?.let { lang ->
             regenerateTtsInLanguage(newPid, forked, lang.trim(), ctx)

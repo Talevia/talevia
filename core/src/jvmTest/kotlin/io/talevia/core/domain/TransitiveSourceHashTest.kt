@@ -1,12 +1,11 @@
 package io.talevia.core.domain
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.ClipId
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.domain.source.Source
 import io.talevia.core.domain.source.SourceNode
@@ -120,9 +119,7 @@ class TransitiveSourceHashTest {
     }
 
     @Test fun staleClipsFromLockfileFlagsClipWhenGrandparentEdited() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p")
         val asset = AssetId("img-1")
 

@@ -9,7 +9,7 @@ import io.talevia.core.TrackId
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.AllowAllPermissionService
@@ -61,10 +61,7 @@ class ConcurrentSessionsIntegrationTest {
 
     @Test
     fun multipleProjectsParallelMutationsAreIsolated() = runBlocking {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val db = TaleviaDb(driver)
-        val store = SqlDelightProjectStore(db)
+        val store = ProjectStoreTestKit.create()
 
         val projectIds = (1..4).map { ProjectId("proj-$it") }
         for (pid in projectIds) store.upsert("p", Project(id = pid, timeline = Timeline()))

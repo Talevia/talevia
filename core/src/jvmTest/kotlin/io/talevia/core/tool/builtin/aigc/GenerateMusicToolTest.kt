@@ -1,25 +1,19 @@
 package io.talevia.core.tool.builtin.aigc
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
-import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.MediaSource
-import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
-import io.talevia.core.domain.Timeline
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.source.consistency.StyleBibleBody
 import io.talevia.core.domain.source.consistency.addStyleBible
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.permission.PermissionDecision
+import io.talevia.core.platform.FileBundleBlobWriter
 import io.talevia.core.platform.GeneratedMusic
 import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.InMemoryMediaStorage
-import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.MusicGenEngine
 import io.talevia.core.platform.MusicGenRequest
 import io.talevia.core.platform.MusicGenResult
@@ -27,9 +21,7 @@ import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import java.io.File
-import java.nio.file.Files
-import kotlin.io.path.createTempDirectory
+import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -43,8 +35,11 @@ class GenerateMusicToolTest {
         override val providerId: String = "fake-music"
         var lastRequest: MusicGenRequest? = null
             private set
+        var calls: Int = 0
+            private set
 
         override suspend fun generate(request: MusicGenRequest): MusicGenResult {
+            calls += 1
             lastRequest = request
             return MusicGenResult(
                 music = GeneratedMusic(
@@ -68,16 +63,6 @@ class GenerateMusicToolTest {
         }
     }
 
-    private class FakeBlobWriter(private val rootDir: File) : MediaBlobWriter {
-        val written = mutableListOf<File>()
-        override suspend fun writeBlob(bytes: ByteArray, suggestedExtension: String): MediaSource {
-            val file = File(rootDir, "${Files.list(rootDir.toPath()).count()}.$suggestedExtension")
-            file.writeBytes(bytes)
-            written += file
-            return MediaSource.File(file.absolutePath)
-        }
-    }
-
     private fun ctx(): ToolContext = ToolContext(
         sessionId = SessionId("s"),
         messageId = MessageId("m"),
@@ -87,12 +72,12 @@ class GenerateMusicToolTest {
         messages = emptyList(),
     )
 
-    @Test fun persistsAssetAndExposesProvenance() = runTest {
-        val tmpDir = createTempDirectory("gen-music-test").toFile()
+    @Test fun persistsAssetIntoBundleAndExposesProvenance() = runTest {
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val bundleRoot = "/projects/demo".toPath()
+        val pid = store.createAt(path = bundleRoot, title = "demo").id
         val engine = FakeMusicGenEngine(tinyMp3)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-        val tool = GenerateMusicTool(engine, storage, writer)
+        val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             GenerateMusicTool.Input(
@@ -101,59 +86,66 @@ class GenerateMusicToolTest {
                 durationSeconds = 15.0,
                 format = "mp3",
                 seed = 42L,
+                projectId = pid.value,
             ),
             ctx(),
         )
 
         val out = result.data
-        val resolvedPath = storage.resolve(AssetId(out.assetId))
-        assertTrue(File(resolvedPath).exists(), "resolved asset file should exist on disk")
-        assertEquals(tinyMp3.toList(), File(resolvedPath).readBytes().toList())
+        // Asset is appended to Project.assets (bundle catalog) — the blob writer
+        // does NOT go through the global MediaStorage anymore.
+        val project = store.get(pid)!!
+        val asset = assertNotNull(project.assets.find { it.id == AssetId(out.assetId) })
+        val src = asset.source as MediaSource.BundleFile
+        assertTrue(src.relativePath.startsWith("media/"))
+        assertTrue(src.relativePath.endsWith(".mp3"))
+        // Bytes landed at <bundleRoot>/<relativePath>.
+        val onDisk = bundleRoot.resolve(src.relativePath)
+        assertTrue(fs.exists(onDisk), "expected bundled bytes at $onDisk")
+        assertEquals(tinyMp3.toList(), fs.read(onDisk) { readByteArray() }.toList())
 
         assertEquals("fake-music", out.providerId)
         assertEquals("musicgen-melody", out.modelId)
         assertEquals(42L, out.seed)
         assertEquals(15.0, out.durationSeconds)
         assertEquals("mp3", out.format)
+
+        // Lockfile was appended too.
+        assertEquals(1, project.lockfile.entries.size)
     }
 
     @Test fun picksSeedClientSideWhenInputOmitsIt() = runTest {
-        val tmpDir = createTempDirectory("gen-music-seed").toFile()
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/seed".toPath(), title = "seed").id
         val engine = FakeMusicGenEngine(tinyMp3)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-        val tool = GenerateMusicTool(engine, storage, writer)
+        val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(GenerateMusicTool.Input(prompt = "no seed"), ctx())
+        val result = tool.execute(
+            GenerateMusicTool.Input(prompt = "no seed", projectId = pid.value),
+            ctx(),
+        )
 
         val engineSeed = assertNotNull(engine.lastRequest?.seed)
         assertEquals(engineSeed, result.data.seed)
     }
 
     @Test fun styleBindingFoldsIntoPrompt() = runTest {
-        val tmpDir = createTempDirectory("gen-music-fold").toFile()
-        val engine = FakeMusicGenEngine(tinyMp3)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
-        val projectId = ProjectId("p-1")
-        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
-        store.mutateSource(projectId) {
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/fold".toPath(), title = "fold").id
+        store.mutateSource(pid) {
             it.addStyleBible(
                 SourceNodeId("cool-jazz"),
                 StyleBibleBody(name = "cool-jazz", description = "cool jazz, muted trumpet, brushed drums"),
             )
         }
+        val engine = FakeMusicGenEngine(tinyMp3)
+        val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val tool = GenerateMusicTool(engine, storage, writer, store)
         val result = tool.execute(
             GenerateMusicTool.Input(
                 prompt = "late-night diner",
                 seed = 7L,
-                projectId = projectId.value,
+                projectId = pid.value,
                 consistencyBindingIds = listOf("cool-jazz"),
             ),
             ctx(),
@@ -167,40 +159,33 @@ class GenerateMusicToolTest {
     }
 
     @Test fun secondCallWithIdenticalInputsIsLockfileCacheHit() = runTest {
-        val tmpDir = createTempDirectory("gen-music-cache").toFile()
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/cache".toPath(), title = "cache").id
         val engine = FakeMusicGenEngine(tinyMp3)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
+        val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
-        val projectId = ProjectId("p-cache")
-        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
-
-        val tool = GenerateMusicTool(engine, storage, writer, store)
         val input = GenerateMusicTool.Input(
             prompt = "warm acoustic",
             durationSeconds = 10.0,
             seed = 1234L,
-            projectId = projectId.value,
+            projectId = pid.value,
         )
 
         val first = tool.execute(input, ctx())
         assertEquals(false, first.data.cacheHit)
-        val writesAfterFirst = writer.written.size
+        assertEquals(1, engine.calls)
 
         val second = tool.execute(input, ctx())
         assertEquals(true, second.data.cacheHit)
         assertEquals(first.data.assetId, second.data.assetId)
-        assertEquals(writesAfterFirst, writer.written.size, "cache hit must not write new blob bytes")
+        assertEquals(1, engine.calls, "cache hit must not call the engine")
 
         // Changing duration must bust the cache — 10s vs 20s is semantically distinct.
         val third = tool.execute(input.copy(durationSeconds = 20.0), ctx())
         assertEquals(false, third.data.cacheHit)
         assertTrue(third.data.assetId != first.data.assetId)
 
-        val lockfile = store.get(projectId)!!.lockfile
+        val lockfile = store.get(pid)!!.lockfile
         assertEquals(2, lockfile.entries.size)
     }
 }

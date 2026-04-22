@@ -5,19 +5,22 @@ import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.cost.AigcPricing
+import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.permission.PermissionSpec
-import io.talevia.core.platform.MediaBlobWriter
+import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.MediaPathResolver
-import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.UpscaleEngine
 import io.talevia.core.platform.UpscaleRequest
 import io.talevia.core.tool.Tool
+import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -32,9 +35,12 @@ import kotlin.time.Duration
 
 /**
  * Upscale / super-resolve an imported image asset via an [UpscaleEngine],
- * persist the bytes through a [MediaBlobWriter], register the result with
- * [MediaStorage], and surface a new `AssetId` that downstream tools can use.
- * Closes the VISION §2 "ML 加工: … 超分 …" lane.
+ * persist the bytes into the project bundle via a [BundleBlobWriter], append
+ * the resulting [MediaAsset] to `Project.assets`, and surface a new `AssetId`
+ * that downstream tools can use. Closes the VISION §2 "ML 加工: … 超分 …" lane.
+ *
+ * Bytes land at `<bundleRoot>/media/<assetId>.<format>` so the upscaled
+ * artefact travels with the project bundle.
  *
  * Placed under `tool/builtin/aigc/` (not `ml/`) because its engine output is
  * bytes rather than text — it shares the seed / lockfile / provenance
@@ -63,10 +69,14 @@ import kotlin.time.Duration
  */
 class UpscaleAssetTool(
     private val engine: UpscaleEngine,
-    private val storage: MediaStorage,
+    /**
+     * Resolves the source asset id to an on-disk path the upscale engine can
+     * read. The newly-generated upscaled bytes are *written* via
+     * [bundleBlobWriter] (bundle-local), not via [resolver].
+     */
     private val resolver: MediaPathResolver,
-    private val blobWriter: MediaBlobWriter,
-    private val projectStore: ProjectStore? = null,
+    private val bundleBlobWriter: BundleBlobWriter,
+    private val projectStore: ProjectStore,
 ) : Tool<UpscaleAssetTool.Input, UpscaleAssetTool.Output> {
 
     @Serializable data class Input(
@@ -97,13 +107,16 @@ class UpscaleAssetTool(
     override val id: String = "upscale_asset"
     override val helpText: String =
         "Upscale / super-resolve an imported image asset via an ML provider (default model: " +
-            "real-esrgan-4x, default scale: 2). Returns a new assetId you can substitute via " +
-            "replace_clip or drop onto the timeline via add_clip. Pass projectId to cache the " +
-            "result in the project lockfile — a second call with identical (assetId, model, " +
-            "scale, seed, format) returns the same upscaled asset without re-billing the provider."
+            "real-esrgan-4x, default scale: 2). Output bytes land in the project bundle's " +
+            "media/ directory so the upscaled image travels with the project. Returns a new " +
+            "assetId you can substitute via replace_clip or drop onto the timeline via " +
+            "add_clip. Lockfile cache kicks in automatically — a second call with identical " +
+            "(assetId, model, scale, seed, format) returns the same upscaled asset without " +
+            "re-billing the provider."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("aigc.generate")
+    override val applicability: ToolApplicability = ToolApplicability.RequiresAssets
 
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
@@ -137,9 +150,11 @@ class UpscaleAssetTool(
         put("additionalProperties", false)
     }
 
+    @OptIn(ExperimentalUuidApi::class)
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         require(input.scale in 2..8) { "scale must be between 2 and 8; got ${input.scale}" }
-        AigcBudgetGuard.enforce(id, projectStore, input.projectId?.let(::ProjectId), ctx)
+        val pid = ctx.resolveProjectId(input.projectId)
+        AigcBudgetGuard.enforce(id, projectStore, pid, ctx)
         val seed = AigcPipeline.ensureSeed(input.seed)
         val sourceAssetId = AssetId(input.assetId)
         val sourcePath = resolver.resolve(sourceAssetId)
@@ -155,10 +170,8 @@ class UpscaleAssetTool(
             ),
         )
 
-        val pid = input.projectId?.let(::ProjectId)
-        val store = projectStore
-        if (pid != null && store != null && !ctx.isReplay) {
-            val cached = AigcPipeline.findCached(store, pid, inputHash)
+        if (!ctx.isReplay) {
+            val cached = AigcPipeline.findCached(projectStore, pid, inputHash)
             if (cached != null) {
                 return hit(cached, input, seed)
             }
@@ -181,46 +194,48 @@ class UpscaleAssetTool(
         }
         val image = result.image
 
-        val source = blobWriter.writeBlob(image.imageBytes, image.format)
-        val asset = storage.import(source) { _ ->
-            MediaMetadata(
+        val newAssetId = AssetId(Uuid.random().toString())
+        val bundleSource = bundleBlobWriter.writeBlob(pid, newAssetId, image.imageBytes, image.format)
+        val newAsset = MediaAsset(
+            id = newAssetId,
+            source = bundleSource,
+            metadata = MediaMetadata(
                 duration = Duration.ZERO,
                 resolution = Resolution(image.width, image.height),
                 frameRate = null,
-            )
-        }
+            ),
+        )
 
         val baseInputs = JsonConfig.default.encodeToJsonElement(Input.serializer(), input).jsonObject
         val costCents = AigcPricing.estimateCents(id, result.provenance, baseInputs)
-        if (pid != null && store != null) {
-            AigcPipeline.record(
-                store = store,
+        AigcPipeline.record(
+            store = projectStore,
+            projectId = pid,
+            toolId = id,
+            inputHash = inputHash,
+            assetId = newAssetId,
+            provenance = result.provenance,
+            sourceBinding = emptySet(),
+            baseInputs = baseInputs,
+            costCents = costCents,
+            sessionId = ctx.sessionId,
+            originatingMessageId = ctx.messageId,
+            newAsset = newAsset,
+        )
+        ctx.publishEvent(
+            BusEvent.AigcCostRecorded(
+                sessionId = ctx.sessionId,
                 projectId = pid,
                 toolId = id,
-                inputHash = inputHash,
-                assetId = asset.id,
-                provenance = result.provenance,
-                sourceBinding = emptySet(),
-                baseInputs = baseInputs,
+                assetId = newAssetId.value,
                 costCents = costCents,
-                sessionId = ctx.sessionId,
-                originatingMessageId = ctx.messageId,
-            )
-            ctx.publishEvent(
-                BusEvent.AigcCostRecorded(
-                    sessionId = ctx.sessionId,
-                    projectId = pid,
-                    toolId = id,
-                    assetId = asset.id.value,
-                    costCents = costCents,
-                ),
-            )
-        }
+            ),
+        )
 
         val prov = result.provenance
         val out = Output(
             sourceAssetId = input.assetId,
-            upscaledAssetId = asset.id.value,
+            upscaledAssetId = newAssetId.value,
             providerId = prov.providerId,
             modelId = prov.modelId,
             modelVersion = prov.modelVersion,

@@ -1,24 +1,18 @@
 package io.talevia.core.tool.builtin.aigc
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
-import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.MediaSource
-import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
-import io.talevia.core.domain.Timeline
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.source.consistency.CharacterRefBody
 import io.talevia.core.domain.source.consistency.addCharacterRef
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.permission.PermissionDecision
+import io.talevia.core.platform.FileBundleBlobWriter
 import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.InMemoryMediaStorage
-import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.SynthesizedAudio
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.TtsRequest
@@ -27,9 +21,7 @@ import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import java.io.File
-import java.nio.file.Files
-import kotlin.io.path.createTempDirectory
+import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -72,16 +64,6 @@ class SynthesizeSpeechToolTest {
         }
     }
 
-    private class FakeBlobWriter(private val rootDir: File) : MediaBlobWriter {
-        val written = mutableListOf<File>()
-        override suspend fun writeBlob(bytes: ByteArray, suggestedExtension: String): MediaSource {
-            val file = File(rootDir, "${Files.list(rootDir.toPath()).count()}.$suggestedExtension")
-            file.writeBytes(bytes)
-            written += file
-            return MediaSource.File(file.absolutePath)
-        }
-    }
-
     private fun ctx(): ToolContext = ToolContext(
         sessionId = SessionId("s"),
         messageId = MessageId("m"),
@@ -91,22 +73,31 @@ class SynthesizeSpeechToolTest {
         messages = emptyList(),
     )
 
-    @Test fun persistsAssetAndExposesProvenance() = runTest {
-        val tmpDir = createTempDirectory("tts-tool-test").toFile()
+    @Test fun persistsAssetIntoBundleAndExposesProvenance() = runTest {
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val bundleRoot = "/projects/tts".toPath()
+        val pid = store.createAt(path = bundleRoot, title = "tts").id
         val engine = FakeTtsEngine(fakeMp3)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-        val tool = SynthesizeSpeechTool(engine, storage, writer)
+        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
-            SynthesizeSpeechTool.Input(text = "hello world", voice = "nova", model = "tts-1-hd"),
+            SynthesizeSpeechTool.Input(
+                text = "hello world",
+                voice = "nova",
+                model = "tts-1-hd",
+                projectId = pid.value,
+            ),
             ctx(),
         )
 
         val out = result.data
-        val resolvedPath = storage.resolve(AssetId(out.assetId))
-        assertTrue(File(resolvedPath).exists(), "resolved audio file should exist on disk")
-        assertEquals(fakeMp3.toList(), File(resolvedPath).readBytes().toList())
+        val project = store.get(pid)!!
+        val asset = assertNotNull(project.assets.find { it.id == AssetId(out.assetId) })
+        val src = asset.source as MediaSource.BundleFile
+        assertTrue(src.relativePath.startsWith("media/"))
+        val onDisk = bundleRoot.resolve(src.relativePath)
+        assertTrue(fs.exists(onDisk))
+        assertEquals(fakeMp3.toList(), fs.read(onDisk) { readByteArray() }.toList())
 
         assertEquals("fake-openai", out.providerId)
         assertEquals("tts-1-hd", out.modelId)
@@ -114,7 +105,6 @@ class SynthesizeSpeechToolTest {
         assertEquals("mp3", out.format)
         assertEquals(false, out.cacheHit)
 
-        // Engine got the right request.
         val req = assertNotNull(engine.lastRequest)
         assertEquals("hello world", req.text)
         assertEquals("nova", req.voice)
@@ -123,35 +113,25 @@ class SynthesizeSpeechToolTest {
     }
 
     @Test fun secondCallWithIdenticalInputsIsLockfileCacheHit() = runTest {
-        val tmpDir = createTempDirectory("tts-cache-test").toFile()
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/cache".toPath(), title = "cache").id
         val engine = FakeTtsEngine(fakeMp3)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
-        val projectId = ProjectId("p-tts")
-        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
-
-        val tool = SynthesizeSpeechTool(engine, storage, writer, store)
+        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
         val input = SynthesizeSpeechTool.Input(
             text = "the quick brown fox",
             voice = "alloy",
             model = "tts-1",
-            projectId = projectId.value,
+            projectId = pid.value,
         )
 
         val first = tool.execute(input, ctx())
         assertEquals(false, first.data.cacheHit)
         assertEquals(1, engine.callCount)
-        val writesAfterFirst = writer.written.size
 
         val second = tool.execute(input, ctx())
-        assertEquals(true, second.data.cacheHit, "identical inputs must hit the lockfile")
+        assertEquals(true, second.data.cacheHit)
         assertEquals(first.data.assetId, second.data.assetId)
         assertEquals(1, engine.callCount, "cache hit must not call the engine again")
-        assertEquals(writesAfterFirst, writer.written.size, "cache hit must not write new bytes")
 
         // Change voice → miss + new asset.
         val third = tool.execute(input.copy(voice = "echo"), ctx())
@@ -159,24 +139,16 @@ class SynthesizeSpeechToolTest {
         assertEquals(2, engine.callCount)
         assertTrue(third.data.assetId != first.data.assetId)
 
-        val lockfile = store.get(projectId)!!.lockfile
+        val lockfile = store.get(pid)!!.lockfile
         assertEquals(2, lockfile.entries.size)
     }
 
     @Test fun changingTextOrSpeedOrFormatBustsTheCache() = runTest {
-        val tmpDir = createTempDirectory("tts-cache-keys").toFile()
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/keys".toPath(), title = "keys").id
         val engine = FakeTtsEngine(fakeMp3)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
-        val projectId = ProjectId("p-tts2")
-        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
-
-        val tool = SynthesizeSpeechTool(engine, storage, writer, store)
-        val base = SynthesizeSpeechTool.Input(text = "one", projectId = projectId.value)
+        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
+        val base = SynthesizeSpeechTool.Input(text = "one", projectId = pid.value)
 
         tool.execute(base, ctx()) // warm
         tool.execute(base.copy(text = "two"), ctx())
@@ -185,33 +157,26 @@ class SynthesizeSpeechToolTest {
 
         // 4 distinct hashes → 4 engine calls + 4 lockfile entries.
         assertEquals(4, engine.callCount)
-        assertEquals(4, store.get(projectId)!!.lockfile.entries.size)
+        assertEquals(4, store.get(pid)!!.lockfile.entries.size)
     }
 
     @Test fun boundCharacterVoiceIdOverridesExplicitVoice() = runTest {
-        val tmpDir = createTempDirectory("tts-voice-bind").toFile()
-        val engine = FakeTtsEngine(fakeMp3)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
-        val projectId = ProjectId("p-tts-bind")
-        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
-        store.mutateSource(projectId) { src ->
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/bind".toPath(), title = "bind").id
+        store.mutateSource(pid) { src ->
             src.addCharacterRef(
                 SourceNodeId("mei"),
                 CharacterRefBody(name = "Mei", visualDescription = "x", voiceId = "nova"),
             )
         }
+        val engine = FakeTtsEngine(fakeMp3)
+        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val tool = SynthesizeSpeechTool(engine, storage, writer, store)
         val result = tool.execute(
             SynthesizeSpeechTool.Input(
                 text = "hello",
                 voice = "alloy", // caller forgot to update; binding should win.
-                projectId = projectId.value,
+                projectId = pid.value,
                 consistencyBindingIds = listOf("mei"),
             ),
             ctx(),
@@ -222,34 +187,27 @@ class SynthesizeSpeechToolTest {
         assertEquals("nova", engine.lastRequest?.voice)
 
         // Lockfile records the binding so stale-clip detection notices future edits.
-        val entry = store.get(projectId)!!.lockfile.entries.single()
+        val entry = store.get(pid)!!.lockfile.entries.single()
         assertEquals(setOf(SourceNodeId("mei")), entry.sourceBinding)
     }
 
     @Test fun boundCharacterWithoutVoiceIdFallsBackToExplicitVoice() = runTest {
-        val tmpDir = createTempDirectory("tts-voice-fallback").toFile()
-        val engine = FakeTtsEngine(fakeMp3)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
-        val projectId = ProjectId("p-tts-fallback")
-        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
-        store.mutateSource(projectId) { src ->
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/fb".toPath(), title = "fb").id
+        store.mutateSource(pid) { src ->
             src.addCharacterRef(
                 SourceNodeId("mei"),
                 CharacterRefBody(name = "Mei", visualDescription = "x"), // no voiceId
             )
         }
+        val engine = FakeTtsEngine(fakeMp3)
+        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val tool = SynthesizeSpeechTool(engine, storage, writer, store)
         val result = tool.execute(
             SynthesizeSpeechTool.Input(
                 text = "hi",
                 voice = "alloy",
-                projectId = projectId.value,
+                projectId = pid.value,
                 consistencyBindingIds = listOf("mei"),
             ),
             ctx(),
@@ -261,22 +219,14 @@ class SynthesizeSpeechToolTest {
             "no voiceId on bound character → nothing was actually 'applied' to voice selection",
         )
         // Binding is still recorded so a future voiceId edit on the character marks the clip stale.
-        val entry = store.get(projectId)!!.lockfile.entries.single()
+        val entry = store.get(pid)!!.lockfile.entries.single()
         assertTrue(entry.sourceBinding.isEmpty())
     }
 
     @Test fun twoBoundCharactersWithVoiceIdsFailLoudly() = runTest {
-        val tmpDir = createTempDirectory("tts-voice-ambig").toFile()
-        val engine = FakeTtsEngine(fakeMp3)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
-        val projectId = ProjectId("p-tts-ambig")
-        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
-        store.mutateSource(projectId) { src ->
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/ambig".toPath(), title = "ambig").id
+        store.mutateSource(pid) { src ->
             src
                 .addCharacterRef(
                     SourceNodeId("mei"),
@@ -287,13 +237,14 @@ class SynthesizeSpeechToolTest {
                     CharacterRefBody(name = "Jun", visualDescription = "y", voiceId = "onyx"),
                 )
         }
+        val engine = FakeTtsEngine(fakeMp3)
+        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val tool = SynthesizeSpeechTool(engine, storage, writer, store)
         assertFailsWith<IllegalStateException> {
             tool.execute(
                 SynthesizeSpeechTool.Input(
                     text = "hi",
-                    projectId = projectId.value,
+                    projectId = pid.value,
                     consistencyBindingIds = listOf("mei", "jun"),
                 ),
                 ctx(),
@@ -303,30 +254,23 @@ class SynthesizeSpeechToolTest {
     }
 
     @Test fun voiceBindingChangesTheCacheKey() = runTest {
-        val tmpDir = createTempDirectory("tts-voice-cache").toFile()
-        val engine = FakeTtsEngine(fakeMp3)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
-        val projectId = ProjectId("p-tts-voice-cache")
-        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
-        store.mutateSource(projectId) { src ->
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/vk".toPath(), title = "vk").id
+        store.mutateSource(pid) { src ->
             src.addCharacterRef(
                 SourceNodeId("mei"),
                 CharacterRefBody(name = "Mei", visualDescription = "x", voiceId = "nova"),
             )
         }
+        val engine = FakeTtsEngine(fakeMp3)
+        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val tool = SynthesizeSpeechTool(engine, storage, writer, store)
         // First: bind + different explicit voice — resolved voice is "nova".
         val bound = tool.execute(
             SynthesizeSpeechTool.Input(
                 text = "same text",
                 voice = "alloy",
-                projectId = projectId.value,
+                projectId = pid.value,
                 consistencyBindingIds = listOf("mei"),
             ),
             ctx(),
@@ -336,25 +280,11 @@ class SynthesizeSpeechToolTest {
             SynthesizeSpeechTool.Input(
                 text = "same text",
                 voice = "nova",
-                projectId = projectId.value,
+                projectId = pid.value,
             ),
             ctx(),
         )
         assertEquals(true, unbound.data.cacheHit, "hash is keyed on resolved voice, not the raw input.voice")
         assertEquals(bound.data.assetId, unbound.data.assetId)
-    }
-
-    @Test fun withoutProjectIdEveryCallHitsTheEngine() = runTest {
-        val tmpDir = createTempDirectory("tts-no-project").toFile()
-        val engine = FakeTtsEngine(fakeMp3)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-        val tool = SynthesizeSpeechTool(engine, storage, writer, projectStore = null)
-
-        val input = SynthesizeSpeechTool.Input(text = "no project")
-        tool.execute(input, ctx())
-        tool.execute(input, ctx())
-
-        assertEquals(2, engine.callCount, "no projectId means no lockfile lookup, so the engine is hit every time")
     }
 }

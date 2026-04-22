@@ -9,7 +9,8 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.FileProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
@@ -59,13 +60,13 @@ class SessionQueryContextPressureTest {
 
     private suspend fun fixture(
         sessionIdValue: String = "s-ctx",
-    ): Triple<SqlDelightSessionStore, SqlDelightProjectStore, SessionId> {
+    ): Triple<SqlDelightSessionStore, FileProjectStore, SessionId> {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         TaleviaDb.Schema.create(driver)
         val db = TaleviaDb(driver)
         val bus = EventBus()
         val sessions = SqlDelightSessionStore(db, bus)
-        val projects = SqlDelightProjectStore(db)
+        val projects = ProjectStoreTestKit.create()
         val sid = SessionId(sessionIdValue)
         sessions.createSession(
             Session(

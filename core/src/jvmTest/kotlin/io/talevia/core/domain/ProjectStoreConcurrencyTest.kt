@@ -1,9 +1,9 @@
 package io.talevia.core.domain
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.ProjectId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.FileProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -32,11 +32,8 @@ class ProjectStoreConcurrencyTest {
         override fun now(): Instant = instant
     }
 
-    private fun newStore(): Pair<SqlDelightProjectStore, ProjectId> {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val db = TaleviaDb(driver)
-        val store = SqlDelightProjectStore(db)
+    private fun newStore(): Pair<FileProjectStore, ProjectId> {
+        val store = ProjectStoreTestKit.create()
         val id = ProjectId("p-1")
         val project = Project(id = id, timeline = Timeline())
         runBlocking { store.upsert("demo", project) }
@@ -124,21 +121,18 @@ class ProjectStoreConcurrencyTest {
     }
 
     @Test fun upsertPreservesOriginalCreationTimestamp() = runBlocking {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val db = TaleviaDb(driver)
         val clock = MutableClock(Instant.parse("2026-01-01T00:00:00Z"))
-        val store = SqlDelightProjectStore(db, clock = clock)
+        val store = ProjectStoreTestKit.create(clock = clock)
         val id = ProjectId("p-ts")
 
         store.upsert("demo", Project(id = id, timeline = Timeline()))
-        val created = db.projectsQueries.selectById(id.value).executeAsOne()
+        val created = store.summary(id)!!
 
         clock.instant = Instant.parse("2026-01-01T00:10:00Z")
         store.upsert("demo-2", Project(id = id, timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"))))))
-        val updated = db.projectsQueries.selectById(id.value).executeAsOne()
+        val updated = store.summary(id)!!
 
-        assertEquals(created.time_created, updated.time_created)
-        assertEquals(clock.instant.toEpochMilliseconds(), updated.time_updated)
+        assertEquals(created.createdAtEpochMs, updated.createdAtEpochMs)
+        assertEquals(clock.instant.toEpochMilliseconds(), updated.updatedAtEpochMs)
     }
 }

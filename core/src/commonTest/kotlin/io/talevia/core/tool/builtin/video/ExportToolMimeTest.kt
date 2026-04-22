@@ -24,7 +24,7 @@ class ExportToolMimeTest {
         override suspend fun get(id: ProjectId): Project? = error("not used")
         override suspend fun upsert(title: String, project: Project) = error("not used")
         override suspend fun list(): List<Project> = error("not used")
-        override suspend fun delete(id: ProjectId) = error("not used")
+        override suspend fun delete(id: ProjectId, deleteFiles: Boolean) = error("not used")
         override suspend fun setTitle(id: ProjectId, title: String) = error("not used")
         override suspend fun summary(id: ProjectId): ProjectSummary? = error("not used")
         override suspend fun listSummaries(): List<ProjectSummary> = error("not used")
@@ -33,7 +33,7 @@ class ExportToolMimeTest {
 
     private object ThrowingVideoEngine : VideoEngine {
         override suspend fun probe(source: MediaSource): MediaMetadata = error("not used")
-        override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> = emptyFlow()
+        override fun render(timeline: Timeline, output: OutputSpec, resolver: io.talevia.core.platform.MediaPathResolver?): Flow<RenderProgress> = emptyFlow()
         override suspend fun thumbnail(asset: AssetId, source: MediaSource, time: Duration): ByteArray = error("not used")
     }
 

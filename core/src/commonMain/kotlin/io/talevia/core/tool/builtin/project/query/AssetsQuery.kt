@@ -124,6 +124,7 @@ private fun buildAssetRow(asset: MediaAsset, kind: String, refCount: Int): Proje
     val res = asset.metadata.resolution
     val sourceKind = when (asset.source) {
         is MediaSource.File -> "file"
+        is MediaSource.BundleFile -> "bundle_file"
         is MediaSource.Http -> "http"
         is MediaSource.Platform -> "platform"
     }

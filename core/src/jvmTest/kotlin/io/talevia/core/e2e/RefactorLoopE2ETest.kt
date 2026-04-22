@@ -1,6 +1,5 @@
 package io.talevia.core.e2e
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
@@ -10,13 +9,12 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Resolution
-import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
@@ -31,7 +29,7 @@ import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.ImageGenRequest
 import io.talevia.core.platform.ImageGenResult
 import io.talevia.core.platform.InMemoryMediaStorage
-import io.talevia.core.platform.MediaBlobWriter
+import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
@@ -100,12 +98,17 @@ class RefactorLoopE2ETest {
         }
     }
 
-    private class FakeBlobWriter(private val rootDir: File) : MediaBlobWriter {
-        override suspend fun writeBlob(bytes: ByteArray, suggestedExtension: String): MediaSource {
-            val file = File(rootDir, "${Files.list(rootDir.toPath()).count()}.$suggestedExtension")
+    private class FakeBlobWriter(private val rootDir: File) : BundleBlobWriter {
+        override suspend fun writeBlob(
+                projectId: io.talevia.core.ProjectId,
+                assetId: io.talevia.core.AssetId,
+                bytes: ByteArray,
+                format: String,
+            ): MediaSource.BundleFile {
+            val file = File(rootDir, "${assetId.value}.$format")
             file.writeBytes(bytes)
-            return MediaSource.File(file.absolutePath)
-        }
+            return MediaSource.BundleFile("media/${file.name}")
+}
     }
 
     private class FakeVideoEngine : VideoEngine {
@@ -115,7 +118,7 @@ class RefactorLoopE2ETest {
         override suspend fun probe(source: MediaSource): MediaMetadata =
             MediaMetadata(duration = Duration.ZERO, resolution = Resolution(0, 0), frameRate = null)
 
-        override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> = flow {
+        override fun render(timeline: Timeline, output: OutputSpec, resolver: io.talevia.core.platform.MediaPathResolver?): Flow<RenderProgress> = flow {
             renderCalls += 1
             emit(RenderProgress.Started("job"))
             // Write a small stub file so ExportTool's happy path sees a real file.
@@ -139,9 +142,7 @@ class RefactorLoopE2ETest {
         val tmpDir = createTempDirectory("e2e-refactor").toFile()
         val outputFile = File(tmpDir, "final.mp4")
 
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val storage = InMemoryMediaStorage()
         val imageEngine = CountingImageEngine()
         val videoEngine = FakeVideoEngine()

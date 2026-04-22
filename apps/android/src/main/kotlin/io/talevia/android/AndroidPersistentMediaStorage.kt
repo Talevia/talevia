@@ -59,6 +59,15 @@ class AndroidPersistentMediaStorage(rootDir: File) : MediaStorage {
             is MediaSource.File -> s.path
             is MediaSource.Http -> error("Http sources must be downloaded before resolve()")
             is MediaSource.Platform -> s.value
+            // TODO(file-bundle-migration): BundleFile assets live inside a
+            // project bundle and must be resolved via BundleMediaPathResolver,
+            // which needs the bundle root path. AndroidPersistentMediaStorage
+            // is a global catalog and doesn't know which bundle owns the
+            // asset; this branch is here only to keep the `when` exhaustive
+            // until the legacy MediaStorage path is retired entirely.
+            is MediaSource.BundleFile -> error(
+                "BundleFile assets must resolve via BundleMediaPathResolver, not the legacy MediaStorage",
+            )
         }
     }
 

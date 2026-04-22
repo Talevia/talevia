@@ -4,9 +4,10 @@ import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.AllowAllPermissionService
@@ -194,7 +195,7 @@ class M6FeaturesTest {
 
     private data class Wiring(
         val sessions: SqlDelightSessionStore,
-        val projects: SqlDelightProjectStore,
+        val projects: FileProjectStore,
         val registry: ToolRegistry,
         val ctx: ToolContext,
         val projectId: ProjectId,
@@ -205,7 +206,7 @@ class M6FeaturesTest {
         val db = TaleviaDb(driver)
         val bus = EventBus()
         val sessions = SqlDelightSessionStore(db, bus)
-        val projects = SqlDelightProjectStore(db)
+        val projects = ProjectStoreTestKit.create()
         val media: MediaStorage = InMemoryMediaStorage()
         val engine = ProbeOnlyEngine()
         val perms = AllowAllPermissionService()
@@ -232,7 +233,7 @@ class M6FeaturesTest {
     /** Engine stub for tests that need probe but no rendering. */
     private class ProbeOnlyEngine : VideoEngine {
         override suspend fun probe(source: io.talevia.core.domain.MediaSource) = io.talevia.core.domain.MediaMetadata(duration = 10.seconds)
-        override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> = flowOf(
+        override fun render(timeline: Timeline, output: OutputSpec, resolver: io.talevia.core.platform.MediaPathResolver?): Flow<RenderProgress> = flowOf(
             RenderProgress.Failed("no-op", "ProbeOnlyEngine cannot render"),
         )
         override suspend fun thumbnail(asset: AssetId, source: io.talevia.core.domain.MediaSource, time: Duration): ByteArray = ByteArray(0)

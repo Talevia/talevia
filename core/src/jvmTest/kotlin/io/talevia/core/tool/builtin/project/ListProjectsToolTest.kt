@@ -1,13 +1,12 @@
 package io.talevia.core.tool.builtin.project
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
-import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
@@ -23,24 +22,22 @@ class ListProjectsToolTest {
 
     /**
      * Mutable clock so we can stamp staggered `time_updated` / `time_created`
-     * values on seeded projects — `SqlDelightProjectStore` reads the current
-     * time from its injected [Clock] during [SqlDelightProjectStore.upsert].
+     * values on seeded projects — `FileProjectStore` reads the current
+     * time from its injected [Clock] during [FileProjectStore.upsert].
      */
     private class MutableClock(var instant: Instant) : Clock {
         override fun now(): Instant = instant
     }
 
     private data class Rig(
-        val store: SqlDelightProjectStore,
+        val store: FileProjectStore,
         val clock: MutableClock,
         val ctx: ToolContext,
     )
 
     private fun rig(): Rig {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
         val clock = MutableClock(Instant.parse("2026-01-01T00:00:00Z"))
-        val store = SqlDelightProjectStore(TaleviaDb(driver), clock = clock)
+        val store = ProjectStoreTestKit.create(clock = clock)
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),

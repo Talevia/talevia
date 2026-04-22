@@ -1,20 +1,14 @@
 package io.talevia.core.tool.builtin.aigc
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
-import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.MediaSource
-import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
-import io.talevia.core.domain.Timeline
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.permission.PermissionDecision
+import io.talevia.core.platform.FileBundleBlobWriter
 import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.InMemoryMediaStorage
-import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.platform.UpscaleEngine
 import io.talevia.core.platform.UpscaleRequest
@@ -23,9 +17,7 @@ import io.talevia.core.platform.UpscaledImage
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
-import java.io.File
-import java.nio.file.Files
-import kotlin.io.path.createTempDirectory
+import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -72,16 +64,6 @@ class UpscaleAssetToolTest {
         }
     }
 
-    private class FakeBlobWriter(private val rootDir: File) : MediaBlobWriter {
-        val written = mutableListOf<File>()
-        override suspend fun writeBlob(bytes: ByteArray, suggestedExtension: String): MediaSource {
-            val file = File(rootDir, "${Files.list(rootDir.toPath()).count()}.$suggestedExtension")
-            file.writeBytes(bytes)
-            written += file
-            return MediaSource.File(file.absolutePath)
-        }
-    }
-
     private class FixedResolver(val path: String) : MediaPathResolver {
         override suspend fun resolve(assetId: AssetId): String = path
     }
@@ -95,22 +77,30 @@ class UpscaleAssetToolTest {
         messages = emptyList(),
     )
 
-    @Test fun persistsUpscaledAssetAndExposesProvenance() = runTest {
-        val tmpDir = createTempDirectory("upscale-test").toFile()
+    @Test fun persistsUpscaledAssetIntoBundleAndExposesProvenance() = runTest {
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val bundleRoot = "/projects/up".toPath()
+        val pid = store.createAt(path = bundleRoot, title = "up").id
         val engine = FakeUpscaleEngine(tinyPng)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-        val tool = UpscaleAssetTool(engine, storage, FixedResolver("/tmp/src.png"), writer)
+        val tool = UpscaleAssetTool(
+            engine,
+            FixedResolver("/tmp/src.png"),
+            FileBundleBlobWriter(store, fs),
+            store,
+        )
 
         val result = tool.execute(
-            UpscaleAssetTool.Input(assetId = "a-source", scale = 4, seed = 42L),
+            UpscaleAssetTool.Input(assetId = "a-source", scale = 4, seed = 42L, projectId = pid.value),
             ctx(),
         )
 
         val out = result.data
-        val resolvedPath = storage.resolve(AssetId(out.upscaledAssetId))
-        assertTrue(File(resolvedPath).exists())
-        assertEquals(tinyPng.toList(), File(resolvedPath).readBytes().toList())
+        val project = store.get(pid)!!
+        val asset = assertNotNull(project.assets.find { it.id == AssetId(out.upscaledAssetId) })
+        val src = asset.source as MediaSource.BundleFile
+        val onDisk = bundleRoot.resolve(src.relativePath)
+        assertTrue(fs.exists(onDisk))
+        assertEquals(tinyPng.toList(), fs.read(onDisk) { readByteArray() }.toList())
 
         assertEquals("fake-esrgan", out.providerId)
         assertEquals("a-source", out.sourceAssetId)
@@ -121,27 +111,33 @@ class UpscaleAssetToolTest {
     }
 
     @Test fun picksSeedClientSideWhenInputOmitsIt() = runTest {
-        val tmpDir = createTempDirectory("upscale-seed").toFile()
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/seed".toPath(), title = "seed").id
         val engine = FakeUpscaleEngine(tinyPng)
-        val tool = UpscaleAssetTool(engine, InMemoryMediaStorage(), FixedResolver("/tmp/src.png"), FakeBlobWriter(tmpDir))
-        val result = tool.execute(UpscaleAssetTool.Input(assetId = "a-1"), ctx())
+        val tool = UpscaleAssetTool(
+            engine,
+            FixedResolver("/tmp/src.png"),
+            FileBundleBlobWriter(store, fs),
+            store,
+        )
+        val result = tool.execute(
+            UpscaleAssetTool.Input(assetId = "a-1", projectId = pid.value),
+            ctx(),
+        )
         val engineSeed = assertNotNull(engine.lastRequest?.seed)
         assertEquals(engineSeed, result.data.seed)
     }
 
     @Test fun secondCallWithIdenticalInputsIsLockfileCacheHit() = runTest {
-        val tmpDir = createTempDirectory("upscale-cache").toFile()
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/cache".toPath(), title = "cache").id
         val engine = FakeUpscaleEngine(tinyPng)
-        val storage = InMemoryMediaStorage()
-        val writer = FakeBlobWriter(tmpDir)
-
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
-        val pid = ProjectId("p-cache")
-        store.upsert("demo", Project(id = pid, timeline = Timeline()))
-
-        val tool = UpscaleAssetTool(engine, storage, FixedResolver("/tmp/src.png"), writer, store)
+        val tool = UpscaleAssetTool(
+            engine,
+            FixedResolver("/tmp/src.png"),
+            FileBundleBlobWriter(store, fs),
+            store,
+        )
         val input = UpscaleAssetTool.Input(
             assetId = "a-src",
             scale = 2,
@@ -152,13 +148,11 @@ class UpscaleAssetToolTest {
         val first = tool.execute(input, ctx())
         assertEquals(false, first.data.cacheHit)
         assertEquals(1, engine.calls)
-        val writesAfterFirst = writer.written.size
 
         val second = tool.execute(input, ctx())
         assertEquals(true, second.data.cacheHit)
         assertEquals(1, engine.calls, "engine must not be invoked on cache hit")
         assertEquals(first.data.upscaledAssetId, second.data.upscaledAssetId)
-        assertEquals(writesAfterFirst, writer.written.size)
 
         // Changing scale must bust.
         val third = tool.execute(input.copy(scale = 4), ctx())
@@ -167,18 +161,19 @@ class UpscaleAssetToolTest {
     }
 
     @Test fun rejectsScaleOutOfRange() = runTest {
-        val tmpDir = createTempDirectory("upscale-bad").toFile()
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/bad".toPath(), title = "bad").id
         val tool = UpscaleAssetTool(
             FakeUpscaleEngine(tinyPng),
-            InMemoryMediaStorage(),
             FixedResolver("/tmp/src.png"),
-            FakeBlobWriter(tmpDir),
+            FileBundleBlobWriter(store, fs),
+            store,
         )
         assertFailsWith<IllegalArgumentException> {
-            tool.execute(UpscaleAssetTool.Input(assetId = "a", scale = 1), ctx())
+            tool.execute(UpscaleAssetTool.Input(assetId = "a", scale = 1, projectId = pid.value), ctx())
         }
         assertFailsWith<IllegalArgumentException> {
-            tool.execute(UpscaleAssetTool.Input(assetId = "a", scale = 16), ctx())
+            tool.execute(UpscaleAssetTool.Input(assetId = "a", scale = 16, projectId = pid.value), ctx())
         }
     }
 }

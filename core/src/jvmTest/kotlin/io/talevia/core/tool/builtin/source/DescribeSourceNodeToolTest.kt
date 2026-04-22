@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.source
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
@@ -9,10 +8,10 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
@@ -38,16 +37,14 @@ import kotlin.time.Duration.Companion.seconds
 class DescribeSourceNodeToolTest {
 
     private data class Rig(
-        val store: SqlDelightProjectStore,
+        val store: FileProjectStore,
         val tool: DescribeSourceNodeTool,
         val ctx: ToolContext,
         val pid: ProjectId,
     )
 
     private suspend fun rig(project: Project): Rig {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         store.upsert("demo", project)
         val ctx = ToolContext(
             sessionId = SessionId("s"),
@@ -62,9 +59,7 @@ class DescribeSourceNodeToolTest {
 
     @Test fun describesCharacterRefWithResolvedParents() = runTest {
         val pid = ProjectId("p")
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         store.upsert("demo", Project(id = pid, timeline = Timeline()))
         store.mutateSource(pid) { source ->
             val withStyle = source.addStyleBible(
@@ -116,9 +111,7 @@ class DescribeSourceNodeToolTest {
     @Test fun describesStyleBibleWithDirectChildren() = runTest {
         // Build: style-warm (parent of both mei and kai)
         val pid = ProjectId("p")
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         store.upsert("demo", Project(id = pid, timeline = Timeline()))
         store.mutateSource(pid) { source ->
             source.addStyleBible(
@@ -175,9 +168,7 @@ class DescribeSourceNodeToolTest {
         // style directly. Call describe_source_node on mei → c1 is direct,
         // nothing transitive from above. Call on style → c2 direct + c1 transitive via mei.
         val pid = ProjectId("p")
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val videoTrack = Track.Video(
             id = TrackId("vt"),
             clips = listOf(

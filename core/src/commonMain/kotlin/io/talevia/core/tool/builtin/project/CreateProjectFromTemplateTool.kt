@@ -27,6 +27,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
+import okio.Path.Companion.toPath
 
 /**
  * Bootstrap a project *pre-populated* with a genre skeleton (VISION §5.4
@@ -75,6 +76,14 @@ class CreateProjectFromTemplateTool(
          * source DAG.
          */
         val intent: String? = null,
+        /**
+         * Optional filesystem path for the new bundle. See
+         * [CreateProjectTool.Input.path] for semantics. The template is
+         * seeded into the bundle via a follow-up [ProjectStore.mutate] when
+         * `path` is set, since [ProjectStore.createAt] only takes timeline +
+         * outputProfile.
+         */
+        val path: String? = null,
     )
 
     @Serializable data class Output(
@@ -143,6 +152,15 @@ class CreateProjectFromTemplateTool(
                         "Used to classify the genre via on-device keyword match (no LLM round-trip).",
                 )
             }
+            putJsonObject("path") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional absolute filesystem path for the project bundle. Defaults to the " +
+                        "store's default-projects-home. The directory must not already contain " +
+                        "a talevia.json.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("title"), JsonPrimitive("template"))))
         put("additionalProperties", false)
@@ -150,11 +168,6 @@ class CreateProjectFromTemplateTool(
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         require(input.title.isNotBlank()) { "title must not be blank" }
-        val rawId = input.projectId?.takeIf { it.isNotBlank() } ?: slugifyProjectId(input.title)
-        val pid = ProjectId(rawId)
-        require(projects.get(pid) == null) {
-            "project ${pid.value} already exists; use list_projects to find an unused id or operate on the existing one"
-        }
         val resolution = parseResolution(input.resolutionPreset)
         val frameRate = parseFrameRate(input.fps)
         val profile = OutputProfile(resolution = resolution, frameRate = frameRate)
@@ -163,8 +176,27 @@ class CreateProjectFromTemplateTool(
         val resolved = resolveTemplate(input)
         val (source, seededIds) = dispatchTemplate(resolved.template)
 
-        val project = Project(id = pid, timeline = timeline, outputProfile = profile, source = source)
-        projects.upsert(input.title, project)
+        val pid: ProjectId = if (input.path != null && input.path.isNotBlank()) {
+            // createAt only accepts timeline + outputProfile; layer the
+            // template's source DAG on via mutate after the bundle exists.
+            val created = projects.createAt(
+                path = input.path.toPath(),
+                title = input.title,
+                timeline = timeline,
+                outputProfile = profile,
+            )
+            projects.mutate(created.id) { it.copy(source = source) }
+            created.id
+        } else {
+            val rawId = input.projectId?.takeIf { it.isNotBlank() } ?: slugifyProjectId(input.title)
+            val candidate = ProjectId(rawId)
+            require(projects.get(candidate) == null) {
+                "project ${candidate.value} already exists; use list_projects to find an unused id or operate on the existing one"
+            }
+            val project = Project(id = candidate, timeline = timeline, outputProfile = profile, source = source)
+            projects.upsert(input.title, project)
+            candidate
+        }
 
         val out = Output(
             projectId = pid.value,
@@ -178,9 +210,10 @@ class CreateProjectFromTemplateTool(
             inferredReason = resolved.reason,
         )
         val inferenceNote = if (resolved.inferred) " (auto-inferred: ${resolved.reason})" else ""
+        val pathNote = input.path?.let { " at $it" }.orEmpty()
         return ToolResult(
             title = "create project ${input.title} from ${resolved.template}",
-            outputForLlm = "Created project ${pid.value} (\"${input.title}\") at " +
+            outputForLlm = "Created project ${pid.value} (\"${input.title}\")$pathNote at " +
                 "${resolution.width}x${resolution.height}@${frameRate.numerator}fps " +
                 "from ${resolved.template} template$inferenceNote. Seeded ${seededIds.size} source node(s): " +
                 "${seededIds.joinToString(", ")}. Fill in TODO placeholders via update_* tools " +

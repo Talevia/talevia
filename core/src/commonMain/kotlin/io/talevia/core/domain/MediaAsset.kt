@@ -14,7 +14,7 @@ data class MediaAsset(
     /**
      * Epoch-millis of the last structural change to this asset, or `null`
      * when the backing project blob predates recency tracking. Stamped by
-     * [io.talevia.core.domain.SqlDelightProjectStore] on `upsert` against
+     * [io.talevia.core.domain.FileProjectStore] on `upsert` against
      * the prior blob. Powers `project_query(select=assets, sortBy="recent")`;
      * nulls sort last so projects imported from older blobs tail
      * deterministically until their next mutation restamps them.
@@ -24,8 +24,40 @@ data class MediaAsset(
 
 @Serializable
 sealed class MediaSource {
+    /**
+     * Absolute filesystem path. Machine-local — does **not** travel across collaborators.
+     * Use for the user's source footage that stays outside the project bundle.
+     */
     @Serializable @SerialName("file")
     data class File(val path: String) : MediaSource()
+
+    /**
+     * Path relative to the project bundle root, POSIX-style (forward slashes).
+     * Travels with the project — used for AIGC products + small imported assets
+     * (LUTs, fonts) that should reproduce on another machine.
+     *
+     * Resolved via [io.talevia.core.platform.BundleMediaPathResolver] which prepends the
+     * loaded project's bundle directory. Path-traversal characters (`..`, leading `/`,
+     * leading drive letters) are rejected at resolve time.
+     */
+    @Serializable @SerialName("bundle_file")
+    data class BundleFile(val relativePath: String) : MediaSource() {
+        init {
+            require(relativePath.isNotBlank()) { "BundleFile relativePath must not be blank" }
+            require(!relativePath.startsWith("/")) {
+                "BundleFile relativePath must not start with '/' (got '$relativePath')"
+            }
+            require(!relativePath.contains("\\")) {
+                "BundleFile relativePath must use POSIX forward slashes (got '$relativePath')"
+            }
+            require(!relativePath.split("/").any { it == ".." }) {
+                "BundleFile relativePath must not contain '..' segments (got '$relativePath')"
+            }
+            require(!relativePath.matches(Regex("^[A-Za-z]:.*"))) {
+                "BundleFile relativePath must not be a Windows-style absolute path (got '$relativePath')"
+            }
+        }
+    }
 
     @Serializable @SerialName("http")
     data class Http(val url: String) : MediaSource()

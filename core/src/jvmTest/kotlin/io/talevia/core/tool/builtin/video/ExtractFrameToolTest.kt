@@ -53,7 +53,7 @@ class ExtractFrameToolTest {
         override suspend fun probe(source: MediaSource): MediaMetadata =
             error("probe should not be called by ExtractFrameTool")
 
-        override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> =
+        override fun render(timeline: Timeline, output: OutputSpec, resolver: io.talevia.core.platform.MediaPathResolver?): Flow<RenderProgress> =
             emptyFlow()
 
         override suspend fun thumbnail(

@@ -40,11 +40,18 @@ interface ProjectStore {
     suspend fun get(id: ProjectId): Project?
     suspend fun upsert(title: String, project: Project)
     suspend fun list(): List<Project>
-    suspend fun delete(id: ProjectId)
 
     /**
-     * Rename a project — updates only the catalog `title` column (and `time_updated`),
-     * leaving the JSON-blobbed [Project] model untouched. Throws if no row exists.
+     * Remove the project from the store. When [deleteFiles] is true the
+     * file-backed implementation also removes the on-disk bundle; for the
+     * SQL-backed implementation the flag is ignored. Defaults to false so
+     * accidentally invoking [delete] never destroys user files.
+     */
+    suspend fun delete(id: ProjectId, deleteFiles: Boolean = false)
+
+    /**
+     * Rename a project — updates only the catalog `title` (and `time_updated`),
+     * leaving the [Project] model untouched. Throws if no row exists.
      */
     suspend fun setTitle(id: ProjectId, title: String)
 
@@ -59,6 +66,33 @@ interface ProjectStore {
      * it and updates the `time_updated` timestamp.
      */
     suspend fun mutate(id: ProjectId, block: suspend (Project) -> Project): Project
+
+    /**
+     * Open an existing project bundle at the given path. Used by file-backed
+     * stores; SQL-backed stores throw [UnsupportedOperationException]. The
+     * loaded project is registered in the recents registry so subsequent
+     * [get] / [list] calls can find it by id.
+     */
+    suspend fun openAt(path: okio.Path): Project =
+        throw UnsupportedOperationException("openAt requires a file-backed ProjectStore")
+
+    /**
+     * Create a new project bundle at the given path with the given title.
+     * The directory must not already contain a `talevia.json`. Used by
+     * file-backed stores; SQL-backed stores throw.
+     */
+    suspend fun createAt(
+        path: okio.Path,
+        title: String,
+        timeline: Timeline = Timeline(),
+        outputProfile: OutputProfile = OutputProfile.DEFAULT_1080P,
+    ): Project = throw UnsupportedOperationException("createAt requires a file-backed ProjectStore")
+
+    /**
+     * Filesystem path of the bundle for the given project, or null if not
+     * currently registered. SQL-backed stores return null.
+     */
+    suspend fun pathOf(id: ProjectId): okio.Path? = null
 }
 
 /**
@@ -180,8 +214,13 @@ class SqlDelightProjectStore(
         // Stamp `updatedAtEpochMs` on tracks / clips / assets based on a
         // structural diff against the prior blob. Done here (not in tools)
         // so 14+ mutation tools don't each need recency bookkeeping — the
-        // one centralised hook covers every write path.
-        val stamped = stampRecency(project, existing?.data_, now)
+        // one centralised hook covers every write path. Decode failure on the
+        // prior blob (e.g. schema drift) degrades to "treat everything as new",
+        // which is strictly more conservative than losing the feature.
+        val priorProject = existing?.data_?.let {
+            runCatching { json.decodeFromString(Project.serializer(), it) }.getOrNull()
+        }
+        val stamped = ProjectRecencyStamper.stamp(project, priorProject, now)
 
         // Blob carries only the "always re-written together" fields. The three
         // append-only lists are stored in sibling tables so `add_clip` doesn't
@@ -251,7 +290,8 @@ class SqlDelightProjectStore(
             ProjectSummary(it.id, it.title, it.time_created, it.time_updated)
         }
 
-    override suspend fun delete(id: ProjectId) {
+    override suspend fun delete(id: ProjectId, deleteFiles: Boolean) {
+        // SQL-backed store has no on-disk bundle; deleteFiles is a no-op here.
         db.transaction {
             db.projectsQueries.delete(id.value)
             db.projectSnapshotsQueries.deleteAllForProject(id.value)
@@ -278,100 +318,4 @@ class SqlDelightProjectStore(
         updated
     }
 
-    /**
-     * Produce a copy of [project] with `updatedAtEpochMs` stamped on each
-     * clip / track / asset per the rule:
-     *  - brand-new entity (id absent in the prior blob) → `now`,
-     *  - structurally unchanged entity (all non-recency fields equal) →
-     *    preserve old stamp (or `now` if old was null / blob predated recency),
-     *  - structurally changed entity → `now`.
-     *
-     * Track stamps cascade from clips: a track whose own fields AND clips
-     * list membership are unchanged but whose individual clip content
-     * changed still counts as "touched". That matches how agents use
-     * `sortBy="recent"` for orientation ("what did I just edit?").
-     *
-     * The prior blob is the slim form (snapshots / lockfile emptied), but
-     * recency only looks at timeline + assets so that's fine. A decoding
-     * error (e.g. schema drift) degrades to "treat everything as new"
-     * — strictly more conservative than losing the feature entirely.
-     */
-    private fun stampRecency(project: Project, existingBlob: String?, now: Long): Project {
-        val old = existingBlob?.let {
-            runCatching { json.decodeFromString(Project.serializer(), it) }.getOrNull()
-        }
-        val oldClipsById: Map<String, Clip> = old?.timeline?.tracks
-            ?.flatMap { it.clips }
-            ?.associateBy { it.id.value }
-            ?: emptyMap()
-        val oldTracksById: Map<String, Track> = old?.timeline?.tracks
-            ?.associateBy { it.id.value }
-            ?: emptyMap()
-        val oldAssetsById: Map<String, MediaAsset> = old?.assets?.associateBy { it.id.value } ?: emptyMap()
-
-        val newTracks = project.timeline.tracks.map { newTrack ->
-            val stampedClips = newTrack.clips.map { stampClip(it, oldClipsById[it.id.value], now) }
-            val trackWithClips = withClips(newTrack, stampedClips)
-            stampTrack(trackWithClips, oldTracksById[newTrack.id.value], now)
-        }
-        val newAssets = project.assets.map { stampAsset(it, oldAssetsById[it.id.value], now) }
-        return project.copy(
-            timeline = project.timeline.copy(tracks = newTracks),
-            assets = newAssets,
-        )
-    }
-
-    private fun stampClip(new: Clip, old: Clip?, now: Long): Clip {
-        val stamp = when {
-            old == null -> now
-            clipStructure(new) == clipStructure(old) -> old.updatedAtEpochMs ?: now
-            else -> now
-        }
-        return applyClipStamp(new, stamp)
-    }
-
-    private fun stampTrack(new: Track, old: Track?, now: Long): Track {
-        val stamp = when {
-            old == null -> now
-            trackStructure(new) == trackStructure(old) -> old.updatedAtEpochMs ?: now
-            else -> now
-        }
-        return applyTrackStamp(new, stamp)
-    }
-
-    private fun stampAsset(new: MediaAsset, old: MediaAsset?, now: Long): MediaAsset {
-        val stamp = when {
-            old == null -> now
-            new.copy(updatedAtEpochMs = null) == old.copy(updatedAtEpochMs = null) -> old.updatedAtEpochMs ?: now
-            else -> now
-        }
-        return new.copy(updatedAtEpochMs = stamp)
-    }
-
-    private fun clipStructure(c: Clip): Clip = applyClipStamp(c, null)
-
-    private fun trackStructure(t: Track): Track = applyTrackStamp(
-        withClips(t, t.clips.map(::clipStructure)),
-        null,
-    )
-
-    private fun applyClipStamp(c: Clip, stamp: Long?): Clip = when (c) {
-        is Clip.Video -> c.copy(updatedAtEpochMs = stamp)
-        is Clip.Audio -> c.copy(updatedAtEpochMs = stamp)
-        is Clip.Text -> c.copy(updatedAtEpochMs = stamp)
-    }
-
-    private fun applyTrackStamp(t: Track, stamp: Long?): Track = when (t) {
-        is Track.Video -> t.copy(updatedAtEpochMs = stamp)
-        is Track.Audio -> t.copy(updatedAtEpochMs = stamp)
-        is Track.Subtitle -> t.copy(updatedAtEpochMs = stamp)
-        is Track.Effect -> t.copy(updatedAtEpochMs = stamp)
-    }
-
-    private fun withClips(t: Track, clips: List<Clip>): Track = when (t) {
-        is Track.Video -> t.copy(clips = clips)
-        is Track.Audio -> t.copy(clips = clips)
-        is Track.Subtitle -> t.copy(clips = clips)
-        is Track.Effect -> t.copy(clips = clips)
-    }
 }

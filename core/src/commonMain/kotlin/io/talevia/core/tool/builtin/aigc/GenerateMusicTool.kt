@@ -1,21 +1,23 @@
 package io.talevia.core.tool.builtin.aigc
 
+import io.talevia.core.AssetId
 import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.cost.AigcPricing
+import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.domain.source.consistency.FoldedPrompt
 import io.talevia.core.permission.PermissionSpec
-import io.talevia.core.platform.MediaBlobWriter
-import io.talevia.core.platform.MediaStorage
+import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.MusicGenEngine
 import io.talevia.core.platform.MusicGenRequest
 import io.talevia.core.tool.Tool
+import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import kotlinx.serialization.KSerializer
@@ -29,13 +31,19 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 import kotlin.time.Duration.Companion.seconds
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
- * Generate a music track via a [MusicGenEngine], persist the bytes through a
- * [MediaBlobWriter], register the result with [MediaStorage], and surface an
- * `AssetId` that `add_clip` can drop onto an audio track. Closes the AIGC
- * music lane from VISION §2 ("AIGC: 音乐生成") — the last of the four
- * generative modalities the VISION calls out (image / video / TTS / music).
+ * Generate a music track via a [MusicGenEngine], persist the bytes into the
+ * project bundle via a [BundleBlobWriter], append the resulting [MediaAsset]
+ * to `Project.assets`, and surface an `AssetId` that `add_clip` can drop onto
+ * an audio track. Closes the AIGC music lane from VISION §2 ("AIGC: 音乐生成")
+ * — the last of the four generative modalities the VISION calls out (image /
+ * video / TTS / music).
+ *
+ * Bytes land at `<bundleRoot>/media/<assetId>.<format>` so the generated
+ * music travels with the project bundle.
  *
  * Seed + provenance handling (VISION §3.1): delegates to [AigcPipeline] so
  * this tool and every future AIGC tool share one implementation of "mint a
@@ -58,9 +66,8 @@ import kotlin.time.Duration.Companion.seconds
  */
 class GenerateMusicTool(
     private val engine: MusicGenEngine,
-    private val storage: MediaStorage,
-    private val blobWriter: MediaBlobWriter,
-    private val projectStore: ProjectStore? = null,
+    private val bundleBlobWriter: BundleBlobWriter,
+    private val projectStore: ProjectStore,
 ) : Tool<GenerateMusicTool.Input, GenerateMusicTool.Output> {
 
     @Serializable
@@ -94,12 +101,14 @@ class GenerateMusicTool(
     override val id: String = "generate_music"
     override val helpText: String =
         "Generate a music track from a text prompt via an AIGC provider and import it as a project asset. " +
+            "Bytes land in the project bundle's media/ directory so the asset travels with the project. " +
             "Records seed + model in the project lockfile so a second call with identical inputs is a cache hit. " +
             "Pass consistencyBindingIds with style_bible / brand_palette node ids to keep music coherent with " +
             "visual style across shots. Drop the returned assetId onto an audio track via add_clip."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("aigc.generate")
+    override val applicability: ToolApplicability = ToolApplicability.RequiresProjectBinding
 
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
@@ -143,10 +152,12 @@ class GenerateMusicTool(
         put("additionalProperties", false)
     }
 
+    @OptIn(ExperimentalUuidApi::class)
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        AigcBudgetGuard.enforce(id, projectStore, input.projectId?.let(::ProjectId), ctx)
+        val pid = ctx.resolveProjectId(input.projectId)
+        AigcBudgetGuard.enforce(id, projectStore, pid, ctx)
         val seed = AigcPipeline.ensureSeed(input.seed)
-        val folded = resolveConsistency(input)
+        val folded = resolveConsistency(input, pid)
 
         val inputHash = AigcPipeline.inputHash(
             listOf(
@@ -161,10 +172,8 @@ class GenerateMusicTool(
             ),
         )
 
-        val pid = input.projectId?.let(::ProjectId)
-        val store = projectStore
-        if (pid != null && store != null && !ctx.isReplay) {
-            val cached = AigcPipeline.findCached(store, pid, inputHash)
+        if (!ctx.isReplay) {
+            val cached = AigcPipeline.findCached(projectStore, pid, inputHash)
             if (cached != null) {
                 return hit(cached, folded, input)
             }
@@ -187,46 +196,48 @@ class GenerateMusicTool(
         }
         val music = result.music
 
-        val source = blobWriter.writeBlob(music.audioBytes, music.format)
-        val asset = storage.import(source) { _ ->
-            MediaMetadata(
+        val newAssetId = AssetId(Uuid.random().toString())
+        val bundleSource = bundleBlobWriter.writeBlob(pid, newAssetId, music.audioBytes, music.format)
+        val newAsset = MediaAsset(
+            id = newAssetId,
+            source = bundleSource,
+            metadata = MediaMetadata(
                 duration = music.durationSeconds.seconds,
                 resolution = Resolution(0, 0),
                 frameRate = null,
-            )
-        }
+            ),
+        )
 
         val baseInputs = JsonConfig.default.encodeToJsonElement(Input.serializer(), input).jsonObject
         val costCents = AigcPricing.estimateCents(id, result.provenance, baseInputs)
-        if (pid != null && store != null) {
-            AigcPipeline.record(
-                store = store,
+        AigcPipeline.record(
+            store = projectStore,
+            projectId = pid,
+            toolId = id,
+            inputHash = inputHash,
+            assetId = newAssetId,
+            provenance = result.provenance,
+            sourceBinding = folded.appliedNodeIds.map { SourceNodeId(it) }.toSet(),
+            baseInputs = baseInputs,
+            costCents = costCents,
+            sessionId = ctx.sessionId,
+            resolvedPrompt = folded.effectivePrompt,
+            originatingMessageId = ctx.messageId,
+            newAsset = newAsset,
+        )
+        ctx.publishEvent(
+            BusEvent.AigcCostRecorded(
+                sessionId = ctx.sessionId,
                 projectId = pid,
                 toolId = id,
-                inputHash = inputHash,
-                assetId = asset.id,
-                provenance = result.provenance,
-                sourceBinding = folded.appliedNodeIds.map { SourceNodeId(it) }.toSet(),
-                baseInputs = baseInputs,
+                assetId = newAssetId.value,
                 costCents = costCents,
-                sessionId = ctx.sessionId,
-                resolvedPrompt = folded.effectivePrompt,
-                originatingMessageId = ctx.messageId,
-            )
-            ctx.publishEvent(
-                BusEvent.AigcCostRecorded(
-                    sessionId = ctx.sessionId,
-                    projectId = pid,
-                    toolId = id,
-                    assetId = asset.id.value,
-                    costCents = costCents,
-                ),
-            )
-        }
+            ),
+        )
 
         val prov = result.provenance
         val out = Output(
-            assetId = asset.id.value,
+            assetId = newAssetId.value,
             durationSeconds = music.durationSeconds,
             format = music.format,
             providerId = prov.providerId,
@@ -270,22 +281,14 @@ class GenerateMusicTool(
         )
     }
 
-    private suspend fun resolveConsistency(input: Input): FoldedPrompt {
+    private suspend fun resolveConsistency(input: Input, pid: ProjectId): FoldedPrompt {
         val bindingIds = input.consistencyBindingIds
         if (bindingIds != null && bindingIds.isEmpty()) {
             return io.talevia.core.domain.source.consistency
                 .foldConsistencyIntoPrompt(input.prompt, emptyList())
         }
-        val store = projectStore ?: run {
-            if (bindingIds != null) error("consistencyBindingIds supplied but this GenerateMusicTool has no ProjectStore wired")
-            return io.talevia.core.domain.source.consistency.foldConsistencyIntoPrompt(input.prompt, emptyList())
-        }
-        val pid = input.projectId ?: run {
-            if (bindingIds != null) error("consistencyBindingIds require projectId to locate the source graph")
-            return io.talevia.core.domain.source.consistency.foldConsistencyIntoPrompt(input.prompt, emptyList())
-        }
-        val project = store.get(ProjectId(pid))
-            ?: error("Project $pid not found when resolving consistency bindings")
+        val project = projectStore.get(pid)
+            ?: error("Project ${pid.value} not found when resolving consistency bindings")
         return AigcPipeline.foldPrompt(
             project = project,
             basePrompt = input.prompt,

@@ -239,7 +239,7 @@ sealed interface BusEvent {
      * (dangling parent refs, parent cycles). Non-throwing warning — the
      * project is still returned to the caller, but subscribers (UI,
      * metrics sink, audit log) can surface the issue so it doesn't rot
-     * unnoticed. Emitted by `SqlDelightProjectStore.get` right after the
+     * unnoticed. Emitted by `FileProjectStore.get` right after the
      * blob decode on every read; issues are computed via a lightweight
      * sublsubset of `ValidateProjectTool`'s DAG check (no full
      * clip/asset/audio validation, see that tool for exhaustive linting).

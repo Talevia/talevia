@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
@@ -10,13 +9,13 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Resolution
-import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
@@ -54,7 +53,7 @@ class ExportToolTest {
         override suspend fun probe(source: MediaSource): MediaMetadata =
             MediaMetadata(duration = Duration.ZERO, resolution = Resolution(0, 0), frameRate = null)
 
-        override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> = flow {
+        override fun render(timeline: Timeline, output: OutputSpec, resolver: io.talevia.core.platform.MediaPathResolver?): Flow<RenderProgress> = flow {
             renderCalls += 1
             lastMetadata = output.metadata
             emit(RenderProgress.Started("job"))
@@ -73,10 +72,8 @@ class ExportToolTest {
         messages = emptyList(),
     )
 
-    private suspend fun newFixture(): Triple<SqlDelightProjectStore, CountingEngine, ProjectId> {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+    private suspend fun newFixture(): Triple<FileProjectStore, CountingEngine, ProjectId> {
+        val store = ProjectStoreTestKit.create()
         val engine = CountingEngine()
         val projectId = ProjectId("p")
         val timeline = Timeline(
@@ -241,7 +238,7 @@ class ExportToolTest {
         override suspend fun probe(source: MediaSource): MediaMetadata =
             MediaMetadata(duration = Duration.ZERO, resolution = Resolution(0, 0), frameRate = null)
 
-        override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> = flow {
+        override fun render(timeline: Timeline, output: OutputSpec, resolver: io.talevia.core.platform.MediaPathResolver?): Flow<RenderProgress> = flow {
             wholeTimelineCalls += 1
             emit(RenderProgress.Started("job"))
             emit(RenderProgress.Completed("job", output.targetPath))
@@ -254,6 +251,7 @@ class ExportToolTest {
             fades: TransitionFades?,
             output: OutputSpec,
             mezzaninePath: String,
+            resolver: io.talevia.core.platform.MediaPathResolver?,
         ) {
             renderClipCalls += 1
             rendered += (clip.id to mezzaninePath)
@@ -272,9 +270,7 @@ class ExportToolTest {
     }
 
     @Test fun perClipEngineRendersEveryClipOnFirstExport() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val engine = FakePerClipEngine()
         val projectId = ProjectId("p-perclip")
         val timeline = Timeline(
@@ -318,9 +314,7 @@ class ExportToolTest {
     }
 
     @Test fun perClipEngineReusesCachedMezzanineOnIdenticalRerun() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val engine = FakePerClipEngine()
         val projectId = ProjectId("p-perclip-rerun")
         val timeline = Timeline(
@@ -364,9 +358,7 @@ class ExportToolTest {
     }
 
     @Test fun perClipEngineReRendersOnlyTheStalyClip() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val engine = FakePerClipEngine()
         val projectId = ProjectId("p-perclip-partial")
         val baseTimeline = Timeline(
@@ -445,7 +437,7 @@ class ExportToolTest {
         override suspend fun probe(source: MediaSource): MediaMetadata =
             MediaMetadata(duration = Duration.ZERO, resolution = Resolution(0, 0), frameRate = null)
 
-        override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> = flow {
+        override fun render(timeline: Timeline, output: OutputSpec, resolver: io.talevia.core.platform.MediaPathResolver?): Flow<RenderProgress> = flow {
             emit(RenderProgress.Started("job"))
             emit(RenderProgress.Preview("job", ratio = 0.25f, thumbnailPath = "/tmp/preview-0.jpg"))
             emit(RenderProgress.Frames("job", ratio = 0.5f))
@@ -640,7 +632,7 @@ class ExportToolTest {
         // contract: manifests must be pure function of (project state at
         // render time), not wall-clock or process-local non-determinism. The
         // cross-fixture "two projects in two stores" case isn't useful here —
-        // SqlDelightProjectStore stamps `Track.updatedAtEpochMs` at upsert
+        // FileProjectStore stamps `Track.updatedAtEpochMs` at upsert
         // time, so two fresh fixtures upserted milliseconds apart legitimately
         // differ in timelineHash.
         val (store, engine, pid) = newFixture()

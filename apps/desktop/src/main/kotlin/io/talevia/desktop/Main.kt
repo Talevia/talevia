@@ -951,23 +951,27 @@ private enum class RightTab(val label: String) {
  * - `TALEVIA_DB_PATH` defaults to `~/.talevia/talevia.db` so projects /
  *   sessions / source DAGs / snapshots survive app restarts out-of-box.
  *   Set `TALEVIA_DB_PATH=:memory:` to opt back into ephemeral mode.
- * - `TALEVIA_MEDIA_DIR` defaults to `~/.talevia/media` so AIGC blobs and
- *   the asset catalog land in a predictable, persistent spot — without
- *   this the catalog was in-memory and AssetIds referenced by saved
- *   projects broke on restart.
+ * - `TALEVIA_PROJECTS_HOME` defaults to `~/.talevia/projects` — newly-created
+ *   project bundles land here when the user doesn't pick a path.
+ * - `TALEVIA_RECENTS_PATH` defaults to `~/.talevia/recents.json` — per-machine
+ *   catalog of which bundles this user has opened. Required by the file-bundle
+ *   ProjectStore.
  *
  * Only fills in defaults the user didn't already set. Anything the user
  * passed via the environment wins.
  */
-private fun desktopEnvWithDefaults(): Map<String, String> {
+internal fun desktopEnvWithDefaults(): Map<String, String> {
     val env = System.getenv().toMutableMap()
     val home = System.getProperty("user.home")
     val defaultRoot = java.io.File(home, ".talevia")
     if (env["TALEVIA_DB_PATH"].isNullOrBlank()) {
         env["TALEVIA_DB_PATH"] = java.io.File(defaultRoot, "talevia.db").absolutePath
     }
-    if (env["TALEVIA_MEDIA_DIR"].isNullOrBlank()) {
-        env["TALEVIA_MEDIA_DIR"] = java.io.File(defaultRoot, "media").absolutePath
+    if (env["TALEVIA_PROJECTS_HOME"].isNullOrBlank()) {
+        env["TALEVIA_PROJECTS_HOME"] = java.io.File(defaultRoot, "projects").absolutePath
+    }
+    if (env["TALEVIA_RECENTS_PATH"].isNullOrBlank()) {
+        env["TALEVIA_RECENTS_PATH"] = java.io.File(defaultRoot, "recents.json").absolutePath
     }
     return env
 }

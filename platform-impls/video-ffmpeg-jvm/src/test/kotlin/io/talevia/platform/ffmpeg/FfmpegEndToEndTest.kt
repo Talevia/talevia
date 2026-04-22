@@ -1,6 +1,5 @@
 package io.talevia.platform.ffmpeg
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
@@ -9,12 +8,11 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.TrackId
 import io.talevia.core.bus.EventBus
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Resolution
-import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
@@ -80,12 +78,10 @@ class FfmpegEndToEndTest {
         generateTestSource(inputB, "testsrc2")
 
         // 2. Wire the agent's view of the world.
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
-        val db = TaleviaDb(driver)
         val bus = EventBus()
         val media = InMemoryMediaStorage()
         val engine = FfmpegVideoEngine(pathResolver = media)
-        val projects = SqlDelightProjectStore(db)
+        val projects = ProjectStoreTestKit.create()
         val perms = AllowAllPermissionService()
 
         val projectId = ProjectId(Uuid.random().toString())
@@ -157,7 +153,6 @@ class FfmpegEndToEndTest {
         // 4. Assert the render landed.
         assertTrue(output.exists(), "output mp4 should exist at ${output.absolutePath}")
         assertTrue(output.length() > 1024, "output mp4 should be non-trivial in size (${output.length()} bytes)")
-        driver.close()
     }
 
     /**
@@ -176,11 +171,9 @@ class FfmpegEndToEndTest {
 
         generateTestSource(inputA, "testsrc")
 
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
-        val db = TaleviaDb(driver)
         val media = InMemoryMediaStorage()
         val engine = FfmpegVideoEngine(pathResolver = media)
-        val projects = SqlDelightProjectStore(db)
+        val projects = ProjectStoreTestKit.create()
         val perms = AllowAllPermissionService()
 
         val projectId = ProjectId(Uuid.random().toString())
@@ -252,7 +245,6 @@ class FfmpegEndToEndTest {
 
         assertTrue(output.exists(), "output mp4 should exist at ${output.absolutePath}")
         assertTrue(output.length() > 1024, "output mp4 should be non-trivial (${output.length()} bytes)")
-        driver.close()
     }
 
     /**
@@ -268,11 +260,9 @@ class FfmpegEndToEndTest {
         generateTestSource(inputA, "testsrc")
         generateTestSource(inputB, "testsrc2")
 
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
-        val db = TaleviaDb(driver)
         val media = InMemoryMediaStorage()
         val engine = FfmpegVideoEngine(pathResolver = media)
-        val projects = SqlDelightProjectStore(db)
+        val projects = ProjectStoreTestKit.create()
         val perms = AllowAllPermissionService()
 
         val projectId = ProjectId(Uuid.random().toString())
@@ -355,7 +345,6 @@ class FfmpegEndToEndTest {
 
         assertTrue(output.exists(), "output mp4 should exist at ${output.absolutePath}")
         assertTrue(output.length() > 1024, "output mp4 should be non-trivial (${output.length()} bytes)")
-        driver.close()
     }
 
     /**
@@ -443,11 +432,9 @@ class FfmpegEndToEndTest {
 
         generateTestSource(inputA, "testsrc")
 
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
-        val db = TaleviaDb(driver)
         val media = InMemoryMediaStorage()
         val engine = FfmpegVideoEngine(pathResolver = media)
-        val projects = SqlDelightProjectStore(db)
+        val projects = ProjectStoreTestKit.create()
         val perms = AllowAllPermissionService()
 
         val projectId = ProjectId(Uuid.random().toString())
@@ -515,7 +502,6 @@ class FfmpegEndToEndTest {
         val decoded = io.talevia.core.domain.render.ProvenanceManifest.decodeFromComment(comment)
         assertTrue(decoded != null, "decodeFromComment must parse the comment ffmpeg round-tripped")
         kotlin.test.assertEquals(expected, decoded, "probe → decode must reproduce what ExportTool baked")
-        driver.close()
     }
 
     private fun ffmpegOnPath(): Boolean = runCatching {

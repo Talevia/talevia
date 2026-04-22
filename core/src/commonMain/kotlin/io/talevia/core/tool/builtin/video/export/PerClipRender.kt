@@ -90,6 +90,7 @@ internal suspend fun runPerClipRender(
     outputPath: String,
     ctx: ToolContext,
     clock: Clock,
+    resolver: io.talevia.core.platform.MediaPathResolver? = null,
 ): PerClipStats {
     val jobId = Uuid.random().toString()
     val projectId = project.id
@@ -140,6 +141,7 @@ internal suspend fun runPerClipRender(
                 fades = fades,
                 output = output,
                 mezzaninePath = mezzaninePath,
+                resolver = resolver,
             )
             chosenPath = mezzaninePath
             newCacheEntries += ClipRenderCacheEntry(

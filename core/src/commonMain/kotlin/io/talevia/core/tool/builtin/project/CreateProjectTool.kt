@@ -20,6 +20,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
+import okio.Path.Companion.toPath
 
 /**
  * Bootstrap a fresh project (VISION §5.2 — agent as a project manager).
@@ -38,6 +39,17 @@ class CreateProjectTool(
         val projectId: String? = null,
         val resolutionPreset: String? = null,
         val fps: Int? = null,
+        /**
+         * Optional filesystem path for the new project bundle. When set, the
+         * file-backed store creates `<path>/talevia.json` (and friends) at
+         * exactly this location. Fails loud if the directory already
+         * contains a `talevia.json`. When null the store picks the default
+         * `<defaultProjectsHome>/<projectId>/` location.
+         *
+         * SQL-backed stores ignore this and use their internal storage —
+         * the tool falls through to the default `upsert` path in that case.
+         */
+        val path: String? = null,
     )
 
     @Serializable data class Output(
@@ -52,7 +64,9 @@ class CreateProjectTool(
     override val helpText: String =
         "Create a new project (empty timeline / assets / source). Returns the projectId — pass it to " +
             "every subsequent tool call. resolutionPreset accepts 720p / 1080p / 4k; fps accepts 24 / 30 / 60. " +
-            "Defaults: 1080p / 30. Fails loud if a project with the same id already exists."
+            "Defaults: 1080p / 30. Fails loud if a project with the same id already exists. Pass `path` " +
+            "to materialise the bundle at a specific filesystem location (must not already contain " +
+            "talevia.json); omit to let the store pick a default."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.write")
@@ -73,6 +87,15 @@ class CreateProjectTool(
                 put("type", "integer")
                 put("description", "Output frame rate: 24, 30 (default), or 60.")
             }
+            putJsonObject("path") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional absolute filesystem path for the project bundle. Defaults to the " +
+                        "store's default-projects-home. The directory must not already contain " +
+                        "a talevia.json.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("title"))))
         put("additionalProperties", false)
@@ -80,17 +103,32 @@ class CreateProjectTool(
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         require(input.title.isNotBlank()) { "title must not be blank" }
-        val rawId = input.projectId?.takeIf { it.isNotBlank() } ?: slugifyProjectId(input.title)
-        val pid = ProjectId(rawId)
-        require(projects.get(pid) == null) {
-            "project ${pid.value} already exists; use list_projects to find an unused id or operate on the existing one"
-        }
         val resolution = parseResolution(input.resolutionPreset)
         val frameRate = parseFrameRate(input.fps)
         val profile = OutputProfile(resolution = resolution, frameRate = frameRate)
         val timeline = Timeline(resolution = resolution, frameRate = frameRate)
-        val project = Project(id = pid, timeline = timeline, outputProfile = profile)
-        projects.upsert(input.title, project)
+
+        // Two paths: explicit `path` → store.createAt mints the id; default →
+        // slug-from-title id, fail loud on duplicate, then upsert.
+        val pid: ProjectId = if (input.path != null && input.path.isNotBlank()) {
+            val created = projects.createAt(
+                path = input.path.toPath(),
+                title = input.title,
+                timeline = timeline,
+                outputProfile = profile,
+            )
+            created.id
+        } else {
+            val rawId = input.projectId?.takeIf { it.isNotBlank() } ?: slugifyProjectId(input.title)
+            val candidate = ProjectId(rawId)
+            require(projects.get(candidate) == null) {
+                "project ${candidate.value} already exists; use list_projects to find an unused id or operate on the existing one"
+            }
+            val project = Project(id = candidate, timeline = timeline, outputProfile = profile)
+            projects.upsert(input.title, project)
+            candidate
+        }
+
         val out = Output(
             projectId = pid.value,
             title = input.title,
@@ -98,9 +136,10 @@ class CreateProjectTool(
             resolutionHeight = resolution.height,
             fps = frameRate.numerator,
         )
+        val pathNote = input.path?.let { " at $it" }.orEmpty()
         return ToolResult(
             title = "create project ${input.title}",
-            outputForLlm = "Created project ${pid.value} (\"${input.title}\") at " +
+            outputForLlm = "Created project ${pid.value} (\"${input.title}\")$pathNote at " +
                 "${resolution.width}x${resolution.height}@${frameRate.numerator}fps. " +
                 "Pass projectId=${pid.value} to subsequent tool calls.",
             data = out,

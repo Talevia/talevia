@@ -6,7 +6,7 @@ import io.talevia.core.domain.source.Source
 /**
  * Lightweight structural check over `Project.source`: detects dangling
  * parent refs and parent cycles. Intended for the load-path auto-validation
- * in `SqlDelightProjectStore.get` — much narrower than
+ * in `FileProjectStore.get` — much narrower than
  * `ValidateProjectTool.sourceDagIssues` (which also walks clips, assets,
  * audio envelopes, etc.) so the cost is `O(nodes + edges)` per load.
  *

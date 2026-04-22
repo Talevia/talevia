@@ -44,6 +44,8 @@ class InMemoryMediaStorage : MediaStorage {
         val asset = mutex.withLock { assets[assetId] } ?: error("Unknown assetId $assetId")
         return when (val s = asset.source) {
             is MediaSource.File -> s.path
+            is MediaSource.BundleFile ->
+                error("BundleFile source not resolvable in InMemoryMediaStorage; use BundleMediaPathResolver")
             is MediaSource.Http -> error("Http sources must be downloaded before resolve()")
             is MediaSource.Platform -> error("Platform source (${s.scheme}) not resolvable in InMemoryMediaStorage")
         }

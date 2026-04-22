@@ -1,5 +1,7 @@
 package io.talevia.core.tool.builtin.video
 
+import io.talevia.core.AssetId
+import io.talevia.core.ProjectId
 import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.ProjectStore
@@ -25,7 +27,13 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
+import okio.FileSystem
+import okio.Path.Companion.toPath
+import okio.buffer
+import okio.use
 import kotlin.time.DurationUnit
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * Register a local file as a project asset: probes via the engine, persists into
@@ -56,6 +64,15 @@ class ImportMediaTool(
      * the import itself.
      */
     private val proxyGenerator: ProxyGenerator = NoopProxyGenerator,
+    /**
+     * Used only when [Input.copy_into_bundle] is true — copies bytes from the
+     * caller-supplied path into `<bundleRoot>/media/<assetId>.<ext>`. The
+     * import-by-reference path (default) doesn't touch the filesystem here
+     * (the asset stays at its original [MediaSource.File] absolute path).
+     * Defaults to [FileSystem.SYSTEM] so production wiring is automatic;
+     * tests that exercise bundle copy can inject a fake.
+     */
+    private val fs: FileSystem = FileSystem.SYSTEM,
 ) : Tool<ImportMediaTool.Input, ImportMediaTool.Output> {
 
     @Serializable data class Input(
@@ -81,6 +98,21 @@ class ImportMediaTool(
          * unbound; fail loud points the agent at `switch_project`.
          */
         val projectId: String? = null,
+        /**
+         * When true, the bytes at each path are *copied* into the project
+         * bundle's `media/<assetId>.<ext>` directory and the asset is
+         * registered as [MediaSource.BundleFile]. The bundle then carries the
+         * bytes — `git push` / `cp -R` reproduces the asset on another
+         * machine. Use for LUTs, fonts, small reference images, or anything
+         * the agent / user expects to travel with the project.
+         *
+         * Default `false`: the asset is registered as [MediaSource.File] at
+         * its original absolute path, no bytes copied. Suitable for big
+         * source footage that should NOT inflate the bundle (gigabyte
+         * 4K rushes stay on the user's NAS / SSD; the bundle just refers
+         * to them).
+         */
+        val copy_into_bundle: Boolean = false,
     )
 
     @Serializable data class ImportedAsset(
@@ -125,10 +157,14 @@ class ImportMediaTool(
 
     override val id = "import_media"
     override val helpText =
-        "Import a media file by path: probes its metadata, registers it with MediaStorage, and " +
-            "appends the asset to the current project's inventory. Returns the new assetId so you " +
-            "can `add_clip(assetId=…)` immediately after. Defaults projectId from the session " +
-            "binding — pass it only when importing into a non-current project."
+        "Import a media file by path: probes its metadata and appends the asset to the current " +
+            "project's inventory. Returns the new assetId so you can `add_clip(assetId=…)` " +
+            "immediately after. Defaults projectId from the session binding — pass it only when " +
+            "importing into a non-current project. Set copy_into_bundle=true to copy the bytes " +
+            "into the project's media/ directory so they travel with the bundle (use for LUTs, " +
+            "fonts, small reference images that should reproduce on another machine). Default " +
+            "false leaves big source footage at its original path — the asset references the " +
+            "absolute path and bytes do NOT travel with `git push`."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("media.import")
@@ -165,12 +201,23 @@ class ImportMediaTool(
                     "Optional — omit to import into the session's current project (set via switch_project).",
                 )
             }
+            putJsonObject("copy_into_bundle") {
+                put("type", "boolean")
+                put(
+                    "description",
+                    "When true, copy the bytes into the project's bundle media/ directory so the " +
+                        "asset travels with the project (LUTs / fonts / small reference assets). " +
+                        "Default false: register by absolute path; bytes stay where they are. " +
+                        "Set true for anything the user expects to reproduce on another machine.",
+                )
+            }
         }
         // No hard-required field at the schema level: `path` xor `paths` is enforced in execute().
         put("required", JsonArray(emptyList()))
         put("additionalProperties", false)
     }
 
+    @OptIn(ExperimentalUuidApi::class)
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         // Exactly one of path / paths must be supplied.
         val pathsToImport: List<String> = when {
@@ -192,11 +239,29 @@ class ImportMediaTool(
         pathsToImport.forEach { PathGuard.validate(it, requireAbsolute = true) }
         val pid = ctx.resolveProjectId(input.projectId)
 
+        // When copy_into_bundle=true we need the bundle root resolved up front
+        // so each probe knows where to copy bytes into. The store may return
+        // null if the project isn't registered with a path (SQL-backed store),
+        // in which case bundle-copy isn't supported and we fail loud.
+        val bundleRoot = if (input.copy_into_bundle) {
+            projects.pathOf(pid)
+                ?: error(
+                    "import_media: copy_into_bundle=true requires a file-backed ProjectStore " +
+                        "with the project registered at a path. Project ${pid.value} has no " +
+                        "registered bundle path; either drop copy_into_bundle or open the " +
+                        "project at a path first via open_project / create_project(path=…).",
+                )
+        } else {
+            null
+        }
+
         // Probe + proxy-generate each path concurrently — imports are IO-bound.
         // Capture per-path success / failure without aborting the batch so one
         // bad clip doesn't lose the other 39.
         val results: List<ProbeResult> = coroutineScope {
-            pathsToImport.map { p -> async { probeOne(p) } }.awaitAll()
+            pathsToImport.map { p ->
+                async { probeOne(p, bundleRoot, pid) }
+            }.awaitAll()
         }
 
         // Serialise the project-mutate calls — the ProjectStore mutex would
@@ -295,15 +360,66 @@ class ImportMediaTool(
      * captured failure. Never throws — every exception maps to
      * [ProbeResult.Failure] so the caller's batch aggregation stays in one
      * straight-line code path.
+     *
+     * When [bundleRoot] is non-null the bytes are copied into the bundle's
+     * `media/<assetId>.<ext>` directory and the asset's source is registered
+     * as [MediaSource.BundleFile]. Otherwise the asset references the original
+     * absolute path via [MediaSource.File].
      */
-    private suspend fun probeOne(path: String): ProbeResult = runCatching {
-        val asset = storage.import(MediaSource.File(path)) { source -> engine.probe(source) }
-        val proxies = runCatching { proxyGenerator.generate(asset) }.getOrDefault(emptyList())
-        val stamped = asset.copy(
-            proxies = (asset.proxies + proxies).deduplicateProxies(),
-            updatedAtEpochMs = clock.now().toEpochMilliseconds(),
-        )
-        ProbeResult.Success(path = path, asset = stamped)
+    @OptIn(ExperimentalUuidApi::class)
+    private suspend fun probeOne(
+        path: String,
+        bundleRoot: okio.Path?,
+        @Suppress("UNUSED_PARAMETER") projectId: ProjectId,
+    ): ProbeResult = runCatching {
+        if (bundleRoot == null) {
+            val asset = storage.import(MediaSource.File(path)) { source -> engine.probe(source) }
+            val proxies = runCatching { proxyGenerator.generate(asset) }.getOrDefault(emptyList())
+            val stamped = asset.copy(
+                proxies = (asset.proxies + proxies).deduplicateProxies(),
+                updatedAtEpochMs = clock.now().toEpochMilliseconds(),
+            )
+            ProbeResult.Success(path = path, asset = stamped)
+        } else {
+            // Probe metadata first against the original path (engine works on
+            // any absolute path; we don't need to copy before probing).
+            val metadata = engine.probe(MediaSource.File(path))
+            // Mint a stable id, copy bytes into <bundleRoot>/media/<id>.<ext>.
+            val newAssetId = AssetId(Uuid.random().toString())
+            val ext = path.substringAfterLast('.', missingDelimiterValue = "bin")
+                .ifBlank { "bin" }
+            val mediaDir = bundleRoot.resolve("media")
+            fs.createDirectories(mediaDir)
+            val target = mediaDir.resolve("${newAssetId.value}.$ext")
+            // Stream the bytes through okio. atomicMove via a tmpfile keeps a
+            // half-copied file from leaking if the JVM dies mid-copy.
+            val tmp = mediaDir.resolve(
+                "${target.name}.tmp.${
+                    kotlin.random.Random.nextLong()
+                        .toString(radix = 36)
+                        .removePrefix("-")
+                }",
+            )
+            fs.source(path.toPath()).use { src ->
+                fs.sink(tmp).buffer().use { sink -> sink.writeAll(src) }
+            }
+            fs.atomicMove(tmp, target)
+
+            val source = MediaSource.BundleFile("media/${target.name}")
+            // Bundle-local assets live on Project.assets, not in the global
+            // MediaStorage catalog — the bundle is the source of truth. We
+            // skip storage.import here (the asset is per-project and travels
+            // with the bundle); the proxyGenerator still runs against the
+            // freshly-built MediaAsset so thumbnails / waveforms get filled
+            // in the same way as the import-by-reference path.
+            val asset = MediaAsset(id = newAssetId, source = source, metadata = metadata)
+            val proxies = runCatching { proxyGenerator.generate(asset) }.getOrDefault(emptyList())
+            val stamped = asset.copy(
+                proxies = (asset.proxies + proxies).deduplicateProxies(),
+                updatedAtEpochMs = clock.now().toEpochMilliseconds(),
+            )
+            ProbeResult.Success(path = path, asset = stamped)
+        }
     }.getOrElse { t ->
         ProbeResult.Failure(
             path = path,

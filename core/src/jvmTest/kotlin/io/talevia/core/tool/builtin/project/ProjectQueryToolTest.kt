@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.project
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
@@ -10,14 +9,14 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Resolution
-import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
@@ -69,10 +68,8 @@ class ProjectQueryToolTest {
         ),
     )
 
-    private suspend fun fixture(): Pair<SqlDelightProjectStore, ProjectId> {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+    private suspend fun fixture(): Pair<FileProjectStore, ProjectId> {
+        val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p")
 
         val videoTrack = Track.Video(
@@ -522,10 +519,8 @@ class ProjectQueryToolTest {
 
     // -------- onlyPinned / onlyReferenced filters (folded from find_* tools) --------
 
-    private suspend fun lockfileFixture(): Pair<SqlDelightProjectStore, ProjectId> {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+    private suspend fun lockfileFixture(): Pair<FileProjectStore, ProjectId> {
+        val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p")
 
         val videoTrack = Track.Video(
@@ -726,10 +721,8 @@ class ProjectQueryToolTest {
     }
 
     @Test fun tracksSortByRecentOrdersMutatedTracksFirst() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
         val clock = ManualClock(1_000L)
-        val store = SqlDelightProjectStore(TaleviaDb(driver), clock = clock)
+        val store = ProjectStoreTestKit.create(clock = clock)
         val pid = ProjectId("p")
 
         val initial = Project(
@@ -787,10 +780,8 @@ class ProjectQueryToolTest {
     }
 
     @Test fun clipsSortByRecentTailsUnstampedLegacyRows() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
         val clock = ManualClock(1_000L)
-        val store = SqlDelightProjectStore(TaleviaDb(driver), clock = clock)
+        val store = ProjectStoreTestKit.create(clock = clock)
         val pid = ProjectId("p")
 
         // Seed at t=1000.
@@ -858,10 +849,8 @@ class ProjectQueryToolTest {
     }
 
     @Test fun assetsSortByRecentMixesStampedAndNulls() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
         val clock = ManualClock(1_000L)
-        val store = SqlDelightProjectStore(TaleviaDb(driver), clock = clock)
+        val store = ProjectStoreTestKit.create(clock = clock)
         val pid = ProjectId("p")
 
         // Seed — a1 + a2 both stamped at 1000.
@@ -1008,9 +997,7 @@ class ProjectQueryToolTest {
     }
 
     @Test fun lockfileEntryDrillDownSurfacesOriginatingMessageId() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p-origin")
         val stamped = io.talevia.core.domain.lockfile.LockfileEntry(
             inputHash = "h-stamped",
@@ -1114,10 +1101,8 @@ class ProjectQueryToolTest {
      * failed — regression symptom). A third clip binds a different
      * source node so the audit scope check kicks in.
      */
-    private suspend fun consistencyFixture(): Pair<SqlDelightProjectStore, ProjectId> {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+    private suspend fun consistencyFixture(): Pair<FileProjectStore, ProjectId> {
+        val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p-consistency")
 
         val characterNodeId = SourceNodeId("mei")

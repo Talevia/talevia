@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
@@ -10,12 +9,12 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.FrameRate
 import io.talevia.core.domain.Project
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Resolution
-import io.talevia.core.domain.SqlDelightProjectStore
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
@@ -49,10 +48,8 @@ class ExportDryRunToolTest {
         messages = emptyList(),
     )
 
-    private suspend fun newFixture(): Pair<SqlDelightProjectStore, ProjectId> {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+    private suspend fun newFixture(): Pair<FileProjectStore, ProjectId> {
+        val store = ProjectStoreTestKit.create()
         val projectId = ProjectId("p")
         val timeline = Timeline(
             tracks = listOf(
@@ -229,9 +226,7 @@ class ExportDryRunToolTest {
     @Test fun timelineProfileAppliedWhenNoExplicitOverride() = runTest {
         // When the project's timeline is configured with a non-default output profile
         // (resolution + frame rate), dry-run surfaces that spec without any overrides.
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p-profile")
         val timeline = Timeline(
             tracks = listOf(
@@ -279,9 +274,7 @@ class ExportDryRunToolTest {
     }
 
     @Test fun missingProjectThrows() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val tool = ExportDryRunTool(store)
 
         val ex = assertFailsWith<IllegalStateException> {

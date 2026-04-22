@@ -22,7 +22,7 @@ sealed class Track {
     /**
      * Epoch-millis of the last structural change to this track (its own
      * identity OR any of its clips), or `null` for pre-recency blobs.
-     * Stamped by [SqlDelightProjectStore.upsert] — cascades from clip
+     * Stamped by [FileProjectStore.upsert] — cascades from clip
      * diffs so "track was touched" covers both clip list membership
      * and clip content edits. Drives `project_query(select=tracks,
      * sortBy="recent")`.

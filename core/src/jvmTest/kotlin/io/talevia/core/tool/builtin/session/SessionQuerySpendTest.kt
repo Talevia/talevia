@@ -9,8 +9,9 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
@@ -69,12 +70,12 @@ class SessionQuerySpendTest {
     private suspend fun fixture(
         entries: List<LockfileEntry>,
         bindProjectId: String = "p",
-    ): Triple<SqlDelightSessionStore, SqlDelightProjectStore, SessionId> {
+    ): Triple<SqlDelightSessionStore, FileProjectStore, SessionId> {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         TaleviaDb.Schema.create(driver)
         val db = TaleviaDb(driver)
         val sessions = SqlDelightSessionStore(db, EventBus())
-        val projects = SqlDelightProjectStore(db)
+        val projects = ProjectStoreTestKit.create()
         val pid = ProjectId(bindProjectId)
         projects.upsert(
             "demo",

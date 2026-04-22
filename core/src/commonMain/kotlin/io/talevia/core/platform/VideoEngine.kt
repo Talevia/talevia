@@ -20,8 +20,20 @@ interface VideoEngine {
     /** Inspect a media file and return its metadata. */
     suspend fun probe(source: MediaSource): MediaMetadata
 
-    /** Render the [timeline] into [output]; emit progress events as work proceeds. */
-    fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress>
+    /**
+     * Render the [timeline] into [output]; emit progress events as work proceeds.
+     *
+     * Optional [resolver] overrides any [MediaPathResolver] the engine was constructed with.
+     * `ExportTool` passes a per-project [io.talevia.core.platform.BundleMediaPathResolver]
+     * here so AIGC + bundle assets resolve relative to the loaded bundle's root rather
+     * than via a global asset pool. Tests / standalone callers can pass `null` and rely
+     * on whatever resolver the engine carries.
+     */
+    fun render(
+        timeline: Timeline,
+        output: OutputSpec,
+        resolver: MediaPathResolver? = null,
+    ): Flow<RenderProgress>
 
     /** Generate a single-frame thumbnail at [time]. Returns PNG bytes. */
     suspend fun thumbnail(asset: AssetId, source: MediaSource, time: kotlin.time.Duration): ByteArray
@@ -65,6 +77,7 @@ interface VideoEngine {
         fades: TransitionFades?,
         output: OutputSpec,
         mezzaninePath: String,
+        resolver: MediaPathResolver? = null,
     ): Unit = throw UnsupportedOperationException(
         "renderClip not supported by ${this::class.simpleName} (supportsPerClipCache=$supportsPerClipCache)",
     )

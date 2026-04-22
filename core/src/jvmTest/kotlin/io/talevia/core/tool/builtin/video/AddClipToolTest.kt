@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
@@ -8,12 +7,12 @@ import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
@@ -31,7 +30,7 @@ import kotlin.time.Duration.Companion.seconds
 class AddClipToolTest {
 
     private data class Rig(
-        val store: SqlDelightProjectStore,
+        val store: FileProjectStore,
         val media: InMemoryMediaStorage,
         val tool: AddClipTool,
         val ctx: ToolContext,
@@ -39,10 +38,7 @@ class AddClipToolTest {
     )
 
     private suspend fun newRig(project: Project): Rig {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val db = TaleviaDb(driver)
-        val store = SqlDelightProjectStore(db)
+        val store = ProjectStoreTestKit.create()
         val media = InMemoryMediaStorage()
         val tool = AddClipTool(store, media)
         val ctx = ToolContext(

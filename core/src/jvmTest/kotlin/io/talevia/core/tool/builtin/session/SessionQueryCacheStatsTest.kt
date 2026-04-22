@@ -9,7 +9,8 @@ import io.talevia.core.SessionId
 import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.FileProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
@@ -49,13 +50,13 @@ class SessionQueryCacheStatsTest {
     private suspend fun fixture(
         messages: List<Pair<String, TokenUsage>>,
         sessionIdValue: String = "s-cache",
-    ): Triple<SqlDelightSessionStore, SqlDelightProjectStore, SessionId> {
+    ): Triple<SqlDelightSessionStore, FileProjectStore, SessionId> {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         TaleviaDb.Schema.create(driver)
         val db = TaleviaDb(driver)
         val bus = EventBus()
         val sessions = SqlDelightSessionStore(db, bus)
-        val projects = SqlDelightProjectStore(db)
+        val projects = ProjectStoreTestKit.create()
         val sid = SessionId(sessionIdValue)
         sessions.createSession(
             Session(
@@ -92,7 +93,7 @@ class SessionQueryCacheStatsTest {
         return Triple(sessions, projects, sid)
     }
 
-    private fun tool(sessions: SqlDelightSessionStore, projects: SqlDelightProjectStore): SessionQueryTool {
+    private fun tool(sessions: SqlDelightSessionStore, projects: FileProjectStore): SessionQueryTool {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         return SessionQueryTool(sessions, AgentRunStateTracker(EventBus(), scope), projects)
     }

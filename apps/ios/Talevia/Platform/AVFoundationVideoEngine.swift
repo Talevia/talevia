@@ -741,22 +741,31 @@ final class AVFoundationVideoEngine: NSObject, VideoEngine {
     }
     // swiftlint:enable identifier_name
 
-    func render(timeline: Timeline, output: OutputSpec) -> SkieSwiftFlow<any RenderProgress> {
+    func render(
+        timeline: Timeline,
+        output: OutputSpec,
+        resolver: (any MediaPathResolver)?
+    ) -> SkieSwiftFlow<any RenderProgress> {
         let jobId = UUID().uuidString
         let adapter = SwiftRenderFlowAdapter()
         _ = adapter.tryEmit(event: RenderProgressStarted(jobId: jobId))
 
+        // Per-render resolver override falls back to the engine-scope resolver
+        // wired at construction time. ExportTool passes a per-project
+        // BundleMediaPathResolver here so AIGC + bundle assets resolve against
+        // the loaded bundle's root.
+        let effectiveResolver = resolver ?? self.resolver
+
         // The Kotlin-side Flow returned by `adapter.asFlow()` is cold and
         // doesn't hold work on its own — we kick off the export in a detached
         // Task and push events into the adapter from there.
-        let resolver = self.resolver
         Task.detached {
             do {
                 try await runExport(
                     timeline: timeline,
                     output: output,
                     jobId: jobId,
-                    resolver: resolver,
+                    resolver: effectiveResolver,
                     adapter: adapter
                 )
             } catch {

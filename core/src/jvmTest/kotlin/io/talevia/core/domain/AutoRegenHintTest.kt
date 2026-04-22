@@ -1,12 +1,11 @@
 package io.talevia.core.domain
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.ClipId
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.domain.source.SourceNode
 import io.talevia.core.domain.source.SourceRef
@@ -55,9 +54,7 @@ class AutoRegenHintTest {
     }
 
     @Test fun returnsNonNullHintWithCountAfterSourceEdit() = runTest {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p-hint")
         val asset = AssetId("img-1")
 
@@ -118,9 +115,7 @@ class AutoRegenHintTest {
     @Test fun hintCountMatchesStaleDetectorCount() = runTest {
         // Two clips bound to different nodes; edit one node — only that
         // clip is stale — hint count should be 1, not 2.
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p-multi")
         val a = AssetId("img-a")
         val b = AssetId("img-b")

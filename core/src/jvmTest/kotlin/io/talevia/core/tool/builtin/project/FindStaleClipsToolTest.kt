@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.project
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
@@ -10,10 +9,10 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
@@ -52,11 +51,7 @@ class FindStaleClipsToolTest {
         messages = emptyList(),
     )
 
-    private fun newStore(): Pair<SqlDelightProjectStore, JdbcSqliteDriver> {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        return SqlDelightProjectStore(TaleviaDb(driver)) to driver
-    }
+    private fun newStore(): FileProjectStore = ProjectStoreTestKit.create()
 
     private fun videoClip(id: String, asset: AssetId, binding: Set<SourceNodeId> = emptySet()): Clip.Video =
         Clip.Video(
@@ -68,7 +63,7 @@ class FindStaleClipsToolTest {
         )
 
     private suspend fun seedProjectWithClip(
-        store: SqlDelightProjectStore,
+        store: FileProjectStore,
         projectId: ProjectId,
         clip: Clip.Video,
     ) {
@@ -90,7 +85,7 @@ class FindStaleClipsToolTest {
         )
 
     private suspend fun appendLockfile(
-        store: SqlDelightProjectStore,
+        store: FileProjectStore,
         projectId: ProjectId,
         entry: LockfileEntry,
     ) {
@@ -98,7 +93,7 @@ class FindStaleClipsToolTest {
     }
 
     @Test fun freshProjectReportsZeroStale() = runTest {
-        val (store, _) = newStore()
+        val store = newStore()
         val pid = ProjectId("p-fresh")
         val asset = AssetId("a-1")
         seedProjectWithClip(store, pid, videoClip("c-1", asset))
@@ -130,7 +125,7 @@ class FindStaleClipsToolTest {
     }
 
     @Test fun characterEditFlagsBoundClip() = runTest {
-        val (store, _) = newStore()
+        val store = newStore()
         val pid = ProjectId("p-stale")
         val asset = AssetId("a-1")
         seedProjectWithClip(store, pid, videoClip("c-1", asset))
@@ -176,7 +171,7 @@ class FindStaleClipsToolTest {
     }
 
     @Test fun reportsOnlyTheBoundNodesThatChanged() = runTest {
-        val (store, _) = newStore()
+        val store = newStore()
         val pid = ProjectId("p-multi")
         val asset = AssetId("a-1")
         seedProjectWithClip(store, pid, videoClip("c-1", asset))
@@ -226,7 +221,7 @@ class FindStaleClipsToolTest {
     }
 
     @Test fun legacyEntryWithoutSnapshotIsSkipped() = runTest {
-        val (store, _) = newStore()
+        val store = newStore()
         val pid = ProjectId("p-legacy")
         val asset = AssetId("a-1")
         seedProjectWithClip(store, pid, videoClip("c-1", asset))
@@ -269,7 +264,7 @@ class FindStaleClipsToolTest {
     }
 
     @Test fun importedClipWithoutLockfileEntryIsSkipped() = runTest {
-        val (store, _) = newStore()
+        val store = newStore()
         val pid = ProjectId("p-imported")
         val asset = AssetId("a-imported")
         seedProjectWithClip(store, pid, videoClip("c-1", asset))
@@ -286,7 +281,7 @@ class FindStaleClipsToolTest {
     }
 
     @Test fun emptyLockfileShortCircuits() = runTest {
-        val (store, _) = newStore()
+        val store = newStore()
         val pid = ProjectId("p-empty")
         store.upsert("demo", Project(id = pid, timeline = Timeline()))
 
@@ -304,7 +299,7 @@ class FindStaleClipsToolTest {
      * id for further assertions.
      */
     private suspend fun seedManyStale(
-        store: SqlDelightProjectStore,
+        store: FileProjectStore,
         pid: ProjectId,
         clipCount: Int,
     ) {
@@ -359,7 +354,7 @@ class FindStaleClipsToolTest {
     }
 
     @Test fun limitCapsReportsButKeepsTrueStaleCount() = runTest {
-        val (store, _) = newStore()
+        val store = newStore()
         val pid = ProjectId("p-capped")
         seedManyStale(store, pid, clipCount = 12)
 
@@ -374,7 +369,7 @@ class FindStaleClipsToolTest {
     }
 
     @Test fun reportOrderIsDeterministicAcrossCalls() = runTest {
-        val (store, _) = newStore()
+        val store = newStore()
         val pid = ProjectId("p-ordered")
         seedManyStale(store, pid, clipCount = 8)
 
@@ -388,7 +383,7 @@ class FindStaleClipsToolTest {
     }
 
     @Test fun omittedLimitFallsBackToDefault50() = runTest {
-        val (store, _) = newStore()
+        val store = newStore()
         val pid = ProjectId("p-default")
         // 60 stale clips > default cap of 50.
         seedManyStale(store, pid, clipCount = 60)

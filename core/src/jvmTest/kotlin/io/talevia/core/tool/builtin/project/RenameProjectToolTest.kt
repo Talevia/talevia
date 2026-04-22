@@ -1,13 +1,12 @@
 package io.talevia.core.tool.builtin.project
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
-import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
@@ -28,10 +27,8 @@ class RenameProjectToolTest {
         messages = emptyList(),
     )
 
-    private fun fixture(title: String = "Original"): Triple<SqlDelightProjectStore, ProjectId, Project> {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+    private fun fixture(title: String = "Original"): Triple<FileProjectStore, ProjectId, Project> {
+        val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p-1")
         val project = Project(id = pid, timeline = Timeline())
         return Triple(store, pid, project).also {

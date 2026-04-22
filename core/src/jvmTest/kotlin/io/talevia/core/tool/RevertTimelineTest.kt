@@ -11,7 +11,7 @@ import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.AllowAllPermissionService
 import io.talevia.core.platform.InMemoryMediaStorage
@@ -40,7 +40,7 @@ class RevertTimelineTest {
         val db = TaleviaDb(driver)
         val bus = EventBus()
         val sessions = SqlDelightSessionStore(db, bus)
-        val projects = SqlDelightProjectStore(db)
+        val projects = ProjectStoreTestKit.create()
         val media = InMemoryMediaStorage()
         val perms = AllowAllPermissionService()
 
@@ -104,7 +104,7 @@ class RevertTimelineTest {
         val db = TaleviaDb(driver)
         val bus = EventBus()
         val sessions = SqlDelightSessionStore(db, bus)
-        val projects = SqlDelightProjectStore(db)
+        val projects = ProjectStoreTestKit.create()
         val media = InMemoryMediaStorage()
         val perms = AllowAllPermissionService()
 

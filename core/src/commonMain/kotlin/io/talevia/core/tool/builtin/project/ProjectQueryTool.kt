@@ -179,7 +179,7 @@ class ProjectQueryTool(
         val firstClipStartSeconds: Double? = null,
         val lastClipEndSeconds: Double? = null,
         val spanSeconds: Double? = null,
-        /** Stamped by [io.talevia.core.domain.SqlDelightProjectStore]; null on pre-recency blobs. */
+        /** Stamped by [io.talevia.core.domain.FileProjectStore]; null on pre-recency blobs. */
         val updatedAtEpochMs: Long? = null,
     )
 
@@ -200,7 +200,7 @@ class ProjectQueryTool(
         val fadeOutSeconds: Float? = null,
         val textPreview: String? = null,
         val sourceBindingNodeIds: List<String> = emptyList(),
-        /** Stamped by [io.talevia.core.domain.SqlDelightProjectStore]; null on pre-recency blobs. */
+        /** Stamped by [io.talevia.core.domain.FileProjectStore]; null on pre-recency blobs. */
         val updatedAtEpochMs: Long? = null,
     )
 
@@ -214,7 +214,7 @@ class ProjectQueryTool(
         val hasAudioTrack: Boolean,
         val sourceKind: String,
         val inUseByClips: Int,
-        /** Stamped by [io.talevia.core.domain.SqlDelightProjectStore]; null on pre-recency blobs. */
+        /** Stamped by [io.talevia.core.domain.FileProjectStore]; null on pre-recency blobs. */
         val updatedAtEpochMs: Long? = null,
     )
 

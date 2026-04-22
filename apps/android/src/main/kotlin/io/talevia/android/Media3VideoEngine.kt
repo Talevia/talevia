@@ -99,7 +99,12 @@ class Media3VideoEngine(
         }
     }
 
-    override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> = callbackFlow {
+    override fun render(
+        timeline: Timeline,
+        output: OutputSpec,
+        resolver: MediaPathResolver?,
+    ): Flow<RenderProgress> = callbackFlow {
+        val effectiveResolver = resolver ?: pathResolver
         val jobId = UUID.randomUUID().toString()
         trySend(RenderProgress.Started(jobId))
 
@@ -119,7 +124,7 @@ class Media3VideoEngine(
         videoClips.forEach { c ->
             c.filters.forEach { f ->
                 val aid = f.assetId
-                if (aid != null) filterAssetPaths.getOrPut(aid.value) { pathResolver.resolve(aid) }
+                if (aid != null) filterAssetPaths.getOrPut(aid.value) { effectiveResolver.resolve(aid) }
             }
         }
         val lutCache = mutableMapOf<String, SingleColorLut>()
@@ -127,7 +132,7 @@ class Media3VideoEngine(
         val transitionFades = transitionFadesFor(timeline, videoClips)
 
         val items = videoClips.map { c ->
-            val resolvedPath = pathResolver.resolve(c.assetId)
+            val resolvedPath = effectiveResolver.resolve(c.assetId)
             val mediaItem = MediaItem.Builder()
                 .setUri(Uri.parse("file://$resolvedPath"))
                 .setClippingConfiguration(
@@ -224,6 +229,14 @@ class Media3VideoEngine(
             "content" -> source.value
             else -> error("Unknown platform scheme: ${source.scheme}")
         }
+        // TODO(file-bundle-migration): BundleFile resolution requires the
+        // per-render BundleMediaPathResolver — sourceToPath() is called from
+        // probe() / extractFrame() paths that don't have one yet. The render
+        // path already routes through pathResolver so it's covered.
+        is MediaSource.BundleFile -> error(
+            "BundleFile sources require a per-render BundleMediaPathResolver; " +
+                "Media3VideoEngine.sourceToPath() does not have one in this code path",
+        )
     }
 
     private fun videoClips(t: Timeline): List<Clip.Video> = t.tracks.filterIsInstance<Track.Video>()

@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.source
 
-import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
@@ -10,10 +9,10 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
@@ -49,10 +48,8 @@ class SourceQueryDotTest {
     private suspend fun fixture(
         nodes: List<SourceNode> = emptyList(),
         clips: List<Clip.Video> = emptyList(),
-    ): Triple<SqlDelightProjectStore, ToolContext, ProjectId> {
-        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
-        TaleviaDb.Schema.create(driver)
-        val store = SqlDelightProjectStore(TaleviaDb(driver))
+    ): Triple<FileProjectStore, ToolContext, ProjectId> {
+        val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p-dot")
         val timeline = if (clips.isEmpty()) {
             Timeline()
@@ -94,7 +91,7 @@ class SourceQueryDotTest {
             out.rows,
         ).single()
 
-    private suspend fun run(store: SqlDelightProjectStore, ctx: ToolContext, pid: ProjectId): SourceQueryTool.Output {
+    private suspend fun run(store: FileProjectStore, ctx: ToolContext, pid: ProjectId): SourceQueryTool.Output {
         val tool = SourceQueryTool(store)
         return tool.execute(
             SourceQueryTool.Input(select = "dot", projectId = pid.value),
