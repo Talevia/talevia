@@ -19,4 +19,3 @@
 
 ## P2 — 记债 / 观望
 
-- **debt-fold-list-project-snapshots** — `ListProjectSnapshotsTool` 是 `project_query` 之外唯一还单独存在的 list_* 工具。**方向：** 加 `project_query(select=snapshots)`，删 `ListProjectSnapshotsTool.kt`。Rubric 外 / debt。
