@@ -521,4 +521,191 @@ class SessionQueryToolTest {
         }
         assertTrue(ex.message!!.contains("requires sessionId"), ex.message)
     }
+
+    // -------- select=session_metadata (absorbed describe_session) --------
+
+    @Test fun sessionMetadataReturnsCountsAndTotals() = runTest {
+        val rig = rig()
+        seedSession(rig.store, "sm1", projectId = "proj-x", updatedAtEpochMs = 1_700_000_100_000L)
+        addUserMessage(rig.store, "sm1", "u1", epochMs = 1_700_000_120_000L)
+        addAssistantMessage(
+            rig.store,
+            "sm1",
+            "a1",
+            parentId = "u1",
+            tokensIn = 30,
+            tokensOut = 50,
+            epochMs = 1_700_000_140_000L,
+        )
+        addUserMessage(rig.store, "sm1", "u2", epochMs = 1_700_000_150_000L)
+        addAssistantMessage(
+            rig.store,
+            "sm1",
+            "a2",
+            parentId = "u2",
+            tokensIn = 15,
+            tokensOut = 25,
+            epochMs = 1_700_000_160_000L,
+        )
+
+        val out = SessionQueryTool(rig.store).execute(
+            SessionQueryTool.Input(select = "session_metadata", sessionId = "sm1"),
+            rig.ctx,
+        ).data
+        assertEquals("session_metadata", out.select)
+        assertEquals(1, out.total)
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SessionQueryTool.SessionMetadataRow.serializer()),
+            out.rows,
+        )
+        val r = rows.single()
+        assertEquals("sm1", r.sessionId)
+        assertEquals("proj-x", r.projectId)
+        assertEquals(4, r.messageCount)
+        assertEquals(2, r.userMessageCount)
+        assertEquals(2, r.assistantMessageCount)
+        assertEquals(45L, r.totalTokensInput)
+        assertEquals(75L, r.totalTokensOutput)
+        assertFalse(r.archived)
+        assertFalse(r.hasCompactionPart)
+        assertEquals(1_700_000_160_000L, r.latestMessageAtEpochMs)
+    }
+
+    @Test fun sessionMetadataEmptySessionFallsBackToCreatedAt() = runTest {
+        val rig = rig()
+        seedSession(rig.store, "sm-empty", updatedAtEpochMs = 1_700_000_000_000L)
+        val out = SessionQueryTool(rig.store).execute(
+            SessionQueryTool.Input(select = "session_metadata", sessionId = "sm-empty"),
+            rig.ctx,
+        ).data
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SessionQueryTool.SessionMetadataRow.serializer()),
+            out.rows,
+        )
+        val r = rows.single()
+        assertEquals(0, r.messageCount)
+        // Empty session → latestMessageAt defaults to session.createdAt.
+        assertEquals(1_700_000_000_000L, r.latestMessageAtEpochMs)
+        assertEquals(0L, r.totalTokensInput)
+        assertEquals(0L, r.totalTokensOutput)
+    }
+
+    @Test fun sessionMetadataMissingSessionFailsLoud() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalStateException> {
+            SessionQueryTool(rig.store).execute(
+                SessionQueryTool.Input(select = "session_metadata", sessionId = "no-such"),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("not found"), ex.message)
+    }
+
+    @Test fun sessionMetadataRequiresSessionId() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalStateException> {
+            SessionQueryTool(rig.store).execute(
+                SessionQueryTool.Input(select = "session_metadata"),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("requires sessionId"), ex.message)
+    }
+
+    // -------- select=message (absorbed describe_message) --------
+
+    @Test fun messageDrillDownReturnsRoleAndParts() = runTest {
+        val rig = rig()
+        seedSession(rig.store, "sm-msg")
+        addUserMessage(rig.store, "sm-msg", "u1")
+        val asst = addAssistantMessage(
+            rig.store,
+            "sm-msg",
+            "a1",
+            parentId = "u1",
+            tokensIn = 12,
+            tokensOut = 34,
+            finish = FinishReason.STOP,
+        )
+        // Put a text part and a tool part on the assistant message so the preview
+        // surface is exercised. `upsertPart` both inserts and updates — the session
+        // store uses one verb for both.
+        rig.store.upsertPart(
+            Part.Text(
+                id = PartId("p-text-1"),
+                messageId = asst.id,
+                sessionId = asst.sessionId,
+                createdAt = asst.createdAt,
+                text = "hello world — first part",
+            ),
+        )
+        rig.store.upsertPart(
+            Part.Tool(
+                id = PartId("p-tool-1"),
+                messageId = asst.id,
+                sessionId = asst.sessionId,
+                createdAt = asst.createdAt,
+                toolId = "generate_image",
+                callId = CallId("call-1"),
+                state = ToolState.Completed(
+                    input = kotlinx.serialization.json.JsonObject(emptyMap()),
+                    outputForLlm = "done",
+                    data = kotlinx.serialization.json.JsonObject(emptyMap()),
+                ),
+            ),
+        )
+
+        val out = SessionQueryTool(rig.store).execute(
+            SessionQueryTool.Input(select = "message", messageId = "a1"),
+            rig.ctx,
+        ).data
+        assertEquals("message", out.select)
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SessionQueryTool.MessageDetailRow.serializer()),
+            out.rows,
+        )
+        val r = rows.single()
+        assertEquals("a1", r.messageId)
+        assertEquals("assistant", r.role)
+        assertEquals(12L, r.tokensInput)
+        assertEquals(34L, r.tokensOutput)
+        assertEquals(2, r.partCount)
+        assertTrue(r.parts.any { it.kind == "text" && it.preview.startsWith("hello") })
+        assertTrue(r.parts.any { it.kind == "tool" && it.preview == "generate_image[completed]" })
+    }
+
+    @Test fun messageDrillDownMissingMessageFailsLoud() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalStateException> {
+            SessionQueryTool(rig.store).execute(
+                SessionQueryTool.Input(select = "message", messageId = "nope"),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("not found"), ex.message)
+    }
+
+    @Test fun messageDrillDownRequiresMessageId() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalStateException> {
+            SessionQueryTool(rig.store).execute(
+                SessionQueryTool.Input(select = "message"),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("requires messageId"), ex.message)
+    }
+
+    @Test fun messageIdOnOtherSelectFailsLoud() = runTest {
+        val rig = rig()
+        seedSession(rig.store, "sm-reject")
+        val ex = assertFailsWith<IllegalStateException> {
+            SessionQueryTool(rig.store).execute(
+                // messageId is drill-down-only — applying it to a list query should fail.
+                SessionQueryTool.Input(select = "messages", sessionId = "sm-reject", messageId = "m-oops"),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("messageId"), ex.message)
+    }
 }

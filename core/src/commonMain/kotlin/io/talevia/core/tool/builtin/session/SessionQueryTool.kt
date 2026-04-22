@@ -10,8 +10,10 @@ import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.query.runAncestorsQuery
 import io.talevia.core.tool.builtin.session.query.runCompactionsQuery
 import io.talevia.core.tool.builtin.session.query.runForksQuery
+import io.talevia.core.tool.builtin.session.query.runMessageDetailQuery
 import io.talevia.core.tool.builtin.session.query.runMessagesQuery
 import io.talevia.core.tool.builtin.session.query.runPartsQuery
+import io.talevia.core.tool.builtin.session.query.runSessionMetadataQuery
 import io.talevia.core.tool.builtin.session.query.runSessionsQuery
 import io.talevia.core.tool.builtin.session.query.runStatusQuery
 import io.talevia.core.tool.builtin.session.query.runToolCallsQuery
@@ -82,6 +84,12 @@ class SessionQueryTool(
         val includeCompacted: Boolean? = null,
         /** Filter tool parts by toolId (e.g. `"generate_image"`). `select=tool_calls` only. */
         val toolId: String? = null,
+        /**
+         * Message id for drill-down. Required for `select=message` (the
+         * singular describe-verb replacing the old `describe_message` tool),
+         * rejected elsewhere.
+         */
+        val messageId: String? = null,
         /** Post-filter cap. Default 100, clamped to `[1, 1000]`. */
         val limit: Int? = null,
         /** Skip the first N rows after filter+sort. Default 0. */
@@ -178,6 +186,71 @@ class SessionQueryTool(
         val compactedAtEpochMs: Long,
     )
 
+    /**
+     * `select=message` — one row per drilled message with metadata + part
+     * previews. Replaces the deleted `describe_message` tool. Preview
+     * strategy matches the old tool's rendering (text first 80 chars,
+     * tool toolId+state, media assetId, timeline-snapshot clip count,
+     * etc.).
+     */
+    @Serializable data class MessageDetailRow(
+        val messageId: String,
+        val sessionId: String,
+        /** `"user"` | `"assistant"`. */
+        val role: String,
+        val createdAtEpochMs: Long,
+        val modelProviderId: String,
+        val modelId: String,
+        /** User-only; null on assistant rows. */
+        val agent: String? = null,
+        /** Assistant-only; null on user rows. */
+        val parentId: String? = null,
+        val tokensInput: Long? = null,
+        val tokensOutput: Long? = null,
+        val finish: String? = null,
+        val error: String? = null,
+        val partCount: Int,
+        val parts: List<MessagePartSummary>,
+    )
+
+    @Serializable data class MessagePartSummary(
+        val id: String,
+        /** Discriminator matching the `@SerialName` of the `Part` subtype. */
+        val kind: String,
+        val createdAtEpochMs: Long,
+        /** When non-null, this part has been compacted out of the LLM context. */
+        val compactedAtEpochMs: Long? = null,
+        /** Terse human summary, per-kind. */
+        val preview: String,
+    )
+
+    /**
+     * `select=session_metadata` — one row per session with the aggregate
+     * counts the old `describe_session` tool returned (message counts,
+     * summed token usage, compaction / permission-rule presence, latest
+     * message timestamp).
+     */
+    @Serializable data class SessionMetadataRow(
+        val sessionId: String,
+        val projectId: String,
+        val title: String,
+        val parentId: String? = null,
+        val archived: Boolean,
+        val createdAtEpochMs: Long,
+        val updatedAtEpochMs: Long,
+        val latestMessageAtEpochMs: Long,
+        val messageCount: Int,
+        val userMessageCount: Int,
+        val assistantMessageCount: Int,
+        val totalTokensInput: Long,
+        val totalTokensOutput: Long,
+        val totalTokensCacheRead: Long,
+        val totalTokensCacheWrite: Long,
+        val hasCompactionPart: Boolean,
+        val permissionRuleCount: Int,
+        val compactingFromMessageId: String? = null,
+    )
+
     @Serializable data class StatusRow(
         val sessionId: String,
         /** `"idle"` | `"generating"` | `"awaiting_tool"` | `"compacting"` | `"cancelled"` | `"failed"`. */
@@ -228,10 +301,16 @@ class SessionQueryTool(
             "State is one of (idle | generating | " +
             "awaiting_tool | compacting | cancelled | failed). requires sessionId. neverRan=true " +
             "means the tracker has not seen any run on this session yet.\n" +
+            "  • session_metadata — single-row drill-down replacing the old describe_session " +
+            "tool. Returns session metadata + aggregate counts (message counts, summed token " +
+            "usage, compaction presence, permission-rule count, latest-message timestamp). " +
+            "requires sessionId.\n" +
+            "  • message — single-row drill-down replacing the old describe_message tool. " +
+            "Returns message metadata + per-part summaries. requires messageId (rejected " +
+            "elsewhere).\n" +
             "Common: limit (default 100, clamped 1..1000), offset (default 0). Setting a filter " +
             "that doesn't apply to the chosen select fails loud so typos surface instead of silently " +
-            "returning an empty list. Describe-style single-entity drilldown stays in describe_session " +
-            "and describe_message."
+            "returning an empty list."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.read")
@@ -290,6 +369,13 @@ class SessionQueryTool(
                 put("type", "string")
                 put("description", "Filter tool parts by toolId. select=tool_calls only.")
             }
+            putJsonObject("messageId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Message id for drill-down. Required for select=message; rejected elsewhere.",
+                )
+            }
             putJsonObject("limit") {
                 put("type", "integer")
                 put(
@@ -325,6 +411,8 @@ class SessionQueryTool(
             SELECT_TOOL_CALLS -> runToolCallsQuery(sessions, input, limit, offset)
             SELECT_COMPACTIONS -> runCompactionsQuery(sessions, input, limit, offset)
             SELECT_STATUS -> runStatusQuery(sessions, agentStates, input)
+            SELECT_SESSION_METADATA -> runSessionMetadataQuery(sessions, input)
+            SELECT_MESSAGE -> runMessageDetailQuery(sessions, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -350,7 +438,11 @@ class SessionQueryTool(
             if (select != SELECT_TOOL_CALLS && input.toolId != null) {
                 add("toolId (select=tool_calls only)")
             }
-            // sessionId is required for everything except sessions; rejected for sessions.
+            if (select != SELECT_MESSAGE && input.messageId != null) {
+                add("messageId (select=message only)")
+            }
+            // sessionId is required for everything except sessions (and `message`, which
+            // uses messageId for the drill-down); rejected for sessions.
             if (select == SELECT_SESSIONS && input.sessionId != null) {
                 add("sessionId (rejected for select=sessions — use projectId)")
             }
@@ -372,9 +464,12 @@ class SessionQueryTool(
         const val SELECT_TOOL_CALLS = "tool_calls"
         const val SELECT_COMPACTIONS = "compactions"
         const val SELECT_STATUS = "status"
+        const val SELECT_SESSION_METADATA = "session_metadata"
+        const val SELECT_MESSAGE = "message"
         private val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
             SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
+            SELECT_SESSION_METADATA, SELECT_MESSAGE,
         )
 
         private const val DEFAULT_LIMIT = 100

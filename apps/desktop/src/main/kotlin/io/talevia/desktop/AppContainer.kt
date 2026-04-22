@@ -90,8 +90,6 @@ import io.talevia.core.tool.builtin.project.SetOutputProfileTool
 import io.talevia.core.tool.builtin.project.ValidateProjectTool
 import io.talevia.core.tool.builtin.session.ArchiveSessionTool
 import io.talevia.core.tool.builtin.session.DeleteSessionTool
-import io.talevia.core.tool.builtin.session.DescribeMessageTool
-import io.talevia.core.tool.builtin.session.DescribeSessionTool
 import io.talevia.core.tool.builtin.session.EstimateSessionTokensTool
 import io.talevia.core.tool.builtin.session.ExportSessionTool
 import io.talevia.core.tool.builtin.session.ForkSessionTool
@@ -279,10 +277,8 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(io.talevia.core.tool.builtin.meta.EstimateTokensTool())
         register(TodoWriteTool())
         register(SessionQueryTool(sessions, agentStates))
-        register(DescribeSessionTool(sessions))
         register(ExportSessionTool(sessions))
         register(EstimateSessionTokensTool(sessions))
-        register(DescribeMessageTool(sessions))
         register(ForkSessionTool(sessions))
         register(RenameSessionTool(sessions))
         register(SwitchProjectTool(sessions, projects, bus = bus))
