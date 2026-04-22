@@ -27,8 +27,60 @@ interface Tool<I : Any, O : Any> {
     val outputSerializer: KSerializer<O>
     val permission: PermissionSpec
 
+    /**
+     * When this tool should be exposed to the model. Defaults to [ToolApplicability.Always]
+     * so the ~90 existing tools keep compiling without touching a thing. Override to hide
+     * a tool from the LLM's schema bundle when a precondition isn't met — e.g. a timeline
+     * mutator that needs a `currentProjectId` binding to mean anything. Filtering happens
+     * at [ToolRegistry.specs]; dispatch itself still works (a cached spec from a prior
+     * turn remains callable).
+     *
+     * Motivation: a single turn bundles every tool's JSON schema into the provider request,
+     * and at ~100 tools that payload is a non-trivial contributor to TPM usage. Context-aware
+     * filtering lets us trim obviously-inapplicable tools (project mutators pre-bind) without
+     * the brittleness of hand-maintained allowlists in each composition root.
+     */
+    val applicability: ToolApplicability get() = ToolApplicability.Always
+
     suspend fun execute(input: I, ctx: ToolContext): ToolResult<O>
 }
+
+/**
+ * Declares when a [Tool] should appear in the LLM-facing spec bundle.
+ *
+ * Consumers ask via [isAvailable]; [ToolRegistry.specs] passes a [ToolAvailabilityContext]
+ * at request-assembly time. Purely declarative — no side effects, no I/O — so the decision
+ * is safe to recompute per turn.
+ */
+sealed interface ToolApplicability {
+    fun isAvailable(ctx: ToolAvailabilityContext): Boolean
+
+    /** Always visible — the default for tools that work regardless of session state. */
+    object Always : ToolApplicability {
+        override fun isAvailable(ctx: ToolAvailabilityContext): Boolean = true
+    }
+
+    /**
+     * Visible only when the session is bound to a current project. Use for tools whose
+     * only useful projectId is the binding default — exposing them in an unbound session
+     * just lures the model into calling them with a fabricated projectId, failing, and
+     * burning a turn. `list_projects` / `create_project` / `switch_project` must stay
+     * [Always] so the model has a path *to* a binding.
+     */
+    object RequiresProjectBinding : ToolApplicability {
+        override fun isAvailable(ctx: ToolAvailabilityContext): Boolean =
+            ctx.currentProjectId != null
+    }
+}
+
+/**
+ * Minimal snapshot of session state relevant to tool visibility. Intentionally narrow —
+ * only holds what [ToolApplicability] checks actually read — so new predicates extend
+ * this rather than growing [ToolContext].
+ */
+data class ToolAvailabilityContext(
+    val currentProjectId: io.talevia.core.ProjectId?,
+)
 
 class ToolContext(
     val sessionId: SessionId,

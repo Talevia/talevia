@@ -23,13 +23,30 @@ class ToolRegistry {
 
     fun all(): List<RegisteredTool> = tools.values.toList()
 
+    /**
+     * Unfiltered spec bundle — every registered tool. Kept for back-compat with callers
+     * that don't have (or don't care about) session state; [specs] with a
+     * [ToolAvailabilityContext] is the preferred entry point for the agent loop.
+     */
     fun specs(): List<ToolSpec> = tools.values.map { it.spec }
+
+    /**
+     * Context-filtered spec bundle — drops tools whose [Tool.applicability] is unavailable
+     * under [ctx]. AgentTurnExecutor calls this per turn so an unbound session doesn't
+     * ship ~dozens of project-scoped tool schemas to the provider. Order is preserved.
+     */
+    fun specs(ctx: ToolAvailabilityContext): List<ToolSpec> =
+        tools.values.asSequence()
+            .filter { it.applicability.isAvailable(ctx) }
+            .map { it.spec }
+            .toList()
 }
 
 class RegisteredTool internal constructor(private val tool: Tool<*, *>) {
     val id: String get() = tool.id
     val helpText: String get() = tool.helpText
     val permission get() = tool.permission
+    val applicability: ToolApplicability get() = tool.applicability
 
     val spec: ToolSpec by lazy { ToolSpec(tool.id, tool.helpText, tool.inputSchema) }
 

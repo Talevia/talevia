@@ -23,6 +23,7 @@ import io.talevia.core.session.SessionStore
 import io.talevia.core.session.TokenUsage
 import io.talevia.core.session.ToolState
 import io.talevia.core.tool.RegisteredTool
+import io.talevia.core.tool.ToolAvailabilityContext
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import kotlinx.coroutines.flow.collect
@@ -135,7 +136,7 @@ internal class AgentTurnExecutor(
         val request = LlmRequest(
             model = input.model,
             messages = history,
-            tools = registry.specs(),
+            tools = registry.specs(ToolAvailabilityContext(currentProjectId = currentProjectId)),
             systemPrompt = buildSystemPrompt(systemPrompt, currentProjectId, input.sessionId),
             // Seed the OpenAI cache-routing hint from the session id so every
             // turn in a session hits the same replica — unless the caller
