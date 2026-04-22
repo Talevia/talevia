@@ -109,7 +109,7 @@ class ExportDeterminismTest {
             )
 
             val registry = ToolRegistry().apply {
-                register(ImportMediaTool(media, engine))
+                register(ImportMediaTool(media, engine, projects))
                 register(AddClipTool(projects, media))
                 register(ExportTool(projects, engine))
             }

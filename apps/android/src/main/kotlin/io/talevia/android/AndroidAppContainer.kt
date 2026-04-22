@@ -159,7 +159,7 @@ class AndroidAppContainer(context: Context) {
         register(UnarchiveSessionTool(sessions))
         register(DeleteSessionTool(sessions))
         register(ReadPartTool(sessions))
-        register(ImportMediaTool(media, engine))
+        register(ImportMediaTool(media, engine, projects))
         register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))
         register(ReplaceClipTool(projects, media))

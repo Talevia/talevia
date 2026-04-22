@@ -212,7 +212,7 @@ class M6FeaturesTest {
         val projectId = ProjectId("p-${Clock.System.now().toEpochMilliseconds()}")
         projects.upsert("test", Project(id = projectId, timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P))
         val registry = ToolRegistry().apply {
-            register(ImportMediaTool(media, engine))
+            register(ImportMediaTool(media, engine, projects))
             register(AddClipTool(projects, media))
             register(ApplyFilterTool(projects))
             register(AddSubtitlesTool(projects))

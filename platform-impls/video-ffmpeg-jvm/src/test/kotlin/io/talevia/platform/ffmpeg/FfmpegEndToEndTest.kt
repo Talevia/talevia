@@ -85,7 +85,7 @@ class FfmpegEndToEndTest {
         )
 
         val registry = ToolRegistry().apply {
-            register(ImportMediaTool(media, engine))
+            register(ImportMediaTool(media, engine, projects))
             register(AddClipTool(projects, media))
             register(ExportTool(projects, engine))
         }
@@ -168,7 +168,7 @@ class FfmpegEndToEndTest {
         )
 
         val registry = ToolRegistry().apply {
-            register(ImportMediaTool(media, engine))
+            register(ImportMediaTool(media, engine, projects))
             register(AddClipTool(projects, media))
             register(AddSubtitlesTool(projects))
             register(ExportTool(projects, engine))
@@ -254,7 +254,7 @@ class FfmpegEndToEndTest {
         )
 
         val registry = ToolRegistry().apply {
-            register(ImportMediaTool(media, engine))
+            register(ImportMediaTool(media, engine, projects))
             register(AddClipTool(projects, media))
             register(AddTransitionTool(projects))
             register(ExportTool(projects, engine))
