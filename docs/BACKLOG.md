@@ -23,8 +23,6 @@
 
 - **progressive-export-preview** — `ExportTool.executeRender` 只发 start / complete 两个 `Part.RenderProgress`，长 export 中间没预览。VISION §5.4 "专家路径能中途接管"需要中途 artifact 可看。**方向：** `VideoEngine.render` flow 增加 `ProgressPreview(frameBytes, ratio)` 事件（FFmpeg 用 `-filter_complex showinfo`+每 N 秒 pipe 一张 JPG）；`ExportTool` 转成 `Part.RenderProgress` 的 `thumbnail` 字段更新。Rubric §5.4。
 
-- **agent-run-state-via-session-query** — `BusEvent.AgentRunStateChanged` 已经 publish 所有状态（Generating/AwaitingTool/Compacting/Cancelled/Failed），但 `session_query(select=status)` 只返回"最近一次 state snapshot"。想看"过去 5 分钟进入了几次 Compacting"需要 grep bus log。**方向：** `session_query(select=run_state_history, sessionId, sinceEpochMs?)` 返回时间线（从 agent-states tracker 的环形 buffer 读）。Rubric §5.4 debug。
-
 - **debt-clean-todos** — `grep -rnE 'TODO|FIXME|HACK|XXX' core/src/commonMain/kotlin | wc -l` = 32。没有历史 snapshot 对比，这次 repopulate 把 32 作为 baseline 记录，下一轮 repopulate 比对增量。**方向：** 走读 32 条 TODO，凡能 5 分钟内修的就修，剩余的把未来的 backlog bullet 补上；目标 ≤ 25。Rubric 外 / debt。
 
 - **debt-consolidate-video-duplicate-variants** — `DuplicateClipTool` + `DuplicateTrackTool` 两件套（和 Add/Remove 同形）。**方向：** 评估合为 `duplicate_from_timeline(target="clip"|"track")`；或按先例（divergent Input）保留两件套并在 decision 说明。Rubric 外 / debt。
