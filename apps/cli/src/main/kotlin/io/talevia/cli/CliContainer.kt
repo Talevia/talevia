@@ -181,7 +181,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
     )
 
     val sessions = SqlDelightSessionStore(db, bus)
-    val projects: ProjectStore = SqlDelightProjectStore(db)
+    val projects: ProjectStore = SqlDelightProjectStore(db, bus = bus)
 
     val mediaRootDir: File = env["TALEVIA_MEDIA_DIR"]
         ?.takeIf { it.isNotBlank() }

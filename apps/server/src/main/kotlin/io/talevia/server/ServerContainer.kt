@@ -202,7 +202,7 @@ class ServerContainer(
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
     val sessions: SessionStore = SqlDelightSessionStore(db, bus)
-    val projects: ProjectStore = SqlDelightProjectStore(db)
+    val projects: ProjectStore = SqlDelightProjectStore(db, bus = bus)
     /**
      * When `TALEVIA_MEDIA_DIR` is set we persist the asset catalog to that
      * directory so AssetIds referenced by saved Projects survive restarts.

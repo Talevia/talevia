@@ -64,7 +64,7 @@ final class AppContainer {
         let clock = ClockSystem.shared
         let json = JsonConfig.shared.default
         self.sessions = SqlDelightSessionStore(db: self.db, bus: self.bus, clock: clock, json: json)
-        self.projects = SqlDelightProjectStore(db: self.db, clock: clock, json: json)
+        self.projects = SqlDelightProjectStore(db: self.db, clock: clock, json: json, bus: self.bus)
         self.media = InMemoryMediaStorage()
         self.engine = AVFoundationVideoEngine(resolver: self.media)
         self.blobWriter = IosFileBlobWriter(rootDir: IosFileBlobWriter.defaultRoot())

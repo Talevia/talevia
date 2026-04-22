@@ -124,7 +124,7 @@ class AndroidAppContainer(context: Context) {
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
     val sessions: SessionStore = SqlDelightSessionStore(db, bus)
-    val projects: ProjectStore = SqlDelightProjectStore(db)
+    val projects: ProjectStore = SqlDelightProjectStore(db, bus = bus)
     val media: MediaStorage = AndroidPersistentMediaStorage(
         java.io.File(context.filesDir, "talevia-media"),
     )

@@ -415,6 +415,7 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.SessionCompactionAuto -> "session.compaction.auto"
     is BusEvent.AgentRunStateChanged -> "agent.run.state.changed"
     is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
+    is BusEvent.ProjectValidationWarning -> "project.validation.warning"
 }
 
 @Serializable data class CreateProjectRequest(val title: String)
@@ -484,7 +485,12 @@ private fun defaultModelFor(providerId: String): String = when (providerId) {
 @Serializable
 data class BusEventDto(
     val type: String,
-    val sessionId: String,
+    /**
+     * Non-null for all session-scoped events; null for project-scoped
+     * events like `project.validation.warning` that are emitted outside
+     * any active session (e.g. on project load).
+     */
+    val sessionId: String? = null,
     val messageId: String? = null,
     val partId: String? = null,
     val field: String? = null,
@@ -511,6 +517,8 @@ data class BusEventDto(
     val runState: String? = null,
     /** Message-ish cause; set when `runState == "failed"`. */
     val runStateCause: String? = null,
+    /** Human-readable DAG issues. Set for `project.validation.warning`. */
+    val validationIssues: List<String>? = null,
 ) {
     companion object {
         fun from(e: BusEvent): BusEventDto = when (e) {
@@ -570,6 +578,12 @@ data class BusEventDto(
                 "session.project.binding.changed", e.sessionId.value,
                 projectId = e.newProjectId.value,
                 previousProjectId = e.previousProjectId?.value,
+            )
+            is BusEvent.ProjectValidationWarning -> BusEventDto(
+                "project.validation.warning",
+                sessionId = null,
+                projectId = e.projectId.value,
+                validationIssues = e.issues,
             )
         }
     }

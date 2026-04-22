@@ -181,4 +181,25 @@ sealed interface BusEvent {
         val previousProjectId: ProjectId?,
         val newProjectId: ProjectId,
     ) : SessionEvent
+
+    /**
+     * A project load detected structural issues in its source DAG
+     * (dangling parent refs, parent cycles). Non-throwing warning — the
+     * project is still returned to the caller, but subscribers (UI,
+     * metrics sink, audit log) can surface the issue so it doesn't rot
+     * unnoticed. Emitted by `SqlDelightProjectStore.get` right after the
+     * blob decode on every read; issues are computed via a lightweight
+     * sublsubset of `ValidateProjectTool`'s DAG check (no full
+     * clip/asset/audio validation, see that tool for exhaustive linting).
+     *
+     * Not a [SessionEvent] — validation runs at project load time,
+     * independent of any active session. Each issue in [issues] is a
+     * human-readable message that already includes the offending node id,
+     * matching `Issue.message` shape from `ValidateProjectTool` so UI
+     * consumers can render either source uniformly.
+     */
+    data class ProjectValidationWarning(
+        val projectId: ProjectId,
+        val issues: List<String>,
+    ) : BusEvent
 }

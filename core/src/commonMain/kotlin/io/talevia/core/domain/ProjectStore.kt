@@ -2,9 +2,13 @@ package io.talevia.core.domain
 
 import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
+import io.talevia.core.bus.BusEvent
+import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
+import io.talevia.core.logging.Loggers
+import io.talevia.core.logging.warn
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
@@ -83,7 +87,18 @@ class SqlDelightProjectStore(
     private val db: TaleviaDb,
     private val clock: Clock = Clock.System,
     private val json: Json = JsonConfig.default,
+    /**
+     * Optional event bus. When provided, every successful [get] runs a
+     * lightweight source-DAG validation (dangling parent refs + parent
+     * cycles only — see [ProjectSourceDagValidator]) and publishes
+     * [BusEvent.ProjectValidationWarning] if any issues surface. Null
+     * keeps the store usable in pure-persistence test rigs; five
+     * production AppContainers (CLI / Desktop / Server / Android / iOS)
+     * all pass the app's bus.
+     */
+    private val bus: EventBus? = null,
 ) : ProjectStore {
+    private val logger = Loggers.get("domain.ProjectStore")
     /**
      * Process-scoped Mutex — serialises `mutate` within this JVM. Safe for
      * single-process Desktop / CLI / single-replica server. When multiple JVM
@@ -96,7 +111,35 @@ class SqlDelightProjectStore(
 
     override suspend fun get(id: ProjectId): Project? {
         val row = db.projectsQueries.selectById(id.value).executeAsOneOrNull() ?: return null
-        return assembleProject(row.data_, id)
+        val project = assembleProject(row.data_, id)
+        maybeEmitValidationWarning(project)
+        return project
+    }
+
+    /**
+     * Light-weight auto-validation on every project load: checks only
+     * source-DAG integrity (dangling parents + parent cycles). Full
+     * timeline/asset/audio validation stays in `ValidateProjectTool` —
+     * this is specifically the "silent DAG corruption" signal that
+     * otherwise goes unnoticed until `find_stale_clips` or an export
+     * surfaces it.
+     *
+     * Non-throwing by design: a warning is logged and (when bus is wired)
+     * published as [BusEvent.ProjectValidationWarning]. The project still
+     * returns normally so existing buggy blobs don't become unreadable —
+     * users can run `validate_project` for the full issue list and fix
+     * incrementally.
+     */
+    private suspend fun maybeEmitValidationWarning(project: Project) {
+        val issues = ProjectSourceDagValidator.validate(project.source)
+        if (issues.isEmpty()) return
+        logger.warn(
+            "project ${project.id.value} failed source-DAG validation on load",
+            "projectId" to project.id.value,
+            "issueCount" to issues.size.toString(),
+            "firstIssue" to issues.first(),
+        )
+        bus?.publish(BusEvent.ProjectValidationWarning(project.id, issues))
     }
 
     private fun assembleProject(blobJson: String, id: ProjectId): Project {

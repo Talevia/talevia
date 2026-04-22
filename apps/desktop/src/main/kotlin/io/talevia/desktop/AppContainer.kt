@@ -179,7 +179,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
     )
 
     val sessions = SqlDelightSessionStore(db, bus)
-    val projects: ProjectStore = SqlDelightProjectStore(db)
+    val projects: ProjectStore = SqlDelightProjectStore(db, bus = bus)
     /**
      * Media root dir for both the asset catalog and AIGC blob output. When
      * `TALEVIA_MEDIA_DIR` is set we persist the asset catalog under it (so

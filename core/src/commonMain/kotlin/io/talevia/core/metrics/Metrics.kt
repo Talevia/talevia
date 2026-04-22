@@ -119,6 +119,7 @@ class EventBusMetricsSink(
         is BusEvent.SessionCompactionAuto -> "session.compaction.auto"
         is BusEvent.AgentRunStateChanged -> "agent.run.state.${stateTag(event.state)}"
         is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
+        is BusEvent.ProjectValidationWarning -> "project.validation.warning"
     }
 
     /**
