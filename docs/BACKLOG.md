@@ -17,8 +17,6 @@
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
 
-- **tts-regen-by-language** — `2026-04-21-generate-project-variant.md` 的 extension point：`fork_project(variantSpec)` 目前不处理 `language` 维度，需要显式重算 TTS。用户做「同一 vlog 的西班牙语版」仍需手动重新 `synthesize_speech` 每个 text clip。**方向：** 给 `fork_project.variantSpec` 加 `language: String?`；当 set 时 iterate timeline 的 text clip，每一个 re-dispatch `synthesize_speech` with target language，绑定到 fork 的新 asset。provider 路径 + lockfile 条目照常走。Rubric §5.2 / §5.5。
-
 - **plan-dry-run-before-execute** — 小白路径 §5.4 + 专家路径共生：agent 接到"做个 30s 毕业 vlog"会连跑 10+ 工具，用户没机会中途介入。**方向：** 新增 `plan_next_actions(goalDescription)` —— agent 产出一个「我打算这么做」的 steps 列表（tool name + 关键输入摘要），返回 JSON，不执行。用户看过后可以 approve 整个 plan 或 edit 某步再 `execute_plan(planId)`。Rubric §5.4。
 
 - **project-export-portable-envelope** — session 有 `export_session` + `SessionEnvelope`；project 没有对应的"全部带走"原语。跨机器 / 跨账号移交项目只能 `fork_project` 到新 store，无法脱离 talevia 实例分享 JSON。**方向：** `export_project(projectId) → ProjectEnvelope` 形的 JSON bundle（project blob + snapshots + lockfile entries + source DAG + 所有引用的 assets 的 id-to-inline-spec 映射，不含字节），带 `FORMAT_VERSION`。`import_project` 反向吃。参考 `2026-04-21-session-export-portable-envelope.md`。Rubric §5.1。
