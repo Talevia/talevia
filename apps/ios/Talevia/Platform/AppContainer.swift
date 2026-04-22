@@ -24,6 +24,7 @@ final class AppContainer {
     let media: InMemoryMediaStorage
     let engine: AVFoundationVideoEngine
     let blobWriter: IosFileBlobWriter
+    let proxyGenerator: AVFoundationProxyGenerator
     let permissions: DefaultPermissionService
     let tools: ToolRegistry
 
@@ -70,6 +71,10 @@ final class AppContainer {
         self.media = InMemoryMediaStorage()
         self.engine = AVFoundationVideoEngine(resolver: self.media)
         self.blobWriter = IosFileBlobWriter(rootDir: IosFileBlobWriter.defaultRoot())
+        self.proxyGenerator = AVFoundationProxyGenerator(
+            pathResolver: self.media,
+            proxyDir: AVFoundationProxyGenerator.defaultRoot()
+        )
         self.permissions = DefaultPermissionService(bus: self.bus)
 
         let registry = ToolRegistry()
@@ -92,7 +97,12 @@ final class AppContainer {
         registry.register(tool: UnarchiveSessionTool(sessions: self.sessions, clock: clock))
         registry.register(tool: DeleteSessionTool(sessions: self.sessions))
         registry.register(tool: ReadPartTool(sessions: self.sessions))
-        registry.register(tool: ImportMediaTool(storage: self.media, engine: self.engine))
+        registry.register(tool: ImportMediaTool(
+            storage: self.media,
+            engine: self.engine,
+            projects: self.projects,
+            proxyGenerator: self.proxyGenerator
+        ))
         registry.register(tool: ExtractFrameTool(engine: self.engine, storage: self.media, blobWriter: self.blobWriter))
         registry.register(tool: AddClipTool(store: self.projects, media: self.media))
         registry.register(tool: ReplaceClipTool(store: self.projects, media: self.media))
