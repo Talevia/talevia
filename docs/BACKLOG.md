@@ -25,4 +25,3 @@
 
 - **debt-clean-todos** — `grep -rnE 'TODO|FIXME|HACK|XXX' core/src/commonMain/kotlin | wc -l` = 32。没有历史 snapshot 对比，这次 repopulate 把 32 作为 baseline 记录，下一轮 repopulate 比对增量。**方向：** 走读 32 条 TODO，凡能 5 分钟内修的就修，剩余的把未来的 backlog bullet 补上；目标 ≤ 25。Rubric 外 / debt。
 
-- **debt-consolidate-video-duplicate-variants** — `DuplicateClipTool` + `DuplicateTrackTool` 两件套（和 Add/Remove 同形）。**方向：** 评估合为 `duplicate_from_timeline(target="clip"|"track")`；或按先例（divergent Input）保留两件套并在 decision 说明。Rubric 外 / debt。
