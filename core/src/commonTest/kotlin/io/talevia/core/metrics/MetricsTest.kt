@@ -89,6 +89,49 @@ class MetricsTest {
         job.cancel()
     }
 
+    @Test fun agentRetrySplitsByReasonSlug() = runTest {
+        // Regression guard for the per-reason counter split: ops dashboards
+        // need to distinguish overload / rate_limit / http_5xx / http_429 /
+        // quota / unavailable / other so an operator can tell a provider
+        // outage from user-driven rate-limiting. Summing agent.retry.* still
+        // yields the total retry count.
+        val bus = EventBus()
+        val registry = MetricsRegistry()
+        val job = EventBusMetricsSink(bus, registry).attach(this)
+        runCurrent()
+
+        // Cover every slug category once, plus an "other" fallback.
+        bus.publish(BusEvent.AgentRetryScheduled(sessionId, attempt = 1, waitMs = 100, reason = "Provider is overloaded"))
+        bus.publish(BusEvent.AgentRetryScheduled(sessionId, attempt = 2, waitMs = 200, reason = "Rate limited"))
+        bus.publish(BusEvent.AgentRetryScheduled(sessionId, attempt = 3, waitMs = 300, reason = "too many requests"))
+        bus.publish(BusEvent.AgentRetryScheduled(sessionId, attempt = 4, waitMs = 400, reason = "anthropic HTTP 503: overloaded_error"))
+        bus.publish(BusEvent.AgentRetryScheduled(sessionId, attempt = 5, waitMs = 500, reason = "openai HTTP 429: rate_limit"))
+        bus.publish(BusEvent.AgentRetryScheduled(sessionId, attempt = 6, waitMs = 600, reason = "Provider quota exhausted"))
+        bus.publish(BusEvent.AgentRetryScheduled(sessionId, attempt = 7, waitMs = 700, reason = "Provider unavailable"))
+        bus.publish(BusEvent.AgentRetryScheduled(sessionId, attempt = 8, waitMs = 800, reason = "completely opaque provider hiccup"))
+        advanceUntilIdle()
+
+        // HTTP transport category wins over semantic: 503 body mentions "overloaded"
+        // but the 503 status is what ops needs to see.
+        assertEquals(1L, registry.get("agent.retry.http_5xx"))
+        assertEquals(1L, registry.get("agent.retry.http_429"))
+        assertEquals(1L, registry.get("agent.retry.overload"))
+        // Two rate-limit-family messages: "Rate limited" + "too many requests".
+        assertEquals(2L, registry.get("agent.retry.rate_limit"))
+        assertEquals(1L, registry.get("agent.retry.quota_exhausted"))
+        assertEquals(1L, registry.get("agent.retry.unavailable"))
+        assertEquals(1L, registry.get("agent.retry.other"))
+
+        // The legacy "agent.retry.scheduled" counter no longer exists; summing the
+        // family gives the total (8 retries).
+        val total = registry.snapshot().entries
+            .filter { it.key.startsWith("agent.retry.") }
+            .sumOf { it.value }
+        assertEquals(8L, total)
+
+        job.cancel()
+    }
+
     @Test fun publishBeforeSubscribeIsDropped() = runTest {
         // Regression guard: if the sink Job hasn't started collecting yet,
         // SharedFlow with replay=0 drops the emission. Callers must wait for

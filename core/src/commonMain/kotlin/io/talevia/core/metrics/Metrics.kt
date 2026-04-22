@@ -115,10 +115,45 @@ class EventBusMetricsSink(
             if (event.accepted) "permission.granted" else "permission.rejected"
         is BusEvent.AgentRunFailed -> "agent.run.failed"
         is BusEvent.SessionCancelled -> "session.cancelled"
-        is BusEvent.AgentRetryScheduled -> "agent.retry.scheduled"
+        is BusEvent.AgentRetryScheduled -> "agent.retry.${retryReasonSlug(event.reason)}"
         is BusEvent.SessionCompactionAuto -> "session.compaction.auto"
         is BusEvent.AgentRunStateChanged -> "agent.run.state.${stateTag(event.state)}"
         is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
+    }
+
+    /**
+     * Classify `BusEvent.AgentRetryScheduled.reason` (free-form, produced by
+     * [io.talevia.core.agent.RetryClassifier]) into one of a small fixed set
+     * of slugs so the counter has bounded cardinality. Every retry still
+     * increments **exactly one** `agent.retry.<slug>` counter. Unknown /
+     * arbitrary messages (e.g. provider-formatted HTTP errors that didn't
+     * match a known pattern) fall into `other` — the Prometheus scrape can
+     * still aggregate "all retries" by summing the `agent.retry.*` family.
+     *
+     * Intentionally written as a cascade so the most specific match wins:
+     * an HTTP 503 with "overloaded" in the body is classified `http_5xx`
+     * (transport category) over `overload` (semantic category) because the
+     * transport signal is the actionable one for ops.
+     */
+    internal fun retryReasonSlug(reason: String): String {
+        val lower = reason.lowercase()
+        // HTTP status codes embedded in the provider-formatted message.
+        val httpStatus = Regex("""http\s+(\d{3})""").find(lower)
+            ?.groupValues?.get(1)?.toIntOrNull()
+        if (httpStatus != null) {
+            return when {
+                httpStatus == 429 -> "http_429"
+                httpStatus in 500..599 -> "http_5xx"
+                else -> "http_${httpStatus}"
+            }
+        }
+        return when {
+            "overload" in lower -> "overload"
+            "rate limit" in lower || "rate_limit" in lower || "too many" in lower -> "rate_limit"
+            "quota" in lower || "exhausted" in lower -> "quota_exhausted"
+            "unavailable" in lower -> "unavailable"
+            else -> "other"
+        }
     }
 
     private fun stateTag(state: io.talevia.core.agent.AgentRunState): String = when (state) {
