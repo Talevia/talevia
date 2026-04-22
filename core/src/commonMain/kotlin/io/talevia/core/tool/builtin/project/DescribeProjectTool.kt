@@ -63,6 +63,18 @@ class DescribeProjectTool(
         val audioCodec: String,
     )
 
+    /**
+     * Compact descriptor for a `ProjectSnapshot`, folded into [Output.recentSnapshots]
+     * so UI / agent can render a "last N save points" strip without a follow-up
+     * `list_project_snapshots` round-trip. Full snapshot payload + body remain
+     * reachable via `restore_project_snapshot` / `list_project_snapshots`.
+     */
+    @Serializable data class SnapshotSummary(
+        val id: String,
+        val label: String,
+        val capturedAtEpochMs: Long,
+    )
+
     @Serializable data class Output(
         val projectId: String,
         val title: String,
@@ -83,6 +95,14 @@ class DescribeProjectTool(
         /** Sparse — only the toolIds that actually appear, sorted alphabetically. */
         val lockfileByTool: Map<String, Int>,
         val snapshotCount: Int,
+        /**
+         * Up to [MAX_RECENT_SNAPSHOTS] most-recent snapshots, newest first
+         * (by [ProjectSnapshot.capturedAtEpochMs] DESC). Empty when the project
+         * has no snapshots. Full list remains reachable via
+         * `list_project_snapshots`; this is the UI/agent "last saves at a glance"
+         * strip. Default `emptyList()` keeps legacy Output JSON forward-compatible.
+         */
+        val recentSnapshots: List<SnapshotSummary> = emptyList(),
         /** Non-null only when the profile differs from [OutputProfile.DEFAULT_1080P]. */
         val outputProfile: ProfileSummary?,
         /** Pre-rendered ~300-char human summary, LLM-quotable verbatim. */
@@ -188,6 +208,14 @@ class DescribeProjectTool(
             )
         }
 
+        // Recent snapshots, newest first. `sortedByDescending` is stable in
+        // commonMain. Capped at MAX_RECENT_SNAPSHOTS so the output stays small
+        // even on projects with hundreds of save points.
+        val recentSnapshots: List<SnapshotSummary> = project.snapshots
+            .sortedByDescending { it.capturedAtEpochMs }
+            .take(MAX_RECENT_SNAPSHOTS)
+            .map { SnapshotSummary(it.id.value, it.label, it.capturedAtEpochMs) }
+
         val durationSeconds = project.timeline.duration.inWholeMilliseconds / 1000.0
         val summaryText = renderSummary(
             title = meta.title,
@@ -218,6 +246,7 @@ class DescribeProjectTool(
             lockfileEntryCount = project.lockfile.entries.size,
             lockfileByTool = lockfileByTool,
             snapshotCount = project.snapshots.size,
+            recentSnapshots = recentSnapshots,
             outputProfile = profileSummary,
             summaryText = summaryText,
         )
@@ -268,6 +297,17 @@ class DescribeProjectTool(
             "$trackCount tracks ($tracksFragment), " +
             "$clipCount clips totaling ${formatSeconds(durationSeconds)}s, " +
             "$sourceFragment, $lockfileFragment, $snapshotCount snapshots."
+    }
+
+    companion object {
+        /**
+         * Cap on `Output.recentSnapshots`. 5 is wide enough to cover typical
+         * "last few saves" UX, narrow enough to keep the describe payload small
+         * (each summary is ~50 bytes). Projects with more than 5 snapshots still
+         * see `snapshotCount` == full count; the rest reach via
+         * `list_project_snapshots`.
+         */
+        const val MAX_RECENT_SNAPSHOTS: Int = 5
     }
 
     private fun formatSeconds(seconds: Double): String {

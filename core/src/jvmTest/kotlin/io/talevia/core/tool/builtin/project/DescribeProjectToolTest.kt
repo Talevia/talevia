@@ -264,6 +264,49 @@ class DescribeProjectToolTest {
 
         assertEquals(3, out.snapshotCount)
         assertTrue(out.summaryText.contains("3 snapshots"), out.summaryText)
+        // Recent snapshots: newest first by capturedAt.
+        assertEquals(listOf("s3", "s2", "s1"), out.recentSnapshots.map { it.id })
+        assertEquals(listOf("v3", "v2", "v1"), out.recentSnapshots.map { it.label })
+        assertEquals(listOf(3_000L, 2_000L, 1_000L), out.recentSnapshots.map { it.capturedAtEpochMs })
+    }
+
+    @Test fun recentSnapshotsEmptyWhenNoSnapshots() = runTest {
+        val rig = rig()
+        rig.store.upsert("nosnap", Project(id = ProjectId("nosnap"), timeline = Timeline()))
+        val out = DescribeProjectTool(rig.store).execute(
+            DescribeProjectTool.Input(projectId = "nosnap"),
+            rig.ctx,
+        ).data
+        assertEquals(0, out.snapshotCount)
+        assertTrue(out.recentSnapshots.isEmpty())
+    }
+
+    @Test fun recentSnapshotsCapsAtFiveOnHighCount() = runTest {
+        // 7 snapshots with out-of-order capturedAt: the cap must keep the 5
+        // most-recent (by time, not by insertion), newest first. Covers the
+        // §3a.9 reverse-sorted edge: insertion order ≠ output order.
+        val rig = rig()
+        val captured = Project(id = ProjectId("cap"), timeline = Timeline())
+        val snaps = listOf(
+            ProjectSnapshot(ProjectSnapshotId("a"), "a", 10L, captured),
+            ProjectSnapshot(ProjectSnapshotId("b"), "b", 70L, captured),
+            ProjectSnapshot(ProjectSnapshotId("c"), "c", 20L, captured),
+            ProjectSnapshot(ProjectSnapshotId("d"), "d", 60L, captured),
+            ProjectSnapshot(ProjectSnapshotId("e"), "e", 30L, captured),
+            ProjectSnapshot(ProjectSnapshotId("f"), "f", 50L, captured),
+            ProjectSnapshot(ProjectSnapshotId("g"), "g", 40L, captured),
+        )
+        rig.store.upsert("cap-test", captured.copy(snapshots = snaps))
+
+        val out = DescribeProjectTool(rig.store).execute(
+            DescribeProjectTool.Input(projectId = "cap"),
+            rig.ctx,
+        ).data
+
+        assertEquals(7, out.snapshotCount)
+        assertEquals(DescribeProjectTool.MAX_RECENT_SNAPSHOTS, out.recentSnapshots.size)
+        // Newest 5: b(70), d(60), f(50), g(40), e(30). Oldest two (a=10, c=20) dropped.
+        assertEquals(listOf("b", "d", "f", "g", "e"), out.recentSnapshots.map { it.id })
     }
 
     @Test fun outputProfileIsNullWhenDefaultAndSetWhenCustom() = runTest {
