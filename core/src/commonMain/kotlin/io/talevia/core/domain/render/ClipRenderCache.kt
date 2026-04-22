@@ -42,6 +42,16 @@ data class ClipRenderCache(
 
     fun append(entry: ClipRenderCacheEntry): ClipRenderCache = copy(entries = entries + entry)
 
+    /**
+     * Keep only entries whose `fingerprint` is in [keep]; drop the rest. Used
+     * by [io.talevia.core.tool.builtin.project.GcClipRenderCacheTool] to prune
+     * policy-selected rows. Preserves append order among survivors so
+     * downstream consumers that rely on `lastOrNull { … }` (the "latest wins"
+     * contract in [findByFingerprint]) keep matching the same entry.
+     */
+    fun retainByFingerprint(keep: Set<String>): ClipRenderCache =
+        copy(entries = entries.filter { it.fingerprint in keep })
+
     companion object {
         val EMPTY: ClipRenderCache = ClipRenderCache()
     }

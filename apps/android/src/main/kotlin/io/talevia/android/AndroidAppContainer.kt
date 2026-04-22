@@ -34,6 +34,7 @@ import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.ExportProjectTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
 import io.talevia.core.tool.builtin.project.ForkProjectTool
+import io.talevia.core.tool.builtin.project.GcClipRenderCacheTool
 import io.talevia.core.tool.builtin.project.GcLockfileTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
 import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
@@ -216,6 +217,7 @@ class AndroidAppContainer(context: Context) {
         register(FindStaleClipsTool(projects))
         register(PruneLockfileTool(projects))
         register(GcLockfileTool(projects))
+        register(GcClipRenderCacheTool(projects, engine))
         register(SetLockfileEntryPinnedTool(projects))
         register(SetClipAssetPinnedTool(projects))
         register(SaveProjectSnapshotTool(projects))

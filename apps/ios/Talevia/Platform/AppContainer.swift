@@ -143,6 +143,7 @@ final class AppContainer {
         registry.register(tool: FindStaleClipsTool(projects: self.projects))
         registry.register(tool: PruneLockfileTool(projects: self.projects))
         registry.register(tool: GcLockfileTool(projects: self.projects, clock: clock))
+        registry.register(tool: GcClipRenderCacheTool(projects: self.projects, engine: self.engine, clock: clock))
         registry.register(tool: SetLockfileEntryPinnedTool(projects: self.projects))
         registry.register(tool: SetClipAssetPinnedTool(projects: self.projects))
         registry.register(tool: SaveProjectSnapshotTool(projects: self.projects, clock: clock))

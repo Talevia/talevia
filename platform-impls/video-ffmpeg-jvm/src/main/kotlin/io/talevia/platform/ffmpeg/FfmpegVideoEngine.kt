@@ -345,6 +345,10 @@ class FfmpegVideoEngine(
         return Files.isRegularFile(p) && Files.size(p) > 0
     }
 
+    override suspend fun deleteMezzanine(path: String): Boolean {
+        return Files.deleteIfExists(java.nio.file.Path.of(path))
+    }
+
     /**
      * Render one [Clip.Video] to [mezzaninePath] as an mp4 encoded at [output]'s
      * profile. Powers [io.talevia.core.tool.builtin.video.ExportTool]'s per-clip

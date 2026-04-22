@@ -84,6 +84,21 @@ interface VideoEngine {
     suspend fun mezzaninePresent(path: String): Boolean = true
 
     /**
+     * Delete a previously-rendered mezzanine at [path]. Called by
+     * [io.talevia.core.tool.builtin.project.GcClipRenderCacheTool] when a cache
+     * entry is being pruned — the engine drops the on-disk mp4 so disk usage
+     * tracks the cache policy. Returns `true` iff a file actually went (the
+     * row count stays honest even when the user already nuked the file).
+     *
+     * Default returns `false` — engines without a per-clip path (Media3,
+     * AVFoundation today) never wrote mezzanines, so there's nothing to
+     * delete. The FFmpeg/JVM impl overrides with `Files.deleteIfExists(path)`.
+     * Errors (permission denied, etc.) bubble up; the caller is expected to
+     * let the tool result carry the per-entry outcome and keep going.
+     */
+    suspend fun deleteMezzanine(path: String): Boolean = false
+
+    /**
      * Stitch pre-rendered mezzanine files (output of [renderClip]) at
      * [mezzaninePaths] into the final export at [output]. Applies [subtitles] as
      * a post-concat drawtext chain (they're timeline-relative so can't be baked
