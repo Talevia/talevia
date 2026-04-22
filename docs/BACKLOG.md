@@ -16,7 +16,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **project-diff-source-graphs** — `DiffProjectsTool` 对比 timeline；source DAG 的 diff（哪些 SourceNode 被加 / 删 / 改）没 entry point。Fork 项目后想看"我动了哪些 source 节点"只能人肉。**方向：** 扩 `diff_projects` 的 Output 加 `sourceAdds / sourceRemoves / sourceModifies`，或单独 `diff_source_graphs(a, b)`；对比口径用 `SourceNode.id` + `contentHash`。Rubric §5.1。
 
 ## P2 — 记债 / 观望
 
