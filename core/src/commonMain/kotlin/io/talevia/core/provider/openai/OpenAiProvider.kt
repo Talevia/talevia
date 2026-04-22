@@ -16,6 +16,8 @@ import io.talevia.core.provider.LlmProvider
 import io.talevia.core.provider.LlmRequest
 import io.talevia.core.provider.ModelInfo
 import io.talevia.core.provider.ReplayFormatting
+import io.talevia.core.provider.TpmThrottle
+import io.talevia.core.provider.estimateRequestTokens
 import io.talevia.core.provider.sseEvents
 import io.talevia.core.session.FinishReason
 import io.talevia.core.session.Message
@@ -56,6 +58,15 @@ class OpenAiProvider(
     private val apiKey: String,
     private val baseUrl: String = "https://api.openai.com",
     private val json: Json = JsonConfig.default,
+    /**
+     * Optional pre-flight TPM guard. When set, every [stream] call reserves the
+     * estimated token cost via [TpmThrottle.acquire] before firing the request,
+     * then settles with the provider-reported usage once it arrives. Leaving it
+     * null preserves the old "fire-and-429-then-back-off" behaviour — composition
+     * roots wire this up when they know the org's TPM limit
+     * (e.g. via `OPENAI_TPM_LIMIT` env var).
+     */
+    private val tpmThrottle: TpmThrottle? = null,
 ) : LlmProvider {
 
     override val id: String = "openai"
@@ -68,6 +79,12 @@ class OpenAiProvider(
 
     override fun stream(request: LlmRequest): Flow<LlmEvent> = channelFlow {
         send(LlmEvent.StepStart)
+
+        // Pre-flight TPM reservation — wait for the sliding window to have room
+        // before firing, so we don't burn a round-trip eating a 429. Settled at
+        // the end with the usage the provider reports; on failure we settle 0
+        // so the window doesn't double-book with the retry.
+        val reservation = tpmThrottle?.acquire(estimateRequestTokens(request))
 
         val body = buildRequestBody(request)
         val encoded = json.encodeToString(JsonElement.serializer(), body)
@@ -214,7 +231,12 @@ class OpenAiProvider(
             }
         }
 
-        if (aborted) return@channelFlow
+        if (aborted) {
+            // Aborted means the provider never reported usage; drop the estimate so the
+            // window doesn't double-book when RetryPolicy fires the next attempt.
+            reservation?.settle(0)
+            return@channelFlow
+        }
 
         textPartId?.let { send(LlmEvent.TextEnd(it, "")) /* delta-summed text already sent */ }
         for ((_, buf) in tools) {
@@ -224,6 +246,11 @@ class OpenAiProvider(
             else runCatching { json.parseToJsonElement(rawArgs) }.getOrElse { JsonObject(emptyMap()) }
             send(LlmEvent.ToolCallReady(buf.partId, callId, buf.name ?: "unknown", parsed))
         }
+
+        // Settle with actuals so the sliding window self-corrects when the estimate missed.
+        // cacheRead tokens are already part of promptTokens (billed at a discount, but the
+        // TPM quota counts them in full on OpenAI), so we use the raw total.
+        reservation?.settle(promptTokens + completionTokens)
 
         send(
             LlmEvent.StepFinish(

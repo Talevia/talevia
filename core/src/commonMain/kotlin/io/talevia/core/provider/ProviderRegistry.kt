@@ -43,11 +43,30 @@ class ProviderRegistry(
                 add(AnthropicProvider(httpClient, apiKey = it))
             }
             env["OPENAI_API_KEY"]?.takeIf { it.isNotBlank() }?.let {
-                add(OpenAiProvider(httpClient, apiKey = it))
+                add(
+                    OpenAiProvider(
+                        httpClient,
+                        apiKey = it,
+                        tpmThrottle = openaiThrottleFrom(env),
+                    ),
+                )
             }
             (env["GEMINI_API_KEY"] ?: env["GOOGLE_API_KEY"])?.takeIf { it.isNotBlank() }?.let {
                 add(GeminiProvider(httpClient, apiKey = it))
             }
+        }
+
+        /**
+         * Construct a [TpmThrottle] from env vars when the org's OpenAI TPM limit is
+         * declared — returns null otherwise, leaving the provider in its original
+         * fire-and-backoff mode. Mostly we read the limit directly
+         * (`OPENAI_TPM_LIMIT=200000`); the buffer ratio knob is available for
+         * accounts with known accounting drift.
+         */
+        private fun openaiThrottleFrom(env: Map<String, String>): io.talevia.core.provider.TpmThrottle? {
+            val limit = env["OPENAI_TPM_LIMIT"]?.toLongOrNull()?.takeIf { it > 0 } ?: return null
+            val buffer = env["OPENAI_TPM_BUFFER_RATIO"]?.toDoubleOrNull()?.takeIf { it in 0.0..1.0 } ?: 0.85
+            return io.talevia.core.provider.TpmThrottle(tpmLimit = limit, bufferRatio = buffer)
         }
 
         /**
