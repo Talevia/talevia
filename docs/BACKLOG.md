@@ -17,8 +17,6 @@
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
 
-- **debt-split-session-query-tool** — `SessionQueryTool.kt` 518 行，R.5 扫描 500-800 区间 → 默认 P1。10 个 select 分支 + 多个 row 数据类，和 ProjectQueryTool 同形。**方向：** 同 `debt-split-project-query-tool`，把 Input / rows / rejectIncompatibleFilters 拆出去，dispatcher 压到 <250 行。Rubric 外 / debt。
-
 - **debt-consolidate-video-apply-variants** — `ApplyFilterTool` + `ApplyLutTool` 两个 tools，都是"给 clip 加一个 effect 属性"，Input 都是 `(clipId, <kind-specific>)`。**方向：** 评估合为 `apply_to_clip(target="filter"|"lut", ...)` 或按 add/remove variants 的先例（divergent Input 保留四件套）在 decision 里说明。Rubric 外 / debt。
 
 - **debt-consolidate-project-snapshot-ops** — `SaveProjectSnapshotTool` + `RestoreProjectSnapshotTool` + `DeleteProjectSnapshotTool` 三件套。**方向：** 评估合为 `snapshot_op(action="save"|"restore"|"delete", ...)`；或按 add/remove-variants 的先例保留三件套并在 decision 里说明。Rubric 外 / debt。
