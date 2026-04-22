@@ -19,8 +19,6 @@
 
 ## P2 — 记债 / 观望
 
-- **audio-waveform-proxy-generator** — `ProxyPurpose.AUDIO_WAVEFORM` enum 存在，`FfmpegProxyGenerator` 只产 thumbnail；audio-only asset 一直没有 proxy，UI 仍然要 decode 原片才能渲染 waveform。跟进 `2026-04-22-asset-proxy-generation.md`。**方向：** `FfmpegProxyGenerator` 检测 audio-only asset，用 `ffmpeg -filter_complex "showwavespic"` 产一张 waveform PNG，填 `ProxyPurpose.AUDIO_WAVEFORM`。Rubric §5.3。
-
 - **auto-generate-proxies-on-import-ios** — iOS `AppContainer.swift` 仍然用 `NoopProxyGenerator`。4K import 在 iOS 上看不到 thumbnail。**方向：** 实现 `AVFoundationProxyGenerator` (AVAssetImageGenerator) 并在 iOS AppContainer 里 wire 进 `ImportMediaTool`。Rubric §5.3 parity。
 
 - **auto-generate-proxies-on-import-android** — 同上，Android `AndroidAppContainer.kt` 仍然 NoopProxyGenerator。**方向：** 用 Media3 `MediaMetadataRetriever.getFrameAtTime` 实现 `Media3ProxyGenerator`；wire 进 `ImportMediaTool`。Rubric §5.3 parity。
