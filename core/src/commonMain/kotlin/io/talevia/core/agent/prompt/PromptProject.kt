@@ -32,7 +32,7 @@ breaks identity.
 snapshots persist across chat sessions and app restarts. Use them at meaningful
 checkpoints: "final cut v1", "before re-color", "approved storyboard". Pass
 `label` for a human handle; omit it to default to the capture timestamp.
-`list_project_snapshots` enumerates the saved snapshots (most recent first) so
+`project_query(select=snapshots)` enumerates the saved snapshots (most recent first) so
 you can pick which one to roll back to. `restore_project_snapshot` rolls the
 project back to the chosen snapshot — it is destructive (asks the user) and
 overwrites the live timeline / source / lockfile, but **preserves the snapshots

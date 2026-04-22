@@ -73,7 +73,6 @@ import io.talevia.core.tool.builtin.project.ForkProjectTool
 import io.talevia.core.tool.builtin.project.GcLockfileTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
 import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
-import io.talevia.core.tool.builtin.project.ListProjectSnapshotsTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
 import io.talevia.core.tool.builtin.project.PruneLockfileTool
@@ -332,7 +331,6 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(SetLockfileEntryPinnedTool(projects))
         register(SetClipAssetPinnedTool(projects))
         register(SaveProjectSnapshotTool(projects))
-        register(ListProjectSnapshotsTool(projects))
         register(RestoreProjectSnapshotTool(projects))
         register(DeleteProjectSnapshotTool(projects))
         register(ForkProjectTool(projects, this))

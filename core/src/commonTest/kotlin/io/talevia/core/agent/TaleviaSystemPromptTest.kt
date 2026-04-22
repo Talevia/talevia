@@ -77,7 +77,7 @@ class TaleviaSystemPromptTest {
         "extract_frame",
         // Project-level named snapshots (VISION §3.4) — survive across chat sessions.
         "save_project_snapshot",
-        "list_project_snapshots",
+        "project_query(select=snapshots)",
         "restore_project_snapshot",
         // Fork — closes the third VISION §3.4 leg ("可分支").
         "fork_project",

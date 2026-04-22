@@ -29,11 +29,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.bus.BusEvent
-import io.talevia.core.tool.builtin.project.ListProjectSnapshotsTool
+import io.talevia.core.tool.builtin.project.ProjectQueryTool
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
@@ -59,21 +61,27 @@ fun SnapshotPanel(
 ) {
     val scope = rememberCoroutineScope()
     val snapshots = remember(projectId) {
-        mutableStateListOf<ListProjectSnapshotsTool.Summary>()
+        mutableStateListOf<ProjectQueryTool.SnapshotRow>()
     }
     var restoring by remember { mutableStateOf<String?>(null) }
 
     suspend fun reload() {
-        val tool = container.tools["list_project_snapshots"] ?: return
+        val tool = container.tools["project_query"] ?: return
         runCatching {
             val result = tool.dispatch(
-                buildJsonObject { put("projectId", projectId.value) },
+                buildJsonObject {
+                    put("projectId", projectId.value)
+                    put("select", "snapshots")
+                },
                 container.uiToolContext(projectId),
             )
-            @Suppress("UNCHECKED_CAST")
-            val data = result.data as? ListProjectSnapshotsTool.Output ?: return
+            val data = result.data as? ProjectQueryTool.Output ?: return
+            val rows = JsonConfig.default.decodeFromJsonElement(
+                ListSerializer(ProjectQueryTool.SnapshotRow.serializer()),
+                data.rows,
+            )
             snapshots.clear()
-            snapshots.addAll(data.snapshots)
+            snapshots.addAll(rows)
         }.onFailure { log += "snapshots load failed: ${friendly(it)}" }
     }
 
@@ -150,7 +158,7 @@ fun SnapshotPanel(
 
 @Composable
 private fun SnapshotRow(
-    snap: ListProjectSnapshotsTool.Summary,
+    snap: ProjectQueryTool.SnapshotRow,
     restoring: Boolean,
     onRestore: () -> Unit,
 ) {

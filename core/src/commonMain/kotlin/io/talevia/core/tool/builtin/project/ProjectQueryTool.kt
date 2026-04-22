@@ -15,6 +15,7 @@ import io.talevia.core.tool.builtin.project.query.runConsistencyPropagationQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileEntriesQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileEntryDetailQuery
 import io.talevia.core.tool.builtin.project.query.runProjectMetadataQuery
+import io.talevia.core.tool.builtin.project.query.runSnapshotsQuery
 import io.talevia.core.tool.builtin.project.query.runSpendQuery
 import io.talevia.core.tool.builtin.project.query.runTimelineClipsQuery
 import io.talevia.core.tool.builtin.project.query.runTracksQuery
@@ -66,6 +67,12 @@ import kotlinx.serialization.serializer
  */
 class ProjectQueryTool(
     private val projects: ProjectStore,
+    /**
+     * Wall clock used by `select=snapshots` when honouring the `maxAgeDays`
+     * filter. Defaults to `Clock.System`; tests inject a fixed clock so
+     * relative-age assertions stay deterministic.
+     */
+    private val clock: kotlinx.datetime.Clock = kotlinx.datetime.Clock.System,
 ) : Tool<ProjectQueryTool.Input, ProjectQueryTool.Output> {
 
     @Serializable data class Input(
@@ -125,6 +132,14 @@ class ProjectQueryTool(
          * queries.
          */
         val sinceEpochMs: Long? = null,
+        // ---- snapshots filter ----
+        /**
+         * Drop snapshots captured strictly earlier than `now - maxAgeDays`.
+         * `select=snapshots` only. Null = no age filter. Mirrors the flag
+         * the old `list_project_snapshots` carried for long-lived projects
+         * that only care about recent snapshots.
+         */
+        val maxAgeDays: Int? = null,
         // ---- clips_for_asset filter (required for that select) ----
         /** Asset id to look up. Required for `select=clips_for_asset`; rejected elsewhere. */
         val assetId: String? = null,
@@ -391,6 +406,25 @@ class ProjectQueryTool(
      * `summaryText` the LLM can quote verbatim.
      */
     /**
+     * `select=snapshots` — enumerate saved snapshots on the project,
+     * newest-first (by `capturedAtEpochMs`). Replaces the deleted
+     * `list_project_snapshots` tool (debt-fold-list-project-snapshots
+     * cycle). Filters: [Input.maxAgeDays] + [Input.limit] (default 50,
+     * clamped 1..500 for this select, same as the old tool). Returns
+     * compact summaries — the full captured `Project` payload is not
+     * surfaced here; callers that need the live state still use
+     * `get_project_state` / `restore_project_snapshot`.
+     */
+    @Serializable data class SnapshotRow(
+        val snapshotId: String,
+        val label: String,
+        val capturedAtEpochMs: Long,
+        val clipCount: Int,
+        val trackCount: Int,
+        val assetCount: Int,
+    )
+
+    /**
      * `select=spend` — single-row aggregate of AIGC spend across the
      * project's lockfile. [costCents] sums on every entry whose stamped
      * `costCents` is non-null; entries with `null` cost (no pricing rule)
@@ -462,6 +496,9 @@ class ProjectQueryTool(
             "  • project_metadata — single-row drill-down replacing describe_project " +
             "(compact aggregate across tracks / clips / source / lockfile / snapshots plus " +
             "pre-rendered summaryText).\n" +
+            "  • snapshots — saved snapshots on the project, newest-first. filter: " +
+            "maxAgeDays (drop snapshots older than now - N days). Default limit 50, max 500. " +
+            "Replaces the deleted list_project_snapshots tool.\n" +
             "  • spend — single-row AIGC cost aggregate across the lockfile. Sums " +
             "`costCents` per entry (null = unknown pricing, counted separately), breaks " +
             "down by toolId and sessionId. Use to answer \"how much has this project " +
@@ -574,6 +611,14 @@ class ProjectQueryTool(
                         "select=lockfile_entries only.",
                 )
             }
+            putJsonObject("maxAgeDays") {
+                put("type", "integer")
+                put(
+                    "description",
+                    "Drop snapshots captured strictly earlier than now - maxAgeDays. " +
+                        "select=snapshots only.",
+                )
+            }
             putJsonObject("assetId") {
                 put("type", "string")
                 put(
@@ -658,6 +703,7 @@ class ProjectQueryTool(
             SELECT_PROJECT_METADATA -> runProjectMetadataQuery(project, projects, input)
             SELECT_CONSISTENCY_PROPAGATION -> runConsistencyPropagationQuery(project, input, limit, offset)
             SELECT_SPEND -> runSpendQuery(project)
+            SELECT_SNAPSHOTS -> runSnapshotsQuery(project, input, clock)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -707,6 +753,9 @@ class ProjectQueryTool(
             if (select != SELECT_LOCKFILE_ENTRIES && input.sinceEpochMs != null) {
                 add("sinceEpochMs (select=lockfile_entries only)")
             }
+            if (select != SELECT_SNAPSHOTS && input.maxAgeDays != null) {
+                add("maxAgeDays (select=snapshots only)")
+            }
             if (select != SELECT_CLIP && input.clipId != null) {
                 add("clipId (select=clip only)")
             }
@@ -735,12 +784,13 @@ class ProjectQueryTool(
         const val SELECT_PROJECT_METADATA = "project_metadata"
         const val SELECT_CONSISTENCY_PROPAGATION = "consistency_propagation"
         const val SELECT_SPEND = "spend"
+        const val SELECT_SNAPSHOTS = "snapshots"
         private val ALL_SELECTS = setOf(
             SELECT_TRACKS, SELECT_TIMELINE_CLIPS, SELECT_ASSETS,
             SELECT_TRANSITIONS, SELECT_LOCKFILE_ENTRIES,
             SELECT_CLIPS_FOR_ASSET, SELECT_CLIPS_FOR_SOURCE,
             SELECT_CLIP, SELECT_LOCKFILE_ENTRY, SELECT_PROJECT_METADATA,
-            SELECT_CONSISTENCY_PROPAGATION, SELECT_SPEND,
+            SELECT_CONSISTENCY_PROPAGATION, SELECT_SPEND, SELECT_SNAPSHOTS,
         )
 
         private const val DEFAULT_LIMIT = 100
