@@ -19,5 +19,3 @@
 
 ## P2 — 记债 / 观望
 
-- **agent-interrupt-via-bus** — OpenCode 通过 bus 事件 trigger agent cancel（`session/prompt.ts` 的 abort 流）；我们的 Agent 支持 `Job.cancel()` 但没有"所有平台统一的取消路径"。长 provider stream 中途用户按 Ctrl+C，取消生效有多快？没有测试覆盖。**方向：** `BusEvent.SessionCancelled(sessionId)` + Agent 订阅 → 传到 provider stream 的 `cancel()`；加 E2E 测 "cancel 从发到生效 ≤ 500ms"。Rubric §5.4。
-
