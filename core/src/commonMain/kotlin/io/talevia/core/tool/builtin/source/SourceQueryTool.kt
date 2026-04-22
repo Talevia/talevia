@@ -9,6 +9,7 @@ import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.source.query.runDagSummaryQuery
+import io.talevia.core.tool.builtin.source.query.runNodesAllProjectsQuery
 import io.talevia.core.tool.builtin.source.query.runNodesQuery
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -51,7 +52,22 @@ class SourceQueryTool(
     @Serializable data class Input(
         /** One of [SELECT_NODES] / [SELECT_DAG_SUMMARY] (case-insensitive). */
         val select: String,
-        val projectId: String,
+        /**
+         * Target project. Required when `scope == "project"` (default) or unset.
+         * When `scope == "all_projects"` (select=nodes only), **must** be null —
+         * the all-projects scope enumerates every project in the store, so a
+         * projectId filter contradicts it. Keeping projectId nullable rather
+         * than introducing a polymorphic Input shape keeps the schema flat.
+         */
+        val projectId: String? = null,
+        /**
+         * Search scope. `null` or `"project"` = current-behaviour single-
+         * project query. `"all_projects"` = cross-project search — requires
+         * `projectId == null`, `select=nodes`, and surfaces a `projectId`
+         * field on every row so the caller can pin-point the hit. Case-
+         * insensitive. Other values fail loud.
+         */
+        val scope: String? = null,
         // ---- nodes filters ----
         /** Exact kind filter (e.g. `"core.consistency.character_ref"`). `select=nodes` only. */
         val kind: String? = null,
@@ -106,6 +122,12 @@ class SourceQueryTool(
         val snippet: String? = null,
         /** Character offset of the `contentSubstring` match. Populated only when that filter is set. */
         val matchOffset: Int? = null,
+        /**
+         * Owning project id — populated only when `scope=all_projects` so the
+         * cross-project caller can pinpoint each hit. Null on single-project
+         * queries because the owning project is already in the Input echo.
+         */
+        val projectId: String? = null,
     )
 
     @Serializable data class Hotspot(
@@ -138,7 +160,10 @@ class SourceQueryTool(
             "  • dag_summary — one row: {nodeCount, nodesByKind, rootNodeIds, leafNodeIds, " +
             "maxDepth, hotspots (ranked by downstream-clip count), orphanedNodeIds, summaryText}. " +
             "filter: hotspotLimit (default 5). No limit/offset — always one row.\n" +
-            "Common: projectId (required), limit, offset (select=nodes only). Setting a filter that " +
+            "Common: projectId (required unless scope='all_projects'), limit, offset " +
+            "(select=nodes only). scope='all_projects' (select=nodes only) enumerates every " +
+            "registered project and tags each row with its owning projectId — use for \"find all " +
+            "character_refs across my projects like cyberpunk\" flows. Setting a filter that " +
             "doesn't apply to the chosen select fails loud. describe_source_node stays as a separate " +
             "tool for single-entity deep views."
     override val inputSerializer: KSerializer<Input> = serializer()
@@ -153,7 +178,22 @@ class SourceQueryTool(
                 put("type", "string")
                 put("description", "What to query: nodes | dag_summary (case-insensitive).")
             }
-            putJsonObject("projectId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Target project. Required unless scope='all_projects'. Rejected when " +
+                        "scope='all_projects' (the cross-project search enumerates every project).",
+                )
+            }
+            putJsonObject("scope") {
+                put("type", "string")
+                put(
+                    "description",
+                    "project (default, single-project query) | all_projects (select=nodes only — " +
+                        "enumerates every project in the store; each row carries its owning projectId).",
+                )
+            }
             putJsonObject("kind") {
                 put("type", "string")
                 put(
@@ -224,7 +264,7 @@ class SourceQueryTool(
                 put("description", "Skip N rows after filter+sort. select=nodes only. Default 0.")
             }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("select"), JsonPrimitive("projectId"))))
+        put("required", JsonArray(listOf(JsonPrimitive("select"))))
         put("additionalProperties", false)
     }
 
@@ -233,10 +273,21 @@ class SourceQueryTool(
         if (select !in ALL_SELECTS) {
             error("select must be one of ${ALL_SELECTS.joinToString(", ")} (got '${input.select}')")
         }
-        rejectIncompatibleFilters(select, input)
+        val scope = (input.scope?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }) ?: SCOPE_PROJECT
+        if (scope !in ALL_SCOPES) {
+            error("scope must be one of ${ALL_SCOPES.joinToString(", ")} (got '${input.scope}')")
+        }
+        rejectIncompatibleFilters(select, input, scope)
 
-        val pid = ProjectId(input.projectId)
-        val project = projects.get(pid) ?: error("Project ${input.projectId} not found")
+        if (scope == SCOPE_ALL_PROJECTS) {
+            // select already validated as SELECT_NODES in rejectIncompatibleFilters
+            return runNodesAllProjectsQuery(projects, input)
+        }
+
+        val projectIdStr = input.projectId
+            ?: error("projectId is required for scope='$SCOPE_PROJECT' (the default). Pass scope='$SCOPE_ALL_PROJECTS' for cross-project search.")
+        val pid = ProjectId(projectIdStr)
+        val project = projects.get(pid) ?: error("Project $projectIdStr not found")
 
         return when (select) {
             SELECT_NODES -> runNodesQuery(project, input)
@@ -245,7 +296,7 @@ class SourceQueryTool(
         }
     }
 
-    private fun rejectIncompatibleFilters(select: String, input: Input) {
+    private fun rejectIncompatibleFilters(select: String, input: Input, scope: String) {
         val misapplied = buildList {
             if (select != SELECT_NODES) {
                 if (input.kind != null) add("kind (select=nodes only)")
@@ -268,11 +319,25 @@ class SourceQueryTool(
                     misapplied.joinToString(", "),
             )
         }
+        if (scope == SCOPE_ALL_PROJECTS) {
+            require(select == SELECT_NODES) {
+                "scope='$SCOPE_ALL_PROJECTS' is only valid with select=nodes (got select='$select'); " +
+                    "cross-project DAG summary isn't meaningful — each project has its own DAG."
+            }
+            require(input.projectId.isNullOrBlank()) {
+                "scope='$SCOPE_ALL_PROJECTS' and projectId are mutually exclusive " +
+                    "(got projectId='${input.projectId}'); pass scope='$SCOPE_PROJECT' for a single-project query."
+            }
+        }
     }
 
     companion object {
         const val SELECT_NODES = "nodes"
         const val SELECT_DAG_SUMMARY = "dag_summary"
         private val ALL_SELECTS = setOf(SELECT_NODES, SELECT_DAG_SUMMARY)
+
+        const val SCOPE_PROJECT = "project"
+        const val SCOPE_ALL_PROJECTS = "all_projects"
+        private val ALL_SCOPES = setOf(SCOPE_PROJECT, SCOPE_ALL_PROJECTS)
     }
 }
