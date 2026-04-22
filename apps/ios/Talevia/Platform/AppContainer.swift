@@ -135,7 +135,7 @@ final class AppContainer {
         registry.register(tool: ListProjectSnapshotsTool(projects: self.projects))
         registry.register(tool: RestoreProjectSnapshotTool(projects: self.projects))
         registry.register(tool: DeleteProjectSnapshotTool(projects: self.projects))
-        registry.register(tool: ForkProjectTool(projects: self.projects))
+        registry.register(tool: ForkProjectTool(projects: self.projects, registry: registry))
         registry.register(tool: DiffProjectsTool(projects: self.projects))
         registry.register(tool: ExportProjectTool(projects: self.projects))
         registry.register(tool: ImportProjectFromJsonTool(projects: self.projects))

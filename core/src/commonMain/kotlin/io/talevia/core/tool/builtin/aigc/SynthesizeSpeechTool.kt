@@ -72,6 +72,13 @@ class SynthesizeSpeechTool(
         val speed: Double = 1.0,
         val projectId: String? = null,
         val consistencyBindingIds: List<String>? = null,
+        /**
+         * Optional ISO-639-1 language hint (e.g. `"en"`, `"es"`, `"zh"`).
+         * Participates in the lockfile inputHash so the same text in a
+         * different language does not cache-hit. See [TtsRequest.language]
+         * for provider-side behaviour.
+         */
+        val language: String? = null,
     )
 
     @Serializable
@@ -87,6 +94,8 @@ class SynthesizeSpeechTool(
         val appliedConsistencyBindingIds: List<String> = emptyList(),
         /** True when this asset came from [io.talevia.core.domain.Project.lockfile] rather than a fresh engine call. */
         val cacheHit: Boolean = false,
+        /** Echo of the ISO-639-1 language hint, when one was passed. Null otherwise. */
+        val language: String? = null,
     )
 
     override val id: String = "synthesize_speech"
@@ -138,6 +147,15 @@ class SynthesizeSpeechTool(
                 )
                 putJsonObject("items") { put("type", "string") }
             }
+            putJsonObject("language") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional ISO-639-1 language hint (e.g. en / es / zh). Participates in the " +
+                        "lockfile cache key so the same text in a different language is a fresh " +
+                        "generation, not a stale hit.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("text"))))
         put("additionalProperties", false)
@@ -155,6 +173,7 @@ class SynthesizeSpeechTool(
                 "format" to input.format,
                 "speed" to input.speed.toString(),
                 "text" to input.text,
+                "language" to (input.language ?: ""),
             ),
         )
 
@@ -179,6 +198,7 @@ class SynthesizeSpeechTool(
                     voice = resolvedVoice,
                     format = input.format,
                     speed = input.speed,
+                    language = input.language,
                 ),
             )
         }
@@ -233,6 +253,7 @@ class SynthesizeSpeechTool(
             parameters = prov.parameters,
             appliedConsistencyBindingIds = folded.appliedNodeIds,
             cacheHit = false,
+            language = input.language,
         )
         val bindingTail = if (folded.appliedNodeIds.isEmpty()) ""
         else " [voice from: ${folded.appliedNodeIds.joinToString(", ")}]"
@@ -280,6 +301,7 @@ class SynthesizeSpeechTool(
             parameters = prov.parameters,
             appliedConsistencyBindingIds = appliedBindings,
             cacheHit = true,
+            language = input.language,
         )
         return ToolResult(
             title = "synthesize speech (cached)",

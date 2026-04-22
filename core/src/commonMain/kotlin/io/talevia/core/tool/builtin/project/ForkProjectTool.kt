@@ -11,6 +11,7 @@ import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.ToolResult
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -18,6 +19,7 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
@@ -46,6 +48,15 @@ import kotlin.time.Duration.Companion.seconds
  */
 class ForkProjectTool(
     private val projects: ProjectStore,
+    /**
+     * Optional tool registry. Only consulted when `variantSpec.language` is
+     * set — the fork dispatches the registered `synthesize_speech` tool per
+     * text clip to generate target-language voiceovers against the fork's
+     * project id. When null (test rigs, deployments without TTS), passing
+     * `variantSpec.language` fails loud with a wiring hint rather than
+     * silently skipping the regeneration.
+     */
+    private val registry: ToolRegistry? = null,
 ) : Tool<ForkProjectTool.Input, ForkProjectTool.Output> {
 
     @Serializable data class Input(
@@ -95,6 +106,41 @@ class ForkProjectTool(
          * range. Must be `> 0` when set.
          */
         val durationSecondsMax: Double? = null,
+        /**
+         * Optional ISO-639-1 language hint (e.g. `"en"`, `"es"`, `"zh"`).
+         * When set, the fork dispatches `synthesize_speech` for every text
+         * clip whose `text` is non-blank; the resulting audio assets are
+         * recorded into the fork's lockfile (keyed by the same text plus
+         * this language) so a second fork in the same language is a cache
+         * hit. The fork's timeline is **not** rewired automatically — the
+         * caller chains `replace_clip` per entry in
+         * [Output.languageRegeneratedClips] to swap existing audio. This
+         * mirrors the "fork stays a reshape primitive" principle: we
+         * surface side-effectful generations on the fork, not timeline
+         * edits on the fork's audio tracks.
+         */
+        val language: String? = null,
+    )
+
+    /**
+     * One TTS regeneration outcome produced by `variantSpec.language`. The
+     * caller (usually the agent) wires the generated [assetId] onto the
+     * appropriate audio clip via `replace_clip` or `add_clip`; we leave that
+     * bind explicit so the fork's timeline shape is never mutated without a
+     * direct tool call the user can see in the transcript.
+     *
+     * @property clipId the text clip whose text drove the regeneration.
+     * @property assetId the new audio asset id (may match a prior fork's
+     *   asset if the lockfile cache-hit on `(text, voice, language, …)`).
+     * @property cacheHit whether the underlying synthesize_speech call came
+     *   back from the lockfile; useful when a user re-forks in the same
+     *   language and expects no provider billing.
+     */
+    @Serializable
+    data class LanguageRegenResult(
+        val clipId: String,
+        val assetId: String,
+        val cacheHit: Boolean,
     )
 
     @Serializable data class Output(
@@ -113,6 +159,14 @@ class ForkProjectTool(
         val clipsDroppedByTrim: Int = 0,
         /** Number of clips truncated by `durationSecondsMax` trimming. */
         val clipsTruncatedByTrim: Int = 0,
+        /**
+         * Per-text-clip TTS regenerations produced by
+         * `variantSpec.language`. Empty / null when language wasn't set or
+         * there were no text clips with non-blank `text`. Each entry's
+         * `assetId` is the new audio the caller should bind via
+         * `replace_clip` (or `add_clip` on a voiceover track).
+         */
+        val languageRegeneratedClips: List<LanguageRegenResult> = emptyList(),
     )
 
     override val id: String = "fork_project"
@@ -123,11 +177,13 @@ class ForkProjectTool(
             "snapshots list, and otherwise inherits everything (timeline, source, lockfile, " +
             "render cache, assets, output profile). Asset bytes are not duplicated — both " +
             "projects reference the same AssetIds in shared media storage. " +
-            "Pass variantSpec={aspectRatio?, durationSecondsMax?} to reshape the fork in one " +
-            "step (VISION §6 \"30s / vertical variant\"): aspectRatio remaps resolution " +
+            "Pass variantSpec={aspectRatio?, durationSecondsMax?, language?} to reshape the fork " +
+            "in one step (VISION §6 \"30s / vertical variant\"): aspectRatio remaps resolution " +
             "(presets: 16:9, 9:16, 1:1, 4:5, 21:9); durationSecondsMax caps the timeline (drops " +
-            "tail clips, truncates straddlers). The fork's parentProjectId points at the source " +
-            "so variants form a lineage."
+            "tail clips, truncates straddlers); language (ISO-639-1) dispatches synthesize_speech " +
+            "per non-blank text clip and surfaces (clipId, assetId, cacheHit) in " +
+            "languageRegeneratedClips — the caller chains replace_clip to swap existing audio. " +
+            "The fork's parentProjectId points at the source so variants form a lineage."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.write")
@@ -170,6 +226,17 @@ class ForkProjectTool(
                     putJsonObject("durationSecondsMax") {
                         put("type", "number")
                         put("description", "Cap the timeline at this many seconds (must be > 0).")
+                    }
+                    putJsonObject("language") {
+                        put("type", "string")
+                        put(
+                            "description",
+                            "ISO-639-1 language code (e.g. en / es / zh). Regenerates TTS for " +
+                                "every non-blank text clip in the fork against this language; " +
+                                "results land in Output.languageRegeneratedClips as (clipId, " +
+                                "assetId, cacheHit). The fork's timeline isn't rewired — chain " +
+                                "replace_clip per entry to swap audio.",
+                        )
                     }
                 }
                 put("additionalProperties", false)
@@ -218,6 +285,10 @@ class ForkProjectTool(
         val forked = reshape?.project ?: baseFork
         projects.upsert(input.newTitle, forked)
 
+        val regenerations = input.variantSpec?.language?.let { lang ->
+            regenerateTtsInLanguage(newPid, forked, lang.trim(), ctx)
+        } ?: emptyList()
+
         val clipCount = forked.timeline.tracks.sumOf { it.clips.size }
         val trackCount = forked.timeline.tracks.size
         val out = Output(
@@ -234,6 +305,7 @@ class ForkProjectTool(
                 ?.takeIf { input.variantSpec?.aspectRatio != null },
             clipsDroppedByTrim = reshape?.clipsDropped ?: 0,
             clipsTruncatedByTrim = reshape?.clipsTruncated ?: 0,
+            languageRegeneratedClips = regenerations,
         )
         val from = input.snapshotId?.let { "snapshot $it" } ?: "current state"
         val variantNote = reshape?.let { r ->
@@ -250,13 +322,77 @@ class ForkProjectTool(
                 append(")")
             }
         }.orEmpty()
+        val regenNote = input.variantSpec?.language?.let { lang ->
+            val hits = regenerations.count { it.cacheHit }
+            val fresh = regenerations.size - hits
+            ", regenerated TTS for ${regenerations.size} text clip(s) in lang=$lang " +
+                "($fresh fresh, $hits cached)"
+        }.orEmpty()
         return ToolResult(
             title = "fork project ${input.newTitle}",
             outputForLlm = "Forked project ${sourcePid.value} → ${newPid.value} " +
-                "(\"${input.newTitle}\", from $from, $clipCount clip(s), $trackCount track(s)$variantNote). " +
+                "(\"${input.newTitle}\", from $from, $clipCount clip(s), $trackCount track(s)$variantNote$regenNote). " +
                 "Pass projectId=${newPid.value} to subsequent tool calls on the fork.",
             data = out,
         )
+    }
+
+    /**
+     * Walk the fork's text clips and dispatch `synthesize_speech` for each one
+     * that has a non-blank `text`. Returns one [LanguageRegenResult] per
+     * successful dispatch (including cache-hit reuses — those are still
+     * meaningful signals for the agent's follow-up `replace_clip`).
+     *
+     * Requires a wired [registry] + a registered `synthesize_speech` tool;
+     * fails loud otherwise so mis-deployments don't silently skip expensive
+     * work. A text clip whose text is blank is skipped — no-op clips (pure
+     * timing placeholders) shouldn't produce audio.
+     */
+    private suspend fun regenerateTtsInLanguage(
+        forkId: ProjectId,
+        fork: Project,
+        language: String,
+        ctx: ToolContext,
+    ): List<LanguageRegenResult> {
+        require(language.isNotBlank()) {
+            "variantSpec.language must be a non-blank ISO-639-1 code (e.g. 'en', 'es')"
+        }
+        val reg = registry ?: error(
+            "variantSpec.language was set but this ForkProjectTool has no ToolRegistry wired — " +
+                "install TtsEngine/SynthesizeSpeechTool in the container or drop variantSpec.language.",
+        )
+        val tts = reg["synthesize_speech"] ?: error(
+            "variantSpec.language requires the `synthesize_speech` tool to be registered on this " +
+                "container — wire a TtsEngine or drop variantSpec.language.",
+        )
+
+        val results = mutableListOf<LanguageRegenResult>()
+        for (track in fork.timeline.tracks) {
+            for (clip in track.clips) {
+                if (clip !is Clip.Text) continue
+                if (clip.text.isBlank()) continue
+                val payload = buildJsonObject {
+                    put("text", clip.text)
+                    put("projectId", forkId.value)
+                    put("language", language)
+                    val bindings = clip.sourceBinding.map { it.value }.sorted()
+                    if (bindings.isNotEmpty()) {
+                        put("consistencyBindingIds", JsonArray(bindings.map { JsonPrimitive(it) }))
+                    }
+                }
+                val result = tts.dispatch(payload, ctx)
+                val outputJson = tts.encodeOutput(result).jsonObject
+                val assetId = (outputJson["assetId"] as? JsonPrimitive)?.content
+                    ?: error("synthesize_speech returned no assetId for clip ${clip.id.value}")
+                val cacheHit = (outputJson["cacheHit"] as? JsonPrimitive)?.content == "true"
+                results += LanguageRegenResult(
+                    clipId = clip.id.value,
+                    assetId = assetId,
+                    cacheHit = cacheHit,
+                )
+            }
+        }
+        return results
     }
 
     private data class VariantReshape(val project: Project, val clipsDropped: Int, val clipsTruncated: Int)

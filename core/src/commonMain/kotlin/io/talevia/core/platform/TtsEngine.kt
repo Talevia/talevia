@@ -48,6 +48,17 @@ data class TtsRequest(
     val format: String = "mp3",
     val speed: Double = 1.0,
     val parameters: Map<String, String> = emptyMap(),
+    /**
+     * Optional ISO-639-1 language hint for the voiceover (e.g. `"en"`, `"es"`,
+     * `"zh"`). OpenAI TTS auto-detects language from [text] and ignores the
+     * hint at the wire level; the field is still recorded in the engine's
+     * provenance + the tool's lockfile inputHash so `(same text, different
+     * language)` yields a distinct cache entry — driver of the
+     * `fork_project(variantSpec.language=…)` "same vlog in Spanish" flow.
+     * Providers that do accept a language param (future additions) may route
+     * this directly into their request body.
+     */
+    val language: String? = null,
 )
 
 @Serializable

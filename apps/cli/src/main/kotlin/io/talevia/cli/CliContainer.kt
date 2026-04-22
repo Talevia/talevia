@@ -351,7 +351,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(ListProjectSnapshotsTool(projects))
         register(RestoreProjectSnapshotTool(projects))
         register(DeleteProjectSnapshotTool(projects))
-        register(ForkProjectTool(projects))
+        register(ForkProjectTool(projects, this))
         register(DiffProjectsTool(projects))
         register(ExportProjectTool(projects))
         register(ImportProjectFromJsonTool(projects))
