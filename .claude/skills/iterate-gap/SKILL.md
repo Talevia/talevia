@@ -64,7 +64,7 @@ git pull --rebase origin main
 
 依次读：
 
-1. `docs/VISION.md` §5（Gap-finding rubric）—— 6 个 rubric 小节（§5.1–§5.6）就是打分轴。§5.6 系统健康 / 技术债与前 5 节 feature 轴一视同仁竞争优先级窗口。
+1. `docs/VISION.md` §5（Gap-finding rubric）—— 7 个 rubric 小节（§5.1–§5.7）就是打分轴。§5.6 系统健康 / 技术债、§5.7 性能 / 成本预算都与前 5 节 feature 轴一视同仁竞争优先级窗口。
 2. `CLAUDE.md` 的「Platform priority — 当前阶段」小节定优先级；「Known incomplete」小节列出已承认的非回归项，别把它们当缺口重复报。
 3. `docs/decisions/` 最近 ~20 个文件（`ls docs/decisions | sort -r | head -20`）—— 近期已做决策约束了不该再做一遍的内容。
 4. `git log --oneline -30` —— 看最近落地了什么。
@@ -145,6 +145,47 @@ git pull --rebase origin main
 - 默认 P2：TODO 净增长、小幅 tool 增长。
 
 **监控曲线**：扫描结果写进 `docs(backlog)` 这次 commit 的 message body（简洁列出各指标对比数字），`git log` 本身就是劣化监控曲线。跳过扫描 / debt 占比不足的 repopulate commit 不合法（见硬规则 13）。
+
+### R.6 性能 / 成本 scan（repopulate 必做）
+
+VISION §5.7 定义了运行时预算轴；本节给出 skill 层的**轻量静态 scan**（不实跑系统）。动态度量（实测 export 计时、实测 session token）归 benchmark 基础设施，不属于每轮 repopulate 的机械动作。
+
+**Perf 不设 30% 配额**（量少时某些轴需要新基础设施，不是每轮都有可挑），但 scan 必须跑，结果和 R.5 一样写进 `docs(backlog)` commit body。跳过 = 违反硬规则 13。
+
+**Scan 条目**：
+
+1. **Tool spec 的 per-turn 成本** — 复用 R.5 #1 的 tool 计数，但判定轴改为 LLM context 负担。如果可以跑 `core.metrics` 暴露的 `tool_spec_budget` 最新值 > 15k token，或 `*Tool.kt` 总数 ≥ 40 → `debt-shrink-tool-spec-surface`。和 R.5 的 `debt-tool-consolidation-*` 区别：前者按**领域重复**合并，后者按**token 预算**削减（例如合并近似 query 工具、把 tool 参数做成 enum 减少 top-level tool 数）。两条都出不算重复 —— 同一 tool 膨胀从不同角度发力。
+
+2. **Unbounded 增长结构** —
+   ```
+   grep -rn 'CounterRegistry\|AtomicLong\|AtomicInteger\|mutableListOf\|mutableMapOf' core/src/commonMain/kotlin
+   ```
+   每处都要能证明有上界或周期性回收。无法证明 → `debt-bound-<field>`。EventBus 的 CounterRegistry 本身 ok（它是度量基础设施），但**基于 CounterRegistry 堆的业务字段**要审。
+
+3. **Session / compaction 上界** —
+   ```
+   grep -rnE 'maxMessages|windowSize|tokenBudget|budget|compact' core/src/commonMain/kotlin/io/talevia/core/compaction core/src/commonMain/kotlin/io/talevia/core/session
+   ```
+   找不到任何硬上界 / 预算配置 → 强制 P0 `debt-bound-session-history`。**session history 无上界 = 系统一定会炸**，属于不能延后的 P0。
+
+4. **核心路径 benchmark 守护** —
+   ```
+   find core platform-impls apps -type f \( -name "*Benchmark*.kt" -o -name "*Perf*.kt" -o -name "*Latency*.kt" \)
+   ```
+   `core/agent`、`core/tool` dispatch、`ExportTool`、`FileProjectStore` 有没有 wall-time / token-count 回归测试？关键路径零 benchmark → `debt-add-benchmark-<path>`。没有 benchmark = 没有回归守护 = perf 劣化无人发现。
+
+5. **Perf decision 停更** —
+   ```
+   ls docs/decisions | grep -iE 'perf|latency|cost|token|budget|benchmark|incremental'
+   ```
+   若最近 3 个月零相关 decision → 提示本轮 repopulate 至少考虑一条 perf gap（**非硬性**，但连续零 perf 工作本身就是隐性劣化信号）。
+
+**严重度分档**：
+- 强制 P0：session / compaction 零上界、`tool_spec_budget` > 20k token、核心路径（agent loop / ExportTool）零 benchmark。
+- 默认 P1：`tool_spec_budget` 15–20k、Project I/O 经分析为 O(size) 而非 O(delta)、次核心路径零 benchmark、可疑 unbounded 增长结构。
+- 默认 P2：perf decision 停更 > 3 个月、单个 unbounded 字段待审。
+
+扫描结果写进 `docs(backlog)` commit body（`perf scan:` 开头，与 `debt scan:` 并列），`git log` 就是 perf 劣化曲线。
 
 写入 `docs/BACKLOG.md` 的格式与当前文件保持一致：
 

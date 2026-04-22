@@ -161,7 +161,7 @@ Talevia 同时服务两类用户，**他们对 agent 自主度和可控粒度的
 
 **两条 gap-source 并行、互不替代**：
 
-1. **本节 §5.1–§5.6 判断题** —— 视频编辑器领域的缺口（source schema / compiler 覆盖 / artifact 复现 / agent UX / 跨镜头一致性 / 系统健康）。
+1. **本节 §5.1–§5.7 判断题** —— 视频编辑器领域的缺口（source schema / compiler 覆盖 / artifact 复现 / agent UX / 跨镜头一致性 / 系统健康 / 性能与成本）。
 2. **OpenCode 行为对照** —— agent 基础设施的缺口（streaming tool 输出、compaction 细节、permission 粒度、bus 事件覆盖等）。映射文件见 `CLAUDE.md` 的 "OpenCode as a 'runnable spec'" 一节。
 
 两条都要跑，不要用其中一个替代另一个。领域能力和 agent infra 同步推进才能避免"功能很全但 agent 跑不顺"或"agent 很顺但剪辑能力空洞"的失衡。
@@ -216,13 +216,34 @@ rubric 前 5 节驱动**新增**，这一节驱动**收敛**。Core 只做加法
 
 具体扫描脚本由下游 loop（如 `iterate-gap` skill）负责；本节定义的是**判断轴本身**，保证无论用哪个循环框架，"收敛"都是第一性要求而不是可选的工具函数。
 
+### 5.7 性能 / 成本预算
+
+§5.1–§5.5 定义"系统能做什么"，§5.6 驱动**代码形状**收敛，这一节驱动**运行时预算**收敛 —— 系统在真实使用下还跑得动吗 / 用得起吗。三者的失败模式正交：
+
+- 缺 §5.1–§5.5 → 产品不成立。
+- 缺 §5.6 → 代码形状劣化（文件变长、tool 膨胀、dead code 堆积）。
+- 缺 §5.7 → 功能齐全但用不起 —— 慢到不能用、贵到烧钱、context 爆到每 turn 都丢记忆。
+
+每轮自查：
+
+- **Agent 每 turn 成本**：system prompt + tool spec + history 的 token 占用有没有**下降或至少稳定**的压力？`session_query(select=tool_spec_budget)` 已暴露度量（见 `938c90d`）但当前无人消费。
+- **增量编译的实际收益**：全量 export vs 改一个 clip 后的 incremental export wall time 差距是多少？§5.3 问增量是否**正确**，这里问是否**真的省时间**。差距小 = 增量机制形同虚设。
+- **AIGC 成本**：一个典型 project 端到端大约 $ 多少？pin 命中率有没有指标？默认不 pin 的路径会让哪些场景重复烧钱？
+- **Bundle I/O 复杂度**：`talevia.json` 的 parse / write 是 O(project size) 还是 O(edit delta)？大 project（> 100 clips）每次 tool 调用是否仍然 sub-second？
+- **预览 / scrub 延迟**：当前优先级平台（CLI / desktop）上，"用户发出编辑指令 → 看到新结果" 的 p50 / p95 延迟是多少？有没有回归测试守护不让它退化？
+- **Token budget 硬闸**：compaction / tool 集合 / session history 有没有**上界**？无上界 = 终将炸。
+
+**没有数字就没有约束** —— 模糊说"应该挺快的"等于没有。性能 gap 和 feature / 结构 gap 一样进入优先级窗口。
+
+与 §5.6 的分工：tool 数量同时是两轴的信号 —— §5.6 问"tool 集合形状是否膨胀"（grep-able 静态），§5.7 问"tool spec 每 turn 烧多少 token"（运行时度量）。同一指标、不同提问角度。
+
 ### 怎么用这份 rubric
 
 每轮迭代的流程：
 
 1. **先校准"现状"再打分**：读最近 ~20 个 `docs/decisions/` 文件（`ls docs/decisions | sort -r | head -20`）+ `git log --oneline -30` + `CLAUDE.md` 的 "Known incomplete" 小节。这一步是为了避免把**刚合入的能力**或**已承认的非回归项**再次列为 gap —— 系统最贵的误报就是"反复发现同一个已经解决的缺口"。
 
-2. **逐轴打分**：对照 §5.1–§5.6 每一节的判断题，读当前代码（`core/domain`, `core/tool/builtin`, `core/agent`, `core/session`, `core/compaction`, `core/permission`, `core/provider`, `core/bus`, 各 app 装配点）打 有 / 部分 / 无。§5.6 的技术债条目与前 5 节 feature gap 一视同仁进入候选池。另外跑一次 OpenCode 对照（见本节开头"两条 gap-source 并行"）作为独立候选来源。
+2. **逐轴打分**：对照 §5.1–§5.7 每一节的判断题，读当前代码（`core/domain`, `core/tool/builtin`, `core/agent`, `core/session`, `core/compaction`, `core/permission`, `core/provider`, `core/bus`, 各 app 装配点）+ 现有运行时度量（`core.metrics`、`session_query` 暴露的 budget 类 select、benchmark 测试）打 有 / 部分 / 无。§5.6 的技术债条目和 §5.7 的运行时预算条目与前 5 节 feature gap 一视同仁进入候选池。另外跑一次 OpenCode 对照（见本节开头"两条 gap-source 并行"）作为独立候选来源。
 
 3. **按顺序过滤出 2–3 条实现任务**：
 
