@@ -47,6 +47,7 @@ import io.talevia.core.provider.tavily.TavilySearchEngine
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.TodoWriteTool
+import io.talevia.core.tool.builtin.aigc.CompareAigcCandidatesTool
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import io.talevia.core.tool.builtin.aigc.GenerateMusicTool
 import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
@@ -365,6 +366,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         musicGen?.let { register(GenerateMusicTool(it, media, blobWriter, projects)) }
         upscale?.let { register(UpscaleAssetTool(it, media, media, blobWriter, projects)) }
         tts?.let { register(SynthesizeSpeechTool(it, media, blobWriter, projects)) }
+        register(CompareAigcCandidatesTool(this))
         asr?.let {
             register(TranscribeAssetTool(it, media))
             register(AutoSubtitleClipTool(it, media, projects))
