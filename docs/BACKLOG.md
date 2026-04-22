@@ -13,8 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **transitive-source-hash-propagation** — 改一个 source 的**祖先**节点（比如 `style_bible` parent 下的 `character_ref`），下游 clip 的 stale 检测只看**直接 binding** 的 contentHash，祖先变化被吞掉。VISION §5.1 "显式标 stale"的判断题目前是"部分"。**方向：** `LockfileEntry.sourceContentHashes` 改为记录**传递闭包**内所有上游节点的 contentHash，或 `SourceNode.contentHash` 自身就把 parents 的 contentHash 折入（保留当前 `contentHash` 的深度等价语义）；`staleClipsFromLockfile` 顺着传递关系走。Rubric §5.1。
-
 - **replay-from-lockfile** — lockfile 有 seed + model version + resolvedPrompt + baseInputs，但没有"给定 inputHash 重跑一遍产物"的原语。VISION §5.2 "相同 source + 相同 toolchain 重跑产物是否 bit-identical" 无法从 agent 侧触发。**方向：** 新 tool 或在已有 AIGC 工具上加 `replayFromLockfile: String?` 参数，传 inputHash 后跳过用户侧 Input，直接用 lockfile 里的 baseInputs 重跑 + 验证 contentHash。Rubric §5.2。
 
 ## P1 — 中优，做完 P0 再排
