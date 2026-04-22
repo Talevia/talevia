@@ -13,8 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **provider-auto-fallback** — `core/provider/` 抽象出了 `LlmEvent` 统一形，但当前 primary provider 挂了（rate limit / outage）没有自动切备份 provider；Agent 直接报错给用户，用户需要手动 `switch_provider`。OpenCode `session/llm.ts` 有明确的 fallback 链模式。**方向：** 引入 `ProviderChain` 抽象（ordered providers + per-error-kind retry policy）。Agent 的 llm-call 包一层 retry-then-fallback，各 provider 共享同一个 `LlmEvent` stream。五端装配点同步切到 chain。Rubric §5.2。
-
 - **aigc-cost-tracking-per-session** — 当前有 `estimate_session_tokens`（Chat token 计数）和 agent.retry 计数器，但没有 AIGC 调用（image / music / upscale / TTS）的花费累计。用户跑了一个 vlog，不知道花了多少 $；老板问"这项目烧了多少 API 费"也答不出。**方向：** 在 `BusEvent.AigcProduced` / 每个 Replicate / Anthropic / OpenAI 工具 dispatch 完成时带出 `cost: MoneyCents?`，metrics 侧聚合 per-session 和 per-project 的 `spend_cents`。通过 `session_query(select=spend)` / `project_query(select=spend)` 可读。Rubric §5.2 / §5.4。
 
 - **debt-consolidate-project-describe-queries** — `core/tool/builtin/project/` 下有 `DescribeClipTool` / `DescribeLockfileEntryTool` / `DescribeProjectTool` 三个近似 drill-down 工具，每个都是「拿 ID，返回结构化细节」。LLM 每轮付 3 份 tool spec。**方向：** 折到 `project_query(select=clip|lockfile_entry|project_metadata, id=...)` 的 drill-down 变体里，删掉三个独立 `Describe*Tool.kt`。参考 `2026-04-21-unify-project-query.md` 的合并模式。Rubric 外 / debt。
