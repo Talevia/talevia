@@ -9,6 +9,7 @@ import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.query.runAncestorsQuery
+import io.talevia.core.tool.builtin.session.query.runCacheStatsQuery
 import io.talevia.core.tool.builtin.session.query.runCompactionsQuery
 import io.talevia.core.tool.builtin.session.query.runForksQuery
 import io.talevia.core.tool.builtin.session.query.runMessageDetailQuery
@@ -279,6 +280,31 @@ class SessionQueryTool(
         val projectResolved: Boolean,
     )
 
+    /**
+     * `select=cache_stats` — single-row prompt-cache utilisation for one
+     * session. Walks the session's assistant messages and sums their
+     * [TokenUsage]. Providers normalise `input` to include both cached and
+     * uncached input tokens, so the hit ratio is
+     * `cacheReadTokens / totalInputTokens` regardless of provider. Helpful
+     * for the "is my prompt cache actually firing?" debug flow — a hit
+     * ratio stuck at 0 across many turns usually means a cache key is
+     * rotating per turn (session-scoped key disabled, different model,
+     * etc.).
+     */
+    @Serializable data class CacheStatsRow(
+        val sessionId: String,
+        /** Number of assistant messages contributing to the aggregate. Zero → the session has had no assistant turns yet. */
+        val assistantMessageCount: Int,
+        /** Sum of `TokenUsage.input` across assistant messages (cached + uncached). */
+        val totalInputTokens: Long,
+        /** Sum of `TokenUsage.cacheRead` — input tokens served from the provider's cache. */
+        val cacheReadTokens: Long,
+        /** Sum of `TokenUsage.cacheWrite` — input tokens newly written to the cache. */
+        val cacheWriteTokens: Long,
+        /** `cacheReadTokens / totalInputTokens`, clamped to [0.0, 1.0]. Zero when totalInputTokens is zero. */
+        val hitRatio: Double,
+    )
+
     @Serializable data class StatusRow(
         val sessionId: String,
         /** `"idle"` | `"generating"` | `"awaiting_tool"` | `"compacting"` | `"cancelled"` | `"failed"`. */
@@ -372,6 +398,7 @@ class SessionQueryTool(
             SELECT_SESSION_METADATA -> runSessionMetadataQuery(sessions, input)
             SELECT_MESSAGE -> runMessageDetailQuery(sessions, input)
             SELECT_SPEND -> runSpendQuery(sessions, projects, input)
+            SELECT_CACHE_STATS -> runCacheStatsQuery(sessions, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -426,10 +453,11 @@ class SessionQueryTool(
         const val SELECT_SESSION_METADATA = "session_metadata"
         const val SELECT_MESSAGE = "message"
         const val SELECT_SPEND = "spend"
+        const val SELECT_CACHE_STATS = "cache_stats"
         private val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
             SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
-            SELECT_SESSION_METADATA, SELECT_MESSAGE, SELECT_SPEND,
+            SELECT_SESSION_METADATA, SELECT_MESSAGE, SELECT_SPEND, SELECT_CACHE_STATS,
         )
 
         private const val DEFAULT_LIMIT = 100

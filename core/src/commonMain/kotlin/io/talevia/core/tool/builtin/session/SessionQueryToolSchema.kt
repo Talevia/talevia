@@ -21,7 +21,8 @@ internal val SESSION_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
             put("type", "string")
             put(
                 "description",
-                "What to query: sessions | messages | parts | forks | ancestors | tool_calls | compactions | status " +
+                "What to query: sessions | messages | parts | forks | ancestors | tool_calls | " +
+                    "compactions | status | session_metadata | message | spend | cache_stats " +
                     "(case-insensitive).",
             )
         }
