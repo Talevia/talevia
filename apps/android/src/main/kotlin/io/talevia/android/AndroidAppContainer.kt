@@ -133,6 +133,18 @@ class AndroidAppContainer(context: Context) {
     val blobWriter: MediaBlobWriter = AndroidFileBlobWriter(
         java.io.File(context.cacheDir, "talevia-generated"),
     )
+
+    /**
+     * Media3-backed proxy generator — pulls a mid-duration thumbnail
+     * for video assets via `MediaMetadataRetriever.getFrameAtTime`.
+     * VISION §5.3 parity with desktop/CLI/server which use
+     * `FfmpegProxyGenerator`. Cache-tier output under
+     * `<cacheDir>/talevia-proxies/`, recoverable via re-import.
+     */
+    val proxyGenerator = io.talevia.android.Media3ProxyGenerator(
+        pathResolver = media,
+        proxyDir = java.io.File(context.cacheDir, "talevia-proxies"),
+    )
     val permissions = DefaultPermissionService(bus)
     val permissionRules = DefaultPermissionRuleset.rules.toMutableList()
     /**
@@ -163,7 +175,7 @@ class AndroidAppContainer(context: Context) {
         register(UnarchiveSessionTool(sessions))
         register(DeleteSessionTool(sessions))
         register(ReadPartTool(sessions))
-        register(ImportMediaTool(media, engine, projects))
+        register(ImportMediaTool(media, engine, projects, proxyGenerator = proxyGenerator))
         register(ExtractFrameTool(engine, media, blobWriter))
         register(AddClipTool(projects, media))
         register(ReplaceClipTool(projects, media))
