@@ -1,9 +1,11 @@
 package io.talevia.desktop
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,6 +32,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.isMetaPressed
@@ -144,6 +148,13 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
     val assets = remember { mutableStateListOf<String>() }
     var renderProgress by remember { mutableStateOf<Float?>(null) }
     var renderMessage by remember { mutableStateOf<String?>(null) }
+    // Mid-render preview: populated from Part.RenderProgress.thumbnailPath when
+    // the engine emits Preview events (ffmpeg -progress stream carries these
+    // for the whole-timeline path). Re-read on every update — the engine
+    // overwrites the same file between ticks, so we need the fresh bytes.
+    // Cleared when ratio hits 1.0 alongside renderProgress so the expert-path
+    // preview doesn't linger over the final file the VideoPreviewPanel loads.
+    var renderThumbnail by remember { mutableStateOf<ImageBitmap?>(null) }
     var importPath by remember { mutableStateOf("") }
     var exportPath by remember { mutableStateOf(System.getProperty("user.home") + "/talevia-export.mp4") }
     // Resolution override for the Export button. "Project" means "fall through to the
@@ -197,11 +208,24 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
                     renderProgress = p.ratio
                     renderMessage = p.message
                     if (p.message != null) log += "render · ${"%.0f".format(p.ratio * 100)}% ${p.message}"
+                    p.thumbnailPath?.let { path ->
+                        // Best-effort: if the file is mid-rotation or the engine
+                        // already cleaned it up (e.g. on the final completion
+                        // tick), silently skip — we only lose one preview
+                        // frame, not the progress bar itself.
+                        runCatching {
+                            val bytes = java.io.File(path).readBytes()
+                            renderThumbnail = org.jetbrains.skia.Image
+                                .makeFromEncoded(bytes)
+                                .toComposeImageBitmap()
+                        }
+                    }
                     if (p.ratio >= 1f) {
                         scope.launch {
                             delay(1_200)
                             renderProgress = null
                             renderMessage = null
+                            renderThumbnail = null
                         }
                     }
                 }
@@ -436,6 +460,16 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
                             }
                         }
                         LinearProgressIndicator(progress = { ratio }, modifier = Modifier.fillMaxWidth())
+                        renderThumbnail?.let { bmp ->
+                            Spacer(Modifier.height(6.dp))
+                            Image(
+                                bitmap = bmp,
+                                contentDescription = "mid-render preview",
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .aspectRatio(bmp.width.toFloat() / bmp.height.toFloat().coerceAtLeast(1f)),
+                            )
+                        }
                     }
                 }
 

@@ -16,7 +16,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **desktop-render-preview-panel** — Cycle 32 落了 `Part.RenderProgress.thumbnailPath`，但 desktop app 的 `Main.kt:196` 对 `Part.RenderProgress` 只打一行 progress string。长 export 还是 "两头看到 started/completed" 的 UX。**方向：** desktop Compose 的 render-progress 区加一块小面板，消费最新 `thumbnailPath` 的 JPEG bytes 显示出来；监听文件 mtime 或直接用 `Part.createdAt` 换 key。Rubric §5.4 expert path。
 - **cli-streaming-tool-output-renderer** — CLI `Renderer` 把 `Part.ToolCall` 当一次性打印，`Part.RenderProgress` 每条新一行。流式工具输出（cycle 里落的 streaming-tool-output-parts）在 CLI 上没有专门的"原地覆盖 / 折叠"表现。**方向：** Renderer 对同一 CallId 的连续 ToolCall parts 做就地 rewrite（ANSI `\r` 或 `\x1b[K`），RenderProgress 同 jobId 合成一行进度条 + 最新 preview 路径。Rubric §5.4。
 - **tool-cost-preflight-estimate** — AIGC 工具调用前没有"本次调用大约要花多少"的入口 —— cost-budget-guard 只在**花了之后**才拦。LLM 要自己判断能不能调用这个 tool 只能凭感觉。**方向：** 新 `describe_tool_cost(toolId, input) -> CostEstimate(cents, currency, basis)` 或 `list_tools` 扩一个 `estimateCentsPer` 字段；值来自 provider-level pricing 表（Replicate / OpenAI / Anthropic 都在 MetricsRegistry 已经记录）。Rubric §5.2。
 - **project-diff-source-graphs** — `DiffProjectsTool` 对比 timeline；source DAG 的 diff（哪些 SourceNode 被加 / 删 / 改）没 entry point。Fork 项目后想看"我动了哪些 source 节点"只能人肉。**方向：** 扩 `diff_projects` 的 Output 加 `sourceAdds / sourceRemoves / sourceModifies`，或单独 `diff_source_graphs(a, b)`；对比口径用 `SourceNode.id` + `contentHash`。Rubric §5.1。
