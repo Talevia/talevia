@@ -11,6 +11,7 @@ import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.query.runAncestorsQuery
 import io.talevia.core.tool.builtin.session.query.runCacheStatsQuery
 import io.talevia.core.tool.builtin.session.query.runCompactionsQuery
+import io.talevia.core.tool.builtin.session.query.runContextPressureQuery
 import io.talevia.core.tool.builtin.session.query.runForksQuery
 import io.talevia.core.tool.builtin.session.query.runMessageDetailQuery
 import io.talevia.core.tool.builtin.session.query.runMessagesQuery
@@ -332,6 +333,31 @@ class SessionQueryTool(
         val cause: String? = null,
     )
 
+    /**
+     * `select=context_pressure` — single-row snapshot of how close this
+     * session's surviving history is to the Agent's auto-compaction
+     * threshold. Unlike `select=status` (which requires the run-state
+     * tracker), this works off the session store alone and adds an
+     * explicit `marginTokens` field so the LLM can decide whether to
+     * pre-emptively summarise. `ratio` is un-clamped so the
+     * over-threshold case surfaces as `> 1.0`.
+     */
+    @Serializable data class ContextPressureRow(
+        val sessionId: String,
+        /** `TokenEstimator.forHistory` on `listMessagesWithParts(includeCompacted=false)` — same slice Compactor evaluates. */
+        val currentEstimate: Int,
+        /** Auto-compaction threshold ([io.talevia.core.tool.builtin.session.query.DEFAULT_COMPACTION_TOKEN_THRESHOLD]). */
+        val threshold: Int,
+        /** `currentEstimate / threshold`, **un-clamped**. Over-threshold reads > 1.0. */
+        val ratio: Double,
+        /** `threshold - currentEstimate`. Negative when over threshold. */
+        val marginTokens: Int,
+        /** True when `currentEstimate >= threshold`. Compactor would fire next turn. */
+        val overThreshold: Boolean,
+        /** How many non-compacted messages contributed to the estimate. */
+        val messageCount: Int,
+    )
+
     @Serializable data class StatusRow(
         val sessionId: String,
         /** `"idle"` | `"generating"` | `"awaiting_tool"` | `"compacting"` | `"cancelled"` | `"failed"`. */
@@ -394,6 +420,12 @@ class SessionQueryTool(
             "sessionId). Unknown-cost entries (no pricing rule) are counted separately. " +
             "requires sessionId. Scoped to the session's CURRENT project only — sessions " +
             "that switched projects mid-run report partial totals.\n" +
+            "  • context_pressure — single-row snapshot of token footprint vs the " +
+            "auto-compaction threshold. Returns (currentEstimate, threshold, ratio, " +
+            "marginTokens, overThreshold, messageCount). ratio is un-clamped so the " +
+            "over-threshold case reads > 1.0; marginTokens is negative when over. Use " +
+            "before issuing a big-context operation to decide whether to compact first. " +
+            "requires sessionId.\n" +
             "Common: limit (default 100, clamped 1..1000), offset (default 0). Setting a filter " +
             "that doesn't apply to the chosen select fails loud so typos surface instead of silently " +
             "returning an empty list."
@@ -426,6 +458,7 @@ class SessionQueryTool(
             SELECT_MESSAGE -> runMessageDetailQuery(sessions, input)
             SELECT_SPEND -> runSpendQuery(sessions, projects, input)
             SELECT_CACHE_STATS -> runCacheStatsQuery(sessions, input)
+            SELECT_CONTEXT_PRESSURE -> runContextPressureQuery(sessions, input)
             SELECT_RUN_STATE_HISTORY -> runRunStateHistoryQuery(sessions, agentStates, input, limit, offset)
             else -> error("unreachable — select validated above: '$select'")
         }
@@ -485,12 +518,13 @@ class SessionQueryTool(
         const val SELECT_MESSAGE = "message"
         const val SELECT_SPEND = "spend"
         const val SELECT_CACHE_STATS = "cache_stats"
+        const val SELECT_CONTEXT_PRESSURE = "context_pressure"
         const val SELECT_RUN_STATE_HISTORY = "run_state_history"
         private val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
             SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
             SELECT_SESSION_METADATA, SELECT_MESSAGE, SELECT_SPEND, SELECT_CACHE_STATS,
-            SELECT_RUN_STATE_HISTORY,
+            SELECT_CONTEXT_PRESSURE, SELECT_RUN_STATE_HISTORY,
         )
 
         private const val DEFAULT_LIMIT = 100
