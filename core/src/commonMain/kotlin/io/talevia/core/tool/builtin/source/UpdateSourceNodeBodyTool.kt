@@ -14,6 +14,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
@@ -103,7 +104,11 @@ class UpdateSourceNodeBodyTool(
             "set_brand_palette instead for those three consistency kinds when you want partial-patch " +
             "ergonomics. Does NOT touch kind (rebuild the node if the kind must change), parents " +
             "(use set_source_node_parents), or id (use rename_source_node). Bumps contentHash so " +
-            "bound clips go stale — run find_stale_clips after editing to surface them."
+            "bound clips go stale — run find_stale_clips after editing to surface them. " +
+            "Required workflow: call describe_source_node first to read the current body, " +
+            "mutate the JsonObject client-side (keep every field you want to retain — this is " +
+            "NOT a patch), then pass the complete new object as `body`. Never call with `body` " +
+            "missing or empty; there is no partial-update fallback."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.write")
@@ -120,8 +125,26 @@ class UpdateSourceNodeBodyTool(
                 put("type", "object")
                 put(
                     "description",
-                    "Full replacement body. Kind is preserved; parents are preserved; contentHash " +
-                        "is recomputed.",
+                    "Required. The COMPLETE new body JSON object — this is a full replacement, " +
+                        "not a partial patch. Every field you want to keep must appear here; " +
+                        "omitted fields are dropped. Workflow: describe_source_node → mutate the " +
+                        "returned body locally → pass the whole thing back as this argument. Must " +
+                        "not be null or {}. Kind and parents are preserved automatically; " +
+                        "contentHash is recomputed.",
+                )
+                put("minProperties", 1)
+                put("additionalProperties", true)
+                put(
+                    "examples",
+                    buildJsonArray {
+                        add(
+                            buildJsonObject {
+                                put("framing", JsonPrimitive("close-up"))
+                                put("dialogue", JsonPrimitive("Where are we?"))
+                                put("duration_seconds", JsonPrimitive(2.5))
+                            },
+                        )
+                    },
                 )
             }
         }
