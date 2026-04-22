@@ -19,7 +19,6 @@
 
 ## P2 — 记债 / 观望
 
-- **semantic-search-source-nodes** — `search-source-nodes-body-content-lookup` 已实现 lexical 搜索；但 "找意思相近的 character_ref" 靠关键词很脆。VISION §5.1 "改一个 source 节点，下游哪些 clip 被标为 stale" 的扩展面是概念级检索。**方向：** 集成轻量嵌入（CoreML / ONNX Runtime / 本地 MiniLM），在 `source_query` 加 `select=semantic_search(query, topK)`；platform-impl 隔离。Rubric §5.1。
 - **per-clip-render-cache-gc** — `ClipRenderCache.append` 只追加，没 eviction。长寿命项目每次 source 漂移都会留一份 orphan mezzanine；磁盘会涨到人类手动删。**方向：** 新 `gc_clip_render_cache(projectId, keepLast: Int? | keepSinceEpoch: Long?)` 或 `save_project_snapshot` 时自动 prune 陈旧条目 + 对应 mp4。Rubric §5.3。
 - **tool-call-provenance-in-lockfile** — `LockfileEntry` 记了 tool / input / sourceContentHashes，但不记是**哪条 Message** 触发的。审计 "这张 image 是在哪句 prompt 下生成的" 要回去 grep session parts。**方向：** `LockfileEntry.originatingMessageId: MessageId? = null`（default 向后兼容），AIGC 工具 `ctx.messageId` 填进去。Rubric §5.2。
 - **project-import-validator** — `ImportProjectFromJsonTool` 解析 JSON 直接 upsert，没校验 `Clip.assetId` / `Clip.sourceBinding` 指向的对象是不是都存在。坏 JSON 能导入一个"timeline 引用不存在的 source 节点"的项目，后面 `find_stale_clips` 才报警。**方向：** import 时跑一次跟 `ValidateProjectTool` 同口径的完整性校验，reject or warn on broken refs。Rubric §5.3。
