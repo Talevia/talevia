@@ -127,59 +127,81 @@ class GeminiProvider(
                 aborted = true
                 return@execute
             }
-            http.sseEvents().collect { sse ->
-                if (sse.data == "[DONE]") return@collect
-                val payload = runCatching { json.parseToJsonElement(sse.data).jsonObject }.getOrElse { cause ->
-                    logMalformedSse("gemini", sse.event, sse.data, cause)
-                    return@collect
-                }
+            // Mid-stream drops (server hangs up after 200 OK, socket reset,
+            // CDN flake) need to retry just like HTTP 5xx — otherwise one
+            // flaky connection kills the whole agent turn.
+            try {
+                http.sseEvents().collect { sse ->
+                    if (sse.data == "[DONE]") return@collect
+                    val payload = runCatching { json.parseToJsonElement(sse.data).jsonObject }.getOrElse { cause ->
+                        logMalformedSse("gemini", sse.event, sse.data, cause)
+                        return@collect
+                    }
 
-                payload["usageMetadata"]?.jsonObject?.let { usage ->
-                    promptTokens = usage["promptTokenCount"]?.jsonPrimitive?.intOrNull?.toLong() ?: promptTokens
-                    candidateTokens = usage["candidatesTokenCount"]?.jsonPrimitive?.intOrNull?.toLong() ?: candidateTokens
-                    cachedTokens = usage["cachedContentTokenCount"]?.jsonPrimitive?.intOrNull?.toLong() ?: cachedTokens
-                    thoughtsTokens = usage["thoughtsTokenCount"]?.jsonPrimitive?.intOrNull?.toLong() ?: thoughtsTokens
-                }
+                    payload["usageMetadata"]?.jsonObject?.let { usage ->
+                        promptTokens = usage["promptTokenCount"]?.jsonPrimitive?.intOrNull?.toLong() ?: promptTokens
+                        candidateTokens = usage["candidatesTokenCount"]?.jsonPrimitive?.intOrNull?.toLong() ?: candidateTokens
+                        cachedTokens = usage["cachedContentTokenCount"]?.jsonPrimitive?.intOrNull?.toLong() ?: cachedTokens
+                        thoughtsTokens = usage["thoughtsTokenCount"]?.jsonPrimitive?.intOrNull?.toLong() ?: thoughtsTokens
+                    }
 
-                val candidate = payload["candidates"]?.jsonArray?.firstOrNull()?.jsonObject ?: return@collect
-                candidate["finishReason"]?.jsonPrimitive?.contentOrNull?.let { finishRaw = it }
+                    val candidate = payload["candidates"]?.jsonArray?.firstOrNull()?.jsonObject ?: return@collect
+                    candidate["finishReason"]?.jsonPrimitive?.contentOrNull?.let { finishRaw = it }
 
-                val parts = candidate["content"]?.jsonObject?.get("parts")?.jsonArray ?: return@collect
-                for (partEl in parts) {
-                    val part = partEl.jsonObject
-                    // Gemini marks "thinking" parts with a boolean `"thought": true`; the
-                    // primitive `content` renders as the string "true".
-                    val isThought = part["thought"]?.jsonPrimitive?.contentOrNull == "true"
+                    val parts = candidate["content"]?.jsonObject?.get("parts")?.jsonArray ?: return@collect
+                    for (partEl in parts) {
+                        val part = partEl.jsonObject
+                        // Gemini marks "thinking" parts with a boolean `"thought": true`; the
+                        // primitive `content` renders as the string "true".
+                        val isThought = part["thought"]?.jsonPrimitive?.contentOrNull == "true"
 
-                    part["text"]?.jsonPrimitive?.contentOrNull?.let { text ->
-                        if (text.isEmpty()) return@let
-                        if (isThought) {
-                            val pid = reasoningPartId ?: PartId(Uuid.random().toString()).also {
-                                reasoningPartId = it
-                                send(LlmEvent.ReasoningStart(it))
+                        part["text"]?.jsonPrimitive?.contentOrNull?.let { text ->
+                            if (text.isEmpty()) return@let
+                            if (isThought) {
+                                val pid = reasoningPartId ?: PartId(Uuid.random().toString()).also {
+                                    reasoningPartId = it
+                                    send(LlmEvent.ReasoningStart(it))
+                                }
+                                send(LlmEvent.ReasoningDelta(pid, text))
+                            } else {
+                                val pid = textPartId ?: PartId(Uuid.random().toString()).also {
+                                    textPartId = it
+                                    send(LlmEvent.TextStart(it))
+                                }
+                                send(LlmEvent.TextDelta(pid, text))
                             }
-                            send(LlmEvent.ReasoningDelta(pid, text))
-                        } else {
-                            val pid = textPartId ?: PartId(Uuid.random().toString()).also {
-                                textPartId = it
-                                send(LlmEvent.TextStart(it))
-                            }
-                            send(LlmEvent.TextDelta(pid, text))
+                        }
+
+                        part["functionCall"]?.jsonObject?.let { fc ->
+                            val name = fc["name"]?.jsonPrimitive?.contentOrNull ?: return@let
+                            val args = fc["args"]?.jsonObject ?: JsonObject(emptyMap())
+                            val partId = PartId(Uuid.random().toString())
+                            // Gemini doesn't supply a call id; mint a stable one so the
+                            // agent + tool_result replay round-trip works.
+                            val callId = CallId("gemini-call-${Uuid.random()}")
+                            sawToolCall = true
+                            send(LlmEvent.ToolCallStart(partId, callId, name))
+                            send(LlmEvent.ToolCallReady(partId, callId, name, args))
                         }
                     }
-
-                    part["functionCall"]?.jsonObject?.let { fc ->
-                        val name = fc["name"]?.jsonPrimitive?.contentOrNull ?: return@let
-                        val args = fc["args"]?.jsonObject ?: JsonObject(emptyMap())
-                        val partId = PartId(Uuid.random().toString())
-                        // Gemini doesn't supply a call id; mint a stable one so the
-                        // agent + tool_result replay round-trip works.
-                        val callId = CallId("gemini-call-${Uuid.random()}")
-                        sawToolCall = true
-                        send(LlmEvent.ToolCallStart(partId, callId, name))
-                        send(LlmEvent.ToolCallReady(partId, callId, name, args))
-                    }
                 }
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                io.talevia.core.logging.Loggers.get("provider.gemini").log(
+                    io.talevia.core.logging.LogLevel.WARN,
+                    "stream.aborted",
+                    mapOf("error" to (e.message ?: e::class.simpleName.orEmpty())),
+                )
+                send(
+                    LlmEvent.Error(
+                        message = "gemini stream aborted: ${e.message ?: e::class.simpleName ?: "I/O error"}",
+                        retriable = true,
+                    ),
+                )
+                send(LlmEvent.StepFinish(finish = FinishReason.ERROR, usage = TokenUsage.ZERO))
+                aborted = true
+                return@execute
             }
         }
 

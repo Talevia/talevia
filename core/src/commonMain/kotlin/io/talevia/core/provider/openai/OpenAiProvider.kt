@@ -131,59 +131,86 @@ class OpenAiProvider(
                 aborted = true
                 return@execute
             }
-            http.sseEvents().collect { sse ->
-                if (sse.data == "[DONE]") return@collect
-                val payload = runCatching { json.parseToJsonElement(sse.data).jsonObject }.getOrElse { cause ->
-                    io.talevia.core.provider.logMalformedSse("openai", sse.event, sse.data, cause)
-                    return@collect
-                }
-
-                (payload["usage"] as? JsonObject)?.let { usage ->
-                    promptTokens = usage["prompt_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: promptTokens
-                    completionTokens = usage["completion_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: completionTokens
-                    cachedTokens = (usage["prompt_tokens_details"] as? JsonObject)
-                        ?.get("cached_tokens")?.jsonPrimitive?.intOrNull?.toLong() ?: cachedTokens
-                }
-
-                // OpenAI may emit `"choices": []` on usage-only final chunks (when
-                // stream_options.include_usage=true), and individual fields like
-                // `delta` / `tool_calls` may arrive as JsonNull rather than absent.
-                val choice = (payload["choices"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return@collect
-                val delta = choice["delta"] as? JsonObject
-
-                (delta?.get("content") as? JsonPrimitive)?.contentOrNull?.let { text ->
-                    if (text.isNotEmpty()) {
-                        val pid = textPartId ?: PartId(Uuid.random().toString()).also {
-                            textPartId = it
-                            send(LlmEvent.TextStart(it))
-                        }
-                        send(LlmEvent.TextDelta(pid, text))
+            // The status-code branch above handles the "OpenAI rejected the
+            // request up front" case. A separate failure mode is the server
+            // accepting the request, starting the SSE stream, then hanging up
+            // midway — TPM-saturated orgs, socket resets, and CDN flakes all
+            // land here. Ktor surfaces it as "Failed to parse HTTP response:
+            // the server prematurely closed the connection" or similar. If we
+            // let it propagate out of channelFlow the entire turn dies; treat
+            // it as retriable so the RetryPolicy backs off and tries again.
+            try {
+                http.sseEvents().collect { sse ->
+                    if (sse.data == "[DONE]") return@collect
+                    val payload = runCatching { json.parseToJsonElement(sse.data).jsonObject }.getOrElse { cause ->
+                        io.talevia.core.provider.logMalformedSse("openai", sse.event, sse.data, cause)
+                        return@collect
                     }
-                }
 
-                (delta?.get("tool_calls") as? JsonArray)?.forEach { tcEl ->
-                    val tc = tcEl as? JsonObject ?: return@forEach
-                    val index = (tc["index"] as? JsonPrimitive)?.intOrNull ?: 0
-                    val buf = tools.getOrPut(index) { ToolBuf(PartId(Uuid.random().toString())) }
-                    val function = tc["function"] as? JsonObject
-                    val newId = (tc["id"] as? JsonPrimitive)?.contentOrNull
-                    val newName = (function?.get("name") as? JsonPrimitive)?.contentOrNull
-                    if (buf.callId == null && newId != null) {
-                        buf.callId = CallId(newId)
-                        buf.name = newName
-                        send(LlmEvent.ToolCallStart(buf.partId, buf.callId!!, buf.name ?: "unknown"))
-                    } else if (newName != null && buf.name == null) {
-                        buf.name = newName
+                    (payload["usage"] as? JsonObject)?.let { usage ->
+                        promptTokens = usage["prompt_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: promptTokens
+                        completionTokens = usage["completion_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: completionTokens
+                        cachedTokens = (usage["prompt_tokens_details"] as? JsonObject)
+                            ?.get("cached_tokens")?.jsonPrimitive?.intOrNull?.toLong() ?: cachedTokens
                     }
-                    (function?.get("arguments") as? JsonPrimitive)?.contentOrNull?.let { chunk ->
-                        if (chunk.isNotEmpty()) {
-                            buf.args.append(chunk)
-                            buf.callId?.let { id -> send(LlmEvent.ToolCallInputDelta(buf.partId, id, chunk)) }
+
+                    // OpenAI may emit `"choices": []` on usage-only final chunks (when
+                    // stream_options.include_usage=true), and individual fields like
+                    // `delta` / `tool_calls` may arrive as JsonNull rather than absent.
+                    val choice = (payload["choices"] as? JsonArray)?.firstOrNull() as? JsonObject ?: return@collect
+                    val delta = choice["delta"] as? JsonObject
+
+                    (delta?.get("content") as? JsonPrimitive)?.contentOrNull?.let { text ->
+                        if (text.isNotEmpty()) {
+                            val pid = textPartId ?: PartId(Uuid.random().toString()).also {
+                                textPartId = it
+                                send(LlmEvent.TextStart(it))
+                            }
+                            send(LlmEvent.TextDelta(pid, text))
                         }
                     }
-                }
 
-                (choice["finish_reason"] as? JsonPrimitive)?.contentOrNull?.let { finishRaw = it }
+                    (delta?.get("tool_calls") as? JsonArray)?.forEach { tcEl ->
+                        val tc = tcEl as? JsonObject ?: return@forEach
+                        val index = (tc["index"] as? JsonPrimitive)?.intOrNull ?: 0
+                        val buf = tools.getOrPut(index) { ToolBuf(PartId(Uuid.random().toString())) }
+                        val function = tc["function"] as? JsonObject
+                        val newId = (tc["id"] as? JsonPrimitive)?.contentOrNull
+                        val newName = (function?.get("name") as? JsonPrimitive)?.contentOrNull
+                        if (buf.callId == null && newId != null) {
+                            buf.callId = CallId(newId)
+                            buf.name = newName
+                            send(LlmEvent.ToolCallStart(buf.partId, buf.callId!!, buf.name ?: "unknown"))
+                        } else if (newName != null && buf.name == null) {
+                            buf.name = newName
+                        }
+                        (function?.get("arguments") as? JsonPrimitive)?.contentOrNull?.let { chunk ->
+                            if (chunk.isNotEmpty()) {
+                                buf.args.append(chunk)
+                                buf.callId?.let { id -> send(LlmEvent.ToolCallInputDelta(buf.partId, id, chunk)) }
+                            }
+                        }
+                    }
+
+                    (choice["finish_reason"] as? JsonPrimitive)?.contentOrNull?.let { finishRaw = it }
+                }
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                io.talevia.core.logging.Loggers.get("provider.openai").log(
+                    io.talevia.core.logging.LogLevel.WARN,
+                    "stream.aborted",
+                    mapOf("error" to (e.message ?: e::class.simpleName.orEmpty())),
+                )
+                send(
+                    LlmEvent.Error(
+                        message = "openai stream aborted: ${e.message ?: e::class.simpleName ?: "I/O error"}",
+                        retriable = true,
+                    ),
+                )
+                send(LlmEvent.StepFinish(finish = FinishReason.ERROR, usage = TokenUsage.ZERO))
+                aborted = true
+                return@execute
             }
         }
 

@@ -125,104 +125,124 @@ class AnthropicProvider(
                 send(LlmEvent.StepFinish(finish = FinishReason.ERROR, usage = TokenUsage.ZERO))
                 return@execute
             }
-            http.sseEvents().collect { sse ->
-                val payload = runCatching { json.parseToJsonElement(sse.data).jsonObject }.getOrElse { cause ->
-                    // Don't abort the whole stream on a single malformed event — the server may
-                    // still send `message_stop`. But make it visible: silent drops used to leave
-                    // operators with no explanation for partially-rendered turns.
-                    logMalformedSse("anthropic", sse.event, sse.data, cause)
-                    return@collect
-                }
-                when (sse.event) {
-                    "message_start" -> {
-                        val usage = payload["message"]?.jsonObject?.get("usage")?.jsonObject
-                        usage?.let {
-                            inputTokens = it["input_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: 0
-                            cacheReadTokens = it["cache_read_input_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: 0
-                            cacheCreationTokens = it["cache_creation_input_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: 0
-                        }
+            // Mid-stream drops (server hangs up after 200 OK, socket reset,
+            // CDN flake) need to retry just like HTTP 5xx — otherwise one
+            // flaky connection kills the whole agent turn.
+            try {
+                http.sseEvents().collect { sse ->
+                    val payload = runCatching { json.parseToJsonElement(sse.data).jsonObject }.getOrElse { cause ->
+                        // Don't abort the whole stream on a single malformed event — the server may
+                        // still send `message_stop`. But make it visible: silent drops used to leave
+                        // operators with no explanation for partially-rendered turns.
+                        logMalformedSse("anthropic", sse.event, sse.data, cause)
+                        return@collect
                     }
-                    "content_block_start" -> {
-                        val index = payload["index"]!!.jsonPrimitive.int
-                        val block = payload["content_block"]!!.jsonObject
-                        val partId = PartId(Uuid.random().toString())
-                        partIdByIndex[index] = partId
-                        when (block["type"]?.jsonPrimitive?.contentOrNull) {
-                            "text" -> send(LlmEvent.TextStart(partId))
-                            "thinking" -> send(LlmEvent.ReasoningStart(partId))
-                            "tool_use" -> {
-                                val callId = CallId(block["id"]!!.jsonPrimitive.content)
-                                val name = block["name"]!!.jsonPrimitive.content
-                                callIdByIndex[index] = callId
-                                toolNameByIndex[index] = name
-                                toolInputByIndex[index] = StringBuilder()
-                                send(LlmEvent.ToolCallStart(partId, callId, name))
+                    when (sse.event) {
+                        "message_start" -> {
+                            val usage = payload["message"]?.jsonObject?.get("usage")?.jsonObject
+                            usage?.let {
+                                inputTokens = it["input_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: 0
+                                cacheReadTokens = it["cache_read_input_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: 0
+                                cacheCreationTokens = it["cache_creation_input_tokens"]?.jsonPrimitive?.intOrNull?.toLong() ?: 0
                             }
                         }
-                    }
-                    "content_block_delta" -> {
-                        val index = payload["index"]!!.jsonPrimitive.int
-                        val delta = payload["delta"]!!.jsonObject
-                        val partId = partIdByIndex[index] ?: return@collect
-                        when (delta["type"]?.jsonPrimitive?.contentOrNull) {
-                            "text_delta" -> send(LlmEvent.TextDelta(partId, delta["text"]!!.jsonPrimitive.content))
-                            "thinking_delta" -> send(LlmEvent.ReasoningDelta(partId, delta["thinking"]!!.jsonPrimitive.content))
-                            "input_json_delta" -> {
-                                val callId = callIdByIndex[index] ?: return@collect
-                                val chunk = delta["partial_json"]!!.jsonPrimitive.content
-                                toolInputByIndex[index]!!.append(chunk)
-                                send(LlmEvent.ToolCallInputDelta(partId, callId, chunk))
+                        "content_block_start" -> {
+                            val index = payload["index"]!!.jsonPrimitive.int
+                            val block = payload["content_block"]!!.jsonObject
+                            val partId = PartId(Uuid.random().toString())
+                            partIdByIndex[index] = partId
+                            when (block["type"]?.jsonPrimitive?.contentOrNull) {
+                                "text" -> send(LlmEvent.TextStart(partId))
+                                "thinking" -> send(LlmEvent.ReasoningStart(partId))
+                                "tool_use" -> {
+                                    val callId = CallId(block["id"]!!.jsonPrimitive.content)
+                                    val name = block["name"]!!.jsonPrimitive.content
+                                    callIdByIndex[index] = callId
+                                    toolNameByIndex[index] = name
+                                    toolInputByIndex[index] = StringBuilder()
+                                    send(LlmEvent.ToolCallStart(partId, callId, name))
+                                }
                             }
                         }
-                    }
-                    "content_block_stop" -> {
-                        val index = payload["index"]!!.jsonPrimitive.int
-                        val partId = partIdByIndex[index] ?: return@collect
-                        if (callIdByIndex.containsKey(index)) {
-                            val raw = toolInputByIndex[index]?.toString().orEmpty()
-                            val parsed = if (raw.isBlank()) JsonObject(emptyMap())
-                            else runCatching { json.parseToJsonElement(raw) }.getOrElse { JsonObject(emptyMap()) }
-                            send(
-                                LlmEvent.ToolCallReady(
-                                    partId,
-                                    callIdByIndex[index]!!,
-                                    toolNameByIndex[index]!!,
-                                    parsed,
+                        "content_block_delta" -> {
+                            val index = payload["index"]!!.jsonPrimitive.int
+                            val delta = payload["delta"]!!.jsonObject
+                            val partId = partIdByIndex[index] ?: return@collect
+                            when (delta["type"]?.jsonPrimitive?.contentOrNull) {
+                                "text_delta" -> send(LlmEvent.TextDelta(partId, delta["text"]!!.jsonPrimitive.content))
+                                "thinking_delta" -> send(LlmEvent.ReasoningDelta(partId, delta["thinking"]!!.jsonPrimitive.content))
+                                "input_json_delta" -> {
+                                    val callId = callIdByIndex[index] ?: return@collect
+                                    val chunk = delta["partial_json"]!!.jsonPrimitive.content
+                                    toolInputByIndex[index]!!.append(chunk)
+                                    send(LlmEvent.ToolCallInputDelta(partId, callId, chunk))
+                                }
+                            }
+                        }
+                        "content_block_stop" -> {
+                            val index = payload["index"]!!.jsonPrimitive.int
+                            val partId = partIdByIndex[index] ?: return@collect
+                            if (callIdByIndex.containsKey(index)) {
+                                val raw = toolInputByIndex[index]?.toString().orEmpty()
+                                val parsed = if (raw.isBlank()) JsonObject(emptyMap())
+                                else runCatching { json.parseToJsonElement(raw) }.getOrElse { JsonObject(emptyMap()) }
+                                send(
+                                    LlmEvent.ToolCallReady(
+                                        partId,
+                                        callIdByIndex[index]!!,
+                                        toolNameByIndex[index]!!,
+                                        parsed,
+                                    ),
+                                )
+                            }
+                        }
+                        "message_delta" -> {
+                            val delta = payload["delta"]?.jsonObject
+                            delta?.get("stop_reason")?.jsonPrimitive?.contentOrNull?.let { stopReason = it }
+                            val usage = payload["usage"]?.jsonObject
+                            usage?.get("output_tokens")?.jsonPrimitive?.intOrNull?.toLong()?.let { outputTokens = it }
+                        }
+                        "message_stop" -> send(
+                            LlmEvent.StepFinish(
+                                finish = mapStopReason(stopReason),
+                                usage = TokenUsage(
+                                    // Normalise to match OpenAI's semantics: `input` is
+                                    // the total input, with `cacheRead` / `cacheWrite`
+                                    // as subsets of it. Anthropic's raw `input_tokens`
+                                    // reports only the uncached portion, so we sum in
+                                    // the cache buckets here. Hit rate is then
+                                    // `cacheRead / input` on any provider.
+                                    input = inputTokens + cacheReadTokens + cacheCreationTokens,
+                                    output = outputTokens,
+                                    cacheRead = cacheReadTokens,
+                                    cacheWrite = cacheCreationTokens,
                                 ),
-                            )
-                        }
-                    }
-                    "message_delta" -> {
-                        val delta = payload["delta"]?.jsonObject
-                        delta?.get("stop_reason")?.jsonPrimitive?.contentOrNull?.let { stopReason = it }
-                        val usage = payload["usage"]?.jsonObject
-                        usage?.get("output_tokens")?.jsonPrimitive?.intOrNull?.toLong()?.let { outputTokens = it }
-                    }
-                    "message_stop" -> send(
-                        LlmEvent.StepFinish(
-                            finish = mapStopReason(stopReason),
-                            usage = TokenUsage(
-                                // Normalise to match OpenAI's semantics: `input` is
-                                // the total input, with `cacheRead` / `cacheWrite`
-                                // as subsets of it. Anthropic's raw `input_tokens`
-                                // reports only the uncached portion, so we sum in
-                                // the cache buckets here. Hit rate is then
-                                // `cacheRead / input` on any provider.
-                                input = inputTokens + cacheReadTokens + cacheCreationTokens,
-                                output = outputTokens,
-                                cacheRead = cacheReadTokens,
-                                cacheWrite = cacheCreationTokens,
                             ),
-                        ),
-                    )
-                    "error" -> send(
-                        LlmEvent.Error(
-                            message = payload["error"]?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
-                                ?: "anthropic stream error",
-                            retriable = false,
-                        ),
-                    )
+                        )
+                        "error" -> send(
+                            LlmEvent.Error(
+                                message = payload["error"]?.jsonObject?.get("message")?.jsonPrimitive?.contentOrNull
+                                    ?: "anthropic stream error",
+                                retriable = false,
+                            ),
+                        )
+                    }
                 }
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                throw c
+            } catch (e: Exception) {
+                io.talevia.core.logging.Loggers.get("provider.anthropic").log(
+                    io.talevia.core.logging.LogLevel.WARN,
+                    "stream.aborted",
+                    mapOf("error" to (e.message ?: e::class.simpleName.orEmpty())),
+                )
+                send(
+                    LlmEvent.Error(
+                        message = "anthropic stream aborted: ${e.message ?: e::class.simpleName ?: "I/O error"}",
+                        retriable = true,
+                    ),
+                )
+                send(LlmEvent.StepFinish(finish = FinishReason.ERROR, usage = TokenUsage.ZERO))
             }
         }
     }

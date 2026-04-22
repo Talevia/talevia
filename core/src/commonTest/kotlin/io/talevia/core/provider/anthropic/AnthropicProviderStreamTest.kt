@@ -6,9 +6,9 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
-import io.ktor.http.content.TextContent
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.PartId
