@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **render-provenance-manifest** — Export 产物是 mp4 but nothing in the container tells you which `Project` / `timeline hash` / `lockfile fingerprint` 产生了它。VISION §5.3 "可复现的确定性产物" 的下一步是让产物自己能反推出回归点。**方向：** `ExportTool` 组装 `ffmpeg -metadata comment="talevia:projectId=...;timelineHash=...;lockfileHash=..."`（或更结构化的 id3 tag），`probe` 返回时也把 metadata 解回来。Rubric §5.3。
 
 ## P1 — 中优，做完 P0 再排
 
