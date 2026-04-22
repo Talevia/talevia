@@ -1,0 +1,34 @@
+CREATE TABLE ProjectClipRenderCache (
+    -- Logical FK to Projects.id. Store layer explicitly deletes on project delete.
+    project_id        TEXT NOT NULL,
+    -- Stable cache key from ExportTool's clipMezzanineFingerprint over
+    -- (clip JSON + neighbour fades + bound-source deep hashes + output profile).
+    -- PK(project_id, fingerprint) means a repeat render with the same
+    -- fingerprint upserts the row rather than stacking duplicates.
+    fingerprint       TEXT NOT NULL,
+    -- Duplicated out of [payload] for future prune-by-age queries.
+    mezzanine_path    TEXT NOT NULL,
+    created_at        INTEGER NOT NULL,
+    -- Full ClipRenderCacheEntry JSON (fingerprint, mezzaninePath,
+    -- resolutionWidth, resolutionHeight, durationSeconds, createdAtEpochMs).
+    payload           TEXT NOT NULL,
+    PRIMARY KEY (project_id, fingerprint)
+);
+
+CREATE INDEX ProjectClipRenderCache_project_created_idx
+    ON ProjectClipRenderCache(project_id, created_at ASC);
+
+selectByProject:
+SELECT * FROM ProjectClipRenderCache WHERE project_id = ? ORDER BY created_at ASC;
+
+countByProject:
+SELECT COUNT(*) FROM ProjectClipRenderCache WHERE project_id = ?;
+
+deleteAllForProject:
+DELETE FROM ProjectClipRenderCache WHERE project_id = ?;
+
+-- Upsert so a repeat cache-miss render at the same fingerprint rewrites the
+-- row (latest mezzanine path / timestamp) instead of raising a PK conflict.
+upsert:
+INSERT OR REPLACE INTO ProjectClipRenderCache(project_id, fingerprint, mezzanine_path, created_at, payload)
+VALUES (?, ?, ?, ?, ?);

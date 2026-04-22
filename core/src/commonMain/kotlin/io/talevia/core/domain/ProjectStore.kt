@@ -7,6 +7,8 @@ import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
+import io.talevia.core.domain.render.ClipRenderCache
+import io.talevia.core.domain.render.ClipRenderCacheEntry
 import io.talevia.core.logging.Loggers
 import io.talevia.core.logging.warn
 import kotlinx.coroutines.sync.Mutex
@@ -62,26 +64,32 @@ interface ProjectStore {
 /**
  * SQLDelight-backed [ProjectStore].
  *
- * Storage shape (schema v2):
- *  - `Projects.data` — JSON of the [Project] with `snapshots` and `lockfile.entries`
- *    emptied. The "hot path" slice that the agent re-reads / re-writes on every tool
- *    call: timeline, source DAG, assets, outputProfile, renderCache.
+ * Storage shape (schema v3):
+ *  - `Projects.data` — JSON of the [Project] with `snapshots`, `lockfile.entries`
+ *    and `clipRenderCache.entries` emptied. The "hot path" slice that the agent
+ *    re-reads / re-writes on every tool call: timeline, source DAG, assets,
+ *    outputProfile, renderCache.
  *  - `ProjectSnapshots` — one row per [ProjectSnapshot], keyed by `(projectId, snapshotId)`.
  *  - `ProjectLockfileEntries` — one row per [LockfileEntry], keyed by `(projectId, ordinal)`.
  *    `ordinal` preserves the append-only order [Lockfile.findByInputHash] relies on
  *    (most-recent match wins).
+ *  - `ProjectClipRenderCache` — one row per [ClipRenderCacheEntry], keyed by
+ *    `(projectId, fingerprint)`. Append-only semantics but the fingerprint is
+ *    already unique per (clip, bound-source hashes, output profile), so the
+ *    table is upsert-keyed on fingerprint instead of ordinal.
  *
  * Write shape: [upsert] always writes the split form — blob with empty lists plus
- * fresh rows in the two sibling tables (delete-all + re-insert, one atomic cycle).
- * [delete] explicitly clears both sibling tables because the tables don't have
+ * fresh rows in the three sibling tables (delete-all + re-insert, one atomic
+ * cycle). [delete] explicitly clears all sibling tables because they don't have
  * FK cascade (SQLite's `foreign_keys` pragma is off project-wide).
  *
- * Read shape with legacy fallback: [get] decodes the blob, queries both sibling
+ * Read shape with legacy fallback: [get] decodes the blob, queries the sibling
  * tables, and overlays the table rows on top of whatever the blob carries.
- * If the tables are empty **and** the blob still has inline snapshots / lockfile
- * entries, those blob values are returned — this is the pre-migration ("legacy")
- * case where a v1 project hasn't been mutated since the v2 upgrade. The next
- * [upsert] migrates automatically (blob lists are emptied, tables are populated).
+ * If a sibling table is empty **and** the blob still has inline entries in the
+ * corresponding field, those blob values are returned — this is the
+ * pre-migration ("legacy") case where a pre-v3 project hasn't been mutated
+ * since the upgrade. The next [upsert] migrates automatically (blob lists are
+ * emptied, tables are populated).
  */
 class SqlDelightProjectStore(
     private val db: TaleviaDb,
@@ -148,13 +156,21 @@ class SqlDelightProjectStore(
             .map { json.decodeFromString(ProjectSnapshot.serializer(), it.payload) }
         val entriesFromTable = db.projectLockfileEntriesQueries.selectByProject(id.value).executeAsList()
             .map { json.decodeFromString(LockfileEntry.serializer(), it.payload) }
+        val clipCacheFromTable = db.projectClipRenderCacheQueries.selectByProject(id.value).executeAsList()
+            .map { json.decodeFromString(ClipRenderCacheEntry.serializer(), it.payload) }
 
-        // Legacy fallback: when v2 sibling tables are empty but the v1 blob still
-        // carries inline lists, keep serving the blob's lists. On the next upsert
-        // the split form takes over (blob lists emptied, sibling rows populated).
+        // Legacy fallback: when a sibling table is empty but the blob still
+        // carries inline entries in the corresponding field, keep serving the
+        // blob's values. On the next upsert the split form takes over (blob
+        // lists emptied, sibling rows populated).
         val snapshots = if (snapshotsFromTable.isEmpty()) base.snapshots else snapshotsFromTable
         val lockfile = if (entriesFromTable.isEmpty()) base.lockfile else Lockfile(entriesFromTable)
-        return base.copy(snapshots = snapshots, lockfile = lockfile)
+        val clipRenderCache = if (clipCacheFromTable.isEmpty()) {
+            base.clipRenderCache
+        } else {
+            ClipRenderCache(clipCacheFromTable)
+        }
+        return base.copy(snapshots = snapshots, lockfile = lockfile, clipRenderCache = clipRenderCache)
     }
 
     override suspend fun upsert(title: String, project: Project) {
@@ -167,10 +183,14 @@ class SqlDelightProjectStore(
         // one centralised hook covers every write path.
         val stamped = stampRecency(project, existing?.data_, now)
 
-        // Blob carries only the "always re-written together" fields. The two
+        // Blob carries only the "always re-written together" fields. The three
         // append-only lists are stored in sibling tables so `add_clip` doesn't
         // pay the write-amplification of re-encoding all history.
-        val slim = stamped.copy(snapshots = emptyList(), lockfile = Lockfile.EMPTY)
+        val slim = stamped.copy(
+            snapshots = emptyList(),
+            lockfile = Lockfile.EMPTY,
+            clipRenderCache = ClipRenderCache.EMPTY,
+        )
 
         db.transaction {
             db.projectsQueries.upsert(
@@ -203,6 +223,16 @@ class SqlDelightProjectStore(
                     payload = json.encodeToString(LockfileEntry.serializer(), entry),
                 )
             }
+            db.projectClipRenderCacheQueries.deleteAllForProject(project.id.value)
+            stamped.clipRenderCache.entries.forEach { entry ->
+                db.projectClipRenderCacheQueries.upsert(
+                    project_id = project.id.value,
+                    fingerprint = entry.fingerprint,
+                    mezzanine_path = entry.mezzaninePath,
+                    created_at = entry.createdAtEpochMs,
+                    payload = json.encodeToString(ClipRenderCacheEntry.serializer(), entry),
+                )
+            }
         }
     }
 
@@ -226,6 +256,7 @@ class SqlDelightProjectStore(
             db.projectsQueries.delete(id.value)
             db.projectSnapshotsQueries.deleteAllForProject(id.value)
             db.projectLockfileEntriesQueries.deleteAllForProject(id.value)
+            db.projectClipRenderCacheQueries.deleteAllForProject(id.value)
         }
     }
 

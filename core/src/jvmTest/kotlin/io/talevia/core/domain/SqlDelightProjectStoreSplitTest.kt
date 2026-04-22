@@ -66,8 +66,8 @@ class SqlDelightProjectStoreSplitTest {
 
     // ── schema version ────────────────────────────────────────────────
 
-    @Test fun schemaVersionIsTwo() {
-        assertEquals(2L, TaleviaDb.Schema.version)
+    @Test fun schemaVersionIsThree() {
+        assertEquals(3L, TaleviaDb.Schema.version)
     }
 
     // ── round-trip ────────────────────────────────────────────────────

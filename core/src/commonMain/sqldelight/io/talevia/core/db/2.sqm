@@ -1,0 +1,34 @@
+-- Extract Project.clipRenderCache (per-clip mezzanine cache) to its own sibling
+-- table (schema v2 → v3). Mirrors the v1 → v2 split that moved snapshots +
+-- lockfile entries out of the JSON blob: ClipRenderCache.entries is append-only
+-- (every cache-miss render adds one row, rows aren't mutated in place), so
+-- leaving it on the Projects.data blob made every project mutation (even
+-- unrelated ones like add_clip / set_clip_volume) re-encode the full cache
+-- history — classic §3a rule 3 write-amplification pattern.
+--
+-- Existing Projects rows keep their blob intact; the store reads both the
+-- blob and this new table on get() with the same legacy-fallback pattern
+-- already used for snapshots / lockfile. First upsert after this migration
+-- empties the blob's clipRenderCache and writes rows here.
+
+CREATE TABLE ProjectClipRenderCache (
+    -- Logical FK to Projects.id. Store layer explicitly deletes on project delete.
+    project_id        TEXT NOT NULL,
+    -- Stable cache key computed by ExportTool over (clip JSON + neighbour fades
+    -- + bound-source deep hashes + output profile). PRIMARY KEY(project_id,
+    -- fingerprint) means a repeat cache-miss render with the same fingerprint
+    -- upserts the latest mezzanine path / timestamp instead of accumulating
+    -- duplicate rows.
+    fingerprint       TEXT NOT NULL,
+    -- Duplicated out of [payload] for future pruning queries (e.g. delete
+    -- entries older than N days). [payload] stays the authoritative copy.
+    mezzanine_path    TEXT NOT NULL,
+    created_at        INTEGER NOT NULL,
+    -- Full ClipRenderCacheEntry JSON (fingerprint, mezzaninePath,
+    -- resolutionWidth, resolutionHeight, durationSeconds, createdAtEpochMs).
+    payload           TEXT NOT NULL,
+    PRIMARY KEY (project_id, fingerprint)
+);
+
+CREATE INDEX ProjectClipRenderCache_project_created_idx
+    ON ProjectClipRenderCache(project_id, created_at ASC);
