@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.session
 
 import io.talevia.core.ProjectId
-import io.talevia.core.SessionId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.domain.ProjectStore
@@ -54,7 +53,14 @@ class SwitchProjectTool(
 ) : Tool<SwitchProjectTool.Input, SwitchProjectTool.Output> {
 
     @Serializable data class Input(
-        val sessionId: String,
+        /**
+         * Optional — omit to default to the tool's owning session
+         * (`ToolContext.sessionId`). Pass an explicit id only to rebind a
+         * different session than the one currently dispatching. Matches the
+         * [ArchiveSessionTool] / [ForkSessionTool] / [CompactSessionTool]
+         * pattern so the agent never has to guess the current sessionId.
+         */
+        val sessionId: String? = null,
         val projectId: String,
     )
 
@@ -70,7 +76,8 @@ class SwitchProjectTool(
         "Set the session's currentProjectId — the cwd-analogue for multi-project work. " +
             "Verifies the project exists before committing; same-id is a no-op. The binding " +
             "is injected into each subsequent turn's system prompt and exposed on " +
-            "ToolContext so tools can default projectId in the future."
+            "ToolContext so tools can default projectId in the future. sessionId is " +
+            "optional — omit to rebind the current session."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.write")
@@ -80,25 +87,35 @@ class SwitchProjectTool(
         putJsonObject("properties") {
             putJsonObject("sessionId") {
                 put("type", "string")
-                put("description", "Id of the session to rebind.")
+                put(
+                    "description",
+                    "Optional — omit to rebind this session (context-resolved). Explicit id to " +
+                        "rebind a different session. Never pass a placeholder like 'current' — " +
+                        "the dispatching session's id is already available via context.",
+                )
             }
             putJsonObject("projectId") {
                 put("type", "string")
                 put("description", "Id of the project to bind the session to. Must exist.")
             }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("sessionId"), JsonPrimitive("projectId"))))
+        put("required", JsonArray(listOf(JsonPrimitive("projectId"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        require(input.sessionId.isNotBlank()) { "sessionId must not be blank" }
         require(input.projectId.isNotBlank()) { "projectId must not be blank" }
+        // Blank explicit sessionId is almost certainly a model-side placeholder
+        // (we saw "current" / "session-unknown" in production logs); reject it
+        // up front rather than let resolveSessionId route to a bogus lookup.
+        input.sessionId?.let {
+            require(it.isNotBlank()) { "sessionId must not be blank" }
+        }
 
-        val sid = SessionId(input.sessionId)
+        val sid = ctx.resolveSessionId(input.sessionId)
         val session = sessions.getSession(sid)
             ?: error(
-                "Session ${input.sessionId} not found. Call session_query(select=sessions) to discover valid session ids.",
+                "Session ${sid.value} not found. Call session_query(select=sessions) to discover valid session ids.",
             )
 
         val pid = ProjectId(input.projectId)

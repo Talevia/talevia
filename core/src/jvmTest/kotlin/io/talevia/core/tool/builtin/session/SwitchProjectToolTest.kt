@@ -243,6 +243,22 @@ class SwitchProjectToolTest {
         assertEquals(ProjectId("p-bound"), downstreamCtx.currentProjectId)
     }
 
+    @Test fun omittedSessionIdDefaultsToDispatchingSession() = runTest {
+        val rig = rig()
+        seedSession(rig.sessions, id = "s")
+        seedProject(rig.projects, "p-target")
+
+        val out = SwitchProjectTool(rig.sessions, rig.projects, fixedClock).execute(
+            SwitchProjectTool.Input(sessionId = null, projectId = "p-target"),
+            rig.ctx,
+        ).data
+
+        assertEquals("s", out.sessionId)
+        assertEquals("p-target", out.currentProjectId)
+        val refreshed = rig.sessions.getSession(SessionId("s"))!!
+        assertEquals(ProjectId("p-target"), refreshed.currentProjectId)
+    }
+
     @Test fun changedBindingPublishesBusEvent() = runTest {
         val rig = rig()
         seedSession(rig.sessions, currentProjectId = ProjectId("p-a"))
