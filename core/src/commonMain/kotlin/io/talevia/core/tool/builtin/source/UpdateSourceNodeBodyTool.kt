@@ -12,8 +12,10 @@ import io.talevia.core.tool.ToolResult
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.JsonTransformingSerializer
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -82,6 +84,42 @@ class UpdateSourceNodeBodyTool(
         val body: JsonObject,
     )
 
+    /**
+     * Tolerant deserializer that rescues the "flattened body" shape some LLMs emit — instead
+     * of nesting body fields under `body`, they splat them at the top level alongside
+     * projectId/nodeId:
+     *
+     *   BAD  {"projectId":"p","nodeId":"shot-1","framing":"wide","dialogue":"…"}
+     *   GOOD {"projectId":"p","nodeId":"shot-1","body":{"framing":"wide","dialogue":"…"}}
+     *
+     * Production logs on gpt-5.4-mini showed this failure fire repeatedly even after the
+     * schema + helpText explicitly flagged it — the model just drops the body wrapper in
+     * long contexts. `JsonConfig.ignoreUnknownKeys=true` made it worse: the flattened fields
+     * silently disappeared and the only feedback was `MissingFieldException` for `body`.
+     *
+     * Transform-on-deserialize fixes it: if the incoming object has no `body` key (or `body`
+     * isn't an object), fold every non-{projectId,nodeId,body} top-level entry into a
+     * synthesized body before the standard data-class deserializer runs. Callers that pass
+     * the correct nested shape are unaffected.
+     */
+    internal object InputCompatSerializer :
+        JsonTransformingSerializer<Input>(Input.serializer()) {
+        override fun transformDeserialize(element: JsonElement): JsonElement {
+            val obj = element as? JsonObject ?: return element
+            if (obj["body"] is JsonObject) return element
+            val body = buildJsonObject {
+                obj.forEach { (k, v) ->
+                    if (k != "projectId" && k != "nodeId" && k != "body") put(k, v)
+                }
+            }
+            return buildJsonObject {
+                obj["projectId"]?.let { put("projectId", it) }
+                obj["nodeId"]?.let { put("nodeId", it) }
+                put("body", body)
+            }
+        }
+    }
+
     @Serializable data class Output(
         val projectId: String,
         val nodeId: String,
@@ -109,7 +147,7 @@ class UpdateSourceNodeBodyTool(
             "mutate the JsonObject client-side (keep every field you want to retain — this is " +
             "NOT a patch), then pass the complete new object as `body`. Never call with `body` " +
             "missing or empty; there is no partial-update fallback."
-    override val inputSerializer: KSerializer<Input> = serializer()
+    override val inputSerializer: KSerializer<Input> = InputCompatSerializer
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.write")
 

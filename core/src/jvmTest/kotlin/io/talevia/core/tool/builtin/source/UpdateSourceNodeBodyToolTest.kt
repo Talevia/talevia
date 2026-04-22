@@ -290,6 +290,57 @@ class UpdateSourceNodeBodyToolTest {
         // contentHash is a function of (kind, body, parents); identical body should hash the same.
         assertEquals(before, after)
     }
+
+    @Test fun flatBodyShapeIsRescuedAtDeserialize() = runTest {
+        // Production gpt-5.4-mini kept emitting the flattened form: body fields splat at
+        // the top level alongside projectId/nodeId, with no `body` wrapper. Exercise the
+        // tool via its own inputSerializer — the same path RegisteredTool.dispatch takes —
+        // to prove the transform rebuilds the expected shape before the data class decoder
+        // sees it.
+        val rig = rig()
+        seedShot(rig.store, rig.pid, "shot-1")
+
+        val flatRaw = buildJsonObject {
+            put("projectId", kotlinx.serialization.json.JsonPrimitive(rig.pid.value))
+            put("nodeId", kotlinx.serialization.json.JsonPrimitive("shot-1"))
+            // Deliberately no `body` wrapper — fields at the top level.
+            put("framing", kotlinx.serialization.json.JsonPrimitive("close-up"))
+            put("dialogue", kotlinx.serialization.json.JsonPrimitive("Where are we?"))
+        }
+
+        val decoded = io.talevia.core.JsonConfig.default
+            .decodeFromJsonElement(UpdateSourceNodeBodyTool.InputCompatSerializer, flatRaw)
+        rig.tool.execute(decoded, rig.ctx)
+
+        val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("shot-1")]!!
+        val body = node.body as kotlinx.serialization.json.JsonObject
+        assertEquals("close-up", body["framing"]!!.toString().trim('"'))
+        assertEquals("Where are we?", body["dialogue"]!!.toString().trim('"'))
+    }
+
+    @Test fun nestedBodyShapePassesThrough() = runTest {
+        // The transform must not interfere with the correct shape either.
+        val rig = rig()
+        seedShot(rig.store, rig.pid, "shot-1")
+
+        val nestedRaw = buildJsonObject {
+            put("projectId", kotlinx.serialization.json.JsonPrimitive(rig.pid.value))
+            put("nodeId", kotlinx.serialization.json.JsonPrimitive("shot-1"))
+            put(
+                "body",
+                buildJsonObject { put("framing", kotlinx.serialization.json.JsonPrimitive("wide")) },
+            )
+        }
+
+        val decoded = io.talevia.core.JsonConfig.default
+            .decodeFromJsonElement(UpdateSourceNodeBodyTool.InputCompatSerializer, nestedRaw)
+        rig.tool.execute(decoded, rig.ctx)
+
+        val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("shot-1")]!!
+        val body = node.body as kotlinx.serialization.json.JsonObject
+        assertEquals("wide", body["framing"]!!.toString().trim('"'))
+        assertEquals(1, body.size, "extra keys must not leak in when body is already nested")
+    }
 }
 
 private fun kotlinx.serialization.json.JsonObjectBuilder.putJsonArray(
