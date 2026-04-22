@@ -23,8 +23,6 @@
 
 ## P2 — 记债 / 观望
 
-- **describe-project-fold-snapshots** — `describe_project` 输出含 `snapshotCount: Int` 但不含最近 snapshot 列表；UI 要知道 "最近 3 个保存点" 还得再 call `project_query(select=project_snapshots)`（或现有的 `list_project_snapshots`）。**方向：** 给 `describe_project.Output` 加 `recentSnapshots: List<SnapshotSummary>` 字段（cap 3-5 条，按 capturedAt DESC），UI 一次读到。Rubric §5.4。
-
 - **agent-retry-bus-observable** — `BusEvent.AgentRetryScheduled` 已发出，但 `MetricsRegistry` 没有 per-reason counter（overload / rate_limit / http_5xx 分开计数）。ops dashboard 只能看到总 retry 数。**方向：** 给 `Metrics.counterName` 加 `agent.retry.count{reason=<slug>}` 分类 counter，`/metrics` Prometheus 端点就能按 reason label 查图。Rubric §5.4。
 
 - **project-query-sort-by-updatedAt** — `project_query(select=tracks | timeline_clips | assets)` 当前 sortBy 都是 domain-specific 维度（index / clipCount / span / startSeconds / duration / id）；没有 "最近改过的在前" 的时间排序。**方向：** `Timeline.tracks` / `clips` / `assets` 加 optional `updatedAtEpochMs` 元数据（或从 `Project.updatedAt` 反推），在 `project_query` 里增加 `sortBy="recent"` 支持。Rubric §5.2。
