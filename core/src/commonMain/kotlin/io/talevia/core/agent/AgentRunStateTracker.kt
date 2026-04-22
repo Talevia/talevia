@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 
 /**
  * Snapshot view of the most recent [AgentRunState] per session, so
@@ -42,17 +43,52 @@ import kotlinx.coroutines.launch
 class AgentRunStateTracker(
     bus: EventBus,
     scope: CoroutineScope,
+    private val clock: Clock = Clock.System,
+    /**
+     * Max transitions to keep per session in the [history] ring buffer.
+     * Older entries drop out when a session exceeds this cap —
+     * `session_query(select=run_statehistoryFlowInternal)` can always read up to
+     * this many back. Picked to comfortably cover a long agent run's
+     * Compacting / Generating / AwaitingTool loops (~50 turns × a few
+     * state flips = a few hundred) while keeping the per-session
+     * memory footprint bounded. Unused across AgentRunStateTracker's
+     * existing API — purely controls history retention.
+     */
+    private val historyCap: Int = DEFAULT_HISTORY_CAP,
 ) {
     private val _states = MutableStateFlow<Map<SessionId, AgentRunState>>(emptyMap())
 
     /** Snapshot of every tracked session's most recent state. */
     val states: StateFlow<Map<SessionId, AgentRunState>> = _states.asStateFlow()
 
+    /**
+     * Per-session ring buffer of [StateTransition]s. `FIFO`: when a
+     * session exceeds [historyCap] entries, the oldest drops off. Kept
+     * alongside [states] so both "current" and "recent history" reads
+     * are non-suspending `.value` hits. The map grows monotonically
+     * with session count; same retention trade-off as `_states`.
+     */
+    private val historyFlowInternal = MutableStateFlow<Map<SessionId, List<StateTransition>>>(emptyMap())
+
+    /** Read-only snapshot of every session's recent [StateTransition] ring buffer. */
+    val historyFlow: StateFlow<Map<SessionId, List<StateTransition>>> = historyFlowInternal.asStateFlow()
+
     init {
         scope.launch {
             bus.events.collect { event ->
                 if (event is BusEvent.AgentRunStateChanged) {
+                    val now = clock.now().toEpochMilliseconds()
+                    val transition = StateTransition(epochMs = now, state = event.state)
                     _states.update { prev -> prev + (event.sessionId to event.state) }
+                    historyFlowInternal.update { prev ->
+                        val existing = prev[event.sessionId].orEmpty()
+                        val next = if (existing.size >= historyCap) {
+                            existing.drop(existing.size - historyCap + 1) + transition
+                        } else {
+                            existing + transition
+                        }
+                        prev + (event.sessionId to next)
+                    }
                 }
             }
         }
@@ -64,7 +100,27 @@ class AgentRunStateTracker(
      */
     fun currentState(sessionId: SessionId): AgentRunState? = _states.value[sessionId]
 
+    /**
+     * Ring-buffer history of every [AgentRunState] transition observed
+     * for [sessionId], oldest first. Empty when no run has been tracked.
+     * Capped at [historyCap] entries — older transitions are dropped.
+     *
+     * `since` filters to transitions with `epochMs >= since`. Null
+     * returns the full buffer (within cap).
+     */
+    fun history(sessionId: SessionId, since: Long? = null): List<StateTransition> {
+        val all = historyFlowInternal.value[sessionId].orEmpty()
+        return if (since == null) all else all.filter { it.epochMs >= since }
+    }
+
     companion object {
+        /**
+         * Default per-session history cap. Sized for long agent runs
+         * (~50 turns × a handful of state flips) without letting a
+         * runaway session balloon memory.
+         */
+        const val DEFAULT_HISTORY_CAP: Int = 256
+
         /**
          * Convenience for composition roots that don't already have a
          * dedicated [CoroutineScope] they want to hand out — mints an
@@ -77,3 +133,16 @@ class AgentRunStateTracker(
             AgentRunStateTracker(bus, CoroutineScope(SupervisorJob() + Dispatchers.Default))
     }
 }
+
+/**
+ * One entry in [AgentRunStateTracker.history]. `epochMs` is the wall-
+ * clock time when the tracker observed the transition (computed via
+ * [Clock.now], not the bus event's own timestamp — bus events don't
+ * carry one today). Pair with the target [state]; the "previous"
+ * state of a given transition is the prior entry's `state`
+ * (effectively the same as the run state published at that point).
+ */
+data class StateTransition(
+    val epochMs: Long,
+    val state: AgentRunState,
+)

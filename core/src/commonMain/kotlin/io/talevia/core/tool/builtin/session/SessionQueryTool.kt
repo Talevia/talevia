@@ -15,6 +15,7 @@ import io.talevia.core.tool.builtin.session.query.runForksQuery
 import io.talevia.core.tool.builtin.session.query.runMessageDetailQuery
 import io.talevia.core.tool.builtin.session.query.runMessagesQuery
 import io.talevia.core.tool.builtin.session.query.runPartsQuery
+import io.talevia.core.tool.builtin.session.query.runRunStateHistoryQuery
 import io.talevia.core.tool.builtin.session.query.runSessionMetadataQuery
 import io.talevia.core.tool.builtin.session.query.runSessionsQuery
 import io.talevia.core.tool.builtin.session.query.runSpendQuery
@@ -102,6 +103,12 @@ class SessionQueryTool(
         val limit: Int? = null,
         /** Skip the first N rows after filter+sort. Default 0. */
         val offset: Int? = null,
+        /**
+         * Epoch-millis lower bound for `select=run_state_history`. Entries
+         * with `epochMs < sinceEpochMs` are dropped; null returns the full
+         * ring buffer (within its cap). Rejected for other selects.
+         */
+        val sinceEpochMs: Long? = null,
     )
 
     @Serializable data class Output(
@@ -305,6 +312,26 @@ class SessionQueryTool(
         val hitRatio: Double,
     )
 
+    /**
+     * `select=run_state_history` — one row per observed
+     * [AgentRunState] transition for this session, oldest first. Reads
+     * from the [AgentRunStateTracker]'s in-memory ring buffer (capped
+     * per session), so history is bounded to the current process's
+     * lifetime — no SQLite persistence. Useful for "how many times did
+     * the agent enter Compacting in the last 5 minutes?" debug
+     * questions that `select=status` (latest-only snapshot) can't
+     * answer.
+     */
+    @Serializable data class RunStateTransitionRow(
+        val sessionId: String,
+        /** Millis since Unix epoch when the tracker observed the transition. */
+        val epochMs: Long,
+        /** `"idle"` | `"generating"` | `"awaiting_tool"` | `"compacting"` | `"cancelled"` | `"failed"`. */
+        val state: String,
+        /** Non-null only for `state="failed"` transitions. */
+        val cause: String? = null,
+    )
+
     @Serializable data class StatusRow(
         val sessionId: String,
         /** `"idle"` | `"generating"` | `"awaiting_tool"` | `"compacting"` | `"cancelled"` | `"failed"`. */
@@ -399,6 +426,7 @@ class SessionQueryTool(
             SELECT_MESSAGE -> runMessageDetailQuery(sessions, input)
             SELECT_SPEND -> runSpendQuery(sessions, projects, input)
             SELECT_CACHE_STATS -> runCacheStatsQuery(sessions, input)
+            SELECT_RUN_STATE_HISTORY -> runRunStateHistoryQuery(sessions, agentStates, input, limit, offset)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -432,6 +460,9 @@ class SessionQueryTool(
             if (select == SELECT_SESSIONS && input.sessionId != null) {
                 add("sessionId (rejected for select=sessions — use projectId)")
             }
+            if (select != SELECT_RUN_STATE_HISTORY && input.sinceEpochMs != null) {
+                add("sinceEpochMs (select=run_state_history only)")
+            }
         }
         if (misapplied.isNotEmpty()) {
             error(
@@ -454,10 +485,12 @@ class SessionQueryTool(
         const val SELECT_MESSAGE = "message"
         const val SELECT_SPEND = "spend"
         const val SELECT_CACHE_STATS = "cache_stats"
+        const val SELECT_RUN_STATE_HISTORY = "run_state_history"
         private val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
             SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
             SELECT_SESSION_METADATA, SELECT_MESSAGE, SELECT_SPEND, SELECT_CACHE_STATS,
+            SELECT_RUN_STATE_HISTORY,
         )
 
         private const val DEFAULT_LIMIT = 100

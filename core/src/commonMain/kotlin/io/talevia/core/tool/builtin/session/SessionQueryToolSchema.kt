@@ -22,8 +22,8 @@ internal val SESSION_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
             put(
                 "description",
                 "What to query: sessions | messages | parts | forks | ancestors | tool_calls | " +
-                    "compactions | status | session_metadata | message | spend | cache_stats " +
-                    "(case-insensitive).",
+                    "compactions | status | session_metadata | message | spend | cache_stats | " +
+                    "run_state_history (case-insensitive).",
             )
         }
         putJsonObject("sessionId") {
@@ -86,6 +86,15 @@ internal val SESSION_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
         putJsonObject("offset") {
             put("type", "integer")
             put("description", "Skip N rows after filter+sort (default 0).")
+        }
+        putJsonObject("sinceEpochMs") {
+            put("type", "integer")
+            put(
+                "description",
+                "Epoch-millis lower bound for select=run_state_history — drop transitions " +
+                    "older than this. Null returns the full ring buffer (capped at 256 entries " +
+                    "per session). Rejected for other selects.",
+            )
         }
     }
     put("required", JsonArray(listOf(JsonPrimitive("select"))))
