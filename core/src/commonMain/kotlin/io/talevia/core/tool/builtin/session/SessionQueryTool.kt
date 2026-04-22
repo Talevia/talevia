@@ -2,6 +2,7 @@ package io.talevia.core.tool.builtin.session
 
 import io.talevia.core.JsonConfig
 import io.talevia.core.agent.AgentRunStateTracker
+import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.Tool
@@ -15,6 +16,7 @@ import io.talevia.core.tool.builtin.session.query.runMessagesQuery
 import io.talevia.core.tool.builtin.session.query.runPartsQuery
 import io.talevia.core.tool.builtin.session.query.runSessionMetadataQuery
 import io.talevia.core.tool.builtin.session.query.runSessionsQuery
+import io.talevia.core.tool.builtin.session.query.runSpendQuery
 import io.talevia.core.tool.builtin.session.query.runStatusQuery
 import io.talevia.core.tool.builtin.session.query.runToolCallsQuery
 import kotlinx.serialization.KSerializer
@@ -64,6 +66,15 @@ class SessionQueryTool(
      * production AppContainer from the same bus every Agent publishes on.
      */
     private val agentStates: AgentRunStateTracker? = null,
+    /**
+     * Optional project store. Required when `select=spend` is requested so we
+     * can resolve the session's bound project and walk its lockfile for
+     * cost-stamped entries. Callers pass null to keep other selects
+     * functional in non-Project rigs (pure session store tests); a
+     * `select=spend` call on a rig with no project store reports zero cost
+     * and flags `projectResolved=false`.
+     */
+    private val projects: ProjectStore? = null,
 ) : Tool<SessionQueryTool.Input, SessionQueryTool.Output> {
 
     @Serializable data class Input(
@@ -251,6 +262,27 @@ class SessionQueryTool(
         val compactingFromMessageId: String? = null,
     )
 
+    /**
+     * `select=spend` — single-row AIGC cost aggregate attributed to one
+     * session. Walks the session's bound project's lockfile and sums
+     * `costCents` for entries whose stamped sessionId matches. Unknown-cost
+     * entries (no pricing rule) are counted in [unknownCostEntries] and do
+     * not contribute to [totalCostCents]. [projectResolved] surfaces "the
+     * session's project no longer exists" — the session record is still
+     * valid but spend is un-computable.
+     */
+    @Serializable data class SpendSummaryRow(
+        val sessionId: String,
+        val projectId: String,
+        val totalCostCents: Long,
+        val entryCount: Int,
+        val knownCostEntries: Int,
+        val unknownCostEntries: Int,
+        val byTool: Map<String, Long> = emptyMap(),
+        val unknownByTool: Map<String, Int> = emptyMap(),
+        val projectResolved: Boolean,
+    )
+
     @Serializable data class StatusRow(
         val sessionId: String,
         /** `"idle"` | `"generating"` | `"awaiting_tool"` | `"compacting"` | `"cancelled"` | `"failed"`. */
@@ -308,6 +340,11 @@ class SessionQueryTool(
             "  • message — single-row drill-down replacing the old describe_message tool. " +
             "Returns message metadata + per-part summaries. requires messageId (rejected " +
             "elsewhere).\n" +
+            "  • spend — single-row AIGC cost aggregate for this session (walks the " +
+            "session's bound project lockfile, sums `costCents` for entries stamped with " +
+            "sessionId). Unknown-cost entries (no pricing rule) are counted separately. " +
+            "requires sessionId. Scoped to the session's CURRENT project only — sessions " +
+            "that switched projects mid-run report partial totals.\n" +
             "Common: limit (default 100, clamped 1..1000), offset (default 0). Setting a filter " +
             "that doesn't apply to the chosen select fails loud so typos surface instead of silently " +
             "returning an empty list."
@@ -413,6 +450,7 @@ class SessionQueryTool(
             SELECT_STATUS -> runStatusQuery(sessions, agentStates, input)
             SELECT_SESSION_METADATA -> runSessionMetadataQuery(sessions, input)
             SELECT_MESSAGE -> runMessageDetailQuery(sessions, input)
+            SELECT_SPEND -> runSpendQuery(sessions, projects, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -466,10 +504,11 @@ class SessionQueryTool(
         const val SELECT_STATUS = "status"
         const val SELECT_SESSION_METADATA = "session_metadata"
         const val SELECT_MESSAGE = "message"
+        const val SELECT_SPEND = "spend"
         private val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
             SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
-            SELECT_SESSION_METADATA, SELECT_MESSAGE,
+            SELECT_SESSION_METADATA, SELECT_MESSAGE, SELECT_SPEND,
         )
 
         private const val DEFAULT_LIMIT = 100

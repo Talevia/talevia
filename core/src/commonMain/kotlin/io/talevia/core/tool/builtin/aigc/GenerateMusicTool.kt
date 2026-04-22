@@ -3,6 +3,8 @@ package io.talevia.core.tool.builtin.aigc
 import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
+import io.talevia.core.bus.BusEvent
+import io.talevia.core.cost.AigcPricing
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
@@ -193,6 +195,8 @@ class GenerateMusicTool(
             )
         }
 
+        val baseInputs = JsonConfig.default.encodeToJsonElement(Input.serializer(), input).jsonObject
+        val costCents = AigcPricing.estimateCents(id, result.provenance, baseInputs)
         if (pid != null && store != null) {
             AigcPipeline.record(
                 store = store,
@@ -202,7 +206,18 @@ class GenerateMusicTool(
                 assetId = asset.id,
                 provenance = result.provenance,
                 sourceBinding = folded.appliedNodeIds.map { SourceNodeId(it) }.toSet(),
-                baseInputs = JsonConfig.default.encodeToJsonElement(Input.serializer(), input).jsonObject,
+                baseInputs = baseInputs,
+                costCents = costCents,
+                sessionId = ctx.sessionId,
+            )
+            ctx.publishEvent(
+                BusEvent.AigcCostRecorded(
+                    sessionId = ctx.sessionId,
+                    projectId = pid,
+                    toolId = id,
+                    assetId = asset.id.value,
+                    costCents = costCents,
+                ),
             )
         }
 

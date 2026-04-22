@@ -77,7 +77,7 @@ final class AppContainer {
         registry.register(tool: EstimateTokensTool())
         registry.register(tool: TodoWriteTool(clock: clock))
         registry.register(tool: CompareAigcCandidatesTool(registry: registry))
-        registry.register(tool: SessionQueryTool(sessions: self.sessions, agentStates: self.agentStates))
+        registry.register(tool: SessionQueryTool(sessions: self.sessions, agentStates: self.agentStates, projects: self.projects))
         registry.register(tool: ExportSessionTool(sessions: self.sessions))
         registry.register(tool: EstimateSessionTokensTool(sessions: self.sessions))
         registry.register(tool: ForkSessionTool(sessions: self.sessions))

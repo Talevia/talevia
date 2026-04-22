@@ -128,6 +128,20 @@ data class Lockfile(
  *   surviving asset) is dead weight regardless of intent, and the pin had no
  *   artifact to protect anyway. Default `false` preserves the legacy shape; old
  *   serialized lockfiles missing this field deserialize as unpinned.
+ * @property costCents Best-effort USD cost of the generation in integer cents
+ *   (i.e. 100 = $1.00), computed by [io.talevia.core.cost.AigcPricing] at record
+ *   time from the tool id + provenance + inputs. **Three-state by design:**
+ *   `null` = "we don't have a pricing rule for this model / call shape" (do not
+ *   count toward totals); `0L` = "explicitly free" (counted, but adds nothing);
+ *   positive Long = paid generation. Legacy entries written before this field
+ *   existed deserialize as `null`, matching the "unknown" semantic. Feeds
+ *   `session_query(select=spend)` and `project_query(select=spend)` aggregations.
+ * @property sessionId The session id that issued the tool dispatch, when available.
+ *   Required for `session_query(select=spend)` to scope totals to one session. Null
+ *   on legacy entries, and on dispatches that somehow ran outside a session (not
+ *   expected in production — every Agent turn has a sessionId). Storing on the
+ *   entry rather than on a side-index keeps the lookup zero-IO: a session's spend
+ *   is just a filter over `project.lockfile.entries`.
  */
 @Serializable
 data class LockfileEntry(
@@ -139,4 +153,6 @@ data class LockfileEntry(
     val sourceContentHashes: Map<SourceNodeId, String> = emptyMap(),
     val baseInputs: JsonObject = JsonObject(emptyMap()),
     val pinned: Boolean = false,
+    val costCents: Long? = null,
+    val sessionId: String? = null,
 )

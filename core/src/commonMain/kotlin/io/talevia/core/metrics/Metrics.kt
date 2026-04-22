@@ -89,6 +89,17 @@ class EventBusMetricsSink(
         bus.events.filterIsInstance<BusEvent>().collect { event ->
             try {
                 registry.increment(counterName(event))
+                // AigcCostRecorded additionally feeds a cents gauge so dashboards
+                // can render "spend this session" without re-reading the lockfile.
+                if (event is BusEvent.AigcCostRecorded) {
+                    val cents = event.costCents
+                    if (cents != null) {
+                        registry.increment("aigc.cost.cents", by = cents)
+                        registry.increment("aigc.cost.${event.toolId}.cents", by = cents)
+                    } else {
+                        registry.increment("aigc.cost.unknown")
+                    }
+                }
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t
                 // Metrics must never break the run — log and swallow.
@@ -121,6 +132,7 @@ class EventBusMetricsSink(
         is BusEvent.AgentRunStateChanged -> "agent.run.state.${stateTag(event.state)}"
         is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
         is BusEvent.ProjectValidationWarning -> "project.validation.warning"
+        is BusEvent.AigcCostRecorded -> "aigc.cost.recorded"
     }
 
     /**

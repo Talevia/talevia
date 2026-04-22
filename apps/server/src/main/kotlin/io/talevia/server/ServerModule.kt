@@ -417,6 +417,7 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.AgentRunStateChanged -> "agent.run.state.changed"
     is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
     is BusEvent.ProjectValidationWarning -> "project.validation.warning"
+    is BusEvent.AigcCostRecorded -> "aigc.cost.recorded"
 }
 
 @Serializable data class CreateProjectRequest(val title: String)
@@ -524,6 +525,12 @@ data class BusEventDto(
     val fromProviderId: String? = null,
     /** Set for `agent.provider.fallback` — provider the chain is advancing to. */
     val toProviderId: String? = null,
+    /** Set for `aigc.cost.recorded` — which tool produced the asset (e.g. `generate_image`). */
+    val toolId: String? = null,
+    /** Set for `aigc.cost.recorded` — the produced asset id. */
+    val assetId: String? = null,
+    /** Set for `aigc.cost.recorded` — USD cents (null = no pricing rule). */
+    val costCents: Long? = null,
 ) {
     companion object {
         fun from(e: BusEvent): BusEventDto = when (e) {
@@ -595,6 +602,14 @@ data class BusEventDto(
                 sessionId = null,
                 projectId = e.projectId.value,
                 validationIssues = e.issues,
+            )
+            is BusEvent.AigcCostRecorded -> BusEventDto(
+                "aigc.cost.recorded",
+                e.sessionId.value,
+                projectId = e.projectId.value,
+                toolId = e.toolId,
+                assetId = e.assetId,
+                costCents = e.costCents,
             )
         }
     }

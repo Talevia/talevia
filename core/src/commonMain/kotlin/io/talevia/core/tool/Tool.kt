@@ -123,6 +123,16 @@ class ToolContext(
      * existing `ToolContext(…)` call sites keep compiling without change.
      */
     val currentProjectId: ProjectId? = null,
+    /**
+     * Publish a coarse [io.talevia.core.bus.BusEvent] (NOT a streaming Part —
+     * use [emitPart] for those). Default no-op so test harnesses that don't
+     * wire a bus keep compiling. Production dispatch from
+     * [io.talevia.core.agent.AgentTurnExecutor] plumbs this to the same
+     * `EventBus` that agent / session signals flow through, so metrics sinks
+     * and SSE subscribers see tool-side events (e.g. `AigcCostRecorded`)
+     * without bespoke wiring per tool.
+     */
+    val publishEvent: suspend (io.talevia.core.bus.BusEvent) -> Unit = { },
 ) {
     /**
      * Resolve a project id for a tool that accepts an optional explicit

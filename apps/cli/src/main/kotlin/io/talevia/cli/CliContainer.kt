@@ -2,6 +2,7 @@ package io.talevia.cli
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.talevia.cli.permission.cliPermissionRules
 import io.talevia.core.agent.Agent
 import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.agent.SessionTitler
@@ -11,7 +12,6 @@ import io.talevia.core.db.TaleviaDb
 import io.talevia.core.db.TaleviaDbFactory
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
-import io.talevia.cli.permission.cliPermissionRules
 import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.permission.DefaultPermissionService
 import io.talevia.core.platform.AsrEngine
@@ -292,7 +292,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         register(io.talevia.core.tool.builtin.meta.ListToolsTool(this))
         register(io.talevia.core.tool.builtin.meta.EstimateTokensTool())
         register(TodoWriteTool())
-        register(SessionQueryTool(sessions, agentStates))
+        register(SessionQueryTool(sessions, agentStates, projects))
         register(ExportSessionTool(sessions))
         register(EstimateSessionTokensTool(sessions))
         register(ForkSessionTool(sessions))

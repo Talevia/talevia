@@ -202,6 +202,27 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     /**
+     * An AIGC dispatch (image / TTS / music / video / upscale) completed and a
+     * lockfile entry was recorded. Carries a best-effort cost estimate in
+     * integer USD cents; [costCents] is `null` when
+     * [io.talevia.core.cost.AigcPricing] has no rule for the provider + model
+     * combination. Subscribers (metrics sink, UI spend indicator) aggregate
+     * non-null values and surface "unknown cost" as a separate signal rather
+     * than silently summing zero.
+     *
+     * Fired exclusively on cache **misses** (new generations). Cache hits
+     * re-serve the already-billed asset and do not emit this event — the cost
+     * was accounted for on the original generation.
+     */
+    data class AigcCostRecorded(
+        override val sessionId: SessionId,
+        val projectId: ProjectId,
+        val toolId: String,
+        val assetId: String,
+        val costCents: Long?,
+    ) : SessionEvent
+
+    /**
      * A project load detected structural issues in its source DAG
      * (dangling parent refs, parent cycles). Non-throwing warning — the
      * project is still returned to the caller, but subscribers (UI,

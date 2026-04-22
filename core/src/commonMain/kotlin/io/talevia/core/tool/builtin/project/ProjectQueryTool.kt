@@ -15,6 +15,7 @@ import io.talevia.core.tool.builtin.project.query.runConsistencyPropagationQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileEntriesQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileEntryDetailQuery
 import io.talevia.core.tool.builtin.project.query.runProjectMetadataQuery
+import io.talevia.core.tool.builtin.project.query.runSpendQuery
 import io.talevia.core.tool.builtin.project.query.runTimelineClipsQuery
 import io.talevia.core.tool.builtin.project.query.runTracksQuery
 import io.talevia.core.tool.builtin.project.query.runTransitionsQuery
@@ -374,6 +375,26 @@ class ProjectQueryTool(
      * kind, lockfile-by-tool, snapshots, plus a pre-rendered
      * `summaryText` the LLM can quote verbatim.
      */
+    /**
+     * `select=spend` — single-row aggregate of AIGC spend across the
+     * project's lockfile. [costCents] sums on every entry whose stamped
+     * `costCents` is non-null; entries with `null` cost (no pricing rule)
+     * are counted in [unknownCostEntries] and NOT rolled into
+     * [totalCostCents] — silent zero-coalescing would misrepresent spend
+     * as cheaper than it is. [byTool] / [bySession] break the total down
+     * so dashboards can answer "which tool / session ate the budget".
+     */
+    @Serializable data class SpendSummaryRow(
+        val projectId: String,
+        val totalCostCents: Long,
+        val entryCount: Int,
+        val knownCostEntries: Int,
+        val unknownCostEntries: Int,
+        val byTool: Map<String, Long> = emptyMap(),
+        val bySession: Map<String, Long> = emptyMap(),
+        val unknownByTool: Map<String, Int> = emptyMap(),
+    )
+
     @Serializable data class ProjectMetadataRow(
         val title: String,
         val createdAtEpochMs: Long,
@@ -424,6 +445,10 @@ class ProjectQueryTool(
             "  • project_metadata — single-row drill-down replacing describe_project " +
             "(compact aggregate across tracks / clips / source / lockfile / snapshots plus " +
             "pre-rendered summaryText).\n" +
+            "  • spend — single-row AIGC cost aggregate across the lockfile. Sums " +
+            "`costCents` per entry (null = unknown pricing, counted separately), breaks " +
+            "down by toolId and sessionId. Use to answer \"how much has this project " +
+            "burned\".\n" +
             "Common: limit (default 100, clamped 1..500), offset (default 0). Setting a filter " +
             "that doesn't apply to the chosen select fails loud so typos surface instead of silently " +
             "returning an empty list."
@@ -447,7 +472,9 @@ class ProjectQueryTool(
                 put(
                     "description",
                     "What to query: tracks | timeline_clips | assets | transitions | " +
-                        "lockfile_entries | clips_for_asset | clips_for_source (case-insensitive).",
+                        "lockfile_entries | clips_for_asset | clips_for_source | " +
+                        "clip | lockfile_entry | project_metadata | consistency_propagation | " +
+                        "spend (case-insensitive).",
                 )
             }
             putJsonObject("trackKind") {
@@ -603,6 +630,7 @@ class ProjectQueryTool(
             SELECT_LOCKFILE_ENTRY -> runLockfileEntryDetailQuery(project, input)
             SELECT_PROJECT_METADATA -> runProjectMetadataQuery(project, projects, input)
             SELECT_CONSISTENCY_PROPAGATION -> runConsistencyPropagationQuery(project, input, limit, offset)
+            SELECT_SPEND -> runSpendQuery(project)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -672,12 +700,13 @@ class ProjectQueryTool(
         const val SELECT_LOCKFILE_ENTRY = "lockfile_entry"
         const val SELECT_PROJECT_METADATA = "project_metadata"
         const val SELECT_CONSISTENCY_PROPAGATION = "consistency_propagation"
+        const val SELECT_SPEND = "spend"
         private val ALL_SELECTS = setOf(
             SELECT_TRACKS, SELECT_TIMELINE_CLIPS, SELECT_ASSETS,
             SELECT_TRANSITIONS, SELECT_LOCKFILE_ENTRIES,
             SELECT_CLIPS_FOR_ASSET, SELECT_CLIPS_FOR_SOURCE,
             SELECT_CLIP, SELECT_LOCKFILE_ENTRY, SELECT_PROJECT_METADATA,
-            SELECT_CONSISTENCY_PROPAGATION,
+            SELECT_CONSISTENCY_PROPAGATION, SELECT_SPEND,
         )
 
         private const val DEFAULT_LIMIT = 100

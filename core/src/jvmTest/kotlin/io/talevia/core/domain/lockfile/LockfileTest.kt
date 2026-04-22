@@ -69,4 +69,38 @@ class LockfileTest {
         val project = json.decodeFromString(Project.serializer(), legacy)
         assertEquals(Lockfile.EMPTY, project.lockfile)
     }
+
+    @Test fun entryMissingCostFieldsDecodesAsNull() {
+        // Blob written before costCents/sessionId existed must still decode; the
+        // new fields surface as their null defaults, keeping spend aggregations
+        // honest about "we don't know what this entry cost".
+        val legacy = """
+            {
+              "inputHash": "h1",
+              "toolId": "generate_image",
+              "assetId": "asset-1",
+              "provenance": {
+                "providerId": "fake",
+                "modelId": "m",
+                "modelVersion": "v1",
+                "seed": 42,
+                "parameters": { "prompt": "p" },
+                "createdAtEpochMs": 1700000000000
+              }
+            }
+        """.trimIndent()
+        val entry = json.decodeFromString(LockfileEntry.serializer(), legacy)
+        assertNull(entry.costCents)
+        assertNull(entry.sessionId)
+    }
+
+    @Test fun entryWithCostFieldsRoundTrips() {
+        val original = entry("h1", "asset-1").copy(costCents = 42L, sessionId = "s-xyz")
+        val roundTripped = json.decodeFromString(
+            LockfileEntry.serializer(),
+            json.encodeToString(LockfileEntry.serializer(), original),
+        )
+        assertEquals(42L, roundTripped.costCents)
+        assertEquals("s-xyz", roundTripped.sessionId)
+    }
 }

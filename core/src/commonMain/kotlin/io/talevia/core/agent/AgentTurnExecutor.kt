@@ -332,6 +332,7 @@ internal class AgentTurnExecutor(
             // session before each turn, not mid-turn; the next turn's
             // first tool call picks up the switch.
             currentProjectId = currentProjectId,
+            publishEvent = { e -> bus.publish(e) },
         )
 
         val toolStart = clock.now()
