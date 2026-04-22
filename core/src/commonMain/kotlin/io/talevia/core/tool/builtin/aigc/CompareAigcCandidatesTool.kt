@@ -122,6 +122,7 @@ class CompareAigcCandidatesTool(
                     "description",
                     "Model ids to compare. Must be non-empty and pairwise distinct.",
                 )
+                putJsonObject("items") { put("type", "string") }
             }
         }
         put(
