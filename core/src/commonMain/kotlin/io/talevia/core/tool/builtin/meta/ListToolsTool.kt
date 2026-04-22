@@ -1,5 +1,6 @@
 package io.talevia.core.tool.builtin.meta
 
+import io.talevia.core.cost.AigcPricing
 import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
@@ -85,6 +86,15 @@ class ListToolsTool(
          * [avgCostCents] to null too).
          */
         val costedCalls: Long? = null,
+        /**
+         * Short textual description of the tool's pricing shape
+         * ([io.talevia.core.cost.AigcPricing.priceBasisFor]) — null for
+         * non-priced tools. Lets the agent reason about cost **before**
+         * dispatching (retrospective [avgCostCents] only fires after
+         * the first priced call). Example:
+         * `"OpenAI: gpt-image-1 ~$0.04/square, ~$0.06/non-square; …"`.
+         */
+        val priceBasis: String? = null,
     )
 
     @Serializable data class Output(
@@ -130,6 +140,7 @@ class ListToolsTool(
                 permission = rt.permission.permission,
                 avgCostCents = avg,
                 costedCalls = count,
+                priceBasis = AigcPricing.priceBasisFor(rt.id),
             )
         }
         val filtered = if (needle == null) enriched else enriched.filter { it.id.startsWith(needle) }

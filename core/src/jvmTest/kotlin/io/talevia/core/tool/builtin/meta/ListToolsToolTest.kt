@@ -172,4 +172,96 @@ class ListToolsToolTest {
         assertNull(echoRow.avgCostCents)
         assertNull(echoRow.costedCalls)
     }
+
+    // ── priceBasis preflight hints ─────────────────────────────────────
+
+    @Test fun priceBasisNullForNonAigcTools() = runTest {
+        val registry = registryWith() // only list_tools / todowrite / echo
+        val out = ListToolsTool(registry).execute(
+            ListToolsTool.Input(),
+            ctx(),
+        ).data
+        // None of the registered tools are AIGC; every `priceBasis` must be null.
+        assertTrue(
+            out.tools.all { it.priceBasis == null },
+            "Non-AIGC tools must emit null priceBasis; got: ${out.tools.map { it.id to it.priceBasis }}",
+        )
+    }
+
+    @Test fun priceBasisPopulatedForAigcToolIds() = runTest {
+        // Inject a fake tool registered under each priced AIGC id. The test
+        // doesn't care about the tool's execute behaviour — only that the
+        // ListToolsTool path populates priceBasis for each known id.
+        val registry = ToolRegistry()
+        registry.register(ListToolsTool(registry))
+        registry.register(FakeTool("generate_image"))
+        registry.register(FakeTool("synthesize_speech"))
+        registry.register(FakeTool("generate_video"))
+        registry.register(FakeTool("generate_music"))
+        registry.register(FakeTool("upscale_asset"))
+
+        val out = ListToolsTool(registry).execute(
+            ListToolsTool.Input(),
+            ctx(),
+        ).data
+
+        val byId = out.tools.associateBy { it.id }
+        val priced = listOf(
+            "generate_image",
+            "synthesize_speech",
+            "generate_video",
+            "generate_music",
+            "upscale_asset",
+        )
+        for (id in priced) {
+            val row = byId[id]
+            assertTrue(row != null, "registered tool $id must surface in list_tools")
+            assertTrue(
+                row!!.priceBasis != null,
+                "priced tool $id must carry a non-null priceBasis; got: ${row.priceBasis}",
+            )
+            assertTrue(row.priceBasis!!.isNotBlank(), "priceBasis for $id must be non-blank")
+        }
+        // list_tools itself must NOT get a priceBasis — it's the enumerator, not an AIGC tool.
+        assertNull(byId["list_tools"]?.priceBasis)
+    }
+
+    @Test fun priceBasisForwardsExactAigcPricingText() = runTest {
+        // Guard against the wiring accidentally translating / trimming the
+        // basis string — the LLM needs the text verbatim to reason about
+        // per-input scaling (e.g. "$/sq vs $/rect" tells it to pass
+        // square dimensions when possible).
+        val registry = ToolRegistry()
+        registry.register(ListToolsTool(registry))
+        registry.register(FakeTool("generate_image"))
+        val out = ListToolsTool(registry).execute(
+            ListToolsTool.Input(prefix = "generate_image"),
+            ctx(),
+        ).data
+        val row = out.tools.single()
+        assertEquals(
+            io.talevia.core.cost.AigcPricing.priceBasisFor("generate_image"),
+            row.priceBasis,
+            "priceBasis must forward AigcPricing text verbatim",
+        )
+    }
+
+    /** Minimal Tool stub — only its id is inspected by ListToolsTool. */
+    private class FakeTool(override val id: String) :
+        io.talevia.core.tool.Tool<FakeTool.In, FakeTool.Out> {
+        @kotlinx.serialization.Serializable data class In(val x: Int = 0)
+        @kotlinx.serialization.Serializable data class Out(val y: Int = 0)
+        override val helpText: String = "fake $id"
+        override val inputSerializer = kotlinx.serialization.serializer<In>()
+        override val outputSerializer = kotlinx.serialization.serializer<Out>()
+        override val permission =
+            io.talevia.core.permission.PermissionSpec.fixed("fake.$id")
+        override val inputSchema: kotlinx.serialization.json.JsonObject =
+            kotlinx.serialization.json.buildJsonObject {
+                put("type", kotlinx.serialization.json.JsonPrimitive("object"))
+            }
+
+        override suspend fun execute(input: In, ctx: ToolContext): io.talevia.core.tool.ToolResult<Out> =
+            io.talevia.core.tool.ToolResult(title = id, outputForLlm = "", data = Out())
+    }
 }

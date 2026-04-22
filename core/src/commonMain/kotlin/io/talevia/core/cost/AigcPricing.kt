@@ -144,6 +144,38 @@ object AigcPricing {
     const val TOOL_GENERATE_MUSIC = "generate_music"
     const val TOOL_UPSCALE_ASSET = "upscale_asset"
 
+    /**
+     * Short, single-line description of a tool's pricing shape — null for
+     * non-priced tools. Surfaced on `list_tools`' Summary so the agent can
+     * read "OpenAI: $0.04/sq, $0.08/rect" **before** dispatching a call,
+     * complementing the retrospective `avgCostCents` (which only fires
+     * after the first priced call). The estimate is intentionally textual
+     * rather than a precise per-input numeric function — a `describe_tool_cost`
+     * tool would need the full input + resolved provider/model, which the
+     * agent doesn't carry at planning time. The basis string carries the
+     * shape ("$/sq vs $/rect", "$/sec", "$/1k chars") so the LLM can do
+     * the scaling on its own.
+     *
+     * When published list prices drift, update this alongside the numeric
+     * tables above — both live in this one file so a reprice PR touches
+     * exactly one place.
+     */
+    fun priceBasisFor(toolId: String): String? = when (toolId) {
+        TOOL_GENERATE_IMAGE ->
+            "OpenAI: gpt-image-1 ~$0.04/square, ~$0.06/non-square; " +
+                "dall-e-3 ~$0.04/square, ~$0.08/non-square; dall-e-2 ~$0.02 flat."
+        TOOL_SYNTHESIZE_SPEECH ->
+            "OpenAI: tts-1 ~$0.015/1k chars; tts-1-hd ~$0.030/1k chars; " +
+                "gpt-4o-mini-tts billed as tts-1."
+        TOOL_GENERATE_VIDEO ->
+            "OpenAI Sora: ~$0.30/sec (sora/sora-turbo); ~$0.50/sec (sora-hd/sora-1080p)."
+        TOOL_GENERATE_MUSIC ->
+            "Replicate meta/musicgen: ~$0.02/sec of requested output."
+        TOOL_UPSCALE_ASSET ->
+            "Replicate nightmareai/real-esrgan: ~$0.05 per call (flat)."
+        else -> null
+    }
+
     private const val PROVIDER_OPENAI = "openai"
     private const val PROVIDER_REPLICATE = "replicate"
 
