@@ -1,34 +1,28 @@
 package io.talevia.core.tool.builtin.video
 
 import io.talevia.core.JsonConfig
-import io.talevia.core.PartId
 import io.talevia.core.ProjectId
-import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
-import io.talevia.core.domain.Track
 import io.talevia.core.domain.lockfile.Lockfile
-import io.talevia.core.domain.render.ClipRenderCacheEntry
 import io.talevia.core.domain.render.ProvenanceManifest
 import io.talevia.core.domain.render.RenderCacheEntry
-import io.talevia.core.domain.render.clipMezzanineFingerprint
-import io.talevia.core.domain.render.transitionFadesPerClip
-import io.talevia.core.domain.source.deepContentHashOf
 import io.talevia.core.domain.staleClipsFromLockfile
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.OutputSpec
-import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
-import io.talevia.core.session.Part
 import io.talevia.core.tool.MediaAttachment
 import io.talevia.core.tool.PathGuard
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.video.export.PerClipStats
+import io.talevia.core.tool.builtin.video.export.runPerClipRender
+import io.talevia.core.tool.builtin.video.export.runWholeTimelineRender
+import io.talevia.core.tool.builtin.video.export.timelineFitsPerClipPath
 import io.talevia.core.util.fnv1a64Hex
-import kotlinx.coroutines.flow.collect
 import kotlinx.datetime.Clock
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -40,8 +34,6 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 import kotlin.time.DurationUnit
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 
 /**
  * Render the project's timeline to a file (VISION §2: "Artifact is a reproducible
@@ -69,7 +61,6 @@ import kotlin.uuid.Uuid
  * naturally; the stale-guard above catches the orthogonal case where source
  * drifted but the agent hasn't regenerated yet.
  */
-@OptIn(ExperimentalUuidApi::class)
 class ExportTool(
     private val store: ProjectStore,
     private val engine: VideoEngine,
@@ -233,9 +224,9 @@ class ExportTool(
 
         val perClipShape = timelineFitsPerClipPath(timeline)
         val perClipStats = if (engine.supportsPerClipCache && perClipShape != null) {
-            runPerClipRender(project, perClipShape, output, input, ctx)
+            runPerClipRender(engine, store, project, perClipShape, output, input.outputPath, ctx, clock)
         } else {
-            runWholeTimelineRender(timeline, output, ctx)
+            runWholeTimelineRender(engine, timeline, output, ctx, clock)
             PerClipStats(hits = 0, misses = 0)
         }
 
@@ -290,205 +281,6 @@ class ExportTool(
                 ),
             ),
         )
-    }
-
-    private data class PerClipStats(val hits: Int, val misses: Int)
-
-    /**
-     * Shape the per-clip path expects: a single [Track.Video] with at least one
-     * [Clip.Video], plus the subtitle clips the concat step needs to bake back in.
-     * Any other shape (multi-video, audio/effect-only, empty) forces the fall-back
-     * to whole-timeline render — matching the current engine's whole-timeline scope.
-     */
-    private data class PerClipShape(
-        val videoClips: List<Clip.Video>,
-        val subtitles: List<Clip.Text>,
-    )
-
-    private fun timelineFitsPerClipPath(timeline: Timeline): PerClipShape? {
-        val videoTracks = timeline.tracks.filterIsInstance<Track.Video>()
-        if (videoTracks.size != 1) return null
-        val videoClips = videoTracks[0].clips.filterIsInstance<Clip.Video>()
-        if (videoClips.isEmpty()) return null
-        // If the video track holds non-Video clips (shouldn't happen today, but
-        // defensively) the whole-timeline path's `filterIsInstance<Clip.Video>()`
-        // would drop them too, so we'd quietly differ; fall back instead.
-        if (videoClips.size != videoTracks[0].clips.size) return null
-        val subtitles = timeline.tracks
-            .filterIsInstance<Track.Subtitle>()
-            .flatMap { it.clips.filterIsInstance<Clip.Text>() }
-        return PerClipShape(videoClips = videoClips, subtitles = subtitles)
-    }
-
-    /**
-     * Whole-timeline render path (the original flow). Collects progress from the
-     * engine's [VideoEngine.render] and forwards as [Part.RenderProgress] events.
-     */
-    private suspend fun runWholeTimelineRender(
-        timeline: Timeline,
-        output: OutputSpec,
-        ctx: ToolContext,
-    ) {
-        var failure: String? = null
-        engine.render(timeline, output).collect { ev ->
-            val partId = PartId(Uuid.random().toString())
-            when (ev) {
-                is RenderProgress.Started -> ctx.emitPart(
-                    Part.RenderProgress(partId, ctx.messageId, ctx.sessionId, clock.now(), jobId = ev.jobId, ratio = 0f, message = "started"),
-                )
-                is RenderProgress.Frames -> ctx.emitPart(
-                    Part.RenderProgress(partId, ctx.messageId, ctx.sessionId, clock.now(), jobId = ev.jobId, ratio = ev.ratio, message = ev.message),
-                )
-                is RenderProgress.Preview -> ctx.emitPart(
-                    Part.RenderProgress(
-                        partId, ctx.messageId, ctx.sessionId, clock.now(),
-                        jobId = ev.jobId, ratio = ev.ratio, message = "preview",
-                        thumbnailPath = ev.thumbnailPath,
-                    ),
-                )
-                is RenderProgress.Completed -> ctx.emitPart(
-                    Part.RenderProgress(partId, ctx.messageId, ctx.sessionId, clock.now(), jobId = ev.jobId, ratio = 1f, message = "completed"),
-                )
-                is RenderProgress.Failed -> {
-                    failure = ev.message
-                    ctx.emitPart(
-                        Part.RenderProgress(partId, ctx.messageId, ctx.sessionId, clock.now(), jobId = ev.jobId, ratio = 0f, message = "failed: ${ev.message}"),
-                    )
-                }
-            }
-        }
-        if (failure != null) error("export failed: $failure")
-    }
-
-    /**
-     * Per-clip mezzanine path (VISION §3.2 fine cut). For each video clip, compute
-     * a fingerprint over (clip JSON + neighbour transition fades + bound-source
-     * deep hashes + output profile essentials); reuse a cached mezzanine when the
-     * fingerprint matches AND the mezzanine file is still on disk, otherwise ask
-     * the engine to render a fresh one. Stitch them with [VideoEngine.concatMezzanines],
-     * which applies any timeline subtitles post-concat (subtitles are timeline-relative
-     * and deliberately not baked into mezzanines so a subtitle-only edit only
-     * re-runs the cheap concat step).
-     *
-     * Mezzanines live under `<outputDir>/.talevia-render-cache/<projectId>/<fingerprint>.mp4`
-     * so they stay local to the user's export target but can be shared across
-     * multiple exports of the same project to the same directory.
-     *
-     * Progress is emitted at the granularity of "clip N of M" events (each clip
-     * contributes one [RenderProgress.Frames]) plus a final concat progress line —
-     * richer per-frame progress is available on the whole-timeline path via
-     * ffmpeg's `-progress` pipe; the per-clip path optimises for compile time,
-     * not for frame-level UI animation.
-     */
-    private suspend fun runPerClipRender(
-        project: Project,
-        shape: PerClipShape,
-        output: OutputSpec,
-        input: Input,
-        ctx: ToolContext,
-    ): PerClipStats {
-        val jobId = Uuid.random().toString()
-        val projectId = project.id
-        val mezzanineDir = mezzanineDirFor(input.outputPath, projectId.value)
-
-        // Pre-compute fade map + per-binding deep source hashes once for the
-        // whole timeline. deepContentHashOf caches intermediate results so shared
-        // ancestors (style_bible parents several character_refs) only walk once.
-        val fadesByClipId = project.timeline.transitionFadesPerClip(shape.videoClips)
-        val deepHashCache = mutableMapOf<io.talevia.core.SourceNodeId, String>()
-
-        ctx.emitPart(
-            Part.RenderProgress(
-                PartId(Uuid.random().toString()), ctx.messageId, ctx.sessionId, clock.now(),
-                jobId = jobId, ratio = 0f,
-                message = "per-clip render: ${shape.videoClips.size} clip(s)",
-            ),
-        )
-
-        var hits = 0
-        var misses = 0
-        val mezzaninePaths = mutableListOf<String>()
-        val newCacheEntries = mutableListOf<ClipRenderCacheEntry>()
-
-        for ((idx, clip) in shape.videoClips.withIndex()) {
-            val fades = fadesByClipId[clip.id]
-            val boundHashes = clip.sourceBinding
-                .filter { it in project.source.byId }
-                .associateWith { project.source.deepContentHashOf(it, deepHashCache) }
-            val fingerprint = clipMezzanineFingerprint(
-                clip = clip,
-                fades = fades,
-                boundSourceDeepHashes = boundHashes,
-                output = output,
-            )
-            val cached = project.clipRenderCache.findByFingerprint(fingerprint)
-            val cachedPath = cached?.mezzaninePath
-            val cacheHitValid = cachedPath != null && engine.mezzaninePresent(cachedPath)
-            val chosenPath: String
-            if (cacheHitValid) {
-                hits += 1
-                chosenPath = cachedPath!!
-            } else {
-                misses += 1
-                val mezzaninePath = "$mezzanineDir/$fingerprint.mp4"
-                engine.renderClip(
-                    clip = clip,
-                    fades = fades,
-                    output = output,
-                    mezzaninePath = mezzaninePath,
-                )
-                chosenPath = mezzaninePath
-                newCacheEntries += ClipRenderCacheEntry(
-                    fingerprint = fingerprint,
-                    mezzaninePath = mezzaninePath,
-                    resolutionWidth = output.resolution.width,
-                    resolutionHeight = output.resolution.height,
-                    durationSeconds = clip.sourceRange.duration.toDouble(DurationUnit.SECONDS),
-                    createdAtEpochMs = clock.now().toEpochMilliseconds(),
-                )
-            }
-            mezzaninePaths += chosenPath
-            val stageRatio = (idx + 1).toFloat() / (shape.videoClips.size + 1).toFloat()
-            ctx.emitPart(
-                Part.RenderProgress(
-                    PartId(Uuid.random().toString()), ctx.messageId, ctx.sessionId, clock.now(),
-                    jobId = jobId, ratio = stageRatio,
-                    message = "clip ${idx + 1}/${shape.videoClips.size} " +
-                        (if (cacheHitValid) "cached" else "rendered"),
-                ),
-            )
-        }
-
-        engine.concatMezzanines(
-            mezzaninePaths = mezzaninePaths,
-            subtitles = shape.subtitles,
-            output = output,
-        )
-        ctx.emitPart(
-            Part.RenderProgress(
-                PartId(Uuid.random().toString()), ctx.messageId, ctx.sessionId, clock.now(),
-                jobId = jobId, ratio = 1f, message = "completed",
-            ),
-        )
-
-        if (newCacheEntries.isNotEmpty()) {
-            store.mutate(projectId) { p ->
-                var cache = p.clipRenderCache
-                for (entry in newCacheEntries) cache = cache.append(entry)
-                p.copy(clipRenderCache = cache)
-            }
-        }
-
-        return PerClipStats(hits = hits, misses = misses)
-    }
-
-    private fun mezzanineDirFor(outputPath: String, projectId: String): String {
-        val parent = outputPath.substringBeforeLast('/', missingDelimiterValue = ".")
-        // Percent-encode enough of projectId so a path-unfriendly id (colon on
-        // Windows, or the default Uuid.toString format on JVM) doesn't break the
-        // resulting directory. We only need to survive `/` and `\` here.
-        val safeProjectId = projectId.replace('/', '_').replace('\\', '_')
-        return "$parent/.talevia-render-cache/$safeProjectId"
     }
 
     private fun fingerprintOf(timeline: Timeline, output: OutputSpec): String {
