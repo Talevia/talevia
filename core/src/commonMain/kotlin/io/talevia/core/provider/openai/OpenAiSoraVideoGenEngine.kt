@@ -43,8 +43,15 @@ import kotlinx.serialization.json.jsonPrimitive
  *
  * Create request shape:
  * ```
- * { model, prompt, size: "<w>x<h>", seconds: <n>, seed }
+ * { model, prompt, size: "<w>x<h>", seconds: <n> }
  * ```
+ *
+ * Note on `seed`: the OpenAI `/v1/videos` endpoint does **not** accept a seed
+ * parameter (verified against a live 400 `Unknown parameter: 'seed'` response
+ * on 2026-04). We still surface [request.seed] into provenance for the
+ * lockfile's cache-key discipline (so the agent can ask for the same seed and
+ * get the same lockfile slot even if Sora itself is non-deterministic) but we
+ * no longer send it on the wire.
  * Create response shape:
  * ```
  * { id, status, created_at, ... }
@@ -154,13 +161,18 @@ class OpenAiSoraVideoGenEngine(
         }
     }
 
-    private fun buildWireBody(request: VideoGenRequest): JsonObject = buildJsonObject {
+    internal fun buildWireBody(request: VideoGenRequest): JsonObject = buildJsonObject {
         put("model", JsonPrimitive(request.modelId))
         put("prompt", JsonPrimitive(request.prompt))
         put("size", JsonPrimitive("${request.width}x${request.height}"))
         put("seconds", JsonPrimitive(request.durationSeconds))
-        put("seed", JsonPrimitive(request.seed))
-        for ((k, v) in request.parameters) put(k, JsonPrimitive(v))
+        // NO `seed` — Sora rejects it with 400 Unknown parameter. Seed is kept in
+        // [GenerationProvenance] for lockfile-cache discipline; callers can't
+        // smuggle it back in via `parameters` either (filtered below).
+        for ((k, v) in request.parameters) {
+            if (k == "seed") continue
+            put(k, JsonPrimitive(v))
+        }
     }
 
     /**
