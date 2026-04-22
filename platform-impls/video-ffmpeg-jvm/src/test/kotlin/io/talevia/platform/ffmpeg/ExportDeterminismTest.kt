@@ -77,9 +77,17 @@ class ExportDeterminismTest {
         // is deterministic given identical args (same duration + size + rate).
         generateTestSource(input)
 
-        // 2. Export once, snapshot the hash, export again, compare.
-        val hashA = exportAndHash(outputA)
-        val hashB = exportAndHash(outputB)
+        // 2. Build a single project fixture once, then render TWICE from
+        //    that same store to two output paths. Using one store is
+        //    deliberate: the ProvenanceManifest baked into the output's
+        //    `comment` tag (VISION §5.3) depends on (projectId, timeline,
+        //    lockfile). Two freshly-upserted projects would legitimately
+        //    mint different manifests (different `Track.updatedAtEpochMs`
+        //    stamped by SqlDelightProjectStore.upsert at wall-clock time);
+        //    two renders of the **same** project produce the same manifest
+        //    and therefore the same bytes.
+        val hashA = renderAndHash(outputA, forceRender = false)
+        val hashB = renderAndHash(outputB, forceRender = true)
 
         assertTrue(outputA.exists(), "export A did not land")
         assertTrue(outputB.exists(), "export B did not land")
@@ -88,70 +96,89 @@ class ExportDeterminismTest {
         assertEquals(
             hashA,
             hashB,
-            "exports diverge byte-for-byte despite identical inputs — RenderCache assumptions break.\n" +
+            "exports diverge byte-for-byte despite identical project + profile — RenderCache assumptions break.\n" +
                 "A=${outputA.absolutePath} sha256=$hashA\nB=${outputB.absolutePath} sha256=$hashB",
         )
     }
 
-    private suspend fun exportAndHash(output: File): String {
+    // Lazy-init across the two calls so the second render sees the same
+    // store (and therefore the same `Track.updatedAtEpochMs` baked by
+    // `upsert`) and re-uses the same imported asset.
+    private var fixture: DeterminismFixture? = null
+
+    private suspend fun renderAndHash(output: File, forceRender: Boolean): String {
+        val fx = fixture ?: buildFixture().also { fixture = it }
+        fx.registry["export"]!!.dispatch(
+            buildJsonObject {
+                put("projectId", fx.projectId.value)
+                put("outputPath", output.absolutePath)
+                put("width", 320)
+                put("height", 240)
+                put("frameRate", 24)
+                put("forceRender", forceRender)
+            },
+            fx.ctx,
+        )
+        return sha256(output)
+    }
+
+    private data class DeterminismFixture(
+        val driver: JdbcSqliteDriver,
+        val projectId: ProjectId,
+        val registry: ToolRegistry,
+        val ctx: ToolContext,
+    )
+
+    @AfterTest
+    fun closeFixtureDriver() {
+        fixture?.driver?.close()
+    }
+
+    private suspend fun buildFixture(): DeterminismFixture {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
         val db = TaleviaDb(driver)
-        try {
-            val media = InMemoryMediaStorage()
-            val engine = FfmpegVideoEngine(pathResolver = media)
-            val projects = SqlDelightProjectStore(db)
-            val perms = AllowAllPermissionService()
+        val media = InMemoryMediaStorage()
+        val engine = FfmpegVideoEngine(pathResolver = media)
+        val projects = SqlDelightProjectStore(db)
+        val perms = AllowAllPermissionService()
 
-            val projectId = ProjectId(Uuid.random().toString())
-            projects.upsert(
-                "determinism",
-                Project(id = projectId, timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P),
-            )
+        val projectId = ProjectId(Uuid.random().toString())
+        projects.upsert(
+            "determinism",
+            Project(id = projectId, timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P),
+        )
 
-            val registry = ToolRegistry().apply {
-                register(ImportMediaTool(media, engine, projects))
-                register(AddClipTool(projects, media))
-                register(ExportTool(projects, engine))
-            }
-
-            val ctx = ToolContext(
-                sessionId = SessionId("det"),
-                messageId = MessageId("m"),
-                callId = CallId("c"),
-                askPermission = { perms.check(emptyList(), it) },
-                emitPart = { },
-                messages = emptyList(),
-            )
-
-            val import = registry["import_media"]!!.dispatch(
-                buildJsonObject {
-                    put("path", input.absolutePath)
-                    put("projectId", projectId.value)
-                },
-                ctx,
-            )
-            val assetId = (import.data as ImportMediaTool.Output).assetId
-            registry["add_clip"]!!.dispatch(
-                buildJsonObject {
-                    put("projectId", projectId.value)
-                    put("assetId", assetId)
-                },
-                ctx,
-            )
-            registry["export"]!!.dispatch(
-                buildJsonObject {
-                    put("projectId", projectId.value)
-                    put("outputPath", output.absolutePath)
-                    put("width", 320)
-                    put("height", 240)
-                    put("frameRate", 24)
-                },
-                ctx,
-            )
-            return sha256(output)
-        } finally {
-            driver.close()
+        val registry = ToolRegistry().apply {
+            register(ImportMediaTool(media, engine, projects))
+            register(AddClipTool(projects, media))
+            register(ExportTool(projects, engine))
         }
+
+        val ctx = ToolContext(
+            sessionId = SessionId("det"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { perms.check(emptyList(), it) },
+            emitPart = { },
+            messages = emptyList(),
+        )
+
+        val import = registry["import_media"]!!.dispatch(
+            buildJsonObject {
+                put("path", input.absolutePath)
+                put("projectId", projectId.value)
+            },
+            ctx,
+        )
+        val assetId = (import.data as ImportMediaTool.Output).assetId
+        registry["add_clip"]!!.dispatch(
+            buildJsonObject {
+                put("projectId", projectId.value)
+                put("assetId", assetId)
+            },
+            ctx,
+        )
+        return DeterminismFixture(driver, projectId, registry, ctx)
     }
 
     private fun sha256(file: File): String {

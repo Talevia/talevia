@@ -429,6 +429,95 @@ class FfmpegEndToEndTest {
         )
     }
 
+    /**
+     * VISION §5.3 — the exported mp4 must carry a [ProvenanceManifest] back
+     * to its source Project + Timeline hash, baked into the container's
+     * `comment` metadata by `FfmpegVideoEngine.render` via
+     * `-metadata comment=<manifest>`. This regression drives the full loop
+     * through real ffmpeg: export → probe → decode, asserting the
+     * round-trip produces the same manifest `ExportTool` minted on input.
+     */
+    @Test
+    fun exportStampsProvenanceManifestProbeRoundTrips() = runTest(timeout = kotlin.time.Duration.parse("60s")) {
+        if (!ffmpegOnPath()) return@runTest
+
+        generateTestSource(inputA, "testsrc")
+
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
+        val db = TaleviaDb(driver)
+        val media = InMemoryMediaStorage()
+        val engine = FfmpegVideoEngine(pathResolver = media)
+        val projects = SqlDelightProjectStore(db)
+        val perms = AllowAllPermissionService()
+
+        val projectId = ProjectId(Uuid.random().toString())
+        projects.upsert(
+            "prov-smoke",
+            Project(id = projectId, timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P),
+        )
+
+        val registry = ToolRegistry().apply {
+            register(ImportMediaTool(media, engine, projects))
+            register(AddClipTool(projects, media))
+            register(ExportTool(projects, engine))
+        }
+
+        val ctx = ToolContext(
+            sessionId = SessionId("test"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { perms.check(emptyList(), it) },
+            emitPart = { },
+            messages = emptyList(),
+        )
+
+        val import = registry["import_media"]!!.dispatch(
+            buildJsonObject {
+                put("path", inputA.absolutePath)
+                put("projectId", projectId.value)
+            },
+            ctx,
+        )
+        val assetId = (import.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
+        registry["add_clip"]!!.dispatch(
+            buildJsonObject {
+                put("projectId", projectId.value)
+                put("assetId", assetId)
+            },
+            ctx,
+        )
+        val exportResult = registry["export"]!!.dispatch(
+            buildJsonObject {
+                put("projectId", projectId.value)
+                put("outputPath", output.absolutePath)
+                put("width", 320)
+                put("height", 240)
+                put("frameRate", 24)
+            },
+            ctx,
+        )
+        val exportOutput = exportResult.data as io.talevia.core.tool.builtin.video.ExportTool.Output
+        val expected = exportOutput.provenance
+        assertTrue(expected != null, "ExportTool must surface the provenance manifest it baked")
+        assertTrue(output.exists(), "output mp4 should exist at ${output.absolutePath}")
+
+        // Probe the output via the same engine and decode the manifest back.
+        val probed = engine.probe(io.talevia.core.domain.MediaSource.File(output.absolutePath))
+        val comment = probed.comment
+        assertTrue(
+            comment != null,
+            "probe must surface the comment tag ffmpeg wrote via -metadata comment=<manifest>",
+        )
+        assertTrue(
+            comment.startsWith(io.talevia.core.domain.render.ProvenanceManifest.MANIFEST_PREFIX),
+            "comment must begin with the Talevia manifest prefix: $comment",
+        )
+        val decoded = io.talevia.core.domain.render.ProvenanceManifest.decodeFromComment(comment)
+        assertTrue(decoded != null, "decodeFromComment must parse the comment ffmpeg round-tripped")
+        kotlin.test.assertEquals(expected, decoded, "probe → decode must reproduce what ExportTool baked")
+        driver.close()
+    }
+
     private fun ffmpegOnPath(): Boolean = runCatching {
         ProcessBuilder("ffmpeg", "-version").redirectErrorStream(true).start().waitFor() == 0
     }.getOrDefault(false)

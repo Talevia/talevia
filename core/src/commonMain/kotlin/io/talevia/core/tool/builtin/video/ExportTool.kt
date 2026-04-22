@@ -9,7 +9,9 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
+import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.render.ClipRenderCacheEntry
+import io.talevia.core.domain.render.ProvenanceManifest
 import io.talevia.core.domain.render.RenderCacheEntry
 import io.talevia.core.domain.render.clipMezzanineFingerprint
 import io.talevia.core.domain.render.transitionFadesPerClip
@@ -112,6 +114,15 @@ class ExportTool(
          */
         val perClipCacheHits: Int = 0,
         val perClipCacheMisses: Int = 0,
+        /**
+         * Provenance record baked into the exported file's container metadata
+         * (VISION §5.3). Null only on engines that can't write container
+         * metadata (Media3 / AVFoundation today) — the FFmpeg engine always
+         * stamps one. Tools downstream (e.g. "which Project produced this
+         * mp4?") can read it back via `probe(source).comment` +
+         * `ProvenanceManifest.decodeFromComment(...)`.
+         */
+        val provenance: ProvenanceManifest? = null,
     )
 
     override val id = "export"
@@ -119,6 +130,8 @@ class ExportTool(
         "Render the project's timeline to a media file at outputPath. Skips rendering when the timeline + " +
             "output spec hash matches a prior render. Refuses to export when any AIGC clip is stale " +
             "(source nodes drifted since generation) unless allowStale=true. " +
+            "Bakes a provenance manifest (projectId + timelineHash + lockfileHash) into the output " +
+            "container's comment tag — read back via probe / ProvenanceManifest.decodeFromComment. " +
             "Streams progress as render-progress parts."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
@@ -156,12 +169,18 @@ class ExportTool(
         val height = input.height ?: timeline.resolution.height
         val fps = input.frameRate ?: timeline.frameRate.numerator / timeline.frameRate.denominator
 
+        // Provenance manifest (VISION §5.3). Pure function of (projectId,
+        // timeline, lockfile) — no timestamps / random ids — so two identical
+        // exports bake byte-identical metadata, preserving the
+        // ExportDeterminismTest bit-exact contract.
+        val provenance = provenanceOf(project)
         val output = OutputSpec(
             targetPath = input.outputPath,
             resolution = Resolution(width, height),
             frameRate = fps,
             videoCodec = input.videoCodec,
             audioCodec = input.audioCodec,
+            metadata = mapOf("comment" to provenance.encodeToComment()),
         )
 
         val staleReports = project.staleClipsFromLockfile()
@@ -191,6 +210,7 @@ class ExportTool(
                     resolutionHeight = cached.resolutionHeight,
                     cacheHit = true,
                     staleClipsIncluded = staleClipIds,
+                    provenance = provenance,
                 )
                 val staleSuffix = if (staleClipIds.isEmpty()) "" else " [allowStale: ${staleClipIds.size} stale clip(s)]"
                 return ToolResult(
@@ -248,6 +268,7 @@ class ExportTool(
             staleClipsIncluded = staleClipIds,
             perClipCacheHits = perClipStats.hits,
             perClipCacheMisses = perClipStats.misses,
+            provenance = provenance,
         )
         val staleSuffix = if (staleClipIds.isEmpty()) "" else " [allowStale: ${staleClipIds.size} stale clip(s)]"
         val perClipSuffix = if (perClipStats.hits + perClipStats.misses == 0) {
@@ -482,6 +503,27 @@ class ExportTool(
             append("|ac=").append(output.audioCodec)
         }
         return fnv1a64Hex(canonical)
+    }
+
+    /**
+     * Build the [ProvenanceManifest] for [project]. Two hashes:
+     *  - `timelineHash` over the canonical Timeline JSON alone (no output
+     *    spec, no lockfile) — a Timeline edit flips it, nothing else.
+     *  - `lockfileHash` over the canonical `Lockfile` JSON — new AIGC
+     *    generation or pin/unpin flips it.
+     *
+     * Both via `JsonConfig.default` so bit-exact re-exports produce
+     * bit-exact hashes (ExportDeterminismTest relies on this).
+     */
+    private fun provenanceOf(project: Project): ProvenanceManifest {
+        val json = JsonConfig.default
+        val timelineHash = fnv1a64Hex(json.encodeToString(Timeline.serializer(), project.timeline))
+        val lockfileHash = fnv1a64Hex(json.encodeToString(Lockfile.serializer(), project.lockfile))
+        return ProvenanceManifest(
+            projectId = project.id.value,
+            timelineHash = timelineHash,
+            lockfileHash = lockfileHash,
+        )
     }
 
     /** MIME type from filename extension; falls back to a generic container. */

@@ -45,6 +45,15 @@ data class MediaMetadata(
     val sampleRate: Int? = null,
     val channels: Int? = null,
     val bitrate: Long? = null,
+    /**
+     * Container-level `comment` metadata tag when the source file carries
+     * one — Talevia exports bake an
+     * [io.talevia.core.domain.render.ProvenanceManifest] here so a probed
+     * artifact can be traced back to its source Project + Timeline hash.
+     * Null when the container has no comment tag (typical for
+     * non-Talevia media).
+     */
+    val comment: String? = null,
 )
 
 @Serializable

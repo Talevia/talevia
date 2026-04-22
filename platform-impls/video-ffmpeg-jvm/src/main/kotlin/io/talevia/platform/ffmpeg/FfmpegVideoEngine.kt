@@ -79,6 +79,12 @@ class FfmpegVideoEngine(
             if (w != null && h != null) Resolution(w, h) else null
         }
         val frameRate = video?.get("r_frame_rate")?.jsonPrimitive?.contentOrNull?.let(::parseFrameRate)
+        // Container-level `comment` tag — lives under `format.tags.comment`.
+        // Talevia exports bake a ProvenanceManifest here (VISION §5.3);
+        // non-Talevia files either omit the tag (null) or carry arbitrary
+        // user text (still surfaced as-is, decoder distinguishes via the
+        // manifest prefix).
+        val comment = format?.get("tags")?.jsonObject?.get("comment")?.jsonPrimitive?.contentOrNull
         return MediaMetadata(
             duration = durationSecs.seconds,
             resolution = resolution,
@@ -88,6 +94,7 @@ class FfmpegVideoEngine(
             sampleRate = audio?.get("sample_rate")?.jsonPrimitive?.contentOrNull?.toIntOrNull(),
             channels = audio?.get("channels")?.jsonPrimitive?.intOrNull,
             bitrate = format?.get("bit_rate")?.jsonPrimitive?.contentOrNull?.toLongOrNull(),
+            comment = comment,
         )
     }
 
@@ -208,6 +215,25 @@ class FfmpegVideoEngine(
         args += listOf("-s", "${output.resolution.width}x${output.resolution.height}")
         args += listOf("-c:v", output.videoCodec, "-b:v", "${output.videoBitrate}", "-flags:v", "+bitexact")
         args += listOf("-c:a", output.audioCodec, "-b:a", "${output.audioBitrate}", "-flags:a", "+bitexact")
+        // Container-level metadata — ExportTool bakes the ProvenanceManifest
+        // as a `comment=<talevia/v1:{json}>` entry so the artifact carries
+        // its source Project + Timeline hash (VISION §5.3). ffmpeg applies
+        // `-metadata` to the NEXT output file, so these must precede
+        // [output.targetPath]. Values passed through verbatim — callers are
+        // responsible for keeping them deterministic (no timestamps, etc.)
+        // per the ExportDeterminismTest bit-exact contract.
+        //
+        // `-map_metadata -1` (dropped input metadata) is required whenever
+        // we bake user metadata: ffmpeg's default is to copy first-input
+        // global metadata into the output container, which on probed
+        // sources can include non-deterministic tags (input creation_time,
+        // provider-specific encoder watermarks) that would defeat the
+        // bit-exact render-cache contract even though +bitexact is set.
+        // With `-1` the output carries ONLY what we explicitly set here.
+        args += listOf("-map_metadata", "-1")
+        for ((k, v) in output.metadata) {
+            args += listOf("-metadata", "$k=$v")
+        }
         args += output.targetPath
         // Preview side output — `-update 1 -f image2` makes ffmpeg overwrite
         // the same JPEG on each emitted frame (the canonical "live thumbnail"
@@ -449,6 +475,13 @@ class FfmpegVideoEngine(
                     "-c:v", output.videoCodec, "-b:v", "${output.videoBitrate}", "-flags:v", "+bitexact",
                     "-c:a", "copy", "-flags:a", "+bitexact",
                 )
+            }
+            // Container-level metadata (VISION §5.3). Per-clip mezzanines
+            // never carry the manifest — only the final concat output does,
+            // so the per-clip-cache path produces the same comment tag as
+            // the whole-timeline path.
+            for ((k, v) in output.metadata) {
+                args += listOf("-metadata", "$k=$v")
             }
             args += output.targetPath
 

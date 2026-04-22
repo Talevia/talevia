@@ -48,12 +48,15 @@ class ExportToolTest {
     private class CountingEngine : VideoEngine {
         var renderCalls: Int = 0
             private set
+        var lastMetadata: Map<String, String> = emptyMap()
+            private set
 
         override suspend fun probe(source: MediaSource): MediaMetadata =
             MediaMetadata(duration = Duration.ZERO, resolution = Resolution(0, 0), frameRate = null)
 
         override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> = flow {
             renderCalls += 1
+            lastMetadata = output.metadata
             emit(RenderProgress.Started("job"))
             emit(RenderProgress.Completed("job", output.targetPath))
         }
@@ -490,5 +493,163 @@ class ExportToolTest {
             nonPreviewParts.all { it.thumbnailPath == null },
             "Non-Preview engine events must not set thumbnailPath",
         )
+    }
+
+    // -----------------------------------------------------------------------
+    // Provenance manifest (VISION §5.3).
+    //
+    // ExportTool builds a ProvenanceManifest — pure function of (projectId,
+    // timeline, lockfile) — and stamps it into OutputSpec.metadata as a
+    // `"comment"` entry + surfaces it on the tool's Output.provenance. These
+    // tests exercise the binding without needing ffmpeg on PATH; a round-trip
+    // through real ffmpeg lives in
+    // platform-impls/video-ffmpeg-jvm/.../FfmpegEndToEndTest.kt.
+    // -----------------------------------------------------------------------
+
+    @Test fun exportStampsProvenanceManifestIntoOutputAndOutputSpec() = runTest {
+        val (store, engine, pid) = newFixture()
+        val tool = ExportTool(store, engine)
+
+        val result = tool.execute(
+            ExportTool.Input(projectId = pid.value, outputPath = "/tmp/out.mp4"),
+            ctx(),
+        )
+
+        val provenance = result.data.provenance
+        assertTrue(provenance != null, "Output must carry a ProvenanceManifest on a fresh render")
+        assertEquals(pid.value, provenance.projectId)
+        assertEquals(
+            io.talevia.core.domain.render.ProvenanceManifest.CURRENT_SCHEMA,
+            provenance.schemaVersion,
+        )
+        // Timeline + lockfile hashes are fnv1a64 (16 hex chars).
+        assertTrue(provenance.timelineHash.matches(Regex("[0-9a-f]{16}")))
+        assertTrue(provenance.lockfileHash.matches(Regex("[0-9a-f]{16}")))
+
+        // OutputSpec.metadata["comment"] must round-trip through decodeFromComment.
+        val comment = engine.lastMetadata["comment"]
+        assertTrue(comment != null, "engine must have received a `comment` metadata entry")
+        assertTrue(
+            comment.startsWith(io.talevia.core.domain.render.ProvenanceManifest.MANIFEST_PREFIX),
+            "comment must begin with the Talevia manifest prefix so non-Talevia consumers can distinguish it",
+        )
+        val decoded = io.talevia.core.domain.render.ProvenanceManifest.decodeFromComment(comment)
+        assertEquals(provenance, decoded)
+    }
+
+    @Test fun timelineMutationChangesTimelineHashButNotLockfileHash() = runTest {
+        val (store, engine, pid) = newFixture()
+        val tool = ExportTool(store, engine)
+
+        val first = tool.execute(
+            ExportTool.Input(projectId = pid.value, outputPath = "/tmp/out.mp4"),
+            ctx(),
+        ).data.provenance!!
+
+        store.mutate(pid) { p ->
+            val track = p.timeline.tracks.first() as Track.Video
+            val extra = Clip.Video(
+                id = ClipId("c2"),
+                timeRange = TimeRange(5.seconds, 3.seconds),
+                sourceRange = TimeRange(0.seconds, 3.seconds),
+                assetId = AssetId("a2"),
+            )
+            p.copy(
+                timeline = p.timeline.copy(
+                    tracks = listOf(track.copy(clips = track.clips + extra)),
+                    duration = 8.seconds,
+                ),
+            )
+        }
+
+        val second = tool.execute(
+            ExportTool.Input(projectId = pid.value, outputPath = "/tmp/out.mp4"),
+            ctx(),
+        ).data.provenance!!
+
+        assertEquals(first.projectId, second.projectId, "projectId does not change on timeline edits")
+        assertTrue(
+            first.timelineHash != second.timelineHash,
+            "timelineHash must differ after a clip append",
+        )
+        assertEquals(first.lockfileHash, second.lockfileHash, "untouched lockfile → same lockfileHash")
+    }
+
+    @Test fun lockfileMutationChangesLockfileHashButNotTimelineHash() = runTest {
+        val (store, engine, pid) = newFixture()
+        val tool = ExportTool(store, engine)
+
+        val first = tool.execute(
+            ExportTool.Input(projectId = pid.value, outputPath = "/tmp/out.mp4"),
+            ctx(),
+        ).data.provenance!!
+
+        // Append a lockfile entry without touching the timeline. timelineHash
+        // must stay stable; lockfileHash must flip.
+        store.mutate(pid) { p ->
+            p.copy(
+                lockfile = p.lockfile.append(
+                    LockfileEntry(
+                        inputHash = "h-prov",
+                        toolId = "generate_image",
+                        assetId = AssetId("a-prov"),
+                        provenance = GenerationProvenance(
+                            providerId = "fake",
+                            modelId = "fake",
+                            modelVersion = null,
+                            seed = 1L,
+                            parameters = JsonObject(emptyMap()),
+                            createdAtEpochMs = 0L,
+                        ),
+                        sourceBinding = emptySet(),
+                        sourceContentHashes = emptyMap(),
+                    ),
+                ),
+            )
+        }
+
+        val second = tool.execute(
+            ExportTool.Input(projectId = pid.value, outputPath = "/tmp/out.mp4", forceRender = true),
+            ctx(),
+        ).data.provenance!!
+
+        assertEquals(first.timelineHash, second.timelineHash, "untouched timeline → same timelineHash")
+        assertTrue(
+            first.lockfileHash != second.lockfileHash,
+            "lockfileHash must differ after appending a lockfile entry",
+        )
+    }
+
+    @Test fun cacheHitExportStillReportsProvenance() = runTest {
+        val (store, engine, pid) = newFixture()
+        val tool = ExportTool(store, engine)
+        val input = ExportTool.Input(projectId = pid.value, outputPath = "/tmp/out.mp4")
+
+        val first = tool.execute(input, ctx())
+        val firstProv = first.data.provenance!!
+
+        val second = tool.execute(input, ctx())
+        assertEquals(true, second.data.cacheHit)
+        val secondProv = second.data.provenance!!
+        assertEquals(firstProv, secondProv, "cache hit must reproduce the same manifest the cached render baked")
+    }
+
+    @Test fun reexportProducesIdenticalProvenance() = runTest {
+        // Within a single fixture, re-exporting the same project must mint
+        // byte-identical manifests. Covers the ExportDeterminismTest-adjacent
+        // contract: manifests must be pure function of (project state at
+        // render time), not wall-clock or process-local non-determinism. The
+        // cross-fixture "two projects in two stores" case isn't useful here —
+        // SqlDelightProjectStore stamps `Track.updatedAtEpochMs` at upsert
+        // time, so two fresh fixtures upserted milliseconds apart legitimately
+        // differ in timelineHash.
+        val (store, engine, pid) = newFixture()
+        val tool = ExportTool(store, engine)
+        val input = ExportTool.Input(projectId = pid.value, outputPath = "/tmp/out.mp4")
+
+        val first = tool.execute(input, ctx()).data.provenance!!
+        val second = tool.execute(input.copy(forceRender = true), ctx()).data.provenance!!
+
+        assertEquals(first, second, "re-export of the same project must mint the same manifest")
     }
 }

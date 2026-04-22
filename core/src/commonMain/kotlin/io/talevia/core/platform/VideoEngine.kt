@@ -115,6 +115,20 @@ data class OutputSpec(
     val videoCodec: String = "h264",
     val audioCodec: String = "aac",
     val container: String = "mp4",
+    /**
+     * Container-level metadata key→value entries the engine should bake into
+     * the output file (e.g. mp4 `moov.udta` / ISO BMFF metadata atoms).
+     * Typical use: [io.talevia.core.domain.render.ProvenanceManifest] encoded
+     * into a `"comment"` entry so the artifact traces back to its source
+     * Project + Timeline hash (VISION §5.3). Default empty — engines that
+     * cannot write container metadata (Media3 / AVFoundation today) silently
+     * ignore the map; FFmpeg engine wires it via `-metadata key=value`.
+     *
+     * Values must be deterministic across re-exports of the same Project to
+     * preserve the bit-exact RenderCache guarantee — no timestamps, no
+     * process ids, no machine-local identifiers.
+     */
+    val metadata: Map<String, String> = emptyMap(),
 )
 
 sealed interface RenderProgress {
