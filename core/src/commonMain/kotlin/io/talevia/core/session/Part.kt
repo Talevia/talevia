@@ -10,6 +10,7 @@ import kotlinx.datetime.Instant
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
 
 @Serializable
 sealed class Part {
@@ -234,6 +235,18 @@ data class PlanStep(
     val inputSummary: String,
     val status: PlanStepStatus = PlanStepStatus.PENDING,
     val note: String? = null,
+    /**
+     * VISION §5.4 expert-path batch-approval: the executable Input JSON
+     * for this step. When non-null, `execute_plan(planId)` can dispatch
+     * this step directly through [io.talevia.core.tool.ToolRegistry]
+     * without going back to the LLM for input reconstruction. When null,
+     * the step remains a preview-only recommendation — `execute_plan`
+     * skips it with a diagnostic note. Agents drafting plans that should
+     * be agent-executable should populate this with a concrete payload;
+     * agents drafting plans for human review or for cases where inputs
+     * depend on intermediate results can leave it null.
+     */
+    val input: JsonObject? = null,
 )
 
 @Serializable

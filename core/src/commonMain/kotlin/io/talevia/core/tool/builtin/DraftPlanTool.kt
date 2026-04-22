@@ -84,6 +84,14 @@ class DraftPlanTool(private val clock: Clock = Clock.System) : Tool<DraftPlanToo
         val inputSummary: String,
         val status: PlanStepStatus = PlanStepStatus.PENDING,
         val note: String? = null,
+        /**
+         * Optional executable Input payload for `execute_plan`. When set,
+         * the agent (or the user via UI) can auto-dispatch this step
+         * without returning to the LLM to reconstruct inputs. When null,
+         * the step remains preview-only and `execute_plan` will skip it
+         * with a diagnostic note. See [PlanStep.input].
+         */
+        val input: JsonObject? = null,
     )
 
     @Serializable
@@ -155,6 +163,17 @@ class DraftPlanTool(private val clock: Clock = Clock.System) : Tool<DraftPlanToo
                                 "Optional free-text annotation (skip reason, failure cause).",
                             )
                         }
+                        putJsonObject("input") {
+                            put("type", "object")
+                            put(
+                                "description",
+                                "Optional executable Input JSON for execute_plan. When present, " +
+                                    "execute_plan dispatches this step directly via the registered tool " +
+                                    "without re-asking the LLM for inputs. Omit when the step is " +
+                                    "preview-only or when inputs depend on intermediate results.",
+                            )
+                            put("additionalProperties", true)
+                        }
                     }
                     put(
                         "required",
@@ -204,6 +223,7 @@ class DraftPlanTool(private val clock: Clock = Clock.System) : Tool<DraftPlanToo
                 inputSummary = s.inputSummary,
                 status = s.status,
                 note = s.note,
+                input = s.input,
             )
         }
 
