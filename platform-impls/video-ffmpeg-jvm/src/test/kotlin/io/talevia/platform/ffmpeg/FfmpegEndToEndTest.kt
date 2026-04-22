@@ -1,18 +1,27 @@
 package io.talevia.platform.ffmpeg
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import io.talevia.core.AssetId
 import io.talevia.core.CallId
+import io.talevia.core.ClipId
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
+import io.talevia.core.TrackId
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.Clip
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
+import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
+import io.talevia.core.domain.Track
 import io.talevia.core.permission.AllowAllPermissionService
 import io.talevia.core.platform.InMemoryMediaStorage
+import io.talevia.core.platform.OutputSpec
+import io.talevia.core.platform.RenderProgress
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.video.AddClipTool
@@ -20,6 +29,7 @@ import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonObject
@@ -348,6 +358,77 @@ class FfmpegEndToEndTest {
         driver.close()
     }
 
+    /**
+     * Progressive export preview (VISION §5.4). Drives `engine.render` directly
+     * on a 4-second timeline, asserts ffmpeg's side-output pipeline actually
+     * emits at least one `RenderProgress.Preview` event with a ratio inside
+     * [0, 1] and a path under the output's parent directory. Goes direct-to-
+     * engine instead of through `ExportTool` so the test isolates the preview
+     * contract from the tool's render cache and per-clip branches.
+     */
+    @Test
+    fun renderEmitsProgressivePreviewEvents() = runTest(timeout = kotlin.time.Duration.parse("60s")) {
+        if (!ffmpegOnPath()) return@runTest
+
+        generateTestSourceWithDuration(inputA, "testsrc", durationSeconds = 4)
+        val assetId = AssetId("a1")
+        val resolver = object : io.talevia.core.platform.MediaPathResolver {
+            override suspend fun resolve(assetId: AssetId): String = inputA.absolutePath
+        }
+        val engine = FfmpegVideoEngine(pathResolver = resolver)
+
+        val timeline = Timeline(
+            tracks = listOf(
+                Track.Video(
+                    id = TrackId("v"),
+                    clips = listOf(
+                        Clip.Video(
+                            id = ClipId("c1"),
+                            timeRange = TimeRange(kotlin.time.Duration.ZERO, kotlin.time.Duration.parse("4s")),
+                            sourceRange = TimeRange(kotlin.time.Duration.ZERO, kotlin.time.Duration.parse("4s")),
+                            assetId = assetId,
+                        ),
+                    ),
+                ),
+            ),
+            duration = kotlin.time.Duration.parse("4s"),
+        )
+        val out = OutputSpec(
+            targetPath = output.absolutePath,
+            resolution = Resolution(320, 240),
+            frameRate = 24,
+        )
+
+        val events = engine.render(timeline, out).toList()
+        val previews = events.filterIsInstance<RenderProgress.Preview>()
+        assertTrue(
+            previews.isNotEmpty(),
+            "engine must emit at least one Preview event during a 4-second render; got events: " +
+                events.joinToString(", ") { it::class.simpleName ?: "?" },
+        )
+        for (p in previews) {
+            assertTrue(p.ratio in 0f..1f, "Preview ratio out of bounds: ${p.ratio}")
+            assertTrue(
+                p.thumbnailPath.startsWith(output.parentFile.absolutePath),
+                "Preview thumbnailPath should live next to the export target: ${p.thumbnailPath}",
+            )
+            assertTrue(
+                p.thumbnailPath.endsWith(".jpg"),
+                "Preview thumbnailPath should be a .jpg: ${p.thumbnailPath}",
+            )
+        }
+        assertTrue(
+            events.any { it is RenderProgress.Completed },
+            "render must still complete alongside preview events",
+        )
+        // Sidecar must be cleaned up after the flow terminates (Completed/Failed).
+        val sidecarFiles = output.parentFile.listFiles { f -> f.name.startsWith(".talevia-preview-") && f.name.endsWith(".jpg") }
+        assertTrue(
+            sidecarFiles == null || sidecarFiles.isEmpty(),
+            "preview sidecar must be deleted after render completes; found: ${sidecarFiles?.toList()}",
+        )
+    }
+
     private fun ffmpegOnPath(): Boolean = runCatching {
         ProcessBuilder("ffmpeg", "-version").redirectErrorStream(true).start().waitFor() == 0
     }.getOrDefault(false)
@@ -362,9 +443,13 @@ class FfmpegEndToEndTest {
     }.getOrDefault(false)
 
     private fun generateTestSource(target: File, pattern: String) {
+        generateTestSourceWithDuration(target, pattern, durationSeconds = 2)
+    }
+
+    private fun generateTestSourceWithDuration(target: File, pattern: String, durationSeconds: Int) {
         val args = listOf(
             "ffmpeg", "-y",
-            "-f", "lavfi", "-i", "$pattern=duration=2:size=320x240:rate=24",
+            "-f", "lavfi", "-i", "$pattern=duration=$durationSeconds:size=320x240:rate=24",
             "-f", "lavfi", "-i", "anullsrc=cl=stereo:r=44100",
             "-shortest",
             "-c:v", "libx264", "-pix_fmt", "yuv420p",

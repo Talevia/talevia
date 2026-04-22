@@ -120,6 +120,26 @@ data class OutputSpec(
 sealed interface RenderProgress {
     data class Started(val jobId: String) : RenderProgress
     data class Frames(val jobId: String, val ratio: Float, val message: String? = null) : RenderProgress
+
+    /**
+     * An intermediate low-resolution JPEG snapshot of the in-progress render
+     * (VISION §5.4 — long exports stay watchable / interruptible; the expert
+     * path can inspect output mid-stream and decide to cancel + reshape the
+     * timeline before the full encode completes).
+     *
+     * [thumbnailPath] points at a best-effort on-disk JPEG the engine wrote;
+     * it is **mutable** (engines typically overwrite the same file each tick
+     * via an `image2 -update 1`-style side output). Consumers that want to
+     * hold on to a specific tick's bytes must copy them out before the next
+     * `Preview` event fires. The path's lifetime ends when [Completed] or
+     * [Failed] is emitted — the engine is free to delete it.
+     *
+     * Optional: engines without a cheap side-output (Media3, AVFoundation)
+     * simply never emit this variant; consumers must not rely on its
+     * presence.
+     */
+    data class Preview(val jobId: String, val ratio: Float, val thumbnailPath: String) : RenderProgress
+
     data class Completed(val jobId: String, val outputPath: String) : RenderProgress
     data class Failed(val jobId: String, val message: String) : RenderProgress
 }

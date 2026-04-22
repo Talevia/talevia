@@ -430,4 +430,65 @@ class ExportToolTest {
         assertTrue(cache.entries.any { it.outputPath == "/tmp/a.mp4" })
         assertTrue(cache.entries.any { it.outputPath == "/tmp/b.mp4" })
     }
+
+    /**
+     * Engine that emits `Started`, a pair of `Preview` events at different ratios,
+     * a regular `Frames`, and `Completed`. Verifies `ExportTool` translates each
+     * `Preview` into a `Part.RenderProgress` that carries the engine-supplied
+     * `thumbnailPath`. This is the contract behind VISION §5.4 — UIs see the
+     * thumbnail path on the render-progress part as exports run.
+     */
+    private class PreviewEmittingEngine : VideoEngine {
+        override suspend fun probe(source: MediaSource): MediaMetadata =
+            MediaMetadata(duration = Duration.ZERO, resolution = Resolution(0, 0), frameRate = null)
+
+        override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> = flow {
+            emit(RenderProgress.Started("job"))
+            emit(RenderProgress.Preview("job", ratio = 0.25f, thumbnailPath = "/tmp/preview-0.jpg"))
+            emit(RenderProgress.Frames("job", ratio = 0.5f))
+            emit(RenderProgress.Preview("job", ratio = 0.75f, thumbnailPath = "/tmp/preview-1.jpg"))
+            emit(RenderProgress.Completed("job", output.targetPath))
+        }
+
+        override suspend fun thumbnail(asset: AssetId, source: MediaSource, time: Duration): ByteArray = ByteArray(0)
+    }
+
+    @Test fun previewEventsForwardedAsRenderProgressPartsWithThumbnailPath() = runTest {
+        val (store, _, pid) = newFixture()
+        val engine = PreviewEmittingEngine()
+        val tool = ExportTool(store, engine)
+
+        val capturedParts = mutableListOf<io.talevia.core.session.Part.RenderProgress>()
+        val captureCtx = ToolContext(
+            sessionId = SessionId("s"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { PermissionDecision.Once },
+            emitPart = { p ->
+                if (p is io.talevia.core.session.Part.RenderProgress) capturedParts += p
+            },
+            messages = emptyList(),
+        )
+        tool.execute(ExportTool.Input(projectId = pid.value, outputPath = "/tmp/preview-out.mp4"), captureCtx)
+
+        val previewParts = capturedParts.filter { it.thumbnailPath != null }
+        assertEquals(2, previewParts.size, "two Preview engine events should produce two thumbnail-carrying parts")
+        assertEquals("/tmp/preview-0.jpg", previewParts[0].thumbnailPath)
+        assertEquals(0.25f, previewParts[0].ratio)
+        assertEquals("preview", previewParts[0].message)
+        assertEquals("/tmp/preview-1.jpg", previewParts[1].thumbnailPath)
+        assertEquals(0.75f, previewParts[1].ratio)
+
+        // Non-preview events (Started, Frames, Completed) must not carry a
+        // thumbnailPath — only Preview events do.
+        val nonPreviewParts = capturedParts.filter { it.thumbnailPath == null }
+        assertTrue(
+            nonPreviewParts.isNotEmpty(),
+            "Started/Frames/Completed still produce render-progress parts",
+        )
+        assertTrue(
+            nonPreviewParts.all { it.thumbnailPath == null },
+            "Non-Preview engine events must not set thumbnailPath",
+        )
+    }
 }

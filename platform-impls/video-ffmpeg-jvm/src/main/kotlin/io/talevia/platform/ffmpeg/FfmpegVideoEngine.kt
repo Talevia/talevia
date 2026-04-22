@@ -156,6 +156,15 @@ class FfmpegVideoEngine(
         // clips without either pass [N:v:0] through unchanged. Audio is always
         // taken from [N:a:0?] without filters (apply_filter only supports video
         // in core).
+        //
+        // Progressive preview (VISION §5.4). We tee the final video label via
+        // `split` into [outv_main] (the export file's source) and [preview]
+        // (a downsampled, frame-rate-limited side stream). The preview is
+        // consumed by a second ffmpeg output — an image2 muxer with
+        // `-update 1` that rewrites the same JPEG on each emitted frame. The
+        // progress loop polls that file's mtime and emits a
+        // [RenderProgress.Preview] event whenever a new frame lands.
+        val previewPath = previewSidecarPathFor(output.targetPath, jobId)
         val filter = buildString {
             val videoLabels = mutableListOf<String>()
             for (i in 0 until n) {
@@ -177,19 +186,34 @@ class FfmpegVideoEngine(
             }
             append("concat=n=$n:v=1:a=1")
             if (drawtextChain != null) {
-                // concat emits [cv]/[outa]; drawtext chain consumes [cv] and labels [outv].
-                append("[cv][outa];[cv]$drawtextChain[outv]")
+                // concat emits [cv]/[outa]; drawtext chain consumes [cv] and labels [outv_joined].
+                append("[cv][outa];[cv]$drawtextChain[outv_joined]")
             } else {
-                append("[outv][outa]")
+                append("[outv_joined][outa]")
             }
+            // Fan [outv_joined] into two branches: the real export ([outv_main])
+            // and the preview pipeline ([preview] — ~1 frame per output second,
+            // scaled to PREVIEW_WIDTH for a small JPEG).
+            append(";[outv_joined]split=2[outv_main][preview_src];")
+            append("[preview_src]fps=$PREVIEW_FPS,scale=$PREVIEW_WIDTH:-2[preview]")
         }
+        // Make sure the preview sidecar's parent exists before ffmpeg tries to
+        // open it. Same reason `-y` on the main output matters: fresh runs
+        // shouldn't fail on a missing dir.
+        Files.createDirectories(java.nio.file.Path.of(previewPath).parent)
         args += listOf("-filter_complex", filter)
-        args += listOf("-map", "[outv]", "-map", "[outa]")
+        // Primary export output.
+        args += listOf("-map", "[outv_main]", "-map", "[outa]")
         args += listOf("-r", output.frameRate.toString())
         args += listOf("-s", "${output.resolution.width}x${output.resolution.height}")
         args += listOf("-c:v", output.videoCodec, "-b:v", "${output.videoBitrate}", "-flags:v", "+bitexact")
         args += listOf("-c:a", output.audioCodec, "-b:a", "${output.audioBitrate}", "-flags:a", "+bitexact")
         args += output.targetPath
+        // Preview side output — `-update 1 -f image2` makes ffmpeg overwrite
+        // the same JPEG on each emitted frame (the canonical "live thumbnail"
+        // recipe in ffmpeg docs). `-q:v 5` is a mid-quality JPEG — small
+        // enough to poll cheaply, sharp enough to preview by.
+        args += listOf("-map", "[preview]", "-c:v", "mjpeg", "-q:v", "5", "-update", "1", "-f", "image2", previewPath)
 
         val process = ProcessBuilder(args).redirectErrorStream(false).start()
         val totalSeconds = timeline.duration.toDouble(kotlin.time.DurationUnit.SECONDS).takeIf { it > 0 } ?: 1.0
@@ -198,6 +222,12 @@ class FfmpegVideoEngine(
         // ffmpeg's actual complaint (bad filter graph, missing input, codec
         // unsupported) instead of just "exited N".
         val stderrTail = ArrayDeque<String>()
+        // Track the last-seen mtime of the preview JPEG so we emit exactly one
+        // Preview event per ffmpeg overwrite. Starts at 0 — the first non-zero
+        // mtime wins.
+        var lastPreviewMtimeMs = 0L
+        var lastPreviewRatio = 0f
+        val previewFile = java.nio.file.Path.of(previewPath)
 
         try {
             // ffmpeg writes progress KV pairs (out_time_ms=…, progress=continue|end) to
@@ -227,8 +257,19 @@ class FfmpegVideoEngine(
                 if (k == "out_time_ms" && v.isNotEmpty()) {
                     val microsec = v.toLongOrNull()
                     if (microsec != null) {
-                        val ratio = (microsec / 1_000_000.0 / totalSeconds).coerceIn(0.0, 1.0)
-                        emit(RenderProgress.Frames(jobId, ratio.toFloat()))
+                        val ratio = (microsec / 1_000_000.0 / totalSeconds).coerceIn(0.0, 1.0).toFloat()
+                        emit(RenderProgress.Frames(jobId, ratio))
+                        lastPreviewRatio = ratio
+                    }
+                }
+                // Piggy-back on the progress KV cadence to check whether ffmpeg
+                // has written a new preview frame. Cheap — one `Files.getLastModifiedTime`
+                // call per KV line.
+                if (Files.isRegularFile(previewFile)) {
+                    val mtime = runCatching { Files.getLastModifiedTime(previewFile).toMillis() }.getOrDefault(0L)
+                    if (mtime > lastPreviewMtimeMs) {
+                        lastPreviewMtimeMs = mtime
+                        emit(RenderProgress.Preview(jobId, lastPreviewRatio, previewPath))
                     }
                 }
                 if (k == "progress" && v == "end") break
@@ -261,6 +302,11 @@ class FfmpegVideoEngine(
                 process.destroyForcibly()
                 runCatching { process.waitFor() }
             }
+            // Best-effort preview-sidecar cleanup. `RenderProgress.Preview`'s
+            // contract promises the path is valid until Completed/Failed —
+            // callers that cared about a specific frame copied the bytes out
+            // already.
+            runCatching { Files.deleteIfExists(previewFile) }
         }
     }.flowOn(ioDispatcher)
 
@@ -663,5 +709,35 @@ class FfmpegVideoEngine(
             }
             throw t
         }
+    }
+
+    /**
+     * Path ffmpeg writes progressive preview JPEGs to during [render]. Lives
+     * next to the target output in a hidden dot-dir so a directory listing of
+     * the user's output folder doesn't show a half-written thumbnail; the
+     * sidecar is deleted on render completion regardless of success.
+     */
+    private fun previewSidecarPathFor(targetPath: String, jobId: String): String {
+        val parent = targetPath.substringBeforeLast('/', missingDelimiterValue = ".")
+        return "$parent/.talevia-preview-$jobId.jpg"
+    }
+
+    private companion object {
+        /**
+         * Output frames per rendered-video-second emitted by the preview
+         * branch. 1 is plenty for a "mid-render check-in" UX and keeps the
+         * `image2 -update 1` overwrite rate low enough that the polling
+         * progress loop never misses a frame.
+         */
+        const val PREVIEW_FPS = 1
+
+        /**
+         * Scale the preview to this width preserving aspect (`-2` on the
+         * height arg does the rounding). Same 320px as
+         * [io.talevia.platform.ffmpeg.FfmpegProxyGenerator]'s THUMB_WIDTH so
+         * consumers that render thumbnails in the UI don't need two different
+         * scaling code paths.
+         */
+        const val PREVIEW_WIDTH = 320
     }
 }

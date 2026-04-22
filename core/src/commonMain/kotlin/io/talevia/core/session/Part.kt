@@ -96,6 +96,16 @@ sealed class Part {
         val jobId: String,
         val ratio: Float,
         val message: String? = null,
+        /**
+         * Optional path to a small JPEG snapshot of the in-progress render
+         * (VISION §5.4 — expert path can see mid-render output). Populated
+         * when the engine emitted a [io.talevia.core.platform.RenderProgress.Preview]
+         * event; null otherwise. The file at this path is overwritten by
+         * subsequent preview ticks and deleted once the render completes —
+         * UIs that want to keep a historical frame must copy the bytes out
+         * before the next render-progress part lands.
+         */
+        val thumbnailPath: String? = null,
         /** Forward-compat discriminator. See [PartSchema]. */
         val schemaVersion: Int = PartSchema.CURRENT,
     ) : Part()

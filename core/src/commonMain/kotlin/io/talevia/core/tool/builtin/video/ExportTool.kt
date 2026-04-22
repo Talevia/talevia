@@ -318,6 +318,13 @@ class ExportTool(
                 is RenderProgress.Frames -> ctx.emitPart(
                     Part.RenderProgress(partId, ctx.messageId, ctx.sessionId, clock.now(), jobId = ev.jobId, ratio = ev.ratio, message = ev.message),
                 )
+                is RenderProgress.Preview -> ctx.emitPart(
+                    Part.RenderProgress(
+                        partId, ctx.messageId, ctx.sessionId, clock.now(),
+                        jobId = ev.jobId, ratio = ev.ratio, message = "preview",
+                        thumbnailPath = ev.thumbnailPath,
+                    ),
+                )
                 is RenderProgress.Completed -> ctx.emitPart(
                     Part.RenderProgress(partId, ctx.messageId, ctx.sessionId, clock.now(), jobId = ev.jobId, ratio = 1f, message = "completed"),
                 )
