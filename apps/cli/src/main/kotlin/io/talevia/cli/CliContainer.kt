@@ -206,7 +206,49 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
 
     val httpClient: HttpClient = HttpClient(CIO)
 
-    val providerAuth: ProviderAuth = EnvProviderAuth(env::get)
+    /**
+     * Env vars backfilled from the [secrets] store — same lookup the chat
+     * [providers] registry uses, so AIGC / ML engines don't go dark when the
+     * user only set up keys through `/setkey`.
+     *
+     * Why this matters: [ProviderRegistry.Builder.addSecretStore] threads the
+     * secrets store into chat provider construction, so the OpenAI chat model
+     * works fine with a key in `~/.talevia/secrets.properties`. But
+     * `providerAuth` feeds a **second** set of clients — [imageGen], [videoGen],
+     * [asr], [tts], [vision], and the Replicate lane — and those only ran if
+     * the raw `OPENAI_API_KEY` env var was set. Result: a CLI user who did the
+     * normal interactive setup saw chat work but `generate_image` /
+     * `generate_video` / `transcribe_asset` / `synthesize_speech` /
+     * `describe_asset` silently unregister, and the agent had no way to
+     * produce an asset → no way to [add_clip] → no way to export.
+     *
+     * We eagerly read the known provider-id slots from [secrets] (each has a
+     * short, stable, CI-friendly env var name) and backfill them into the env
+     * map before constructing [providerAuth]. Explicit env vars still win —
+     * only empty / missing slots fall back to the secret store.
+     */
+    private val envWithSecrets: Map<String, String> = run {
+        val backfill = mutableMapOf<String, String>()
+        kotlinx.coroutines.runBlocking {
+            // SecretStore key -> env var name. Mirrors DEFAULT_ENV_VARS in EnvProviderAuth.
+            val map = listOf(
+                ProviderRegistry.SecretKeys.OPENAI to "OPENAI_API_KEY",
+                ProviderRegistry.SecretKeys.ANTHROPIC to "ANTHROPIC_API_KEY",
+                ProviderRegistry.SecretKeys.GEMINI to "GEMINI_API_KEY",
+                ProviderRegistry.SecretKeys.GOOGLE to "GOOGLE_API_KEY",
+                "replicate" to "REPLICATE_API_TOKEN",
+                "tavily" to "TAVILY_API_KEY",
+            )
+            for ((secretKey, envName) in map) {
+                if (env[envName].isNullOrBlank()) {
+                    secrets.get(secretKey)?.takeIf { it.isNotBlank() }?.let { backfill[envName] = it }
+                }
+            }
+        }
+        env + backfill
+    }
+
+    val providerAuth: ProviderAuth = EnvProviderAuth(envWithSecrets::get)
 
     val imageGen: ImageGenEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiImageGenEngine(httpClient, it) }
