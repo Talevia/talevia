@@ -21,6 +21,7 @@ import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.domain.lockfile.LockfileEntry
+import io.talevia.core.domain.render.TransitionFades
 import io.talevia.core.domain.source.consistency.CharacterRefBody
 import io.talevia.core.domain.source.consistency.addCharacterRef
 import io.talevia.core.domain.source.mutateSource
@@ -213,6 +214,206 @@ class ExportToolTest {
         val forced = tool.execute(input.copy(allowStale = true), ctx())
         assertEquals(1, engine.renderCalls)
         assertEquals(listOf("c1"), forced.data.staleClipsIncluded)
+    }
+
+    /**
+     * Per-clip engine that counts how many clip renders / concat calls occurred.
+     * Acts as a drop-in VideoEngine with `supportsPerClipCache = true` so
+     * ExportTool's per-clip branch executes. Mezzanine writes are fake (empty
+     * file touch + always present) — this test lives in core and mustn't depend
+     * on ffmpeg binaries.
+     */
+    private class FakePerClipEngine : VideoEngine {
+        var wholeTimelineCalls: Int = 0
+            private set
+        var renderClipCalls: Int = 0
+            private set
+        var concatCalls: Int = 0
+            private set
+        val rendered: MutableList<Pair<ClipId, String>> = mutableListOf()
+        val presentPaths: MutableSet<String> = mutableSetOf()
+
+        override val supportsPerClipCache: Boolean = true
+
+        override suspend fun probe(source: MediaSource): MediaMetadata =
+            MediaMetadata(duration = Duration.ZERO, resolution = Resolution(0, 0), frameRate = null)
+
+        override fun render(timeline: Timeline, output: OutputSpec): Flow<RenderProgress> = flow {
+            wholeTimelineCalls += 1
+            emit(RenderProgress.Started("job"))
+            emit(RenderProgress.Completed("job", output.targetPath))
+        }
+
+        override suspend fun mezzaninePresent(path: String): Boolean = path in presentPaths
+
+        override suspend fun renderClip(
+            clip: Clip.Video,
+            fades: TransitionFades?,
+            output: OutputSpec,
+            mezzaninePath: String,
+        ) {
+            renderClipCalls += 1
+            rendered += (clip.id to mezzaninePath)
+            presentPaths += mezzaninePath
+        }
+
+        override suspend fun concatMezzanines(
+            mezzaninePaths: List<String>,
+            subtitles: List<Clip.Text>,
+            output: OutputSpec,
+        ) {
+            concatCalls += 1
+        }
+
+        override suspend fun thumbnail(asset: AssetId, source: MediaSource, time: Duration): ByteArray = ByteArray(0)
+    }
+
+    @Test fun perClipEngineRendersEveryClipOnFirstExport() = runTest {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val engine = FakePerClipEngine()
+        val projectId = ProjectId("p-perclip")
+        val timeline = Timeline(
+            tracks = listOf(
+                Track.Video(
+                    id = TrackId("v"),
+                    clips = listOf(
+                        Clip.Video(
+                            id = ClipId("c1"),
+                            timeRange = TimeRange(0.seconds, 3.seconds),
+                            sourceRange = TimeRange(0.seconds, 3.seconds),
+                            assetId = AssetId("a1"),
+                        ),
+                        Clip.Video(
+                            id = ClipId("c2"),
+                            timeRange = TimeRange(3.seconds, 2.seconds),
+                            sourceRange = TimeRange(0.seconds, 2.seconds),
+                            assetId = AssetId("a2"),
+                        ),
+                    ),
+                ),
+            ),
+            duration = 5.seconds,
+        )
+        store.upsert("perclip", Project(id = projectId, timeline = timeline))
+
+        val tool = ExportTool(store, engine)
+        val first = tool.execute(
+            ExportTool.Input(projectId = projectId.value, outputPath = "/tmp/out.mp4"),
+            ctx(),
+        )
+        assertEquals(0, engine.wholeTimelineCalls, "per-clip path must not call whole-timeline render")
+        assertEquals(2, engine.renderClipCalls, "every clip should render on first export")
+        assertEquals(1, engine.concatCalls, "concat runs once per export")
+        assertEquals(0, first.data.perClipCacheHits)
+        assertEquals(2, first.data.perClipCacheMisses)
+
+        // Cache entries were persisted.
+        val clipCache = store.get(projectId)!!.clipRenderCache
+        assertEquals(2, clipCache.entries.size)
+    }
+
+    @Test fun perClipEngineReusesCachedMezzanineOnIdenticalRerun() = runTest {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val engine = FakePerClipEngine()
+        val projectId = ProjectId("p-perclip-rerun")
+        val timeline = Timeline(
+            tracks = listOf(
+                Track.Video(
+                    id = TrackId("v"),
+                    clips = listOf(
+                        Clip.Video(
+                            id = ClipId("c1"),
+                            timeRange = TimeRange(0.seconds, 3.seconds),
+                            sourceRange = TimeRange(0.seconds, 3.seconds),
+                            assetId = AssetId("a1"),
+                        ),
+                        Clip.Video(
+                            id = ClipId("c2"),
+                            timeRange = TimeRange(3.seconds, 2.seconds),
+                            sourceRange = TimeRange(0.seconds, 2.seconds),
+                            assetId = AssetId("a2"),
+                        ),
+                    ),
+                ),
+            ),
+            duration = 5.seconds,
+        )
+        store.upsert("perclip", Project(id = projectId, timeline = timeline))
+        val tool = ExportTool(store, engine)
+
+        tool.execute(ExportTool.Input(projectId = projectId.value, outputPath = "/tmp/out.mp4"), ctx())
+        assertEquals(2, engine.renderClipCalls)
+
+        // Second export with forceRender (full-timeline cache bypass) but identical
+        // clip shape → all mezzanines reused from ClipRenderCache.
+        val second = tool.execute(
+            ExportTool.Input(projectId = projectId.value, outputPath = "/tmp/out.mp4", forceRender = true),
+            ctx(),
+        )
+        assertEquals(2, engine.renderClipCalls, "per-clip cache hits — no new renderClip calls")
+        assertEquals(2, engine.concatCalls, "concat still runs once per export")
+        assertEquals(2, second.data.perClipCacheHits)
+        assertEquals(0, second.data.perClipCacheMisses)
+    }
+
+    @Test fun perClipEngineReRendersOnlyTheStalyClip() = runTest {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val store = SqlDelightProjectStore(TaleviaDb(driver))
+        val engine = FakePerClipEngine()
+        val projectId = ProjectId("p-perclip-partial")
+        val baseTimeline = Timeline(
+            tracks = listOf(
+                Track.Video(
+                    id = TrackId("v"),
+                    clips = listOf(
+                        Clip.Video(
+                            id = ClipId("c1"),
+                            timeRange = TimeRange(0.seconds, 3.seconds),
+                            sourceRange = TimeRange(0.seconds, 3.seconds),
+                            assetId = AssetId("a1"),
+                        ),
+                        Clip.Video(
+                            id = ClipId("c2"),
+                            timeRange = TimeRange(3.seconds, 2.seconds),
+                            sourceRange = TimeRange(0.seconds, 2.seconds),
+                            assetId = AssetId("a2"),
+                        ),
+                    ),
+                ),
+            ),
+            duration = 5.seconds,
+        )
+        store.upsert("perclip", Project(id = projectId, timeline = baseTimeline))
+        val tool = ExportTool(store, engine)
+
+        tool.execute(ExportTool.Input(projectId = projectId.value, outputPath = "/tmp/out.mp4"), ctx())
+        assertEquals(2, engine.renderClipCalls)
+
+        // Edit clip c2 only (different assetId → fingerprint shifts).
+        store.mutate(projectId) { p ->
+            val track = p.timeline.tracks.first() as Track.Video
+            val newClips = track.clips.map { c ->
+                if ((c as Clip.Video).id == ClipId("c2")) c.copy(assetId = AssetId("a2-new")) else c
+            }
+            p.copy(
+                timeline = p.timeline.copy(
+                    tracks = listOf(track.copy(clips = newClips)),
+                ),
+            )
+        }
+
+        val after = tool.execute(
+            ExportTool.Input(projectId = projectId.value, outputPath = "/tmp/out.mp4"),
+            ctx(),
+        )
+        assertEquals(3, engine.renderClipCalls, "only c2 should re-render; c1 hits cache")
+        assertEquals(1, after.data.perClipCacheHits)
+        assertEquals(1, after.data.perClipCacheMisses)
     }
 
     @Test fun changingOutputPathMissesCache() = runTest {

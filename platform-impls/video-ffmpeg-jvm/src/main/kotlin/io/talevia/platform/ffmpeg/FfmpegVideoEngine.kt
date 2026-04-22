@@ -9,6 +9,8 @@ import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
+import io.talevia.core.domain.render.TransitionFades
+import io.talevia.core.domain.render.transitionFadesPerClip
 import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
@@ -119,7 +121,7 @@ class FfmpegVideoEngine(
         // black over D/2) — this is the cross-engine parity floor and matches
         // what the Media3 / AVFoundation engines can render without custom
         // shaders.
-        val transitionFades: Map<String, ClipFades> = transitionFadesFor(timeline, videoClips)
+        val transitionFades: Map<String, TransitionFades> = transitionFadesFor(timeline, videoClips)
         // `-fflags +bitexact` strips the container-level encoder id string and
         // random/timestamp-based metadata; `-flags:v/+flags:a +bitexact` do the
         // same for video and audio streams (codec headers). Guarantees the
@@ -261,6 +263,160 @@ class FfmpegVideoEngine(
             }
         }
     }.flowOn(ioDispatcher)
+
+    override val supportsPerClipCache: Boolean = true
+
+    override suspend fun mezzaninePresent(path: String): Boolean {
+        // A zero-byte file is an aborted mezzanine — treat as miss so we re-render
+        // instead of feeding ffmpeg's concat demuxer garbage.
+        val p = java.nio.file.Path.of(path)
+        return Files.isRegularFile(p) && Files.size(p) > 0
+    }
+
+    /**
+     * Render one [Clip.Video] to [mezzaninePath] as an mp4 encoded at [output]'s
+     * profile. Powers [io.talevia.core.tool.builtin.video.ExportTool]'s per-clip
+     * cache path — cache-miss clips become mezzanines, cache-hit clips reuse the
+     * prior file, and [concatMezzanines] stitches them at the end.
+     *
+     * Shape:
+     *  - Single input with `-ss` pre-seek + `-t` duration — cheapest way to trim.
+     *  - Filtergraph mirrors the whole-timeline render's per-clip segment: the
+     *    clip's own [Clip.Video.filters] followed by the [fades] fade chain.
+     *    Subtitles are intentionally absent (they're timeline-relative; applied
+     *    in [concatMezzanines]).
+     *  - `-map` picks up the clip's audio stream if present (`0:a:0?` — optional
+     *    means a silent render when the source has no audio track).
+     *  - Encoder flags mirror the whole-timeline path (`-fflags +bitexact`,
+     *    `+bitexact` on video + audio codec headers) so mezzanines are
+     *    byte-deterministic — a second render with the same fingerprint produces
+     *    the same bytes. Required for concat-demux correctness.
+     */
+    override suspend fun renderClip(
+        clip: Clip.Video,
+        fades: TransitionFades?,
+        output: OutputSpec,
+        mezzaninePath: String,
+    ) {
+        // Make sure the target directory exists — callers pass a path under
+        // `<outputDir>/.talevia-render-cache/<projectId>/` which may not exist
+        // on the first mezzanine write.
+        Files.createDirectories(java.nio.file.Path.of(mezzaninePath).parent)
+
+        val sourceMediaPath = pathResolver.resolve(clip.assetId)
+        val filterAssetPaths: Map<AssetId, String> = clip.filters
+            .mapNotNull { it.assetId }
+            .distinct()
+            .associateWith { pathResolver.resolve(it) }
+
+        val filterChain = filterChainFor(clip.filters, filterAssetPaths)
+        val fadeChain = buildFadeChain(clip, fades)
+        val fullChain = listOfNotNull(filterChain, fadeChain)
+            .ifEmpty { null }?.joinToString(",")
+
+        val args = mutableListOf(
+            ffmpegPath, "-y",
+            "-fflags", "+bitexact",
+            "-ss", "${clip.sourceRange.start.toDouble(kotlin.time.DurationUnit.SECONDS)}",
+            "-t", "${clip.sourceRange.duration.toDouble(kotlin.time.DurationUnit.SECONDS)}",
+            "-i", sourceMediaPath,
+        )
+        if (fullChain != null) {
+            args += listOf(
+                "-filter_complex", "[0:v:0]$fullChain[outv]",
+                "-map", "[outv]", "-map", "0:a:0?",
+            )
+        } else {
+            args += listOf("-map", "0:v:0", "-map", "0:a:0?")
+        }
+        args += listOf("-r", output.frameRate.toString())
+        args += listOf("-s", "${output.resolution.width}x${output.resolution.height}")
+        args += listOf("-c:v", output.videoCodec, "-b:v", "${output.videoBitrate}", "-flags:v", "+bitexact")
+        args += listOf("-c:a", output.audioCodec, "-b:a", "${output.audioBitrate}", "-flags:a", "+bitexact")
+        args += mezzaninePath
+
+        val result = runProcess(*args.toTypedArray())
+        if (result.exitCode != 0) {
+            error(
+                "ffmpeg mezzanine render failed (exit=${result.exitCode}) for clip ${clip.id.value} → $mezzaninePath: " +
+                    result.stderr.takeLast(800),
+            )
+        }
+    }
+
+    /**
+     * Concat the pre-encoded [mezzaninePaths] (output of [renderClip]) into the
+     * final [output]. Two code paths:
+     *
+     * - **No subtitles**: `ffmpeg -f concat -c copy` stream-copies the mezzanine
+     *   bitstreams straight into the target container. Zero re-encode cost —
+     *   this is where the §3.2 speed-up lands.
+     * - **With subtitles**: concat-demux the video+audio, apply the drawtext
+     *   chain to the video stream, stream-copy audio, re-mux. Video must be
+     *   re-encoded because drawtext is a per-frame filter, but it's still one
+     *   encode pass over the whole timeline instead of N per-clip encodes.
+     *
+     * Concat-demux list file uses FFmpeg's single-quote + `'\''` escape (same
+     * as shell) so paths containing `'` don't break out of the quoted value.
+     */
+    override suspend fun concatMezzanines(
+        mezzaninePaths: List<String>,
+        subtitles: List<Clip.Text>,
+        output: OutputSpec,
+    ) {
+        require(mezzaninePaths.isNotEmpty()) { "concatMezzanines called with no mezzanines" }
+        // Final output directory may not exist if user picked a fresh path; the
+        // whole-timeline `render` path relies on ffmpeg to auto-create but the
+        // concat demuxer can fail on missing parent dirs on some platforms.
+        Files.createDirectories(java.nio.file.Path.of(output.targetPath).parent)
+
+        val listFile = Files.createTempFile("talevia-concat-", ".txt")
+        try {
+            val listContent = mezzaninePaths.joinToString("\n") { path ->
+                // Concat demuxer directive syntax: `file '<path>'`. Single quote
+                // escape is `'\''` (close quote, escaped quote, open quote).
+                "file '${path.replace("'", "'\\''")}'"
+            }
+            Files.writeString(listFile, listContent)
+
+            val drawtextChain = subtitleDrawtextChain(
+                subtitles,
+                output.resolution.width,
+                output.resolution.height,
+            )
+
+            val args = mutableListOf(
+                ffmpegPath, "-y",
+                "-fflags", "+bitexact",
+                "-f", "concat", "-safe", "0",
+                "-i", listFile.absolutePathString(),
+            )
+            if (drawtextChain == null) {
+                // Pure stream copy — the mezzanines already encoded at target
+                // profile. `-flags:v/a +bitexact` is a no-op under copy but
+                // keeps the args surface consistent with the whole-timeline path.
+                args += listOf("-c", "copy", "-flags:v", "+bitexact", "-flags:a", "+bitexact")
+            } else {
+                args += listOf(
+                    "-filter_complex", "[0:v]$drawtextChain[outv]",
+                    "-map", "[outv]", "-map", "0:a?",
+                    "-c:v", output.videoCodec, "-b:v", "${output.videoBitrate}", "-flags:v", "+bitexact",
+                    "-c:a", "copy", "-flags:a", "+bitexact",
+                )
+            }
+            args += output.targetPath
+
+            val result = runProcess(*args.toTypedArray())
+            if (result.exitCode != 0) {
+                error(
+                    "ffmpeg concat failed (exit=${result.exitCode}) for ${mezzaninePaths.size} mezzanines → " +
+                        "${output.targetPath}: ${result.stderr.takeLast(800)}",
+                )
+            }
+        } finally {
+            runCatching { Files.deleteIfExists(listFile) }
+        }
+    }
 
     override suspend fun thumbnail(asset: AssetId, source: MediaSource, time: Duration): ByteArray {
         val path = sourceToLocalPath(source)
@@ -448,53 +604,16 @@ class FfmpegVideoEngine(
     }
 
     /**
-     * Per-clip fade envelope derived from transition clips on Effect tracks.
-     * A video clip sitting *before* a transition gets a tail fade-out; the one
-     * sitting *after* gets a head fade-in. Each half-duration is the transition
-     * clip's `duration / 2` — transitions are centered on the boundary between
-     * their two neighbours.
-     */
-    internal data class ClipFades(
-        val headFade: Duration? = null,
-        val tailFade: Duration? = null,
-    )
-
-    /**
      * Scan [timeline] for transition clips and map each affected video clip's
-     * id to its fade envelope. V1 renders every transition name (fade, dissolve,
-     * slide, wipe, …) as a dip-to-black fade — this is the cross-engine parity
-     * floor and matches what Media3 / AVFoundation can render without custom
-     * shaders. A true crossfade would require the two clips to overlap on the
-     * timeline, which the current [io.talevia.core.tool.builtin.video.AddTransitionTool]
-     * doesn't produce (clips stay sequential, the transition sits on a separate
-     * Effect track and only encodes the boundary).
+     * id (string form) to its fade envelope. Thin wrapper that delegates to
+     * [transitionFadesPerClip] in Core and rekeys by [ClipId.value] because
+     * the render loop uses string ids for label lookups.
      */
     internal fun transitionFadesFor(
         timeline: Timeline,
         videoClips: List<Clip.Video>,
-    ): Map<String, ClipFades> {
-        val transitions = timeline.tracks
-            .filterIsInstance<Track.Effect>()
-            .flatMap { it.clips.filterIsInstance<Clip.Video>() }
-            .filter { it.assetId.value.startsWith("transition:") }
-        if (transitions.isEmpty()) return emptyMap()
-        val accum = mutableMapOf<String, ClipFades>()
-        for (trans in transitions) {
-            val halfDur = trans.timeRange.duration / 2
-            val boundary = trans.timeRange.start + halfDur
-            val fromClip = videoClips.firstOrNull { it.timeRange.end == boundary }
-            val toClip = videoClips.firstOrNull { it.timeRange.start == boundary }
-            if (fromClip != null) {
-                val prior = accum[fromClip.id.value] ?: ClipFades()
-                accum[fromClip.id.value] = prior.copy(tailFade = halfDur)
-            }
-            if (toClip != null) {
-                val prior = accum[toClip.id.value] ?: ClipFades()
-                accum[toClip.id.value] = prior.copy(headFade = halfDur)
-            }
-        }
-        return accum
-    }
+    ): Map<String, TransitionFades> =
+        timeline.transitionFadesPerClip(videoClips).mapKeys { (k, _) -> k.value }
 
     /**
      * Emit an ffmpeg `fade` filter chain for a clip's transition envelope, or
@@ -503,7 +622,7 @@ class FfmpegVideoEngine(
      * tail. We anchor the tail fade at `clipDur - tailDur` so it lands exactly
      * at the clip's end regardless of which input pre-seek ffmpeg used.
      */
-    internal fun buildFadeChain(clip: Clip.Video, fades: ClipFades?): String? {
+    internal fun buildFadeChain(clip: Clip.Video, fades: TransitionFades?): String? {
         if (fades == null) return null
         val clipDur = clip.sourceRange.duration.toDouble(kotlin.time.DurationUnit.SECONDS)
         val parts = mutableListOf<String>()

@@ -127,12 +127,16 @@ class SessionQueryRunStateHistoryTest {
         val (sessions, tracker, bus) = fixture()
         val sid = SessionId("s-hist")
         // Publish in sequence. The Idle / Generating / Failed triad is
-        // representative of a failed turn.
-        bus.publish(BusEvent.AgentRunStateChanged(sid, AgentRunState.Generating))
-        bus.publish(BusEvent.AgentRunStateChanged(sid, AgentRunState.AwaitingTool))
-        bus.publish(BusEvent.AgentRunStateChanged(sid, AgentRunState.Generating))
-        bus.publish(BusEvent.AgentRunStateChanged(sid, AgentRunState.Failed("boom")))
-        delay(100.milliseconds)
+        // representative of a failed turn. Use runBlocking + await so the
+        // async bus-collector runs against wall-clock time (runTest's
+        // virtual clock doesn't drive Dispatchers.Default).
+        kotlinx.coroutines.runBlocking {
+            bus.publish(BusEvent.AgentRunStateChanged(sid, AgentRunState.Generating))
+            bus.publish(BusEvent.AgentRunStateChanged(sid, AgentRunState.AwaitingTool))
+            bus.publish(BusEvent.AgentRunStateChanged(sid, AgentRunState.Generating))
+            bus.publish(BusEvent.AgentRunStateChanged(sid, AgentRunState.Failed("boom")))
+            awaitHistorySize(tracker, sid, target = 4)
+        }
 
         val out = tool(sessions, tracker).execute(
             SessionQueryTool.Input(select = "run_state_history", sessionId = sid.value),

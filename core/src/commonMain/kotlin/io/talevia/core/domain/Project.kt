@@ -2,6 +2,7 @@ package io.talevia.core.domain
 
 import io.talevia.core.ProjectId
 import io.talevia.core.domain.lockfile.Lockfile
+import io.talevia.core.domain.render.ClipRenderCache
 import io.talevia.core.domain.render.RenderCache
 import io.talevia.core.domain.source.Source
 import kotlinx.serialization.Serializable
@@ -34,6 +35,17 @@ data class Project(
      * handing the timeline to the engine; identical inputs return without re-rendering.
      */
     val renderCache: RenderCache = RenderCache.EMPTY,
+    /**
+     * Per-clip mezzanine memoization (VISION §3.2 fine cut). Populated by
+     * [io.talevia.core.tool.builtin.video.ExportTool] when the engine advertises
+     * [io.talevia.core.platform.VideoEngine.supportsPerClipCache] — each clip that
+     * cache-misses is rendered to an intermediate mp4 under
+     * `<outputDir>/.talevia-render-cache/<projectId>/` and recorded here. A later
+     * export with the same clip shape + fades + source hashes + output profile
+     * stream-copies the mezzanine via `ffmpeg -f concat -c copy` instead of
+     * re-encoding. Empty default preserves backward compat on existing project blobs.
+     */
+    val clipRenderCache: ClipRenderCache = ClipRenderCache.EMPTY,
     /**
      * Named, restorable points-in-time of the project (VISION §3.4 — "可版本化"). Stored
      * inline rather than a sibling table so the existing [ProjectStore.mutate] mutex

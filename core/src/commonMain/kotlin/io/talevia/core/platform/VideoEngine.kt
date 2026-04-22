@@ -1,10 +1,12 @@
 package io.talevia.core.platform
 
 import io.talevia.core.AssetId
+import io.talevia.core.domain.Clip
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
+import io.talevia.core.domain.render.TransitionFades
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -23,6 +25,85 @@ interface VideoEngine {
 
     /** Generate a single-frame thumbnail at [time]. Returns PNG bytes. */
     suspend fun thumbnail(asset: AssetId, source: MediaSource, time: kotlin.time.Duration): ByteArray
+
+    /**
+     * Whether this engine implements the per-clip mezzanine render path
+     * ([renderClip] + [concatMezzanines]) that powers [ExportTool]'s
+     * [io.talevia.core.domain.render.ClipRenderCache] optimization (VISION §3.2 —
+     * "只重编译必要的部分"). Default `false` so iOS / Android impls keep whole-timeline
+     * semantics until they implement it; the FFmpeg/JVM impl opts in.
+     *
+     * When `false`, [ExportTool] always calls [render] for the whole timeline.
+     */
+    val supportsPerClipCache: Boolean get() = false
+
+    /**
+     * Render a single [Clip.Video] to a mezzanine file at [mezzaninePath] — an mp4
+     * encoded at [output]'s resolution / fps / codec / bitrate so later mezzanines
+     * can be concat-demuxed into the final export.
+     *
+     * Responsibilities:
+     *  - Resolve the clip's source media via the engine's own [MediaPathResolver]
+     *    (the engine already holds one; callers don't pass paths in) and seek
+     *    into it via [Clip.Video.sourceRange].
+     *  - Apply the clip's own filters (brightness, saturation, blur, vignette, LUT).
+     *  - Bake in head/tail fades from [fades] — these came from a neighbouring
+     *    transition clip on an Effect track; the clip itself doesn't know them.
+     *  - Use bitexact flags so the mezzanine is byte-deterministic (required for
+     *    [io.talevia.core.domain.render.ClipRenderCache] correctness — a cached
+     *    fingerprint must produce the same bytes on a re-render).
+     *  - Do NOT apply subtitles — they're timeline-relative and get applied in
+     *    [concatMezzanines]. Keeping subtitles out of mezzanines means a subtitle
+     *    edit only invalidates the final concat step, not any per-clip mezzanine.
+     *
+     * Default impl throws [UnsupportedOperationException] so engines that haven't
+     * implemented the per-clip path remain spec-compliant; [supportsPerClipCache]
+     * gates whether callers reach this method.
+     */
+    suspend fun renderClip(
+        clip: Clip.Video,
+        fades: TransitionFades?,
+        output: OutputSpec,
+        mezzaninePath: String,
+    ): Unit = throw UnsupportedOperationException(
+        "renderClip not supported by ${this::class.simpleName} (supportsPerClipCache=$supportsPerClipCache)",
+    )
+
+    /**
+     * Ask the engine whether a previously-rendered mezzanine is still present on
+     * disk. Used by [ExportTool] to treat a missing mezzanine as a cache miss
+     * (user deleted the `.talevia-render-cache` dir between exports) instead of
+     * failing the concat step with an obscure "No such file" ffmpeg error.
+     *
+     * Default `true` so engines without a per-clip path — or targets where a
+     * filesystem check isn't meaningful (in-memory storage, sandboxed iOS
+     * containers) — don't reject cache hits. The FFmpeg/JVM impl overrides with
+     * an actual `Files.exists(...)` check since mezzanines live in a predictable
+     * directory on the host filesystem.
+     */
+    suspend fun mezzaninePresent(path: String): Boolean = true
+
+    /**
+     * Stitch pre-rendered mezzanine files (output of [renderClip]) at
+     * [mezzaninePaths] into the final export at [output]. Applies [subtitles] as
+     * a post-concat drawtext chain (they're timeline-relative so can't be baked
+     * into mezzanines) and must remain bitexact so re-running the final step on
+     * identical inputs produces the same bytes.
+     *
+     * The path of least resistance when [subtitles] is empty is FFmpeg's concat
+     * demuxer with `-c copy`: the mezzanines were encoded at [output]'s profile
+     * so stream-copy produces a valid mp4 without re-encoding — which is where
+     * the §3.2 speed-up actually lands.
+     *
+     * Default impl throws [UnsupportedOperationException].
+     */
+    suspend fun concatMezzanines(
+        mezzaninePaths: List<String>,
+        subtitles: List<Clip.Text>,
+        output: OutputSpec,
+    ): Unit = throw UnsupportedOperationException(
+        "concatMezzanines not supported by ${this::class.simpleName} (supportsPerClipCache=$supportsPerClipCache)",
+    )
 }
 
 data class OutputSpec(
