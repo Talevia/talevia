@@ -117,6 +117,14 @@ class ProjectQueryTool(
         // ---- lockfile_entries filter ----
         /** Filter lockfile entries by producing tool id (e.g. `"generate_image"`). `select=lockfile_entries` only. */
         val toolId: String? = null,
+        /**
+         * Lower-bound timestamp filter (entries with
+         * `provenance.createdAtEpochMs >= sinceEpochMs`). `select=lockfile_entries`
+         * only. Null = no time filter. Useful for "what has this project
+         * generated since Monday" / "new entries since the last UI refresh"
+         * queries.
+         */
+        val sinceEpochMs: Long? = null,
         // ---- clips_for_asset filter (required for that select) ----
         /** Asset id to look up. Required for `select=clips_for_asset`; rejected elsewhere. */
         val assetId: String? = null,
@@ -437,7 +445,9 @@ class ProjectQueryTool(
             "  sortBy=\"recent\" orders by most-recently-mutated entity first (null stamps — pre-recency " +
             "blobs — sort last, stable tie-break by id).\n" +
             "  • transitions — filter: onlyOrphaned. Chronological order.\n" +
-            "  • lockfile_entries — filter: toolId (e.g. generate_image), onlyPinned. Most-recent first.\n" +
+            "  • lockfile_entries — filter: toolId (e.g. generate_image), onlyPinned, " +
+            "sourceNodeId (entries bound to one source node — \"this character's " +
+            "generation history\"), sinceEpochMs (created at or after). Most-recent first.\n" +
             "  • clips_for_asset — required: assetId. Every clip referencing the asset.\n" +
             "  • clips_for_source — required: sourceNodeId. Every clip bound to that source node " +
             "(directly or transitively).\n" +
@@ -556,6 +566,14 @@ class ProjectQueryTool(
                         "synthesize_speech). select=lockfile_entries only.",
                 )
             }
+            putJsonObject("sinceEpochMs") {
+                put("type", "integer")
+                put(
+                    "description",
+                    "Keep lockfile entries with createdAtEpochMs >= sinceEpochMs. " +
+                        "select=lockfile_entries only.",
+                )
+            }
             putJsonObject("assetId") {
                 put("type", "string")
                 put(
@@ -567,7 +585,9 @@ class ProjectQueryTool(
                 put("type", "string")
                 put(
                     "description",
-                    "Required for select=clips_for_source. Source node id to find bound clips for.",
+                    "Source node id. Required for select=clips_for_source and " +
+                        "select=consistency_propagation; optional filter for " +
+                        "select=lockfile_entries (\"this character's generation history\").",
                 )
             }
             putJsonObject("clipId") {
@@ -677,8 +697,15 @@ class ProjectQueryTool(
             if (select != SELECT_CLIPS_FOR_ASSET && input.assetId != null) {
                 add("assetId (select=clips_for_asset only)")
             }
-            if (select != SELECT_CLIPS_FOR_SOURCE && select != SELECT_CONSISTENCY_PROPAGATION && input.sourceNodeId != null) {
-                add("sourceNodeId (select=clips_for_source or consistency_propagation only)")
+            if (select != SELECT_CLIPS_FOR_SOURCE &&
+                select != SELECT_CONSISTENCY_PROPAGATION &&
+                select != SELECT_LOCKFILE_ENTRIES &&
+                input.sourceNodeId != null
+            ) {
+                add("sourceNodeId (select=clips_for_source, consistency_propagation, or lockfile_entries only)")
+            }
+            if (select != SELECT_LOCKFILE_ENTRIES && input.sinceEpochMs != null) {
+                add("sinceEpochMs (select=lockfile_entries only)")
             }
             if (select != SELECT_CLIP && input.clipId != null) {
                 add("clipId (select=clip only)")

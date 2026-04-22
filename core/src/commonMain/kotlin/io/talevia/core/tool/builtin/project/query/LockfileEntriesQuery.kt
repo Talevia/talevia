@@ -1,5 +1,6 @@
 package io.talevia.core.tool.builtin.project.query
 
+import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.Project
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
@@ -8,8 +9,12 @@ import kotlinx.serialization.builtins.ListSerializer
 /**
  * `select=lockfile_entries` — AIGC lockfile entries on a project,
  * most-recent first. Replaces the pre-consolidation
- * `list_lockfile_entries` tool. Filters: [ProjectQueryTool.Input.toolId]
- * (producing tool) + [ProjectQueryTool.Input.onlyPinned] (hero shots).
+ * `list_lockfile_entries` tool. Filters:
+ *  - [ProjectQueryTool.Input.toolId] (producing tool)
+ *  - [ProjectQueryTool.Input.onlyPinned] (hero shots)
+ *  - [ProjectQueryTool.Input.sourceNodeId] (entries bound to one source node —
+ *    "this character's generation history")
+ *  - [ProjectQueryTool.Input.sinceEpochMs] (created at or after this timestamp)
  */
 internal fun runLockfileEntriesQuery(
     project: Project,
@@ -19,7 +24,17 @@ internal fun runLockfileEntriesQuery(
 ): ToolResult<ProjectQueryTool.Output> {
     val all = project.lockfile.entries
     val byToolId = if (input.toolId.isNullOrBlank()) all else all.filter { it.toolId == input.toolId }
-    val filtered = if (input.onlyPinned == true) byToolId.filter { it.pinned } else byToolId
+    val byPin = if (input.onlyPinned == true) byToolId.filter { it.pinned } else byToolId
+    val bySource = input.sourceNodeId?.takeIf { it.isNotBlank() }?.let { nodeId ->
+        val target = SourceNodeId(nodeId)
+        byPin.filter { target in it.sourceBinding }
+    } ?: byPin
+    val since = input.sinceEpochMs
+    val filtered = if (since != null) {
+        bySource.filter { it.provenance.createdAtEpochMs >= since }
+    } else {
+        bySource
+    }
     // entries is append-only / insertion-ordered; reverse so most-recent first.
     val recent = filtered.asReversed().drop(offset).take(limit)
 
@@ -40,6 +55,8 @@ internal fun runLockfileEntriesQuery(
     val scopeParts = buildList {
         input.toolId?.takeIf { it.isNotBlank() }?.let { add("toolId=$it") }
         if (input.onlyPinned == true) add("pinned")
+        input.sourceNodeId?.takeIf { it.isNotBlank() }?.let { add("sourceNodeId=$it") }
+        since?.let { add("sinceEpochMs=$it") }
     }
     val body = if (rows.isEmpty()) {
         val scope = if (scopeParts.isEmpty()) "" else " (${scopeParts.joinToString(", ")})"
