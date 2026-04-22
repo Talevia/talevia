@@ -19,8 +19,6 @@
 
 ## P2 — 记债 / 观望
 
-- **asset-proxy-generation** — `MediaAsset.proxies` 已有 `ProxyPurpose.THUMBNAIL / LOW_RES / AUDIO_WAVEFORM` 的数据形，但没有自动生成 proxy 的 ingestion path。UI 对 4K 视频 asset 要等原片 decode 才能显示缩略图。**方向：** `ImportMediaTool` 成功后异步 dispatch 一个 `generate_proxies` job（ffmpeg -ss 取中点帧 + 缩放）填 `proxies` 列表。Rubric §5.3 性能。
-
 - **debt-consolidate-video-remove-variants** — 配合 P1 的 `debt-consolidate-video-add-variants`：`RemoveClipTool` + `RemoveFilterTool` + `RemoveTrackTool` + `RemoveTransitionTool` 四件套。**方向：** 同 add 的判断，合为 `remove_from_timeline(target=...)` 或保留四件套并在 decision 说明。Rubric 外 / debt。
 
 - **debt-fold-list-project-snapshots** — `ListProjectSnapshotsTool` 是 `project_query` 之外唯一还单独存在的 list_* 工具。**方向：** 加 `project_query(select=snapshots)`，删 `ListProjectSnapshotsTool.kt`。Rubric 外 / debt。
