@@ -88,7 +88,14 @@ class Repl(
         println(Styles.meta("type /help for commands, /exit to quit (Ctrl+D also works)"))
         println()
 
-        val renderer = Renderer(terminal, markdownEnabled = markdownEnabled)
+        val renderer = Renderer(
+            terminal,
+            markdownEnabled = markdownEnabled,
+            // In-place rewrites (tool ⟳→✓, same-jobId progress bar) only need
+            // ANSI cursor control. Tie them to TTY so they kick in even when
+            // the richer Mordant markdown repaint is opted-out of.
+            ansiEnabled = isTty,
+        )
 
         val routerScope = CoroutineScope(coroutineContext + SupervisorJob())
         val router = EventRouter(

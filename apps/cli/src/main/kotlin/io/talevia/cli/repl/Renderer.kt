@@ -20,10 +20,20 @@ import com.github.ajalt.mordant.terminal.Terminal as MordantTerminal
  *  - [finalizeAssistantText] (Phase 2) repaints the just-streamed part with
  *    Mordant's markdown widget so the final transcript has rendered bold,
  *    bullets and fenced code blocks instead of raw `**foo**` etc.
+ *
+ * Also owns the "bottom-of-buffer" state for in-place rewrites so that:
+ *  - a tool's `⟳ running` line gets upgraded to `✓ completed` on the same row
+ *  - consecutive [Part.RenderProgress] ticks on the same `jobId` overwrite one
+ *    progress-bar line instead of spamming a new line per tick
+ * Both behaviors require ANSI cursor control (`[ansiEnabled] = true`), which
+ * is only safe on a real TTY. Non-interactive runs (piped stdout, dumb
+ * terminals, `markdownEnabled = false` by default in tests) fall back to the
+ * "one line per update" baseline so captured output stays grep-friendly.
  */
 class Renderer(
     private val terminal: Terminal,
     private val markdownEnabled: Boolean = true,
+    private val ansiEnabled: Boolean = markdownEnabled,
 ) {
     private val mutex = Mutex()
     private val emittedLen: MutableMap<PartId, Int> = mutableMapOf()
@@ -40,6 +50,23 @@ class Renderer(
     /** True iff any assistant text has been streamed in the current turn. */
     private var assistantOpen: Boolean = false
 
+    /**
+     * PartId whose `⟳ running` announcement is the bottom-most row in the
+     * buffer and can still be repainted in place by a completion/failure line.
+     * Cleared by any other non-tool write.
+     */
+    private var bottomToolPartId: PartId? = null
+
+    /**
+     * `(jobId, message)` for the last [Part.RenderProgress] row printed at the
+     * bottom of the buffer. A follow-up tick with the same `jobId` rewrites
+     * that row; anything else invalidates the slot.
+     */
+    private var bottomRenderJobId: String? = null
+
+    /** jobIds we've already printed a final "completed"/"failed" line for. */
+    private val renderProgressTerminal: MutableSet<String> = mutableSetOf()
+
     private val mordant: MordantTerminal by lazy {
         MordantTerminal(
             ansiLevel = if (markdownEnabled) AnsiLevel.TRUECOLOR else AnsiLevel.NONE,
@@ -49,6 +76,7 @@ class Renderer(
 
     suspend fun streamAssistantDelta(partId: PartId, delta: String) = mutex.withLock {
         if (delta.isEmpty() || finalised.contains(partId)) return@withLock
+        invalidateBottomLocked()
         assistantOpen = true
         emittedLen[partId] = (emittedLen[partId] ?: 0) + delta.length
         streamedText.getOrPut(partId) { StringBuilder() }.append(delta)
@@ -67,6 +95,7 @@ class Renderer(
         val already = emittedLen[partId] ?: 0
         if (text.length <= already) return@withLock
         val tail = text.substring(already)
+        invalidateBottomLocked()
         assistantOpen = true
         emittedLen[partId] = text.length
         streamedText.getOrPut(partId) { StringBuilder() }.append(tail)
@@ -89,6 +118,7 @@ class Renderer(
         val already = emittedLen[partId] ?: 0
         if (text.length > already) {
             val tail = text.substring(already)
+            invalidateBottomLocked()
             assistantOpen = true
             emittedLen[partId] = text.length
             streamedText.getOrPut(partId) { StringBuilder() }.append(tail)
@@ -140,11 +170,15 @@ class Renderer(
         repaintable.clear()
         announcedTools.clear()
         finalisedTools.clear()
+        bottomToolPartId = null
+        bottomRenderJobId = null
+        renderProgressTerminal.clear()
     }
 
     suspend fun println(text: String) = mutex.withLock {
         breakAssistantLineLocked()
         markAllPartsUnrepaintableLocked()
+        invalidateBottomLocked()
         terminal.writer().println(text)
         terminal.writer().flush()
     }
@@ -154,6 +188,7 @@ class Renderer(
         // separate from assistant text even when stdout is redirected.
         breakAssistantLineLocked()
         markAllPartsUnrepaintableLocked()
+        invalidateBottomLocked()
         System.err.println(Styles.error(text))
     }
 
@@ -165,26 +200,99 @@ class Renderer(
         if (!announcedTools.add(partId)) return@withLock
         breakAssistantLineLocked()
         markAllPartsUnrepaintableLocked()
+        invalidateBottomLocked()
         terminal.writer().println("  ${Styles.running("⟳")} ${Styles.toolId(toolId)}")
         terminal.writer().flush()
+        bottomToolPartId = partId
     }
 
     suspend fun toolCompleted(partId: PartId, toolId: String, summary: String) = mutex.withLock {
         if (!finalisedTools.add(partId)) return@withLock
-        breakAssistantLineLocked()
-        markAllPartsUnrepaintableLocked()
         val oneLine = summary.lineSequence().firstOrNull()?.take(120).orEmpty()
         val suffix = if (oneLine.isBlank()) "" else " ${Styles.meta("· $oneLine")}"
-        terminal.writer().println("  ${Styles.ok("✓")} ${Styles.toolId(toolId)}$suffix")
+        val line = "  ${Styles.ok("✓")} ${Styles.toolId(toolId)}$suffix"
+        if (ansiEnabled && bottomToolPartId == partId) {
+            terminal.writer().print(CURSOR_UP_1 + CARRIAGE_RETURN + CLEAR_LINE)
+            terminal.writer().println(line)
+        } else {
+            breakAssistantLineLocked()
+            markAllPartsUnrepaintableLocked()
+            invalidateBottomLocked()
+            terminal.writer().println(line)
+        }
         terminal.writer().flush()
+        bottomToolPartId = null
     }
 
     suspend fun toolFailed(partId: PartId, toolId: String, message: String) = mutex.withLock {
         if (!finalisedTools.add(partId)) return@withLock
-        breakAssistantLineLocked()
-        markAllPartsUnrepaintableLocked()
-        terminal.writer().println("  ${Styles.fail("✗")} ${Styles.toolId(toolId)} ${Styles.meta("· $message")}")
+        val line = "  ${Styles.fail("✗")} ${Styles.toolId(toolId)} ${Styles.meta("· $message")}"
+        if (ansiEnabled && bottomToolPartId == partId) {
+            terminal.writer().print(CURSOR_UP_1 + CARRIAGE_RETURN + CLEAR_LINE)
+            terminal.writer().println(line)
+        } else {
+            breakAssistantLineLocked()
+            markAllPartsUnrepaintableLocked()
+            invalidateBottomLocked()
+            terminal.writer().println(line)
+        }
         terminal.writer().flush()
+        bottomToolPartId = null
+    }
+
+    /**
+     * Render one tick of a `Part.RenderProgress` event. Consecutive ticks that
+     * carry the same [jobId] repaint the bottom row in place (ANSI cursor-up +
+     * clear-line) so a long export doesn't spam N lines of progress text; a
+     * tick with a new `jobId`, or any other terminal write, fresh-lines.
+     *
+     * Ratio is clamped to `[0, 1]`. The emitted row has the shape:
+     * `⟳ <jobId-short>  [=====>      ]  67%  · <message>  · preview=…/foo.jpg`.
+     * Once a `jobId` emits a terminal tick (ratio = 1 or a "failed" message)
+     * we swap the spinner for `✓`/`✗` and lock the slot — any future tick on
+     * that same jobId fresh-lines again.
+     */
+    suspend fun renderProgress(
+        jobId: String,
+        ratio: Float,
+        message: String?,
+        thumbnailPath: String?,
+    ) = mutex.withLock {
+        val clampedRatio = ratio.coerceIn(0f, 1f)
+        val isFailure = message != null && message.startsWith("failed")
+        val isCompleted = !isFailure && (clampedRatio >= 0.999f || message == "completed")
+        val alreadyTerminal = renderProgressTerminal.contains(jobId)
+
+        val line = formatRenderProgressLine(
+            jobId = jobId,
+            ratio = clampedRatio,
+            message = message,
+            thumbnailPath = thumbnailPath,
+            isCompleted = isCompleted,
+            isFailure = isFailure,
+            width = terminal.width.coerceAtLeast(40),
+        )
+
+        val canRepaint = ansiEnabled &&
+            bottomRenderJobId == jobId &&
+            !alreadyTerminal
+        if (canRepaint) {
+            terminal.writer().print(CURSOR_UP_1 + CARRIAGE_RETURN + CLEAR_LINE)
+            terminal.writer().println(line)
+        } else {
+            breakAssistantLineLocked()
+            markAllPartsUnrepaintableLocked()
+            invalidateBottomLocked()
+            terminal.writer().println(line)
+        }
+        terminal.writer().flush()
+
+        if (isCompleted || isFailure) {
+            renderProgressTerminal.add(jobId)
+            bottomRenderJobId = null
+        } else {
+            bottomRenderJobId = jobId
+        }
     }
 
     /**
@@ -196,6 +304,7 @@ class Renderer(
     suspend fun retryNotice(attempt: Int, waitMs: Long, reason: String) = mutex.withLock {
         breakAssistantLineLocked()
         markAllPartsUnrepaintableLocked()
+        invalidateBottomLocked()
         val seconds = (waitMs / 1000.0)
         val formatted = if (seconds >= 1.0) "${seconds}s" else "${waitMs}ms"
         terminal.writer().println(
@@ -223,6 +332,12 @@ class Renderer(
     private fun markAllPartsUnrepaintableLocked() {
         if (repaintable.isEmpty()) return
         for (k in repaintable.keys.toList()) repaintable[k] = false
+    }
+
+    /** Forget what's at the bottom of the buffer — the next write won't be in-place. */
+    private fun invalidateBottomLocked() {
+        bottomToolPartId = null
+        bottomRenderJobId = null
     }
 
     private fun renderMarkdown(text: String): String =
@@ -270,5 +385,72 @@ class Renderer(
         // The streamed text doesn't have a trailing newline, so the cursor sits
         // on the last printed row — that row counts once, no extra add needed.
         return rows
+    }
+
+    private fun formatRenderProgressLine(
+        jobId: String,
+        ratio: Float,
+        message: String?,
+        thumbnailPath: String?,
+        isCompleted: Boolean,
+        isFailure: Boolean,
+        width: Int,
+    ): String {
+        val shortJob = jobId.take(16)
+        val marker = when {
+            isFailure -> Styles.fail("✗")
+            isCompleted -> Styles.ok("✓")
+            else -> Styles.running("⟳")
+        }
+        val pct = (ratio * 100f).toInt().coerceIn(0, 100)
+        val bar = progressBar(ratio, barWidth = 20)
+        val meta = buildString {
+            if (!message.isNullOrBlank()) append("· ").append(message)
+            if (!thumbnailPath.isNullOrBlank()) {
+                if (isNotEmpty()) append(' ')
+                append("· preview=").append(shortenPath(thumbnailPath, maxChars = 40))
+            }
+        }
+        val metaStyled = if (meta.isNotEmpty()) " ${Styles.meta(meta)}" else ""
+        val head = "  $marker ${Styles.toolId(shortJob)} $bar ${String.format("%3d", pct)}%"
+        val line = head + metaStyled
+        // The ANSI styling bytes don't take up visible columns; a width-based
+        // truncation here would cut mid-escape. Keep the full line — terminals
+        // wrap, but the in-place-rewrite path only over-clears one row, which
+        // is the desired behaviour on narrow widths (worst case: the next tick
+        // prints after a soft wrap).
+        return line
+    }
+
+    private fun progressBar(ratio: Float, barWidth: Int): String {
+        val filled = (ratio * barWidth).toInt().coerceIn(0, barWidth)
+        val empty = (barWidth - filled).coerceAtLeast(0)
+        val bar = buildString {
+            append('[')
+            repeat(filled) { append('=') }
+            if (filled in 1 until barWidth) {
+                // Replace the last '=' with '>' so the head is visible.
+                setCharAt(length - 1, '>')
+            }
+            repeat(empty) { append(' ') }
+            append(']')
+        }
+        return bar
+    }
+
+    private fun shortenPath(path: String, maxChars: Int): String {
+        if (path.length <= maxChars) return path
+        val slash = path.lastIndexOf('/')
+        if (slash < 0 || slash >= path.length - 1) {
+            return "…" + path.takeLast(maxChars - 1)
+        }
+        val base = path.substring(slash)
+        return if (base.length + 1 <= maxChars) "…$base" else "…" + base.takeLast(maxChars - 1)
+    }
+
+    private companion object {
+        private const val CURSOR_UP_1 = "\u001B[1A"
+        private const val CARRIAGE_RETURN = "\r"
+        private const val CLEAR_LINE = "\u001B[2K"
     }
 }

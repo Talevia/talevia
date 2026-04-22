@@ -72,6 +72,12 @@ class EventRouter(
                             is ToolState.Failed -> renderer.toolFailed(p.id, p.toolId, s.message)
                             ToolState.Pending -> Unit
                         }
+                        is Part.RenderProgress -> renderer.renderProgress(
+                            jobId = p.jobId,
+                            ratio = p.ratio,
+                            message = p.message,
+                            thumbnailPath = p.thumbnailPath,
+                        )
                         else -> Unit
                     }
                 }
