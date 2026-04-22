@@ -19,7 +19,6 @@
 
 ## P2 — 记债 / 观望
 
-- **debt-consolidate-pinning-tools** — `SetClipAssetPinnedTool` + `SetLockfileEntryPinnedTool` 同是"切一个布尔 pinned"的 set tool，前者 key 是 `(projectId, clipId)`，后者是 `(projectId, assetId)`。**方向：** 按 add/remove 先例评估；可能合并成 `set_pinned(target="clip"|"lockfile_entry", id, pinned)` 更合适 —— 先跑 §3a 检查。Rubric §5.2。
 - **debt-consolidate-project-creation** — `CreateProjectTool` + `CreateProjectFromTemplateTool` 产出同一件东西（一个新 Project），只是前者空 source，后者带 template 种子。**方向：** 评估合为 `create_project(template: String? = null)`，null = 空源 path；或按先例保留两件套。Rubric §5.2。
 - **debt-consolidate-session-trash** — `ArchiveSessionTool` + `DeleteSessionTool` 都是 session "从活跃列表移出" 的 lifecycle 操作，一个可逆一个不可逆。两件套是否合为 `retire_session(mode="archive"|"delete")` 值得评估。Rubric §5.2。
 - **semantic-search-source-nodes** — `search-source-nodes-body-content-lookup` 已实现 lexical 搜索；但 "找意思相近的 character_ref" 靠关键词很脆。VISION §5.1 "改一个 source 节点，下游哪些 clip 被标为 stale" 的扩展面是概念级检索。**方向：** 集成轻量嵌入（CoreML / ONNX Runtime / 本地 MiniLM），在 `source_query` 加 `select=semantic_search(query, topK)`；platform-impl 隔离。Rubric §5.1。
