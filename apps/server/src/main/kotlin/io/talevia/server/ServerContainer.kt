@@ -331,7 +331,7 @@ class ServerContainer(
         register(TodoWriteTool())
         register(io.talevia.core.tool.builtin.DraftPlanTool())
         register(io.talevia.core.tool.builtin.ExecutePlanTool(this, sessions))
-        register(SessionQueryTool(sessions, agentStates, projects))
+        register(SessionQueryTool(sessions, agentStates, projects, toolRegistry = this))
         register(ExportSessionTool(sessions))
         register(EstimateSessionTokensTool(sessions))
         register(ForkSessionTool(sessions))

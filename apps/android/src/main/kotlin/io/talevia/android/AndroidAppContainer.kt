@@ -164,7 +164,7 @@ class AndroidAppContainer(context: Context) {
         register(io.talevia.core.tool.builtin.ExecutePlanTool(this, sessions))
         register(io.talevia.core.tool.builtin.aigc.CompareAigcCandidatesTool(this))
         register(io.talevia.core.tool.builtin.aigc.ReplayLockfileTool(this, projects))
-        register(SessionQueryTool(sessions, agentStates, projects))
+        register(SessionQueryTool(sessions, agentStates, projects, toolRegistry = this))
         register(ExportSessionTool(sessions))
         register(EstimateSessionTokensTool(sessions))
         register(ForkSessionTool(sessions))

@@ -85,7 +85,7 @@ final class AppContainer {
         registry.register(tool: ExecutePlanTool(registry: registry, sessions: self.sessions, clock: clock))
         registry.register(tool: CompareAigcCandidatesTool(registry: registry))
         registry.register(tool: ReplayLockfileTool(registry: registry, projects: self.projects))
-        registry.register(tool: SessionQueryTool(sessions: self.sessions, agentStates: self.agentStates, projects: self.projects))
+        registry.register(tool: SessionQueryTool(sessions: self.sessions, agentStates: self.agentStates, projects: self.projects, toolRegistry: registry))
         registry.register(tool: ExportSessionTool(sessions: self.sessions))
         registry.register(tool: EstimateSessionTokensTool(sessions: self.sessions))
         registry.register(tool: ForkSessionTool(sessions: self.sessions))

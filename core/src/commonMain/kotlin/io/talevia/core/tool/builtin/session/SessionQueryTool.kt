@@ -7,6 +7,7 @@ import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.query.runAncestorsQuery
 import io.talevia.core.tool.builtin.session.query.runCacheStatsQuery
@@ -22,6 +23,7 @@ import io.talevia.core.tool.builtin.session.query.runSessionsQuery
 import io.talevia.core.tool.builtin.session.query.runSpendQuery
 import io.talevia.core.tool.builtin.session.query.runStatusQuery
 import io.talevia.core.tool.builtin.session.query.runToolCallsQuery
+import io.talevia.core.tool.builtin.session.query.runToolSpecBudgetQuery
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -74,6 +76,18 @@ class SessionQueryTool(
      * and flags `projectResolved=false`.
      */
     private val projects: ProjectStore? = null,
+    /**
+     * Optional tool-registry reference. Required when
+     * `select=tool_spec_budget` is requested so we can enumerate the
+     * registered tools and estimate their LLM-spec token weight.
+     * Callers pass null in rigs that don't have a registry (pure
+     * session-store tests); a `select=tool_spec_budget` call on such a
+     * rig reports zero tools and flags `registryResolved=false`.
+     * Holding the registry here is safe even though this tool is itself
+     * registered in it — `execute()` reads via `registry.all()` at
+     * dispatch time, after the composition root has finished wiring.
+     */
+    private val toolRegistry: ToolRegistry? = null,
 ) : Tool<SessionQueryTool.Input, SessionQueryTool.Output> {
 
     @Serializable data class Input(
@@ -358,6 +372,33 @@ class SessionQueryTool(
         val messageCount: Int,
     )
 
+    /**
+     * `select=tool_spec_budget` — single-row snapshot of how many tokens
+     * the registered tool specs cost the LLM on every turn (VISION §5.4
+     * + §3a-10). Registry-wide, session-independent — passing sessionId
+     * is rejected so typos surface. [registryResolved] is false only
+     * when the session-query is wired without a registry (non-Agent
+     * rigs), in which case every count reports zero.
+     */
+    @Serializable data class ToolSpecBudgetRow(
+        val toolCount: Int,
+        /** Sum across all tools of `(id + helpText + JsonSchema).length / 4`. Order-of-magnitude estimate. */
+        val estimatedTokens: Int,
+        /** Sum of raw spec byte lengths — useful when the caller wants to apply its own tokenizer ratio. */
+        val specBytes: Int,
+        /** True when a registry was injected; false on test rigs that skip registry wiring. */
+        val registryResolved: Boolean,
+        /** Top [ToolSpecBudgetEntry]s by [ToolSpecBudgetEntry.estimatedTokens] descending. Capped so the response stays cheap. */
+        val topByTokens: List<ToolSpecBudgetEntry> = emptyList(),
+    )
+
+    @Serializable data class ToolSpecBudgetEntry(
+        val toolId: String,
+        /** `(id + helpText + schema).length / 4`, rounded half-up. */
+        val estimatedTokens: Int,
+        val specBytes: Int,
+    )
+
     @Serializable data class StatusRow(
         val sessionId: String,
         /** `"idle"` | `"generating"` | `"awaiting_tool"` | `"compacting"` | `"cancelled"` | `"failed"`. */
@@ -426,6 +467,11 @@ class SessionQueryTool(
             "over-threshold case reads > 1.0; marginTokens is negative when over. Use " +
             "before issuing a big-context operation to decide whether to compact first. " +
             "requires sessionId.\n" +
+            "  • tool_spec_budget — single-row registry-wide snapshot of how many tokens " +
+            "the registered tool specs cost the LLM per turn. Returns (toolCount, " +
+            "estimatedTokens, specBytes, registryResolved, topByTokens[5]). Session-" +
+            "independent — sessionId is rejected. Use to decide whether to consolidate " +
+            "near-duplicate tools before they inflate the per-turn context cost.\n" +
             "Common: limit (default 100, clamped 1..1000), offset (default 0). Setting a filter " +
             "that doesn't apply to the chosen select fails loud so typos surface instead of silently " +
             "returning an empty list."
@@ -460,6 +506,7 @@ class SessionQueryTool(
             SELECT_CACHE_STATS -> runCacheStatsQuery(sessions, input)
             SELECT_CONTEXT_PRESSURE -> runContextPressureQuery(sessions, input)
             SELECT_RUN_STATE_HISTORY -> runRunStateHistoryQuery(sessions, agentStates, input, limit, offset)
+            SELECT_TOOL_SPEC_BUDGET -> runToolSpecBudgetQuery(toolRegistry, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -496,6 +543,10 @@ class SessionQueryTool(
             if (select != SELECT_RUN_STATE_HISTORY && input.sinceEpochMs != null) {
                 add("sinceEpochMs (select=run_state_history only)")
             }
+            // tool_spec_budget is a registry-wide snapshot — passing sessionId is a typo.
+            if (select == SELECT_TOOL_SPEC_BUDGET && input.sessionId != null) {
+                add("sessionId (rejected for select=tool_spec_budget — registry-wide snapshot)")
+            }
         }
         if (misapplied.isNotEmpty()) {
             error(
@@ -520,11 +571,12 @@ class SessionQueryTool(
         const val SELECT_CACHE_STATS = "cache_stats"
         const val SELECT_CONTEXT_PRESSURE = "context_pressure"
         const val SELECT_RUN_STATE_HISTORY = "run_state_history"
+        const val SELECT_TOOL_SPEC_BUDGET = "tool_spec_budget"
         private val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
             SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
             SELECT_SESSION_METADATA, SELECT_MESSAGE, SELECT_SPEND, SELECT_CACHE_STATS,
-            SELECT_CONTEXT_PRESSURE, SELECT_RUN_STATE_HISTORY,
+            SELECT_CONTEXT_PRESSURE, SELECT_RUN_STATE_HISTORY, SELECT_TOOL_SPEC_BUDGET,
         )
 
         private const val DEFAULT_LIMIT = 100
