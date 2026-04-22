@@ -26,7 +26,13 @@ import io.talevia.core.tool.RegisteredTool
 import io.talevia.core.tool.ToolAvailabilityContext
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.supervisorScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlin.uuid.ExperimentalUuidApi
@@ -169,88 +175,127 @@ internal class AgentTurnExecutor(
         var emittedContent = false
         val pending = mutableMapOf<CallId, PendingToolCall>()
 
-        providers[providerIndex].stream(request).collect { event ->
-            when (event) {
-                is LlmEvent.TextStart -> {
-                    emittedContent = true
-                    upsertEmptyText(asstMsg, event.partId)
-                }
-                is LlmEvent.TextDelta -> bus.publish(
-                    BusEvent.PartDelta(asstMsg.sessionId, asstMsg.id, event.partId, "text", event.text),
-                )
-                is LlmEvent.TextEnd -> store.upsertPart(
-                    Part.Text(event.partId, asstMsg.id, asstMsg.sessionId, clock.now(), text = event.finalText),
-                )
+        // Parallel tool dispatch (§5.2 / §5.4). Providers emit multiple
+        // `ToolCallReady` events per step when the model requests several
+        // independent tool calls; serialising them inflates turn latency to
+        // sum(tool_i) instead of max(tool_i). We launch each dispatch as a
+        // child coroutine of `supervisorScope` so one tool's failure doesn't
+        // cancel siblings, then `joinAll` before reporting TurnResult. The
+        // permission-check phase is serialised by `permissionMutex` so
+        // interactive prompts never race for the same terminal.
+        val dispatchJobs = mutableListOf<Job>()
+        val permissionMutex = Mutex()
 
-                is LlmEvent.ReasoningStart -> {
-                    emittedContent = true
-                    store.upsertPart(
-                        Part.Reasoning(event.partId, asstMsg.id, asstMsg.sessionId, clock.now(), text = ""),
+        supervisorScope {
+            providers[providerIndex].stream(request).collect { event ->
+                when (event) {
+                    is LlmEvent.TextStart -> {
+                        emittedContent = true
+                        upsertEmptyText(asstMsg, event.partId)
+                    }
+                    is LlmEvent.TextDelta -> bus.publish(
+                        BusEvent.PartDelta(asstMsg.sessionId, asstMsg.id, event.partId, "text", event.text),
                     )
-                }
-                is LlmEvent.ReasoningDelta -> bus.publish(
-                    BusEvent.PartDelta(asstMsg.sessionId, asstMsg.id, event.partId, "text", event.text),
-                )
-                is LlmEvent.ReasoningEnd -> store.upsertPart(
-                    Part.Reasoning(event.partId, asstMsg.id, asstMsg.sessionId, clock.now(), text = event.finalText),
-                )
-
-                is LlmEvent.ToolCallStart -> {
-                    emittedContent = true
-                    pending[event.callId] = PendingToolCall(event.partId, event.toolId)
-                    store.upsertPart(
-                        Part.Tool(
-                            id = event.partId,
-                            messageId = asstMsg.id,
-                            sessionId = asstMsg.sessionId,
-                            createdAt = clock.now(),
-                            callId = event.callId,
-                            toolId = event.toolId,
-                            state = ToolState.Pending,
-                        ),
+                    is LlmEvent.TextEnd -> store.upsertPart(
+                        Part.Text(event.partId, asstMsg.id, asstMsg.sessionId, clock.now(), text = event.finalText),
                     )
-                }
-                is LlmEvent.ToolCallInputDelta -> bus.publish(
-                    BusEvent.PartDelta(asstMsg.sessionId, asstMsg.id, event.partId, "input", event.jsonDelta),
-                )
-                is LlmEvent.ToolCallReady -> dispatchTool(asstMsg, history, input, event, pending, currentProjectId, spendCapCents)
 
-                LlmEvent.StepStart -> store.upsertPart(
-                    Part.StepStart(
-                        id = PartId(Uuid.random().toString()),
-                        messageId = asstMsg.id,
-                        sessionId = asstMsg.sessionId,
-                        createdAt = clock.now(),
-                    ),
-                )
-                is LlmEvent.StepFinish -> {
-                    finish = event.finish
-                    usage = event.usage
-                    store.upsertPart(
-                        Part.StepFinish(
+                    is LlmEvent.ReasoningStart -> {
+                        emittedContent = true
+                        store.upsertPart(
+                            Part.Reasoning(event.partId, asstMsg.id, asstMsg.sessionId, clock.now(), text = ""),
+                        )
+                    }
+                    is LlmEvent.ReasoningDelta -> bus.publish(
+                        BusEvent.PartDelta(asstMsg.sessionId, asstMsg.id, event.partId, "text", event.text),
+                    )
+                    is LlmEvent.ReasoningEnd -> store.upsertPart(
+                        Part.Reasoning(event.partId, asstMsg.id, asstMsg.sessionId, clock.now(), text = event.finalText),
+                    )
+
+                    is LlmEvent.ToolCallStart -> {
+                        emittedContent = true
+                        pending[event.callId] = PendingToolCall(event.partId, event.toolId)
+                        store.upsertPart(
+                            Part.Tool(
+                                id = event.partId,
+                                messageId = asstMsg.id,
+                                sessionId = asstMsg.sessionId,
+                                createdAt = clock.now(),
+                                callId = event.callId,
+                                toolId = event.toolId,
+                                state = ToolState.Pending,
+                            ),
+                        )
+                    }
+                    is LlmEvent.ToolCallInputDelta -> bus.publish(
+                        BusEvent.PartDelta(asstMsg.sessionId, asstMsg.id, event.partId, "input", event.jsonDelta),
+                    )
+                    is LlmEvent.ToolCallReady -> {
+                        // Resolve the pending handle on the stream thread so
+                        // dispatchTool never touches the shared `pending` map
+                        // from a launched child (avoids an MT map race).
+                        val handle = pending[event.callId]
+                            ?: PendingToolCall(event.partId, event.toolId).also {
+                                pending[event.callId] = it
+                            }
+                        dispatchJobs += launch {
+                            dispatchTool(
+                                asstMsg = asstMsg,
+                                history = history,
+                                input = input,
+                                event = event,
+                                handle = handle,
+                                currentProjectId = currentProjectId,
+                                spendCapCents = spendCapCents,
+                                permissionMutex = permissionMutex,
+                            )
+                        }
+                    }
+
+                    LlmEvent.StepStart -> store.upsertPart(
+                        Part.StepStart(
                             id = PartId(Uuid.random().toString()),
                             messageId = asstMsg.id,
                             sessionId = asstMsg.sessionId,
                             createdAt = clock.now(),
-                            tokens = event.usage,
-                            finish = event.finish,
                         ),
                     )
-                    metrics?.let { m ->
-                        val pid = input.model.providerId
-                        m.increment("provider.$pid.tokens.input", event.usage.input)
-                        m.increment("provider.$pid.tokens.output", event.usage.output)
-                        m.increment("provider.$pid.tokens.cache_read", event.usage.cacheRead)
-                        m.increment("provider.$pid.tokens.cache_write", event.usage.cacheWrite)
+                    is LlmEvent.StepFinish -> {
+                        finish = event.finish
+                        usage = event.usage
+                        store.upsertPart(
+                            Part.StepFinish(
+                                id = PartId(Uuid.random().toString()),
+                                messageId = asstMsg.id,
+                                sessionId = asstMsg.sessionId,
+                                createdAt = clock.now(),
+                                tokens = event.usage,
+                                finish = event.finish,
+                            ),
+                        )
+                        metrics?.let { m ->
+                            val pid = input.model.providerId
+                            m.increment("provider.$pid.tokens.input", event.usage.input)
+                            m.increment("provider.$pid.tokens.output", event.usage.output)
+                            m.increment("provider.$pid.tokens.cache_read", event.usage.cacheRead)
+                            m.increment("provider.$pid.tokens.cache_write", event.usage.cacheWrite)
+                        }
+                    }
+                    is LlmEvent.Error -> {
+                        error = event.message
+                        retriable = event.retriable
+                        retryAfterMs = event.retryAfterMs
+                        finish = FinishReason.ERROR
                     }
                 }
-                is LlmEvent.Error -> {
-                    error = event.message
-                    retriable = event.retriable
-                    retryAfterMs = event.retryAfterMs
-                    finish = FinishReason.ERROR
-                }
             }
+            // Await every launched dispatch before reporting the turn. The
+            // outer Agent loop relies on `TurnResult` signalling that *all*
+            // tool Parts for this turn have landed in the SessionStore, so
+            // the next turn's history snapshot sees tool results rather than
+            // unresolved Pending parts.
+            dispatchJobs.joinAll()
         }
 
         return TurnResult(
@@ -274,13 +319,11 @@ internal class AgentTurnExecutor(
         history: List<MessageWithParts>,
         input: RunInput,
         event: LlmEvent.ToolCallReady,
-        pending: MutableMap<CallId, PendingToolCall>,
+        handle: PendingToolCall,
         currentProjectId: ProjectId?,
         spendCapCents: Long?,
+        permissionMutex: Mutex,
     ) {
-        val handle = pending[event.callId]
-            ?: PendingToolCall(event.partId, event.toolId).also { pending[event.callId] = it }
-
         val tool: RegisteredTool? = registry[event.toolId]
         val baseTime: Instant = clock.now()
         val basePart = Part.Tool(
@@ -304,15 +347,20 @@ internal class AgentTurnExecutor(
         }
 
         val pattern = tool.permission.patternFrom(event.input.toString())
-        val decision = permissions.check(
-            rules = input.permissionRules,
-            request = PermissionRequest(
-                sessionId = asstMsg.sessionId,
-                permission = tool.permission.permission,
-                pattern = pattern,
-                metadata = mapOf("toolId" to event.toolId),
-            ),
-        )
+        // Serialise permission checks across concurrent dispatches so
+        // interactive prompts (ask-once-per-tool) never race for the same
+        // terminal. The tool body itself still runs concurrently.
+        val decision = permissionMutex.withLock {
+            permissions.check(
+                rules = input.permissionRules,
+                request = PermissionRequest(
+                    sessionId = asstMsg.sessionId,
+                    permission = tool.permission.permission,
+                    pattern = pattern,
+                    metadata = mapOf("toolId" to event.toolId),
+                ),
+            )
+        }
         if (!decision.granted) {
             store.upsertPart(
                 basePart.copy(
