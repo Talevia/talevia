@@ -14,6 +14,7 @@ import io.talevia.core.platform.AsrEngine
 import io.talevia.core.platform.AsrRequest
 import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.tool.Tool
+import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import kotlinx.serialization.KSerializer
@@ -102,6 +103,7 @@ class AutoSubtitleClipTool(
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("ml.transcribe")
+    override val applicability: ToolApplicability = ToolApplicability.RequiresAssets
 
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")

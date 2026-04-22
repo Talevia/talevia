@@ -7,6 +7,7 @@ import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.domain.source.removeNode
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
+import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import kotlinx.serialization.KSerializer
@@ -48,6 +49,7 @@ class RemoveSourceNodeTool(
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.write")
+    override val applicability: ToolApplicability = ToolApplicability.RequiresProjectBinding
 
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")

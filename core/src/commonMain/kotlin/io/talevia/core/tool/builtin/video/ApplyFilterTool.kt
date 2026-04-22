@@ -96,7 +96,7 @@ class ApplyFilterTool(
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")
-    override val applicability: ToolApplicability = ToolApplicability.RequiresProjectBinding
+    override val applicability: ToolApplicability = ToolApplicability.RequiresAssets
 
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")

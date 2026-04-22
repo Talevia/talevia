@@ -13,6 +13,7 @@ import io.talevia.core.domain.source.SourceNode
 import io.talevia.core.domain.source.SourceRef
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
+import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.video.emitTimelineSnapshot
@@ -97,6 +98,7 @@ class RenameSourceNodeTool(
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.write")
+    override val applicability: ToolApplicability = ToolApplicability.RequiresProjectBinding
 
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")

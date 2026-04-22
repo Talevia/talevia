@@ -113,6 +113,13 @@ internal class AgentTurnExecutor(
     private val clock: Clock,
     private val metrics: MetricsRegistry?,
     private val systemPrompt: String?,
+    /**
+     * Optional project store used to enrich [io.talevia.core.tool.ToolAvailabilityContext]
+     * for [io.talevia.core.tool.ToolApplicability.RequiresAssets] checks. When null,
+     * asset-dependent tools stay hidden whenever a project is bound but we can't cheaply
+     * confirm it has assets — conservative but correct.
+     */
+    private val projects: io.talevia.core.domain.ProjectStore? = null,
 ) {
     init {
         require(providers.isNotEmpty()) { "AgentTurnExecutor requires at least one provider" }
@@ -133,10 +140,17 @@ internal class AgentTurnExecutor(
         currentProjectId: ProjectId?,
         providerIndex: Int = 0,
     ): TurnResult {
+        val projectHasAssets = currentProjectId != null &&
+            projects?.get(currentProjectId)?.assets?.isNotEmpty() == true
         val request = LlmRequest(
             model = input.model,
             messages = history,
-            tools = registry.specs(ToolAvailabilityContext(currentProjectId = currentProjectId)),
+            tools = registry.specs(
+                ToolAvailabilityContext(
+                    currentProjectId = currentProjectId,
+                    projectHasAssets = projectHasAssets,
+                ),
+            ),
             systemPrompt = buildSystemPrompt(systemPrompt, currentProjectId, input.sessionId),
             // Seed the OpenAI cache-routing hint from the session id so every
             // turn in a session hits the same replica — unless the caller

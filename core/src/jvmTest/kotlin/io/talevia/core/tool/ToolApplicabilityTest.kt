@@ -70,6 +70,44 @@ class ToolApplicabilityTest {
         assertTrue("b" in visible)
     }
 
+    /** Tool that requires both project binding AND at least one asset. */
+    private class AssetTool(override val id: String) : Tool<Noop, Noop> {
+        override val helpText: String = "needs assets"
+        override val inputSchema: JsonObject = buildJsonObject { put("type", "object") }
+        override val inputSerializer: KSerializer<Noop> = serializer()
+        override val outputSerializer: KSerializer<Noop> = serializer()
+        override val permission: PermissionSpec = PermissionSpec.fixed("test.z")
+        override val applicability: ToolApplicability = ToolApplicability.RequiresAssets
+        override suspend fun execute(input: Noop, ctx: ToolContext): ToolResult<Noop> =
+            ToolResult(title = id, outputForLlm = "ok", data = Noop())
+    }
+
+    @Test fun assetToolHiddenWhenProjectBoundButEmpty() {
+        val registry = ToolRegistry().apply {
+            register(AssetTool("clip_op"))
+        }
+        val ctx = ToolAvailabilityContext(currentProjectId = ProjectId("p"), projectHasAssets = false)
+        assertFalse("clip_op" in registry.specs(ctx).map { it.id }.toSet())
+    }
+
+    @Test fun assetToolVisibleOnceAssetsExist() {
+        val registry = ToolRegistry().apply {
+            register(AssetTool("clip_op"))
+        }
+        val ctx = ToolAvailabilityContext(currentProjectId = ProjectId("p"), projectHasAssets = true)
+        assertTrue("clip_op" in registry.specs(ctx).map { it.id }.toSet())
+    }
+
+    @Test fun assetToolHiddenInUnboundSessionEvenIfAssetsFlagSet() {
+        // Defensive: RequiresAssets implies binding; a stray true flag with a null pid
+        // shouldn't leak the tool.
+        val registry = ToolRegistry().apply {
+            register(AssetTool("clip_op"))
+        }
+        val ctx = ToolAvailabilityContext(currentProjectId = null, projectHasAssets = true)
+        assertFalse("clip_op" in registry.specs(ctx).map { it.id }.toSet())
+    }
+
     @Test fun defaultApplicabilityIsAlways() {
         // A tool that doesn't override `applicability` must stay always-visible —
         // filtering should never hide the 90 existing tools without explicit opt-in.

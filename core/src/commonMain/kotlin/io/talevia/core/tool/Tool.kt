@@ -71,6 +71,22 @@ sealed interface ToolApplicability {
         override fun isAvailable(ctx: ToolAvailabilityContext): Boolean =
             ctx.currentProjectId != null
     }
+
+    /**
+     * Visible only when the session is bound AND the current project has at least one
+     * imported media asset. Use for tools whose essential input is an `assetId` or which
+     * operate on existing clips (which in turn need assets) — `add_clip`, `apply_filter`,
+     * `apply_lut`, `add_transition`. In an empty project these trap the model into
+     * calling with placeholder ids (we saw `assetId="missing"` in real logs); hiding them
+     * nudges the agent toward `import_media` / `generate_*` first.
+     *
+     * Narrower than [RequiresProjectBinding] — a project-bound but asset-empty session
+     * still exposes source-graph and track-creation tools.
+     */
+    object RequiresAssets : ToolApplicability {
+        override fun isAvailable(ctx: ToolAvailabilityContext): Boolean =
+            ctx.currentProjectId != null && ctx.projectHasAssets
+    }
 }
 
 /**
@@ -80,6 +96,14 @@ sealed interface ToolApplicability {
  */
 data class ToolAvailabilityContext(
     val currentProjectId: io.talevia.core.ProjectId?,
+    /**
+     * True when the current project has at least one imported [io.talevia.core.domain.MediaAsset].
+     * Defaults to false so callers that don't (or can't) cheaply load project state get the
+     * conservative answer — [ToolApplicability.RequiresAssets] tools stay hidden, and the
+     * model is steered toward `import_media`. The AgentTurnExecutor populates this from
+     * an injected ProjectStore when one is available.
+     */
+    val projectHasAssets: Boolean = false,
 )
 
 class ToolContext(

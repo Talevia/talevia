@@ -374,6 +374,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
             ),
             titler = SessionTitler(provider = provider, store = sessions),
             fallbackProviders = providers.all().filter { it.id != provider.id },
+            projects = projects,
         )
     }
 

@@ -114,6 +114,14 @@ class Agent(
      * 4 attempts total with exponential backoff. Set to [RetryPolicy.None] to disable.
      */
     private val retryPolicy: RetryPolicy = RetryPolicy.Default,
+    /**
+     * Optional project store used by the turn executor to enrich
+     * [io.talevia.core.tool.ToolAvailabilityContext] with asset-presence info so
+     * [io.talevia.core.tool.ToolApplicability.RequiresAssets] tools can be hidden when
+     * the bound project is empty. Composition roots usually wire this when they already
+     * have a ProjectStore singleton; null is safe (asset-scoped tools stay hidden).
+     */
+    private val projects: io.talevia.core.domain.ProjectStore? = null,
 ) {
 
     private val log = Loggers.get("agent")
@@ -130,6 +138,7 @@ class Agent(
         clock = clock,
         metrics = metrics,
         systemPrompt = systemPrompt,
+        projects = projects,
     )
 
     /**

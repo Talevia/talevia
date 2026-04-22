@@ -7,6 +7,7 @@ import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.tool.Tool
+import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import kotlinx.serialization.KSerializer
@@ -64,6 +65,7 @@ class ExtractFrameTool(
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("media.import")
+    override val applicability: ToolApplicability = ToolApplicability.RequiresAssets
 
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
