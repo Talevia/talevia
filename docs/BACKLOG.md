@@ -17,8 +17,6 @@
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
 
-- **debt-consolidate-project-snapshot-ops** — `SaveProjectSnapshotTool` + `RestoreProjectSnapshotTool` + `DeleteProjectSnapshotTool` 三件套。**方向：** 评估合为 `snapshot_op(action="save"|"restore"|"delete", ...)`；或按 add/remove-variants 的先例保留三件套并在 decision 里说明。Rubric 外 / debt。
-
 ## P2 — 记债 / 观望
 
 - **audio-waveform-proxy-generator** — `ProxyPurpose.AUDIO_WAVEFORM` enum 存在，`FfmpegProxyGenerator` 只产 thumbnail；audio-only asset 一直没有 proxy，UI 仍然要 decode 原片才能渲染 waveform。跟进 `2026-04-22-asset-proxy-generation.md`。**方向：** `FfmpegProxyGenerator` 检测 audio-only asset，用 `ffmpeg -filter_complex "showwavespic"` 产一张 waveform PNG，填 `ProxyPurpose.AUDIO_WAVEFORM`。Rubric §5.3。
