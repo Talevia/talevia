@@ -21,8 +21,6 @@
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
 
-- **debt-merge-import-source-node-pair** — `ImportSourceNodeTool` + `ImportSourceNodeFromJsonTool`（portable envelope vs raw JSON body）。两者 output 契约基本一致，只是输入源不同。**方向：** 合并为 `import_source_node(source: {path?: String, jsonBody?: JsonElement})`，二选一。Rubric 外 / §R.5.4。
-
 ## P2 — 记债 / 观望
 
 - **debt-split-create-project-from-template** — `CreateProjectFromTemplateTool.kt` 416 行，接近 500 行阈值（§R.5.3 preemptive）。5 个 genre 模板（narrative / vlog / ad / musicmv / tutorial）的 seed payload 都塞在同一个文件里，新加 genre 要在中间插一大段。**方向：** 把每个 genre template 提取到 `project/template/<genre>.kt`，主文件变 dispatcher。Rubric 外 / §R.5.3。
