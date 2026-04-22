@@ -29,7 +29,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Round-trip coverage for [ExportSourceNodeTool] + [ImportSourceNodeFromJsonTool]
+ * Round-trip coverage for [ExportSourceNodeTool] + [ImportSourceNodeTool] (envelope path)
  * — the cross-instance leg of VISION §5.1 "Source 能不能序列化、版本化、跨 project 复用?"
  */
 class SourceNodeExportImportToolsTest {
@@ -72,8 +72,8 @@ class SourceNodeExportImportToolsTest {
         assertEquals(1, export.data.nodeCount)
         assertEquals(listOf("core.consistency.character_ref"), export.data.kinds)
 
-        val import = ImportSourceNodeFromJsonTool(rig.store).execute(
-            ImportSourceNodeFromJsonTool.Input(
+        val import = ImportSourceNodeTool(rig.store).execute(
+            ImportSourceNodeTool.Input(
                 toProjectId = "to",
                 envelope = export.data.envelope,
             ),
@@ -104,15 +104,15 @@ class SourceNodeExportImportToolsTest {
         )
 
         // First import lands fresh.
-        val first = ImportSourceNodeFromJsonTool(rig.store).execute(
-            ImportSourceNodeFromJsonTool.Input(toProjectId = "to", envelope = export.data.envelope),
+        val first = ImportSourceNodeTool(rig.store).execute(
+            ImportSourceNodeTool.Input(toProjectId = "to", envelope = export.data.envelope),
             rig.ctx,
         )
         assertFalse(first.data.nodes.single().skippedDuplicate)
 
         // Second import is a dedup no-op — contentHash already present.
-        val second = ImportSourceNodeFromJsonTool(rig.store).execute(
-            ImportSourceNodeFromJsonTool.Input(toProjectId = "to", envelope = export.data.envelope),
+        val second = ImportSourceNodeTool(rig.store).execute(
+            ImportSourceNodeTool.Input(toProjectId = "to", envelope = export.data.envelope),
             rig.ctx,
         )
         assertTrue(second.data.nodes.single().skippedDuplicate)
@@ -147,8 +147,8 @@ class SourceNodeExportImportToolsTest {
         )
         assertEquals(2, export.data.nodeCount)
 
-        val import = ImportSourceNodeFromJsonTool(rig.store).execute(
-            ImportSourceNodeFromJsonTool.Input(toProjectId = "to", envelope = export.data.envelope),
+        val import = ImportSourceNodeTool(rig.store).execute(
+            ImportSourceNodeTool.Input(toProjectId = "to", envelope = export.data.envelope),
             rig.ctx,
         )
         // Parent was imported before the leaf.
@@ -174,8 +174,8 @@ class SourceNodeExportImportToolsTest {
             it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Other", visualDescription = "red"))
         }
 
-        val out = ImportSourceNodeFromJsonTool(rig.store).execute(
-            ImportSourceNodeFromJsonTool.Input(
+        val out = ImportSourceNodeTool(rig.store).execute(
+            ImportSourceNodeTool.Input(
                 toProjectId = "to",
                 envelope = export.data.envelope,
                 newNodeId = "mei-imported",
@@ -202,8 +202,8 @@ class SourceNodeExportImportToolsTest {
         }
 
         val ex = assertFailsWith<IllegalStateException> {
-            ImportSourceNodeFromJsonTool(rig.store).execute(
-                ImportSourceNodeFromJsonTool.Input(toProjectId = "to", envelope = export.data.envelope),
+            ImportSourceNodeTool(rig.store).execute(
+                ImportSourceNodeTool.Input(toProjectId = "to", envelope = export.data.envelope),
                 rig.ctx,
             )
         }
@@ -215,8 +215,8 @@ class SourceNodeExportImportToolsTest {
         val bogus = """{"formatVersion":"talevia-source-export-v999","rootNodeId":"mei","nodes":[{"id":"mei","kind":"character_ref","body":{"name":"Mei","visualDescription":"teal"}}]}"""
 
         val ex = assertFailsWith<IllegalArgumentException> {
-            ImportSourceNodeFromJsonTool(rig.store).execute(
-                ImportSourceNodeFromJsonTool.Input(toProjectId = "to", envelope = bogus),
+            ImportSourceNodeTool(rig.store).execute(
+                ImportSourceNodeTool.Input(toProjectId = "to", envelope = bogus),
                 rig.ctx,
             )
         }
@@ -227,8 +227,8 @@ class SourceNodeExportImportToolsTest {
     @Test fun malformedEnvelopeFails() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            ImportSourceNodeFromJsonTool(rig.store).execute(
-                ImportSourceNodeFromJsonTool.Input(toProjectId = "to", envelope = "not-json"),
+            ImportSourceNodeTool(rig.store).execute(
+                ImportSourceNodeTool.Input(toProjectId = "to", envelope = "not-json"),
                 rig.ctx,
             )
         }
@@ -264,8 +264,8 @@ class SourceNodeExportImportToolsTest {
         )
         assertTrue(pretty.data.envelope.length > compact.data.envelope.length)
         // Both must round-trip. Feed pretty-printed envelope into the importer.
-        val imported = ImportSourceNodeFromJsonTool(rig.store).execute(
-            ImportSourceNodeFromJsonTool.Input(toProjectId = "to", envelope = pretty.data.envelope),
+        val imported = ImportSourceNodeTool(rig.store).execute(
+            ImportSourceNodeTool.Input(toProjectId = "to", envelope = pretty.data.envelope),
             rig.ctx,
         )
         assertEquals("mei", imported.data.nodes.single().importedId)
