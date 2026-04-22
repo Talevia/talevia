@@ -22,8 +22,8 @@ import kotlinx.serialization.serializer
  * Useful pre-flight: before composing a large prompt or pasting a long
  * artefact into the conversation, the agent can ask "will this blow
  * past the model's context window?". Pairs with
- * [ListToolsTool] / [ListProvidersTool] as capability-discovery
- * utilities the agent can reach for *inside* a turn.
+ * [ListToolsTool] / [io.talevia.core.tool.builtin.provider.ProviderQueryTool]
+ * as capability-discovery utilities the agent can reach for *inside* a turn.
  *
  * Wraps [io.talevia.core.compaction.TokenEstimator.forText], which is
  * the same approximation driving "should we compact?" decisions

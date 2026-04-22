@@ -432,8 +432,7 @@ class ServerContainer(
         providerRegistryOverride ?: ProviderRegistry.Builder().addEnv(httpClient, env).build()
 
     init {
-        tools.register(io.talevia.core.tool.builtin.provider.ListProvidersTool(providers))
-        tools.register(io.talevia.core.tool.builtin.provider.ListProviderModelsTool(providers))
+        tools.register(io.talevia.core.tool.builtin.provider.ProviderQueryTool(providers))
         tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
     }
 
