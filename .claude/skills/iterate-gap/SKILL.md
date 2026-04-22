@@ -86,53 +86,65 @@ git pull --rebase origin main
 
 ### R.5 技术债扫描（repopulate 必做）
 
-Rubric 分析完之后，再显式扫一遍下面 7 类信号。每类命中都产出一条 slug 以 `debt-` 开头的 backlog 任务，和 feature gap 一起按优先级排档。信号不是"建议看看"，是**客观指标**，和 `main` 前一次 `docs(backlog)` commit 所在的快照对比：
+技术债**信号类别**和"债与 feature gap 竞争同一优先级窗口"的原则由 VISION §5.6 定义；本节给出 skill 层的**扫描命令 + 严重度阈值 + 配额强制 + 监控曲线约定**。
 
-1. **Tool 数量膨胀** —
+**Debt 占比硬性要求**：20 条 repopulate 里**至少 6 条（30%）**来自本节扫描。没做扫描 / 扫出来不到 6 条 → 按实际结果如实加，宁可 feature gap 减少也不能砍 debt 名额。这是防止系统只做新功能而持续劣化的硬闸门。
+
+**扫描命令**（每个信号产出一条 slug 以 `debt-` 开头的 backlog 任务；净增长指标与 `main` 前一次 `docs(backlog)` commit 快照对比）：
+
+1. **Tool 数量净增长** —
    ```
    find core/src/commonMain/kotlin/io/talevia/core/tool/builtin -name "*Tool.kt" | wc -l
    ```
-   对比 `git show <prev-backlog-commit>:core/.../tool/builtin`。增幅 > 5% 或绝对增长 ≥ 5 → 出一条 `debt-tool-consolidation-<area>`（area 用增长最快的子目录名）。**这是最容易劣化的地方**，必须每次 repopulate 都扫。
+   对比 `git show <prev-backlog-commit>:core/.../tool/builtin`。增幅 > 5% 或绝对增长 ≥ 5 → `debt-tool-consolidation-<area>`（area 用增长最快的子目录名）。**最容易劣化的地方**，每次必扫。
 
-2. **Project 字段膨胀** —
+2. **近似工具群** —
+   逐个扫 `core/tool/builtin/<area>/`，同一 area 下 2+ 个同前缀工具（`list_X*` / `find_X*` / `describe_X*` / `Define* + Update*` 成对）→ `debt-consolidate-<area>-queries`。过去几个月最频繁的劣化信号。
+
+3. **Project 字段膨胀** —
    ```
    grep -cE '^\s*val ' core/src/commonMain/kotlin/io/talevia/core/domain/Project.kt
    ```
-   和上次快照对比。新增字段如果类型是 `List<X>` / `Map<K, V>`（= append-only / grow-over-time 语义）→ 必出一条 `debt-extract-<field>-table`（把它拆到独立 SQLDelight 表）。
+   和上次快照对比。新增类型为 `List<X>` / `Map<K, V>`（append-only 语义）的字段 → `debt-extract-<field>-table`（拆到独立 SQLDelight 表）。
 
-3. **长文件** —
+4. **长文件** —
    ```
    find core/src/commonMain/kotlin -name "*.kt" -exec wc -l {} + | sort -rn | head -10
    ```
-   > 500 行的文件自动进入 debt 候选，slug `debt-split-<filename>`。超 800 行是强制 P0 / P1。
-
-4. **近似工具群** —
-   逐个扫 `core/tool/builtin/<area>/` 目录，如果同一 area 下有 2+ 个同前缀工具（`list_X*` / `find_X*` / `describe_X*` / `Define*` + `Update*` 成对），出一条 `debt-consolidate-<area>-queries`。这是过去几个月最频繁的劣化信号。
+   > 500 行 → `debt-split-<filename>`。超 800 行强制 P0 / P1。
 
 5. **被跳过的测试** —
    ```
    grep -rnE '@Ignore|@Disabled|\.skip\(' core/src/*Test/kotlin platform-impls apps
    ```
-   每个 skip / @Ignore 都是一条 debt（要么修要么删），slug `debt-unskip-<test-name>`。
+   每条 → `debt-unskip-<test-name>`（要么修要么删）。
 
-6. **TODO / FIXME 累积** —
+6. **TODO / FIXME / HACK 净增长** —
    ```
    grep -rnE 'TODO|FIXME|HACK|XXX' core/src/commonMain/kotlin | wc -l
    ```
-   和上次快照对比。只要净增长 > 0 就出一条 `debt-clean-todos`，decision 里列出新增的行号让下次有据可查。
+   和上次快照对比。净增长 > 0 → `debt-clean-todos`，decision 里列新增行号让下轮有据可查。
 
-7. **Deprecated 标记** —
+7. **@Deprecated 不清理** —
    ```
    grep -rn '@Deprecated' core/src/commonMain/kotlin
    ```
-   任何存在 > 1 轮 repopulate 周期的 `@Deprecated` → 出 `debt-remove-deprecated-<symbol>`。Deprecated 永不清理 = 代码里有两份实现，比保留还差。
+   存在 > 1 轮 repopulate 周期仍未移除 → `debt-remove-deprecated-<symbol>`。永不清理的 Deprecated = 代码里有两份实现，比保留还差。
 
-**扫描产出的 debt 任务按严重度进入对应档**：
-- 强制 P0：长文件 ≥ 800 行、被跳过的测试 ≥ 3 条、tool 绝对增长 ≥ 10。
-- 默认 P1：长文件 500–800、近似工具群、Project 字段膨胀。
-- 默认 P2：TODO 净增长、单个 Deprecated、小幅 tool 增长。
+8. **Dead code** —
+   查最近一次大重构（`git log --oneline -30` 找 `feat(core):` / `refactor(core):` 主题重构）之后，schema / 类 / 表 / 字段是否还挂在代码里但没人消费。参考写法：
+   ```
+   # 找到可疑符号后，grep 引用方验证
+   grep -rn '<symbol>' core apps platform-impls --include='*.kt'
+   ```
+   只剩定义没有消费方 → `debt-remove-dead-<area>`。典型例子：`baad43f` 文件化 ProjectStore 后遗留的 4 张 SQLDelight 项目表。
 
-扫描结果也写进 `docs(backlog)` 这次 commit 的 message body（简洁列出各指标对比数字），这样 `git log` 本身就是劣化监控曲线。
+**严重度分档**：
+- 强制 P0：长文件 ≥ 800 行、被跳过的测试 ≥ 3 条、tool 绝对增长 ≥ 10、确认的 dead code（有具体符号 + 零消费方证据）。
+- 默认 P1：长文件 500–800、近似工具群、Project 字段膨胀、存在 > 1 轮的 @Deprecated。
+- 默认 P2：TODO 净增长、小幅 tool 增长。
+
+**监控曲线**：扫描结果写进 `docs(backlog)` 这次 commit 的 message body（简洁列出各指标对比数字），`git log` 本身就是劣化监控曲线。跳过扫描 / debt 占比不足的 repopulate commit 不合法（见硬规则 13）。
 
 写入 `docs/BACKLOG.md` 的格式与当前文件保持一致：
 
