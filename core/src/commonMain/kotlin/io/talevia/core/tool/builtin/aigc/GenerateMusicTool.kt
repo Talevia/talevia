@@ -209,6 +209,7 @@ class GenerateMusicTool(
                 baseInputs = baseInputs,
                 costCents = costCents,
                 sessionId = ctx.sessionId,
+                resolvedPrompt = folded.effectivePrompt,
             )
             ctx.publishEvent(
                 BusEvent.AigcCostRecorded(

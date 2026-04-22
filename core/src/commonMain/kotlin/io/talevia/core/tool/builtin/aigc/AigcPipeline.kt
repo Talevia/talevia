@@ -206,6 +206,7 @@ internal object AigcPipeline {
         baseInputs: JsonObject = JsonObject(emptyMap()),
         costCents: Long? = null,
         sessionId: io.talevia.core.SessionId? = null,
+        resolvedPrompt: String? = null,
     ) {
         store.mutate(projectId) { project ->
             val snapshot: Map<SourceNodeId, String> = if (sourceBinding.isEmpty()) emptyMap()
@@ -227,6 +228,7 @@ internal object AigcPipeline {
                         baseInputs = baseInputs,
                         costCents = costCents,
                         sessionId = sessionId?.value,
+                        resolvedPrompt = resolvedPrompt,
                     ),
                 ),
             )

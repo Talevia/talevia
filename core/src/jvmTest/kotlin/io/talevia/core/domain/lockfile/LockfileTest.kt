@@ -103,4 +103,40 @@ class LockfileTest {
         assertEquals(42L, roundTripped.costCents)
         assertEquals("s-xyz", roundTripped.sessionId)
     }
+
+    @Test fun entryMissingResolvedPromptDecodesAsNull() {
+        // Entry written before the resolvedPrompt field must still decode; the
+        // new field surfaces as null so UI / queries can say "unknown prompt
+        // trace for this legacy entry" rather than silently reporting an empty
+        // string (which would wrongly suggest "we asked the provider for ''").
+        val legacy = """
+            {
+              "inputHash": "h1",
+              "toolId": "generate_image",
+              "assetId": "asset-1",
+              "provenance": {
+                "providerId": "fake",
+                "modelId": "m",
+                "modelVersion": "v1",
+                "seed": 42,
+                "parameters": { "prompt": "p" },
+                "createdAtEpochMs": 1700000000000
+              },
+              "costCents": 4,
+              "sessionId": "s-pre-cycle-7"
+            }
+        """.trimIndent()
+        val entry = json.decodeFromString(LockfileEntry.serializer(), legacy)
+        assertNull(entry.resolvedPrompt)
+    }
+
+    @Test fun entryWithResolvedPromptRoundTrips() {
+        val folded = "[character_ref mei: Asian, mid-30s]\n\nCyberpunk street at night"
+        val original = entry("h1", "asset-1").copy(resolvedPrompt = folded)
+        val roundTripped = json.decodeFromString(
+            LockfileEntry.serializer(),
+            json.encodeToString(LockfileEntry.serializer(), original),
+        )
+        assertEquals(folded, roundTripped.resolvedPrompt)
+    }
 }

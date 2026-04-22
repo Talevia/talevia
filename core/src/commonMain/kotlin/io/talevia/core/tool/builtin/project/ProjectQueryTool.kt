@@ -352,6 +352,13 @@ class ProjectQueryTool(
         val currentlyStale: Boolean,
         val driftedNodes: List<LockfileEntryDriftedNode> = emptyList(),
         val clipReferences: List<LockfileEntryClipRef> = emptyList(),
+        /**
+         * The fully-expanded prompt the AIGC tool sent to the provider,
+         * after consistency-fold (character_ref / style_bible etc.
+         * prepended). Null for tools without a prompt concept (upscale,
+         * synthesize_speech) and for pre-cycle-7 legacy entries.
+         */
+        val resolvedPrompt: String? = null,
     )
 
     @Serializable data class ProjectMetadataProfile(

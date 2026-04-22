@@ -288,6 +288,15 @@ class GenerateImageToolTest {
             entry.sourceContentHashes,
             "lockfile must snapshot the bound source's contentHash for stale-clip detection",
         )
+        // Debug-trace prompt: the fully-folded prompt sent to the provider
+        // must be captured so the user can diff "what I asked" vs "what the
+        // provider saw" without re-running the fold themselves (VISION §5.4).
+        val resolved = assertNotNull(entry.resolvedPrompt)
+        assertTrue("portrait" in resolved, "resolvedPrompt must include the base prompt text")
+        assertTrue(
+            "Mei" in resolved || "teal hair" in resolved,
+            "resolvedPrompt must carry the folded character_ref fields: $resolved",
+        )
     }
 
     @Test fun consistencyBindingWithUnknownIdIsSkippedWithoutThrowing() = runTest {

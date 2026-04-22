@@ -85,6 +85,7 @@ internal fun runLockfileEntryDetailQuery(
         currentlyStale = stale,
         driftedNodes = driftedNodes,
         clipReferences = clipRefs,
+        resolvedPrompt = entry.resolvedPrompt,
     )
     val rows = encodeRows(
         ListSerializer(ProjectQueryTool.LockfileEntryDetailRow.serializer()),

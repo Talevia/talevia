@@ -142,6 +142,14 @@ data class Lockfile(
  *   expected in production — every Agent turn has a sessionId). Storing on the
  *   entry rather than on a side-index keeps the lookup zero-IO: a session's spend
  *   is just a filter over `project.lockfile.entries`.
+ * @property resolvedPrompt The fully-expanded prompt string that was actually
+ *   sent to the provider, after consistency-fold (character_ref / style_bible /
+ *   etc. prepended). Null when the tool has no prompt concept (upscale,
+ *   synthesize_speech — the latter's `text` is already verbatim in `baseInputs`
+ *   so duplicating it would waste bytes) or when the entry pre-dates this
+ *   field. VISION §5.4 debug: lets the user answer "why didn't this image
+ *   respect character_ref?" by comparing the stamped prompt against today's
+ *   folded one, without having to re-run the fold in their head.
  */
 @Serializable
 data class LockfileEntry(
@@ -155,4 +163,5 @@ data class LockfileEntry(
     val pinned: Boolean = false,
     val costCents: Long? = null,
     val sessionId: String? = null,
+    val resolvedPrompt: String? = null,
 )
