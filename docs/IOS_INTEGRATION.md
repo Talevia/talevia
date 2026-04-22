@@ -52,10 +52,16 @@ The build produces a ready-to-install `Talevia.app` in the derived-data director
 - `TaleviaApp` + `ContentView`: status-screen scaffold that exercises
   `AppContainer.shared` on launch so the Kotlin graph (driver → db → stores →
   tool registry → engine) lights up and the linker keeps those symbols live.
-- `AppContainer`: composition root — SQLDelight driver via
-  `TaleviaDatabaseFactory`, `InMemoryMediaStorage`, `AVFoundationVideoEngine`,
-  `DefaultPermissionService`, and the same 5 tools the Android app registers
-  (Import / AddClip / SplitClip / Export / RevertTimeline).
+- `AppContainer`: composition root — file-backed SQLDelight driver
+  (`Documents/talevia.db`, persists Sessions / Messages / Parts; switched
+  from in-memory in `baad43f`), `RecentsRegistry` at
+  `Documents/recents.json`, `FileProjectStore` rooted at
+  `Documents/projects/`, `FileBundleBlobWriter` for AIGC outputs,
+  `AVFoundationVideoEngine`, `DefaultPermissionService`, and the same
+  tools the Android app registers (Import / AddClip / SplitClip / Export /
+  RevertTimeline). Project bundles are visible to the user via the iOS
+  Files app; AirDrop / iCloud sync of the bundle directory works for
+  cross-device handoff.
 - `AVFoundationVideoEngine`: native `VideoEngine` implementation.
   - `probe(source:)` → `AVURLAsset.load(.duration, .tracks)` + per-track video /
     audio metadata extraction. Portrait detection via preferredTransform so
@@ -109,11 +115,15 @@ hand-written shims in `core/src/iosMain/kotlin/io/talevia/core/IosBridges.kt`:
    critical: the Swift side emits `Started` synchronously before the Kotlin
    caller starts collecting, so without replay the opening event is dropped.
 
-6. **`MediaStorage.import(source, probe)`** — the `probe` parameter is
-   `KotlinSuspendFunction1` and is painful to construct from Swift. The
-   iosMain helper `importWithKnownMetadata(storage:source:metadata:)` lets
-   callers pre-probe via the engine and hand in metadata directly — used by
-   the XCTest smoke target.
+6. **`MediaStorage.import(source, probe)`** — legacy surface kept alive for
+   tools that haven't migrated to `Project.assets` yet (see
+   `docs/BACKLOG.md::delete-file-media-storage-interface`). The `probe`
+   parameter is `KotlinSuspendFunction1` and is painful to construct from
+   Swift. The iosMain helper `importWithKnownMetadata(storage:source:metadata:)`
+   lets callers pre-probe via the engine and hand in metadata directly —
+   used by the XCTest smoke target. New code should write through
+   `BundleBlobWriter` + `ProjectStore.mutate { it.copy(assets = ...) }`
+   instead and skip `MediaStorage` entirely.
 
 7. **SKIE protocol conformance surfaces both an async shim and a
    callback-style requirement**, e.g. `VideoEngine.probe` appears as
@@ -138,7 +148,9 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 
 `AVFoundationVideoEngineSmokeTest` synthesizes two 1-second solid-colour MP4s
 via `AVAssetWriter` (no checked-in binary fixtures), imports them through
-`InMemoryMediaStorage`, runs `engine.render(...)`, and asserts Started +
+`InMemoryMediaStorage` (still used by this legacy smoke; see
+`docs/BACKLOG.md::delete-file-media-storage-interface` for the migration to
+`Project.assets`), runs `engine.render(...)`, and asserts Started +
 Completed events arrived plus the output file is non-empty. Swap the
 simulator name to whatever `xcrun simctl list devices available` reports.
 

@@ -74,9 +74,19 @@ adb install apps/android/build/outputs/apk/debug/android-debug.apk
 - `Media3VideoEngine` currently handles single-track video concat via
   `EditedMediaItemSequence`. Filters / transitions / multi-track audio mixing
   are data-modelled on the timeline but not yet rendered by the engine.
-- `InMemoryMediaStorage` holds assets in-memory — real Android apps will want
-  to persist assets and hand out `content://` URIs via PhotoPicker. That means
-  a small `MediaStorage` implementation that resolves `MediaSource.Platform`
-  tokens too.
+- Project bundles live under `<context.filesDir>/projects/<id>/` (set by
+  `AndroidAppContainer`); the recents registry sits at
+  `<context.filesDir>/recents.json`. This is the app sandbox — the user can't
+  pick an arbitrary external path until SAF (`Storage Access Framework`)
+  integration lands (see `docs/BACKLOG.md::bundle-mobile-document-picker`).
+  AIGC + `import_media(copy_into_bundle=true)` outputs land at
+  `<bundleRoot>/media/<assetId>.<ext>` and travel with the bundle if it's
+  pulled out via `adb pull` or shared via Android sharing.
+- A few tools (`ImportMediaTool` reference path, `ApplyLutTool`,
+  `ExtractFrameTool`) still consume the legacy `MediaStorage` surface for
+  `MediaSource.Platform` (`content://` URIs from PhotoPicker) and proxy
+  generation; the container keeps an `InMemoryMediaStorage` placeholder for
+  them. Migration to `BundleMediaPathResolver` + `Project.assets` is queued
+  in `docs/BACKLOG.md::delete-file-media-storage-interface`.
 - The app has never been run through end-to-end testing on a physical device;
   `assembleDebug` is the furthest the CI path goes today.

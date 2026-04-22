@@ -95,7 +95,7 @@ Options, in order of preference:
 ## Environment toggles
 
 - `TALEVIA_CLI_MARKDOWN=on|1|true` — opt into the Mordant markdown repaint path. OFF by default (since 2026-04-21) because the cursor math regresses on CJK wide chars and interleaves badly with the permission prompt's direct terminal writes. Layer 2 tests for affected code should include a `markdownEnabled = true` variant when this flag is on.
-- `TALEVIA_DB_PATH=:memory:` / `TALEVIA_MEDIA_DIR=<tmpdir>` — isolated session / asset state. Use for smoke runs so you don't poison `~/.talevia/talevia.db` with test sessions.
+- `TALEVIA_DB_PATH=:memory:` / `TALEVIA_PROJECTS_HOME=<tmpdir>` / `TALEVIA_RECENTS_PATH=<tmpdir>/recents.json` — isolated session / project state. Use for smoke runs so you don't poison `~/.talevia/talevia.db` with test sessions or `~/.talevia/projects/` with throwaway bundles.
 - `TALEVIA_CLI_LOG_LEVEL=DEBUG` — verbose `~/.talevia/cli.log`.
 
 ## Debug order when the CLI misbehaves
