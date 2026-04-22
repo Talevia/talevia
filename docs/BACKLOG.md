@@ -25,6 +25,4 @@
 
 - **project-query-sort-by-updatedAt** — `project_query(select=tracks | timeline_clips | assets)` 当前 sortBy 都是 domain-specific 维度（index / clipCount / span / startSeconds / duration / id）；没有 "最近改过的在前" 的时间排序。**方向：** `Timeline.tracks` / `clips` / `assets` 加 optional `updatedAtEpochMs` 元数据（或从 `Project.updatedAt` 反推），在 `project_query` 里增加 `sortBy="recent"` 支持。Rubric §5.2。
 
-- **compact-session-threshold-visible-in-ui** — `Compactor` 用 `compactionTokenThreshold = 120_000` 硬编码触发；UI 没有渠道展示 "当前 session 离阈值多远"。用户看不到进度条。**方向：** 扩展 `session_query(select=status)` （P1 那条的 follow-up）返回 `estimatedTokens` + `compactionThreshold` + `percent`；UI 就能渲染占比条。Rubric §5.4。
-
 - **validate-project-auto-on-load** — `ValidateProjectTool` 存在，但项目加载路径（`SqlDelightProjectStore.get`）不会自动跑，只靠 agent 明调用。长项目可能带入未发现的 DAG 损坏而没人注意。**方向：** `SqlDelightProjectStore.get` 在返回前跑一次 light-weight validation（只检 DAG cycle / missing parent ref，不做全量校验），失败记 warning log + 发 `BusEvent.ProjectValidationWarning`，但不 throw（避免锁死存量项目）。Rubric §5.1 / §5.3。
