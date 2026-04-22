@@ -13,8 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **replay-from-lockfile** — lockfile 有 seed + model version + resolvedPrompt + baseInputs，但没有"给定 inputHash 重跑一遍产物"的原语。VISION §5.2 "相同 source + 相同 toolchain 重跑产物是否 bit-identical" 无法从 agent 侧触发。**方向：** 新 tool 或在已有 AIGC 工具上加 `replayFromLockfile: String?` 参数，传 inputHash 后跳过用户侧 Input，直接用 lockfile 里的 baseInputs 重跑 + 验证 contentHash。Rubric §5.2。
-
 ## P1 — 中优，做完 P0 再排
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
