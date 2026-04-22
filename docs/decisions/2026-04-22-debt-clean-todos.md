@@ -1,6 +1,6 @@
 ## 2026-04-22 — debt-clean-todos: 32-baseline audit finds zero code-debt comments
 
-Commit: `<docs-shorthash>`
+Commit: `c1b3feb`
 
 **Context.** The `debt-clean-todos` backlog bullet took the raw
 `grep -rnE 'TODO|FIXME|HACK|XXX' core/src/commonMain/kotlin | wc -l = 32`
