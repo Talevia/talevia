@@ -277,6 +277,7 @@ class AndroidAppContainer(context: Context) {
                 permissions = permissions,
                 bus = bus,
                 compactor = Compactor(provider, sessions, bus),
+                fallbackProviders = providers.all().filter { it.id != provider.id },
             )
         }
     }

@@ -44,12 +44,14 @@ final class AppContainer {
     func agent(for providerId: String) -> Agent? {
         if let existing = agents[providerId] { return existing }
         guard let provider = providers.get(providerId: providerId) else { return nil }
+        let fallbacks = providers.all().filter { $0.id != provider.id }
         let agent = doNewIosAgent(
             provider: provider,
             tools: tools,
             sessions: sessions,
             permissions: permissions,
-            bus: bus
+            bus: bus,
+            fallbackProviders: fallbacks
         )
         agents[providerId] = agent
         return agent

@@ -106,6 +106,25 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     /**
+     * Primary provider exhausted its retry budget with no streamed content;
+     * the Agent is falling through to the next provider in the configured
+     * chain ([Agent.fallbackProviders]). Pair with [AgentRetryScheduled]:
+     * retry covers same-provider transient failures, fallback covers
+     * cross-provider ones. Emitted once per chain advance.
+     *
+     * Mid-stream failures (content already delivered to the user) do NOT
+     * trigger fallback — the partial output is preserved and the turn is
+     * marked ERROR so the user sees what came through rather than two
+     * different providers' truncated outputs stitched together.
+     */
+    data class AgentProviderFallback(
+        override val sessionId: SessionId,
+        val fromProviderId: String,
+        val toProviderId: String,
+        val reason: String,
+    ) : SessionEvent
+
+    /**
      * Background agent runs (e.g. the server's fire-and-forget `agent.run` launch)
      * historically swallowed failures, leaving clients stuck on a 202 with no signal
      * that the run died. Publish this event instead so SSE subscribers see the

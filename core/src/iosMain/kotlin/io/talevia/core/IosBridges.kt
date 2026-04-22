@@ -457,6 +457,7 @@ fun newIosAgent(
     sessions: SessionStore,
     permissions: PermissionService,
     bus: EventBus,
+    fallbackProviders: List<LlmProvider> = emptyList(),
 ): Agent = Agent(
     provider = provider,
     registry = tools,
@@ -465,6 +466,7 @@ fun newIosAgent(
     bus = bus,
     systemPrompt = taleviaSystemPrompt(),
     compactor = Compactor(provider = provider, store = sessions, bus = bus),
+    fallbackProviders = fallbackProviders,
 )
 
 /** Swift-friendly RunInput factory — avoids constructing [ModelRef] / rules from Swift. */

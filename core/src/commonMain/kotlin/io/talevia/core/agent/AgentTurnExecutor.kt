@@ -84,7 +84,12 @@ internal fun buildSystemPrompt(base: String?, currentProjectId: ProjectId?): Str
  * contract changes.
  */
 internal class AgentTurnExecutor(
-    private val provider: LlmProvider,
+    /**
+     * Ordered provider chain. Index 0 is the primary — the Agent's retry
+     * loop iterates this list after exhausting retries on the current
+     * provider (provider-auto-fallback). Must be non-empty.
+     */
+    private val providers: List<LlmProvider>,
     private val registry: ToolRegistry,
     private val permissions: PermissionService,
     private val store: SessionStore,
@@ -93,6 +98,15 @@ internal class AgentTurnExecutor(
     private val metrics: MetricsRegistry?,
     private val systemPrompt: String?,
 ) {
+    init {
+        require(providers.isNotEmpty()) { "AgentTurnExecutor requires at least one provider" }
+    }
+
+    /** Exposed so the Agent can emit fallback events with meaningful provider ids. */
+    fun providerIdAt(index: Int): String = providers[index].id
+
+    /** Chain size — Agent's retry loop uses this to know when fallback is exhausted. */
+    val providerCount: Int get() = providers.size
     private val log = Loggers.get("agent")
 
     @OptIn(ExperimentalUuidApi::class)
@@ -101,6 +115,7 @@ internal class AgentTurnExecutor(
         history: List<MessageWithParts>,
         input: RunInput,
         currentProjectId: ProjectId?,
+        providerIndex: Int = 0,
     ): TurnResult {
         val request = LlmRequest(
             model = input.model,
@@ -123,7 +138,7 @@ internal class AgentTurnExecutor(
         var emittedContent = false
         val pending = mutableMapOf<CallId, PendingToolCall>()
 
-        provider.stream(request).collect { event ->
+        providers[providerIndex].stream(request).collect { event ->
             when (event) {
                 is LlmEvent.TextStart -> {
                     emittedContent = true

@@ -69,6 +69,19 @@ class Agent(
     private val systemPrompt: String? = null,
     private val json: Json = JsonConfig.default,
     /**
+     * Ordered fallback providers. When the primary ([provider]) exhausts its
+     * retry budget within a turn AND has streamed zero content, the Agent
+     * advances to the first fallback and restarts the retry loop fresh.
+     * Empty list → retry-only behavior (unchanged from pre-fallback). The
+     * composition root typically passes `registry.all() - provider` so every
+     * configured provider becomes a fallback automatically.
+     *
+     * Mid-stream failures do NOT trigger fallback — preserving the partial
+     * output the user already saw is better than switching providers and
+     * emitting a second half that mentions different prior context.
+     */
+    private val fallbackProviders: List<LlmProvider> = emptyList(),
+    /**
      * Optional compaction hook. When set, the Agent estimates the current history
      * before each LLM turn and calls [Compactor.process] once the estimate crosses
      * [compactionTokenThreshold] (OpenCode uses ~85 % of the model's context
@@ -106,7 +119,10 @@ class Agent(
     private val log = Loggers.get("agent")
 
     private val executor = AgentTurnExecutor(
-        provider = provider,
+        providers = buildList {
+            add(provider)
+            addAll(fallbackProviders.filter { it.id != provider.id })
+        },
         registry = registry,
         permissions = permissions,
         store = store,
@@ -287,6 +303,7 @@ class Agent(
             // the ToolContext seen by freshly dispatched tools (VISION §5.4).
             val currentProjectId = store.getSession(input.sessionId)?.currentProjectId
 
+            var providerIndex = 0
             var attempt = 0
             var asstMsg: Message.Assistant
             var turnResult: TurnResult
@@ -302,15 +319,47 @@ class Agent(
                 store.appendMessage(asstMsg)
                 handle.currentAssistantId = asstMsg.id
 
-                turnResult = executor.streamTurn(asstMsg, history, input, currentProjectId)
+                turnResult = executor.streamTurn(
+                    asstMsg, history, input, currentProjectId, providerIndex,
+                )
 
                 // Only retry when the turn failed and nothing useful was streamed.
                 // Mid-stream errors (rare — an error event after text/tool_calls) are
                 // preserved so the user sees the partial output.
                 if (turnResult.finish != FinishReason.ERROR) break
                 if (turnResult.emittedContent) break
-                if (attempt >= retryPolicy.maxAttempts) break
                 val reason = RetryClassifier.reason(turnResult.error, turnResult.retriable) ?: break
+
+                // Same-provider retry budget exhausted AND a fallback provider is
+                // configured → advance the chain. Mirrors OpenCode's
+                // `session/llm.ts` two-tier model: retry covers the same provider's
+                // transient blips, fallback covers sustained per-provider outages
+                // (a whole cloud down, a whole account rate-limited, etc.).
+                if (attempt >= retryPolicy.maxAttempts) {
+                    val nextIndex = providerIndex + 1
+                    if (nextIndex >= executor.providerCount) break
+                    val fromId = executor.providerIdAt(providerIndex)
+                    val toId = executor.providerIdAt(nextIndex)
+                    log.info(
+                        "provider.fallback",
+                        "session" to input.sessionId.value,
+                        "from" to fromId,
+                        "to" to toId,
+                        "reason" to reason,
+                    )
+                    bus.publish(
+                        BusEvent.AgentProviderFallback(
+                            sessionId = input.sessionId,
+                            fromProviderId = fromId,
+                            toProviderId = toId,
+                            reason = reason,
+                        ),
+                    )
+                    runCatching { store.deleteMessage(asstMsg.id) }
+                    providerIndex = nextIndex
+                    attempt = 0
+                    continue
+                }
 
                 val wait = retryPolicy.delayFor(attempt, turnResult.retryAfterMs)
                 log.info(

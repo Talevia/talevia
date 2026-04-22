@@ -430,6 +430,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
                 bus = bus,
             ),
             titler = SessionTitler(provider = provider, store = sessions),
+            fallbackProviders = providers.all().filter { it.id != provider.id },
         )
     }
 

@@ -15,8 +15,10 @@ import kotlinx.coroutines.flow.flow
  * Captures every [LlmRequest] in [requests] so tests can assert what the Agent sent
  * (e.g. that tool_results were threaded back into the second turn).
  */
-class FakeProvider(turns: List<List<LlmEvent>>) : LlmProvider {
-    override val id: String = "fake"
+class FakeProvider(
+    turns: List<List<LlmEvent>>,
+    override val id: String = "fake",
+) : LlmProvider {
     private val turnQueue = ArrayDeque(turns)
     val requests = mutableListOf<LlmRequest>()
 

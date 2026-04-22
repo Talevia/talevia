@@ -412,6 +412,7 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.PermissionReplied -> "permission.replied"
     is BusEvent.AgentRunFailed -> "agent.run.failed"
     is BusEvent.AgentRetryScheduled -> "agent.retry.scheduled"
+    is BusEvent.AgentProviderFallback -> "agent.provider.fallback"
     is BusEvent.SessionCompactionAuto -> "session.compaction.auto"
     is BusEvent.AgentRunStateChanged -> "agent.run.state.changed"
     is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
@@ -519,6 +520,10 @@ data class BusEventDto(
     val runStateCause: String? = null,
     /** Human-readable DAG issues. Set for `project.validation.warning`. */
     val validationIssues: List<String>? = null,
+    /** Set for `agent.provider.fallback` — provider the chain is leaving. */
+    val fromProviderId: String? = null,
+    /** Set for `agent.provider.fallback` — provider the chain is advancing to. */
+    val toProviderId: String? = null,
 ) {
     companion object {
         fun from(e: BusEvent): BusEventDto = when (e) {
@@ -555,6 +560,12 @@ data class BusEventDto(
             is BusEvent.AgentRetryScheduled -> BusEventDto(
                 "agent.retry.scheduled", e.sessionId.value,
                 attempt = e.attempt, waitMs = e.waitMs, reason = e.reason,
+            )
+            is BusEvent.AgentProviderFallback -> BusEventDto(
+                "agent.provider.fallback", e.sessionId.value,
+                fromProviderId = e.fromProviderId,
+                toProviderId = e.toProviderId,
+                reason = e.reason,
             )
             is BusEvent.SessionCompactionAuto -> BusEventDto(
                 "session.compaction.auto", e.sessionId.value,
