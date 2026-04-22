@@ -19,5 +19,4 @@
 
 ## P2 — 记债 / 观望
 
-- **debt-register-template-tool-on-android-ios** — `CreateProjectFromTemplateTool` 当前只在 CLI / Desktop / Server 注册，Android / iOS 的 `AppContainer` 仍停留在 `CreateProjectTool`。小白模板路径（含新 `template="auto"`）在两个移动端平台默默缺失，违反 CLAUDE.md「五端装配」底线。**方向：** 在 `AndroidAppContainer.kt` 和 `apps/ios/Talevia/Platform/AppContainer.swift` 同步 register `CreateProjectFromTemplateTool`；已在 2026-04-21 auto-author decision 里标注。Rubric 外 / 顺手记录。
 
