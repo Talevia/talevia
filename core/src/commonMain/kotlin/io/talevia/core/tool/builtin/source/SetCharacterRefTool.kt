@@ -4,7 +4,9 @@ import io.talevia.core.AssetId
 import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
+import io.talevia.core.domain.AutoRegenHint
 import io.talevia.core.domain.ProjectStore
+import io.talevia.core.domain.autoRegenHint
 import io.talevia.core.domain.source.consistency.CharacterRefBody
 import io.talevia.core.domain.source.consistency.LoraPin
 import io.talevia.core.domain.source.consistency.addCharacterRef
@@ -93,6 +95,11 @@ class SetCharacterRefTool(
         val created: Boolean,
         /** Body fields the caller actually supplied in this call (regardless of create/patch). */
         val updatedFields: List<String>,
+        /**
+         * VISION §5.5 auto-regen hint: non-null when the project has any
+         * stale clips after this upsert. See [AutoRegenHint] for semantics.
+         */
+        val autoRegenHint: AutoRegenHint? = null,
     )
 
     override val id: String = "set_character_ref"
@@ -220,7 +227,7 @@ class SetCharacterRefTool(
         var created = false
         var resolvedNodeId: SourceNodeId? = null
 
-        projects.mutateSource(pid) { source ->
+        val updated = projects.mutateSource(pid) { source ->
             val existingId = candidateId?.let(::SourceNodeId)
             val existing = existingId?.let { source.byId[it] }
             if (existing != null) {
@@ -294,13 +301,19 @@ class SetCharacterRefTool(
             }
         }
         val nodeIdOut = resolvedNodeId!!.value
-        val out = Output(nodeIdOut, created, touched.distinct())
+        val hint = updated.autoRegenHint()
+        val out = Output(nodeIdOut, created, touched.distinct(), autoRegenHint = hint)
         val verb = if (created) "Created" else "Patched"
         val fieldsNote = if (out.updatedFields.isNotEmpty()) " fields=${out.updatedFields}" else ""
+        val regenNudge = if (hint != null) {
+            " autoRegenHint: ${hint.staleClipCount} stale clip(s) — suggested next: ${hint.suggestedTool}."
+        } else {
+            ""
+        }
         return ToolResult(
             title = if (created) "create character_ref ${input.name ?: nodeIdOut}" else "patch character_ref $nodeIdOut",
             outputForLlm = "$verb character_ref node $nodeIdOut.$fieldsNote " +
-                "contentHash bumped — downstream clips may go stale (check find_stale_clips).",
+                "contentHash bumped — downstream clips may go stale (check find_stale_clips).$regenNudge",
             data = out,
         )
     }

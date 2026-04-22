@@ -2,7 +2,9 @@ package io.talevia.core.tool.builtin.source
 
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
+import io.talevia.core.domain.AutoRegenHint
 import io.talevia.core.domain.ProjectStore
+import io.talevia.core.domain.autoRegenHint
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.domain.source.removeNode
 import io.talevia.core.permission.PermissionSpec
@@ -40,6 +42,11 @@ class RemoveSourceNodeTool(
     @Serializable data class Output(
         val nodeId: String,
         val removedKind: String,
+        /**
+         * VISION §5.5 auto-regen hint: non-null when any clip in the
+         * project is now stale. See [AutoRegenHint] for semantics.
+         */
+        val autoRegenHint: AutoRegenHint? = null,
     )
 
     override val id: String = "remove_source_node"
@@ -65,17 +72,23 @@ class RemoveSourceNodeTool(
         val pid = ProjectId(input.projectId)
         val nodeId = SourceNodeId(input.nodeId)
         var removedKind = ""
-        projects.mutateSource(pid) { source ->
+        val updated = projects.mutateSource(pid) { source ->
             val existing = source.byId[nodeId]
                 ?: error("Source node ${input.nodeId} not found in project ${input.projectId}")
             removedKind = existing.kind
             source.removeNode(nodeId)
         }
-        val out = Output(input.nodeId, removedKind)
+        val hint = updated.autoRegenHint()
+        val out = Output(input.nodeId, removedKind, autoRegenHint = hint)
+        val regenNudge = if (hint != null) {
+            " autoRegenHint: ${hint.staleClipCount} stale clip(s) — suggested next: ${hint.suggestedTool}."
+        } else {
+            ""
+        }
         return ToolResult(
             title = "remove source node ${input.nodeId}",
             outputForLlm = "Removed $removedKind node ${input.nodeId}. " +
-                "Clips that bound this id will be re-rendered next export.",
+                "Clips that bound this id will be re-rendered next export.$regenNudge",
             data = out,
         )
     }

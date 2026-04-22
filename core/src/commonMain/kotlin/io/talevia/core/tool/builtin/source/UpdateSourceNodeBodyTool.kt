@@ -2,7 +2,9 @@ package io.talevia.core.tool.builtin.source
 
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
+import io.talevia.core.domain.AutoRegenHint
 import io.talevia.core.domain.ProjectStore
+import io.talevia.core.domain.autoRegenHint
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.domain.source.replaceNode
 import io.talevia.core.permission.PermissionSpec
@@ -133,6 +135,11 @@ class UpdateSourceNodeBodyTool(
          * return these clips as stale on the next check.
          */
         val boundClipCount: Int,
+        /**
+         * VISION §5.5 auto-regen hint: non-null when the project has any
+         * stale clips after this edit. See [AutoRegenHint] for semantics.
+         */
+        val autoRegenHint: AutoRegenHint? = null,
     )
 
     override val id: String = "update_source_node_body"
@@ -226,6 +233,7 @@ class UpdateSourceNodeBodyTool(
             track.clips.count { nodeId in it.sourceBinding }
         }
 
+        val hint = updated.autoRegenHint()
         val staleHint = if (boundClipCount == 0) {
             " No clips bind this node directly; DAG descendants unchanged (body edits don't rewrite " +
                 "parent refs). Call find_stale_clips if you want to surface transitively-stale clips."
@@ -233,11 +241,16 @@ class UpdateSourceNodeBodyTool(
             " $boundClipCount clip(s) bind this node directly — they will show up as stale in " +
                 "find_stale_clips until re-rendered."
         }
+        val regenNudge = if (hint != null) {
+            " autoRegenHint: ${hint.staleClipCount} clip(s) need regeneration — suggested next: ${hint.suggestedTool}."
+        } else {
+            ""
+        }
 
         return ToolResult(
             title = "update source body for ${input.nodeId}",
             outputForLlm = "Replaced body of ${input.nodeId} (${kindSeen}). " +
-                "contentHash $previousHash → $newHash.$staleHint",
+                "contentHash $previousHash → $newHash.$staleHint$regenNudge",
             data = Output(
                 projectId = input.projectId,
                 nodeId = input.nodeId,
@@ -245,6 +258,7 @@ class UpdateSourceNodeBodyTool(
                 previousContentHash = previousHash,
                 newContentHash = newHash,
                 boundClipCount = boundClipCount,
+                autoRegenHint = hint,
             ),
         )
     }

@@ -5,6 +5,53 @@ import io.talevia.core.ClipId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.source.deepContentHashOf
 import io.talevia.core.domain.source.stale
+import kotlinx.serialization.Serializable
+
+/**
+ * VISION §5.5 auto-regen hint — attached to the `Output` of every
+ * source-mutation tool that can plausibly stale existing clips. Lets the
+ * agent follow up a source edit with a batched regeneration call
+ * **without** having to first dispatch `find_stale_clips` to see if it's
+ * worth it. `null` hint = no stale clips (agent can skip the suggestion);
+ * non-null = "here are N stale clips bound to the lockfile — the single
+ * suggested next tool is [suggestedTool]".
+ *
+ * Why a typed field instead of just prose in `outputForLlm`: the desktop
+ * + iOS UIs subscribe to typed Parts and show a "3 clips need regen"
+ * banner without re-parsing English. The prose is also emitted (the LLM
+ * consumes it), so the agent + the human UI stay in sync.
+ *
+ * @property staleClipCount Total stale clips in the project **after**
+ *   this mutation landed — computed via [Project.staleClipsFromLockfile].
+ *   Includes every clip whose bound source node(s) drifted from their
+ *   lockfile snapshot, not just ones freshly staled by this call — we
+ *   can't cleanly distinguish "staled by this edit" from "was already
+ *   stale" without snapshotting before the mutation, and the practical
+ *   answer the agent needs is "should I run regenerate_stale_clips
+ *   now?" which is the same in both cases.
+ * @property suggestedTool Always `"regenerate_stale_clips"` today. Kept
+ *   as a field (not a bare hint) so a later cycle can vary the suggestion
+ *   (e.g. point at `export(allowStale=true)` when the user's intent is
+ *   "publish now, regen later") without changing the Output shape.
+ */
+@Serializable
+data class AutoRegenHint(
+    val staleClipCount: Int,
+    val suggestedTool: String = "regenerate_stale_clips",
+)
+
+/**
+ * Derive an [AutoRegenHint] from the current project state, or `null`
+ * when nothing is stale. Centralises the "how should a source-mutation
+ * tool nudge the agent toward regeneration?" decision in one place so
+ * every mutation tool gets identical semantics. Call after the mutation
+ * lands; the hint reflects post-mutation state.
+ */
+fun Project.autoRegenHint(): AutoRegenHint? {
+    val stale = staleClipsFromLockfile()
+    if (stale.isEmpty()) return null
+    return AutoRegenHint(staleClipCount = stale.size)
+}
 
 /**
  * Project-layer half of the stale-propagation lane (VISION §3.2). Given a set of

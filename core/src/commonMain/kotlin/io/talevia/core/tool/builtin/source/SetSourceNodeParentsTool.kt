@@ -2,7 +2,9 @@ package io.talevia.core.tool.builtin.source
 
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
+import io.talevia.core.domain.AutoRegenHint
 import io.talevia.core.domain.ProjectStore
+import io.talevia.core.domain.autoRegenHint
 import io.talevia.core.domain.source.Source
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.domain.source.replaceNode
@@ -72,6 +74,11 @@ class SetSourceNodeParentsTool(
         val nodeId: String,
         val previousParentIds: List<String>,
         val newParentIds: List<String>,
+        /**
+         * VISION §5.5 auto-regen hint: non-null when the project has any
+         * stale clips after this parent-list rewrite. See [AutoRegenHint].
+         */
+        val autoRegenHint: AutoRegenHint? = null,
     )
 
     override val id: String = "set_source_node_parents"
@@ -122,7 +129,7 @@ class SetSourceNodeParentsTool(
         var previous: List<String> = emptyList()
         var next: List<String> = emptyList()
 
-        projects.mutateSource(pid) { source ->
+        val updated = projects.mutateSource(pid) { source ->
             val existing = source.byId[nodeId]
                 ?: error(
                     "node ${nodeId.value} not found in project ${input.projectId}; " +
@@ -135,15 +142,22 @@ class SetSourceNodeParentsTool(
             source.replaceNode(nodeId) { node -> node.copy(parents = refs) }
         }
 
+        val hint = updated.autoRegenHint()
+        val regenNudge = if (hint != null) {
+            " autoRegenHint: ${hint.staleClipCount} stale clip(s) — suggested next: ${hint.suggestedTool}."
+        } else {
+            ""
+        }
         return ToolResult(
             title = "set source parents for ${input.nodeId}",
             outputForLlm = "Replaced parents of ${input.nodeId}: was ${previous}, now ${next}. " +
-                "contentHash bumped — run find_stale_clips to see downstream impact.",
+                "contentHash bumped — run find_stale_clips to see downstream impact.$regenNudge",
             data = Output(
                 projectId = input.projectId,
                 nodeId = input.nodeId,
                 previousParentIds = previous,
                 newParentIds = next,
+                autoRegenHint = hint,
             ),
         )
     }
