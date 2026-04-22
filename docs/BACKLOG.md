@@ -17,8 +17,6 @@
 
 - **per-clip-incremental-render** — CLAUDE.md `Known incomplete` 首条：`ExportTool` 只 memoize 整时间线 export，没有"只重渲 stale 的一段 + 剩下从 cache 拼回"的增量路径。长项目一次小修改依旧全量 re-render。**方向：** 扩展 `RenderCache` 支持 per-clip-segment 级 memo（key 含 clip contentHash + source binding hash + profile）；`ExportTool` 发现 stale clip 集后只 re-ffmpeg 那几段 + concat 从 cache 拼接未变化段。参考 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 里记录的方向。Rubric §5.3。
 
-- **cost-budget-guard** — `aigc.cost.cents` 在 session / project 维度都能查了，但 agent 没有"超预算就停"的闸门。用户开一个跑 20 分钟的 vlog loop 可能烧到意外金额才意识到。**方向：** `set_session_spend_cap(cents)` + agent loop 每个 AIGC tool 调用前比对当前累计 (`session_query(select=spend)`) 与 cap；超了就插一个 permission-style `aigc.budget` ASK，用户可以放行继续或收手。Rubric §5.2。
-
 - **autonomous-regenerate-stale-on-source-edit** — 用户 `set_character_ref` 后，bound 到该节点的 clips 立刻 stale，但重生成要 agent 手动调 `regenerate_stale_clips`。VISION §5.5 "改全局风格传导成本" 目前是 agent-intervention cost。**方向：** `set_*` 类 source mutation 工具在 Output 附上 `autoRegenHint: { staleClipCount, suggestedTool: "regenerate_stale_clips" }`，系统 prompt 或 agent runtime 据此在下一轮主动跑一遍 regen（gated by permission + session rule）。Rubric §5.5。
 
 - **plan-execution-follow-through** — `draft_plan` 把"我打算这么做"的 steps 列出来，approvalStatus flip 为 approved 后，**agent 仍然要一条条人工 emit tool call**。没有自动化"按 plan 走"的闸门。VISION §5.4 的专家路径 batch-approval UX 少一半。**方向：** 新 tool `execute_plan(planId, dryRun?)` 按 plan 的 steps 顺序 dispatch 每个 step；遇到 `FAILED` 或用户新消息就暂停。单 tool 合并老 direction 里的 `execute_plan(planId)`。Rubric §5.4。
