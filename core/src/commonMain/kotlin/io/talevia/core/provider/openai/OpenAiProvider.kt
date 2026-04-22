@@ -280,7 +280,18 @@ class OpenAiProvider(
                             append(rendered)
                         }
                     }
-                    val replayable = toolParts.filter { it.state is ToolState.Running || it.state is ToolState.Completed }
+                    // Every tool part that emits a `role: tool` message below
+                    // MUST appear in this assistant's tool_calls — OpenAI
+                    // rejects the whole request with HTTP 400 "messages with
+                    // role 'tool' must be a response to a preceding message
+                    // with 'tool_calls'" otherwise. That means Failed counts
+                    // too: we emit a `role: tool` for its error message, so
+                    // the tool_call entry has to be here to anchor it.
+                    val replayable = toolParts.filter {
+                        it.state is ToolState.Running ||
+                            it.state is ToolState.Completed ||
+                            it.state is ToolState.Failed
+                    }
                     // OpenAI assistant messages: `content` is required as a string when
                     // there are no `tool_calls`. Aborted prior turns leave assistant
                     // messages with neither text nor tool_calls — emit "" so the
@@ -299,6 +310,13 @@ class OpenAiProvider(
                                 val input = when (val s = p.state) {
                                     is ToolState.Running -> s.input
                                     is ToolState.Completed -> s.input
+                                    // Failed may carry null input when the
+                                    // tool errored pre-dispatch (schema parse,
+                                    // missing required field). Replay as {}
+                                    // so the entry is well-formed; the paired
+                                    // `role: tool` message below still carries
+                                    // the error text.
+                                    is ToolState.Failed -> s.input ?: JsonObject(emptyMap())
                                     else -> JsonObject(emptyMap())
                                 }
                                 put("arguments", json.encodeToString(JsonElement.serializer(), input))

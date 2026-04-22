@@ -302,17 +302,31 @@ class AnthropicProvider(
                                 put("text", p.text)
                             }
                             is Part.Tool -> when (val s = p.state) {
-                                is ToolState.Running, is ToolState.Completed -> addJsonObject {
+                                // Failed tool calls MUST be replayed as
+                                // tool_use too: the paired tool_result below
+                                // references p.callId via tool_use_id, and
+                                // Anthropic rejects any tool_result that
+                                // doesn't resolve to a tool_use in the
+                                // preceding assistant turn. Pending is still
+                                // skipped — no callId yet on the wire.
+                                is ToolState.Running, is ToolState.Completed, is ToolState.Failed -> addJsonObject {
                                     put("type", "tool_use")
                                     put("id", p.callId.value)
                                     put("name", p.toolId)
                                     put("input", when (s) {
                                         is ToolState.Running -> s.input
                                         is ToolState.Completed -> s.input
+                                        // Pre-dispatch failures can carry
+                                        // null input (schema parse error).
+                                        // Replay as {} so the tool_use is
+                                        // well-formed; the paired tool_result
+                                        // still surfaces the error via
+                                        // is_error=true.
+                                        is ToolState.Failed -> s.input ?: JsonObject(emptyMap())
                                         else -> JsonObject(emptyMap())
                                     })
                                 }
-                                else -> { /* pending/failed tool calls aren't replayed as tool_use */ }
+                                else -> { /* pending tool calls aren't replayed as tool_use */ }
                             }
                             is Part.Reasoning -> if (p.text.isNotEmpty()) addJsonObject {
                                 put("type", "text")

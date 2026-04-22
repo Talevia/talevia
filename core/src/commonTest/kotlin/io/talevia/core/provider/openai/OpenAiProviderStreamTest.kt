@@ -9,7 +9,9 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
+import io.talevia.core.CallId
 import io.talevia.core.MessageId
+import io.talevia.core.PartId
 import io.talevia.core.SessionId
 import io.talevia.core.provider.LlmEvent
 import io.talevia.core.provider.LlmRequest
@@ -18,6 +20,10 @@ import io.talevia.core.session.FinishReason
 import io.talevia.core.session.Message
 import io.talevia.core.session.MessageWithParts
 import io.talevia.core.session.ModelRef
+import io.talevia.core.session.Part
+import io.talevia.core.session.ToolState
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
@@ -279,6 +285,74 @@ class OpenAiProviderStreamTest {
         assertTrue(err.message.contains("expected a string"))
         val finish = events.filterIsInstance<LlmEvent.StepFinish>().single()
         assertEquals(FinishReason.ERROR, finish.finish)
+    }
+
+    @Test
+    fun failedToolPartReplaysAsToolCallSoResultHasAnchor() = runTest {
+        // Regression: when the session history contains a Part.Tool in
+        // ToolState.Failed, the provider must emit a `tool_calls` entry for
+        // it on the assistant message AND the paired `role: tool` message
+        // below. Without the tool_calls entry, OpenAI rejects the whole
+        // request with HTTP 400 "messages with role 'tool' must be a
+        // response to a preceding message with 'tool_calls'", and the agent
+        // never recovers from a single tool failure — finish=ERROR on every
+        // subsequent turn. Anchor reproduces the user report from cli.log
+        // 2026-04-22: switch_project errored pre-dispatch, next step got
+        // stuck looping the same 400.
+        val sid = SessionId("s1")
+        val model = ModelRef("openai", "gpt-test")
+        val ts = Instant.fromEpochMilliseconds(0)
+        val failedToolArgs: JsonObject = buildJsonObject { /* empty */ }
+        val assistantWithFailedTool = MessageWithParts(
+            message = Message.Assistant(
+                id = MessageId("a1"),
+                sessionId = sid,
+                createdAt = ts,
+                parentId = MessageId("u1"),
+                model = model,
+            ),
+            parts = listOf(
+                Part.Tool(
+                    id = PartId("p1"),
+                    messageId = MessageId("a1"),
+                    sessionId = sid,
+                    createdAt = ts,
+                    callId = CallId("call_failed_xyz"),
+                    toolId = "switch_project",
+                    state = ToolState.Failed(input = failedToolArgs, message = "project 'session' not found"),
+                ),
+            ),
+        )
+        val req = LlmRequest(model = model, messages = listOf(assistantWithFailedTool))
+
+        var capturedBody: String? = null
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler { request ->
+                    capturedBody = (request.body as TextContent).text
+                    respond(
+                        content = ByteReadChannel("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n"),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Text.EventStream.toString()),
+                    )
+                }
+            }
+        }
+        OpenAiProvider(client, apiKey = "test-key").stream(req).toList()
+
+        val msgs = Json.parseToJsonElement(capturedBody!!).jsonObject["messages"]!!.jsonArray
+        val assistant = msgs.single { it.jsonObject["role"]!!.jsonPrimitive.content == "assistant" }.jsonObject
+        val toolCalls = assistant["tool_calls"]!!.jsonArray
+        assertEquals(1, toolCalls.size)
+        assertEquals("call_failed_xyz", toolCalls[0].jsonObject["id"]!!.jsonPrimitive.content)
+        assertEquals(
+            "switch_project",
+            toolCalls[0].jsonObject["function"]!!.jsonObject["name"]!!.jsonPrimitive.content,
+        )
+        // And the matching tool result message references the same id.
+        val toolMsg = msgs.single { it.jsonObject["role"]!!.jsonPrimitive.content == "tool" }.jsonObject
+        assertEquals("call_failed_xyz", toolMsg["tool_call_id"]!!.jsonPrimitive.content)
+        assertTrue(toolMsg["content"]!!.jsonPrimitive.content.contains("not found"))
     }
 
     private fun simpleRequest() = LlmRequest(

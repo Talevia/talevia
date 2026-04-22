@@ -8,12 +8,28 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
+import io.ktor.http.content.TextContent
+import io.talevia.core.CallId
+import io.talevia.core.MessageId
+import io.talevia.core.PartId
+import io.talevia.core.SessionId
 import io.talevia.core.provider.LlmEvent
 import io.talevia.core.provider.LlmRequest
 import io.talevia.core.session.FinishReason
+import io.talevia.core.session.Message
+import io.talevia.core.session.MessageWithParts
 import io.talevia.core.session.ModelRef
+import io.talevia.core.session.Part
+import io.talevia.core.session.ToolState
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.Instant
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -143,6 +159,74 @@ class AnthropicProviderStreamTest {
         assertEquals(3L, finish.usage.output)
         assertEquals(80L, finish.usage.cacheRead)
         assertEquals(20L, finish.usage.cacheWrite)
+    }
+
+    @Test
+    fun failedToolPartReplaysAsToolUseSoResultHasAnchor() = runTest {
+        // Regression: Anthropic rejects any `tool_result` whose tool_use_id
+        // does not resolve to a `tool_use` in the preceding assistant turn.
+        // Failed tool parts MUST be replayed as tool_use. Same invariant as
+        // the OpenAI provider — see OpenAiProviderStreamTest for the anchor
+        // that first surfaced this in the CLI.
+        val sid = SessionId("s1")
+        val model = ModelRef("anthropic", "claude-test")
+        val ts = Instant.fromEpochMilliseconds(0)
+        val failedArgs: JsonObject = buildJsonObject { /* empty */ }
+        val assistantWithFailedTool = MessageWithParts(
+            message = Message.Assistant(
+                id = MessageId("a1"),
+                sessionId = sid,
+                createdAt = ts,
+                parentId = MessageId("u1"),
+                model = model,
+            ),
+            parts = listOf(
+                Part.Tool(
+                    id = PartId("p1"),
+                    messageId = MessageId("a1"),
+                    sessionId = sid,
+                    createdAt = ts,
+                    callId = CallId("toolu_failed_xyz"),
+                    toolId = "switch_project",
+                    state = ToolState.Failed(input = failedArgs, message = "project 'session' not found"),
+                ),
+            ),
+        )
+        val req = LlmRequest(model = model, messages = listOf(assistantWithFailedTool))
+
+        var capturedBody: String? = null
+        val client = HttpClient(MockEngine) {
+            engine {
+                addHandler { request ->
+                    capturedBody = (request.body as TextContent).text
+                    respond(
+                        content = ByteReadChannel(
+                            "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}\n\n" +
+                                "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":1}}\n\n" +
+                                "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+                        ),
+                        status = HttpStatusCode.OK,
+                        headers = headersOf(HttpHeaders.ContentType, ContentType.Text.EventStream.toString()),
+                    )
+                }
+            }
+        }
+        AnthropicProvider(client, apiKey = "test-key").stream(req).toList()
+
+        val body = Json.parseToJsonElement(capturedBody!!).jsonObject
+        val msgs = body["messages"]!!.jsonArray
+        val assistant = msgs.single { it.jsonObject["role"]!!.jsonPrimitive.content == "assistant" }.jsonObject
+        val toolUses = assistant["content"]!!.jsonArray
+            .filter { it.jsonObject["type"]?.jsonPrimitive?.content == "tool_use" }
+        assertEquals(1, toolUses.size)
+        assertEquals("toolu_failed_xyz", toolUses[0].jsonObject["id"]!!.jsonPrimitive.content)
+        // The paired tool_result rides on the following user turn.
+        val userAfter = msgs.last { it.jsonObject["role"]!!.jsonPrimitive.content == "user" }.jsonObject
+        val toolResults = userAfter["content"]!!.jsonArray
+            .filter { it.jsonObject["type"]?.jsonPrimitive?.content == "tool_result" }
+        assertEquals(1, toolResults.size)
+        assertEquals("toolu_failed_xyz", toolResults[0].jsonObject["tool_use_id"]!!.jsonPrimitive.content)
+        assertEquals(true, toolResults[0].jsonObject["is_error"]!!.jsonPrimitive.content.toBoolean())
     }
 
     private fun simpleRequest() = LlmRequest(
