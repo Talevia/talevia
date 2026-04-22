@@ -326,6 +326,7 @@ class ServerContainer(
         register(io.talevia.core.tool.builtin.meta.ListToolsTool(this))
         register(io.talevia.core.tool.builtin.meta.EstimateTokensTool())
         register(TodoWriteTool())
+        register(io.talevia.core.tool.builtin.DraftPlanTool())
         register(SessionQueryTool(sessions, agentStates, projects))
         register(ExportSessionTool(sessions))
         register(EstimateSessionTokensTool(sessions))

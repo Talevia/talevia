@@ -14,6 +14,10 @@ object DefaultPermissionRuleset {
         // Agent scratchpad — purely local state, zero side effects, prompting
         // on every todo update would make the tool useless for multi-step intents.
         PermissionRule(permission = "todowrite", pattern = "*", action = PermissionAction.ALLOW),
+        // Pre-commit plan drafting (draft_plan). Same rationale as todowrite —
+        // purely local Part.Plan emission, no external side effects. The tool
+        // IS the confirm step; gating it would defeat the purpose.
+        PermissionRule(permission = "draft_plan", pattern = "*", action = PermissionAction.ALLOW),
         PermissionRule(permission = "media.import", pattern = "*", action = PermissionAction.ALLOW),
         PermissionRule(permission = "timeline.write", pattern = "*", action = PermissionAction.ALLOW),
         // Source-graph reads/writes are local-only state mutations (no I/O, no cost) — silent

@@ -15,7 +15,7 @@ import kotlinx.serialization.json.JsonArray
 internal val VALID_ROLES: Set<String> = setOf("user", "assistant")
 internal val VALID_PART_KINDS: Set<String> = setOf(
     "text", "reasoning", "tool", "media", "timeline-snapshot",
-    "render-progress", "step-start", "step-finish", "compaction", "todos",
+    "render-progress", "step-start", "step-finish", "compaction", "todos", "plan",
 )
 internal const val PREVIEW_CHARS = 80
 
@@ -45,6 +45,7 @@ internal fun Part.kindDiscriminator(): String = when (this) {
     is Part.StepFinish -> "step-finish"
     is Part.Compaction -> "compaction"
     is Part.Todos -> "todos"
+    is Part.Plan -> "plan"
 }
 
 internal fun Part.preview(): String = when (this) {
@@ -75,5 +76,12 @@ internal fun Part.preview(): String = when (this) {
         val inProgress = todos.count { it.status.name == "IN_PROGRESS" }
         val done = todos.count { it.status.name == "COMPLETED" }
         "${todos.size} todo(s) pending=$pending in_progress=$inProgress done=$done"
+    }
+    is Part.Plan -> {
+        val pending = steps.count { it.status.name == "PENDING" }
+        val done = steps.count { it.status.name == "COMPLETED" }
+        val failed = steps.count { it.status.name == "FAILED" }
+        val approval = approvalStatus.name.lowercase()
+        "${steps.size} step(s) pending=$pending done=$done failed=$failed [$approval]"
     }
 }

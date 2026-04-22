@@ -100,6 +100,7 @@ private fun Part.toSummary(): SessionQueryTool.MessagePartSummary {
         is Part.StepFinish -> "step-finish"
         is Part.Compaction -> "compaction"
         is Part.Todos -> "todos"
+        is Part.Plan -> "plan"
     }
     val preview = when (this) {
         is Part.Text -> text.take(80)
@@ -128,6 +129,13 @@ private fun Part.toSummary(): SessionQueryTool.MessagePartSummary {
             val inProgress = todos.count { it.status.name == "IN_PROGRESS" }
             val done = todos.count { it.status.name == "COMPLETED" }
             "${todos.size} todo(s) pending=$pending in_progress=$inProgress done=$done"
+        }
+        is Part.Plan -> {
+            val pending = steps.count { it.status.name == "PENDING" }
+            val done = steps.count { it.status.name == "COMPLETED" }
+            val failed = steps.count { it.status.name == "FAILED" }
+            val approval = approvalStatus.name.lowercase()
+            "${steps.size} step(s) pending=$pending done=$done failed=$failed [$approval]"
         }
     }
     return SessionQueryTool.MessagePartSummary(

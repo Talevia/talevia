@@ -108,6 +108,7 @@ class ReadPartTool(
             is Part.StepFinish -> "step-finish"
             is Part.Compaction -> "compaction"
             is Part.Todos -> "todos"
+            is Part.Plan -> "plan"
         }
 
         val out = Output(

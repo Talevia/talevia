@@ -155,6 +155,34 @@ sealed class Part {
         /** Forward-compat discriminator. See [PartSchema]. */
         val schemaVersion: Int = PartSchema.CURRENT,
     ) : Part()
+
+    /**
+     * Structured pre-commit plan of tool dispatches — VISION §5.4 dry-run-before-
+     * execute UX. Emitted by the `draft_plan` tool with the agent-composed list
+     * of steps it intends to take. The plan is **not** executed by persisting
+     * this Part; it sits on the turn as a contract for the user to inspect.
+     * Approval flows through the regular next-message loop: the user replies
+     * "go ahead" and the agent proceeds with the underlying tool calls, updating
+     * step [PlanStep.status] via subsequent `draft_plan` emissions as each step
+     * moves PENDING → IN_PROGRESS → COMPLETED / FAILED.
+     *
+     * Distinct from [Todos] because each step carries a structured
+     * `(toolName, inputSummary)` — the UI can render a reviewable "I'm about
+     * to dispatch these 7 tool calls" panel rather than a free-text checklist.
+     */
+    @Serializable @SerialName("plan")
+    data class Plan(
+        override val id: PartId,
+        override val messageId: MessageId,
+        override val sessionId: SessionId,
+        override val createdAt: Instant,
+        override val compactedAt: Instant? = null,
+        val goalDescription: String,
+        val steps: List<PlanStep>,
+        val approvalStatus: PlanApprovalStatus = PlanApprovalStatus.PENDING_APPROVAL,
+        /** Forward-compat discriminator. See [PartSchema]. */
+        val schemaVersion: Int = PartSchema.CURRENT,
+    ) : Part()
 }
 
 @Serializable
@@ -177,6 +205,63 @@ enum class TodoPriority {
     @SerialName("high") HIGH,
     @SerialName("medium") MEDIUM,
     @SerialName("low") LOW,
+}
+
+/**
+ * One planned tool dispatch inside a [Part.Plan]. The agent populates
+ * [toolName] + [inputSummary] (human-readable) so the user can scan the plan
+ * without reading raw JSON; [status] tracks execution progress across
+ * follow-up `draft_plan` emissions.
+ *
+ * @property step 1-based step number for readability (UI "Step 3 of 7").
+ * @property toolName the tool id the agent intends to dispatch (e.g.
+ *   `"generate_image"`, `"add_clip"`).
+ * @property inputSummary a 1-line human summary of the key inputs
+ *   (e.g. `"generate_image prompt=\"a dog\" 1024×1024"`). Callers
+ *   shouldn't stuff the whole JSON here; the full inputs are re-derived
+ *   when the agent actually dispatches the tool.
+ * @property status tri+-state — mirrors [TodoStatus] plus an explicit
+ *   `FAILED` so a broken step doesn't silently disappear under
+ *   "cancelled". Default `PENDING`.
+ * @property note optional free-text annotation; the agent may fill this
+ *   with a reason ("skipping because asset already imported") that the
+ *   user can see alongside the step.
+ */
+@Serializable
+data class PlanStep(
+    val step: Int,
+    val toolName: String,
+    val inputSummary: String,
+    val status: PlanStepStatus = PlanStepStatus.PENDING,
+    val note: String? = null,
+)
+
+@Serializable
+enum class PlanStepStatus {
+    @SerialName("pending") PENDING,
+    @SerialName("in_progress") IN_PROGRESS,
+    @SerialName("completed") COMPLETED,
+    @SerialName("failed") FAILED,
+    @SerialName("cancelled") CANCELLED,
+}
+
+@Serializable
+enum class PlanApprovalStatus {
+    /** Freshly drafted; waiting for the user to ack before execution. */
+    @SerialName("pending_approval") PENDING_APPROVAL,
+
+    /** User approved verbatim. Agent may proceed. */
+    @SerialName("approved") APPROVED,
+
+    /**
+     * User approved after editing at least one step. Same semantics as
+     * [APPROVED] for the agent; distinct state so UI can surface "this plan
+     * diverges from the original draft".
+     */
+    @SerialName("approved_with_edits") APPROVED_WITH_EDITS,
+
+    /** User rejected the plan; agent must not execute any step. */
+    @SerialName("rejected") REJECTED,
 }
 
 @Serializable
