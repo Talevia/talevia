@@ -16,7 +16,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **cross-session-spend-aggregator** — `session_query(select=spend)` 只聚合单 session 的 AIGC 花费。项目总花费（跨所有 session 的 lockfile 条目）没查询入口。**方向：** 把 `SELECT_SPEND` 扩到接受 `projectId` 且不要求 `sessionId`，或在 `project_query` 加 `select=spend`；聚合口径跟单 session 保持一致（同 `costCents`、同 groupBy）。Rubric §5.2。
 - **desktop-render-preview-panel** — Cycle 32 落了 `Part.RenderProgress.thumbnailPath`，但 desktop app 的 `Main.kt:196` 对 `Part.RenderProgress` 只打一行 progress string。长 export 还是 "两头看到 started/completed" 的 UX。**方向：** desktop Compose 的 render-progress 区加一块小面板，消费最新 `thumbnailPath` 的 JPEG bytes 显示出来；监听文件 mtime 或直接用 `Part.createdAt` 换 key。Rubric §5.4 expert path。
 - **cli-streaming-tool-output-renderer** — CLI `Renderer` 把 `Part.ToolCall` 当一次性打印，`Part.RenderProgress` 每条新一行。流式工具输出（cycle 里落的 streaming-tool-output-parts）在 CLI 上没有专门的"原地覆盖 / 折叠"表现。**方向：** Renderer 对同一 CallId 的连续 ToolCall parts 做就地 rewrite（ANSI `\r` 或 `\x1b[K`），RenderProgress 同 jobId 合成一行进度条 + 最新 preview 路径。Rubric §5.4。
 - **tool-cost-preflight-estimate** — AIGC 工具调用前没有"本次调用大约要花多少"的入口 —— cost-budget-guard 只在**花了之后**才拦。LLM 要自己判断能不能调用这个 tool 只能凭感觉。**方向：** 新 `describe_tool_cost(toolId, input) -> CostEstimate(cents, currency, basis)` 或 `list_tools` 扩一个 `estimateCentsPer` 字段；值来自 provider-level pricing 表（Replicate / OpenAI / Anthropic 都在 MetricsRegistry 已经记录）。Rubric §5.2。
