@@ -122,3 +122,7 @@ If a task touches one of these, expect to wire it up rather than work around it.
 
 - `docs/IOS_INTEGRATION.md` — Xcode wiring, xcodegen, SKIE caveats.
 - `docs/ANDROID_INTEGRATION.md` — SDK prerequisites, Media3 limitations.
+
+## CLI changes require end-to-end validation
+
+Any change under `apps/cli/` (Renderer, EventRouter, StdinPermissionPrompt, Repl, CliContainer, slash commands) or any tool whose JSON schema the CLI loads must be end-to-end validated before it's declared done. `:apps:cli:test` green is not sufficient — the user-visible surface depends on `isTty`, ANSI cursor math, CJK wrapping, and JLine quirks that unit tests skip. Invoke the `cli-e2e-testing` skill for the full three-layer recipe and checklist.
