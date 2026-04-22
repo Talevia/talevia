@@ -11,6 +11,7 @@ import io.talevia.core.db.TaleviaDb
 import io.talevia.core.db.TaleviaDbFactory
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.SqlDelightProjectStore
+import io.talevia.cli.permission.cliPermissionRules
 import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.permission.DefaultPermissionService
 import io.talevia.core.platform.AsrEngine
@@ -191,7 +192,16 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
     val fileSystem: FileSystem = JvmFileSystem()
     val processRunner: ProcessRunner = JvmProcessRunner()
     val permissions = DefaultPermissionService(bus)
-    val permissionRules = DefaultPermissionRuleset.rules.toMutableList()
+
+    /**
+     * CLI auto-approves every ASK by default — see [cliPermissionRules] for the
+     * rationale. Opt out with `TALEVIA_CLI_PROMPT_ON_ASK=1`.
+     */
+    val permissionRules: MutableList<io.talevia.core.permission.PermissionRule> =
+        cliPermissionRules(
+            base = DefaultPermissionRuleset.rules,
+            autoApprove = env["TALEVIA_CLI_PROMPT_ON_ASK"] != "1",
+        ).toMutableList()
     val secrets: SecretStore = FileSecretStore()
 
     val httpClient: HttpClient = HttpClient(CIO)
