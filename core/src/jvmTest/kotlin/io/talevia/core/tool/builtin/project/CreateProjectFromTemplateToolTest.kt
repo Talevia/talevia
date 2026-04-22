@@ -258,4 +258,131 @@ class CreateProjectFromTemplateToolTest {
         assertNotNull(summary, "created project must appear in listSummaries")
         assertEquals(title, summary!!.title, "project title must match the input title")
     }
+
+    // ── template='auto' — intent-driven classification (VISION §5.4 novice path) ──
+
+    @Test fun autoTemplateClassifiesNarrativeFromStoryKeywords() = runTest {
+        val store = newStore()
+        val tool = CreateProjectFromTemplateTool(store)
+        val out = tool.execute(
+            CreateProjectFromTemplateTool.Input(
+                title = "Short Story",
+                template = "auto",
+                projectId = "auto-narr",
+                intent = "A short film about two friends reconnecting after ten years — a character-driven drama scene.",
+            ),
+            ctx(),
+        ).data
+
+        assertEquals("narrative", out.template)
+        assertTrue(out.inferredFromIntent)
+        assertNotNull(out.inferredReason)
+        // At least one of the narrative keywords (short film / scene / character-driven / drama) hits.
+        assertTrue(out.inferredReason!!.contains("narrative"), out.inferredReason)
+        // Actually seeded a narrative skeleton.
+        val project = store.get(ProjectId("auto-narr"))!!
+        assertEquals(6, project.source.nodes.size)
+    }
+
+    @Test fun autoTemplateClassifiesMusicMvFromMusicKeyword() = runTest {
+        val store = newStore()
+        val tool = CreateProjectFromTemplateTool(store)
+        val out = tool.execute(
+            CreateProjectFromTemplateTool.Input(
+                title = "Debut MV",
+                template = "auto",
+                projectId = "auto-mv",
+                intent = "Help me make a music video for my band's new song.",
+            ),
+            ctx(),
+        ).data
+        assertEquals("musicmv", out.template)
+        assertTrue(out.inferredFromIntent)
+    }
+
+    @Test fun autoTemplateClassifiesTutorial() = runTest {
+        val store = newStore()
+        val tool = CreateProjectFromTemplateTool(store)
+        val out = tool.execute(
+            CreateProjectFromTemplateTool.Input(
+                title = "Sourdough 101",
+                template = "auto",
+                projectId = "auto-tut",
+                intent = "A step-by-step how-to for baking sourdough at home.",
+            ),
+            ctx(),
+        ).data
+        assertEquals("tutorial", out.template)
+        assertTrue(out.inferredFromIntent)
+    }
+
+    @Test fun autoTemplateFallsBackToNarrativeOnEmptySignal() = runTest {
+        val store = newStore()
+        val tool = CreateProjectFromTemplateTool(store)
+        val out = tool.execute(
+            CreateProjectFromTemplateTool.Input(
+                title = "Mystery Project",
+                template = "auto",
+                projectId = "auto-fallback",
+                // No genre keywords — classifier falls back to narrative.
+                intent = "Just something nice for my grandmother.",
+            ),
+            ctx(),
+        ).data
+        assertEquals("narrative", out.template)
+        assertTrue(out.inferredFromIntent)
+        assertTrue(out.inferredReason!!.contains("default", ignoreCase = true), out.inferredReason)
+    }
+
+    @Test fun autoTemplateRejectsBlankIntent() = runTest {
+        val store = newStore()
+        val tool = CreateProjectFromTemplateTool(store)
+        val ex = assertFailsWith<IllegalArgumentException> {
+            tool.execute(
+                CreateProjectFromTemplateTool.Input(
+                    title = "No Intent",
+                    template = "auto",
+                    projectId = "auto-blank",
+                    intent = "   ",
+                ),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("intent"), ex.message)
+    }
+
+    @Test fun autoTemplateRejectsMissingIntent() = runTest {
+        val store = newStore()
+        val tool = CreateProjectFromTemplateTool(store)
+        val ex = assertFailsWith<IllegalArgumentException> {
+            tool.execute(
+                CreateProjectFromTemplateTool.Input(
+                    title = "Missing Intent",
+                    template = "auto",
+                    projectId = "auto-missing",
+                ),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("intent"), ex.message)
+    }
+
+    @Test fun explicitTemplateIgnoresIntent() = runTest {
+        // Intent with strong vlog signal, but explicit template = "ad" still wins
+        // — regression guard against auto-mode leaking into explicit calls.
+        val store = newStore()
+        val tool = CreateProjectFromTemplateTool(store)
+        val out = tool.execute(
+            CreateProjectFromTemplateTool.Input(
+                title = "Explicit Ad",
+                template = "ad",
+                projectId = "p-explicit",
+                intent = "A day in the life vlog",
+            ),
+            ctx(),
+        ).data
+        assertEquals("ad", out.template)
+        assertEquals(false, out.inferredFromIntent)
+        assertEquals(null, out.inferredReason)
+    }
 }

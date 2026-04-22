@@ -12,6 +12,7 @@ import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.project.template.IntentClassifier
 import io.talevia.core.tool.builtin.project.template.seedAdTemplate
 import io.talevia.core.tool.builtin.project.template.seedMusicMvTemplate
 import io.talevia.core.tool.builtin.project.template.seedNarrativeTemplate
@@ -57,27 +58,50 @@ class CreateProjectFromTemplateTool(
 
     @Serializable data class Input(
         val title: String,
+        /**
+         * Genre template id: `"narrative"`, `"vlog"`, `"ad"`, `"musicmv"`,
+         * `"tutorial"`, or `"auto"`. When `"auto"`, [intent] is required
+         * and drives classification via [IntentClassifier].
+         */
         val template: String,
         val projectId: String? = null,
         val resolutionPreset: String? = null,
         val fps: Int? = null,
+        /**
+         * Free-form user intent — required when `template = "auto"`, ignored
+         * otherwise. Parsed by a deterministic keyword classifier on-device;
+         * no LLM round-trip. VISION §5.4 novice-path primitive: the agent /
+         * user types one sentence, the tool picks a genre and seeds the
+         * source DAG.
+         */
+        val intent: String? = null,
     )
 
     @Serializable data class Output(
         val projectId: String,
         val title: String,
+        /** Echo of the template actually seeded (resolved from `auto` when applicable). */
         val template: String,
         val resolutionWidth: Int,
         val resolutionHeight: Int,
         val fps: Int,
         val seededNodeIds: List<String>,
+        /**
+         * Set only when the caller passed `template = "auto"`. Explains
+         * which keywords drove classification so the agent can redo with
+         * an explicit template if the inference was wrong.
+         */
+        val inferredFromIntent: Boolean = false,
+        val inferredReason: String? = null,
     )
 
     override val id: String = "create_project_from_template"
     override val helpText: String =
         "Create a new project and seed its source DAG with a genre template so the " +
             "agent doesn't start from zero nodes. Templates: narrative / vlog / ad / " +
-            "musicmv / tutorial. All seeded nodes use TODO placeholders — replace " +
+            "musicmv / tutorial. Pass template='auto' plus an `intent` string to let " +
+            "the tool classify the genre from keywords (novice path — one call, " +
+            "source DAG pre-populated). All seeded nodes use TODO placeholders — replace " +
             "them via update_source_node_body / set_character_ref / set_style_bible / " +
             "set_brand_palette before the first AIGC call. The musicmv template does " +
             "not seed a musicmv.track node (needs an imported music asset first). " +
@@ -94,8 +118,9 @@ class CreateProjectFromTemplateTool(
                 put("type", "string")
                 put(
                     "description",
-                    "Genre template: 'narrative', 'vlog', 'ad', 'musicmv', or 'tutorial'. " +
-                        "All seed the source DAG with placeholder nodes the agent / user then fills in.",
+                    "Genre template: 'narrative', 'vlog', 'ad', 'musicmv', 'tutorial', or 'auto'. " +
+                        "All non-auto templates seed the source DAG with placeholder nodes the agent / user " +
+                        "then fills in. 'auto' requires `intent` and classifies the genre from keywords.",
                 )
             }
             putJsonObject("projectId") {
@@ -109,6 +134,14 @@ class CreateProjectFromTemplateTool(
             putJsonObject("fps") {
                 put("type", "integer")
                 put("description", "Output frame rate: 24, 30 (default), or 60.")
+            }
+            putJsonObject("intent") {
+                put("type", "string")
+                put(
+                    "description",
+                    "One-sentence user intent. Required when template='auto'; ignored otherwise. " +
+                        "Used to classify the genre via on-device keyword match (no LLM round-trip).",
+                )
             }
         }
         put("required", JsonArray(listOf(JsonPrimitive("title"), JsonPrimitive("template"))))
@@ -127,7 +160,8 @@ class CreateProjectFromTemplateTool(
         val profile = OutputProfile(resolution = resolution, frameRate = frameRate)
         val timeline = Timeline(resolution = resolution, frameRate = frameRate)
 
-        val (source, seededIds) = dispatchTemplate(input.template)
+        val resolved = resolveTemplate(input)
+        val (source, seededIds) = dispatchTemplate(resolved.template)
 
         val project = Project(id = pid, timeline = timeline, outputProfile = profile, source = source)
         projects.upsert(input.title, project)
@@ -135,21 +169,43 @@ class CreateProjectFromTemplateTool(
         val out = Output(
             projectId = pid.value,
             title = input.title,
-            template = input.template.lowercase(),
+            template = resolved.template,
             resolutionWidth = resolution.width,
             resolutionHeight = resolution.height,
             fps = frameRate.numerator,
             seededNodeIds = seededIds,
+            inferredFromIntent = resolved.inferred,
+            inferredReason = resolved.reason,
         )
+        val inferenceNote = if (resolved.inferred) " (auto-inferred: ${resolved.reason})" else ""
         return ToolResult(
-            title = "create project ${input.title} from ${input.template}",
+            title = "create project ${input.title} from ${resolved.template}",
             outputForLlm = "Created project ${pid.value} (\"${input.title}\") at " +
                 "${resolution.width}x${resolution.height}@${frameRate.numerator}fps " +
-                "from ${input.template} template. Seeded ${seededIds.size} source node(s): " +
+                "from ${resolved.template} template$inferenceNote. Seeded ${seededIds.size} source node(s): " +
                 "${seededIds.joinToString(", ")}. Fill in TODO placeholders via update_* tools " +
                 "before the first AIGC call.",
             data = out,
         )
+    }
+
+    private data class ResolvedTemplate(val template: String, val inferred: Boolean, val reason: String?)
+
+    /**
+     * Normalise the `template` field and run classification when needed.
+     * `"auto"` fails loud if `intent` is missing — silent narrative
+     * fallback would hide novice-mode misuse. The classifier itself does
+     * no LLM calls, so this stays a pure function of `(template, intent)`.
+     */
+    private fun resolveTemplate(input: Input): ResolvedTemplate {
+        val raw = input.template.trim().lowercase()
+        if (raw != "auto") return ResolvedTemplate(raw, inferred = false, reason = null)
+        val intent = input.intent?.trim()
+        require(!intent.isNullOrEmpty()) {
+            "template='auto' requires a non-blank `intent` string (the user's one-sentence ask)"
+        }
+        val classification = IntentClassifier.classify(intent)
+        return ResolvedTemplate(classification.template, inferred = true, reason = classification.reason)
     }
 
     /**
