@@ -15,6 +15,7 @@
 
 ## P1 — 中优，做完 P0 再排
 
+- **debt-query-dispatcher-abstraction** — `ProjectQueryTool` / `SessionQueryTool` / `SourceQueryTool` 三个 unified-dispatcher 都靠 "handler per select + 每个 select 自己的 row 类型 + 输出裸 `JsonArray` 让 caller 用 `Owner.Row.serializer()` 解码" 这同一套惯例，两次 resplit (2026-04-21 / 2026-04-23) 都卡在同一种结构劣化上；第四个 query tool 默认会再撞一次。**方向：** 在 `core/tool/query/` 引入 `QueryDispatcher<I, O>` 基类承担 select → handler 路由 + row 序列化器表，row 类型从 day 1 强制 top-level；同步加 test-kit helper `Output.decodeRows(select): List<T>` 把 10+ 个测试文件里手写的 `decodeFromJsonElement(ListSerializer(...))` 3 行 helper 收敛掉。Rubric §5.6。
 
 ## P2 — 记债 / 观望
 
@@ -23,4 +24,8 @@
 - **recents-registry-list-summaries-index** — `RecentsRegistry.listSummaries()` 当前每次扫所有 entry + 解码每个 `talevia.json` envelope，N≥几百时变慢。**方向：** registry 自身缓存 `(title, updatedAtEpochMs)`，envelope 写时同步 registry；`listSummaries` 直接读 registry 不再扫 bundle。Rubric §5.3 / 性能（profiling 触发再做）。
 - **debt-streaming-bundle-blob-writer** — 三个 caller 内联复制 okio `source→sink.writeAll` 模式因为 `BundleBlobWriter.writeBlob(bytes: ByteArray)` 强制全文件入内存。**方向：** `BundleBlobWriter` 加 `suspend fun writeBlobStreaming(projectId, assetId, source: okio.Source, format): MediaSource.BundleFile`；migrate ImportMediaTool 的 `copy_into_bundle` 分支 + ConsolidateMediaIntoBundleTool + FileBundleBlobWriter.writeBlob 自己（byte-buffered 变 streaming wrapper）。Rubric 外 / 顺手记录。
 - **debt-export-missing-asset-warning** — cycle-14 的 `bundle-asset-relink-ux` 交付了 Core-layer `BusEvent.AssetsMissing` + `RelinkAssetTool`，但 bullet 里的 "CLI / Desktop 在 export 前显式列出 missing" 仍未落地。**方向：** CLI 订阅 `BusEvent.AssetsMissing`，`export` 命令前打印警告（"N assets don't resolve on this machine — call relink_asset or cancel"）；Desktop 在 SnapshotPanel / ExportPanel 旁边加 banner。Rubric 外 / 顺手记录。
+- **debt-plist-extra-keys-lint-test** — Compose Desktop `nativeDistributions.macOS.infoPlist.extraKeysRawXml` 是裸 XML 注入，没有 schema / lint / compile-time 校验；错别字（`<array/>` 漏闭 `<dict>` 等）要到用户在 Finder 双击 `.talevia` 文件没反应才会暴露。**方向：** 加一个 unit test 把 `build.gradle.kts` 里的 raw-XML 串喂给 `NSPropertyListSerialization.propertyListWithData(...)`（或 CI 上调 `plutil -lint`），任何解析失败判 fail。Rubric 外 / 顺手记录。
+- **debt-bundle-fs-testkit-copy-recursive** — Okio 的 `FakeFileSystem` 没有递归 copy 原语；`BundleCrossMachineExportSmokeTest` 在测试里手写了 `copyDirectoryRecursive(fs, src, dst)`（12 行）。**方向：** 第二个 bundle-level 测试需要同一个 walker 时，抽到 `ProjectStoreTestKit` 或 `BundleFsTestKit`；别提前做（don't pre-abstract on N=1）。**触发条件：** 出现第二个 caller。Rubric 外 / 顺手记录。
+- **debt-register-tool-script** — 加一个新 tool 要同步改 5 个 `AppContainer`（CLI / Desktop / Server / Android / iOS），每次 import 行手插入位置错了就挨 ktlint 一顿，有 9/15 ≈ 60% 的 cycle 吃这份税。**方向：** 脚本 `/register-tool <ToolName> <ctorArgs>` 生成 10 行 diff 跨 5 文件 + 自动跑 `ktlintFormat`。**触发条件：** 连续 10 个新-tool cycle 都吃这份税，或 60% 占比在下一次 repopulate 时仍然持有。Rubric 外 / 顺手记录。
+- **debt-unified-dispatcher-select-plugin-shape** — 每次给 `project_query` / `session_query` / `source_query` 加一个 select 要改 7-8 个协调站点（SELECT_* 常量 + ALL_SELECTS + Input 字段 + helpText + JSON Schema + `rejectIncompatibleFilters` 矩阵 + execute 分派 + sibling 文件）；reject 矩阵是 `O(n_selects × n_filters)` 成本。**方向：** 一个 select 一个文件的 "select plugin" shape（例：`@AppliesTo(SELECT_FOO)` 注解驱动 filter 适用性），把 7-8 站点收敛为 1 站点。**触发条件：** 任一 dispatcher 的 select 数达到 20，或 `rejectIncompatibleFilters` 矩阵达到 30+ 规则。当前：project 14 / session 15 / source 5。Rubric 外 / 顺手记录。
 
