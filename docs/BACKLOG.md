@@ -19,7 +19,6 @@
 
 - **debt-resplit-project-query-tool** — `ProjectQueryTool.kt` 在 `6e7bd8f` 首次拆分至 540 行后又长回 547 行，说明上次拆分不彻底 / 漏了一个肥 select 分支。**方向：** 扫一遍各 `handle<Select>` 分支，把任何 > 40 行的单独挪到 `project/query/<select>.kt` 同级；主文件保留 dispatch + schema。Rubric §3a-3。
 - **debt-resplit-session-query-tool** — `SessionQueryTool.kt` 534 行，同类症状；同一轮 repopulate 一并 split。**方向：** 和 ProjectQueryTool 同一个套路。Rubric §3a-3。
-- **debt-trim-agent-kt** — `Agent.kt` 459 行，`agent-interrupt-via-bus` 落地后增量又塞回主类。**方向：** 把 `bus.subscribe().filterIsInstance<BusEvent.SessionCancelRequested>()` 侧通道抽到 `agent/AgentBusCancelWatcher.kt`，由 `Agent.start()` 注入。主类保留 session loop。Rubric §3a-3。
 - **partial-tool-input-streaming** — provider 流式发来 tool JSON delta，core 现在闭门拼到 complete 再 dispatch；UI 只看到「工具在想…」几秒钟没有 feedback。**方向：** `LlmEvent` 新增 `ToolInputDelta(toolCallId, jsonFragment)`；provider 层直通；Part 保留 accumulated JSON 供 dispatch。不改 ToolResult 协议。Rubric §5.4。
 - **tool-output-token-estimate** — `ToolResult` 没带 token 估算，`Compactor` 选哪一条来压缩只能按 part 顺序。**方向：** 在 `ToolResult` 加 `estimatedTokens: Int?`（/4 字节粗估），compaction 按大小降序取 top-N 压掉。Rubric §5.4。
 - **auto-revert-on-failed-export** — `ExportTool` 中途 ffmpeg 崩溃 / 被 cancel 时 mezzanine 文件在磁盘留存，没人清。`deleteMezzanine` 存在但只在 gc 路径调用。**方向：** 在 `ExportTool.execute` try-finally 里对失败路径调 `engine.deleteMezzanine(tmpPath)`；正常成功路径不动。Rubric §5.2。
