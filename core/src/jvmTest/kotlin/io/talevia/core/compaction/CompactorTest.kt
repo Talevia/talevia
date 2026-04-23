@@ -159,6 +159,80 @@ class CompactorTest {
     }
 
     @Test
+    fun pruneDropsAtLeastOnePartWhenHistoryExceedsDefaultBound() = runTest {
+        // Bound-guard runtime test (`debt-add-runtime-test-session-compaction-bounds`).
+        // The existing pruning tests above all pass a *lowered* pruneProtectTokens
+        // (100 / 200) to force drops. None exercise the path at the production
+        // default (40_000). A future refactor that accidentally short-circuits
+        // the prune branch only at the default threshold — e.g. `if (fixedTokens
+        // < 10_000) return emptySet()` — would still pass all the small-bound
+        // tests and fail silently in prod. This test pins the invariant:
+        // given history estimated above the default bound, process() must
+        // produce Result.Compacted with prunedCount > 0.
+        val (store, bus) = inMemoryStore()
+        val sid = SessionId("s-bound")
+        val now = Clock.System.now()
+        store.createSession(Session(sid, ProjectId("p"), title = "bound", createdAt = now, updatedAt = now))
+
+        // 3 user turns (protectUserTurns=2 default → pre-window = [u1, a1]).
+        // a1 carries a single completed tool output stamped at 55 000 tokens —
+        // well above the 40 000 bound, so pruning is mandatory.
+        val u1 = Message.User(MessageId("u-1"), sid, now, agent = "default", model = ModelRef("fake", "x"))
+        val u1Text = Part.Text(PartId("u-1-text"), u1.id, sid, now, text = "plan a cut")
+        val a1 = Message.Assistant(
+            id = MessageId("a-1"), sessionId = sid, createdAt = now,
+            parentId = u1.id, model = ModelRef("fake", "x"),
+            finish = FinishReason.TOOL_CALLS,
+        )
+        val hugeTool = Part.Tool(
+            id = PartId("huge-tool-out"), messageId = a1.id, sessionId = sid, createdAt = now,
+            callId = CallId("c-huge"), toolId = "echo",
+            state = ToolState.Completed(
+                input = JsonObject(mapOf("text" to JsonPrimitive("h"))),
+                outputForLlm = "x",
+                data = JsonObject(emptyMap()),
+                estimatedTokens = 55_000,
+            ),
+        )
+        val u2 = Message.User(MessageId("u-2"), sid, now, agent = "default", model = ModelRef("fake", "x"))
+        val u2Text = Part.Text(PartId("u-2-text"), u2.id, sid, now, text = "another step")
+        val u3 = Message.User(MessageId("u-3"), sid, now, agent = "default", model = ModelRef("fake", "x"))
+        val u3Text = Part.Text(PartId("u-3-text"), u3.id, sid, now, text = "and another")
+        val history = listOf(
+            MessageWithParts(u1, listOf(u1Text)),
+            MessageWithParts(a1, listOf(hugeTool)),
+            MessageWithParts(u2, listOf(u2Text)),
+            MessageWithParts(u3, listOf(u3Text)),
+        )
+        history.forEach { mwp ->
+            store.appendMessage(mwp.message)
+            mwp.parts.forEach { store.upsertPart(it) }
+        }
+
+        val summaryTurn = listOf(
+            LlmEvent.TextStart(PartId("bound-summary")),
+            LlmEvent.TextEnd(PartId("bound-summary"), "Goal: verify bound.\n"),
+            LlmEvent.StepFinish(FinishReason.END_TURN, TokenUsage(input = 10, output = 5)),
+        )
+        val compactor = Compactor(
+            provider = FakeProvider(listOf(summaryTurn)),
+            store = store,
+            bus = bus,
+            // No pruneProtectTokens override — exercise the production default.
+        )
+
+        val result = compactor.process(sid, history, ModelRef("fake", "test"))
+        assertTrue(result is Compactor.Result.Compacted, "expected Compacted, got $result")
+        val compacted = result as Compactor.Result.Compacted
+        assertTrue(
+            compacted.prunedCount > 0,
+            "default pruneProtectTokens=40_000 bound must drop at least one part " +
+                "when history carries a 55_000-token tool output in the pre-window " +
+                "(prunedCount=${compacted.prunedCount})",
+        )
+    }
+
+    @Test
     fun summarisesAndPersistsCompactionPart() = runTest {
         val (store, bus) = inMemoryStore()
         val sid = SessionId("s")

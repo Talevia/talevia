@@ -18,8 +18,7 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **export-incremental-render** — CLAUDE.md "Known incomplete" 首条：`ExportTool` memoize 仅到 whole-timeline 层；长 project 只改一个 clip 仍然重新 render 全 timeline（且 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 明确列为延期）。**方向：** 扩 `ExportTool` memoization key 到 per-clip 级别，利用 `clipRenderCache` 做 "render one stale clip + reuse the rest"。先补一个 benchmark（和 `debt-add-benchmark-core-paths` 合并做），证明 baseline；再扩缓存。决策阶段定义 key 成分（clip spec hash × source binding hash × render profile hash）。Rubric §5.7。
-- **debt-add-runtime-test-session-compaction-bounds** — `Compactor` 有 `pruneProtectTokens = 40_000` 硬上界，但没有单元测试证明"history 超过上界时至少会 drop 一个 part"。一个未来 refactor 不小心把 prune 分支短路会默默失效。**方向：** 给 `Compactor` 加一个"超长 history 必 drop"的 runtime 测试（用 mock provider + 50k+ token 预估的 history，断言 `Result.Compacted` with prunedCount > 0）。Rubric §5.7。
+- **export-incremental-render** — CLAUDE.md "Known incomplete" 首条：`ExportTool` memoize 仅到 whole-timeline 层；长 project 只改一个 clip 仍然重新 render 全 timeline（且 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 明确列为延期）。**方向：** 扩 `ExportTool` memoization key 到 per-clip 级别，利用 `clipRenderCache` 做 "render one stale clip + reuse the rest"。先补一个 benchmark（和 `debt-add-benchmark-core-paths` 合并做），证明 baseline；再扩缓存。决策阶段定义 key 成分（clip spec hash × source binding hash × render profile hash）。Rubric §5.7。 · skipped 2026-04-23: 前置依赖未落地 — bullet 自己的方向要求先做 `debt-add-benchmark-core-paths`（P0，仍 skip-tagged 待分解），无 benchmark baseline 就上 optimization 违反 2026-04-19 deferral 决策。
 
 ## P2 — 记债 / 观望
 
