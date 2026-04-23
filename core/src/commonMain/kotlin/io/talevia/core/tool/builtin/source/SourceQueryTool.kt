@@ -8,7 +8,9 @@ import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.source.query.runAncestorsQuery
 import io.talevia.core.tool.builtin.source.query.runDagSummaryQuery
+import io.talevia.core.tool.builtin.source.query.runDescendantsQuery
 import io.talevia.core.tool.builtin.source.query.runDotQuery
 import io.talevia.core.tool.builtin.source.query.runNodesAllProjectsQuery
 import io.talevia.core.tool.builtin.source.query.runNodesQuery
@@ -55,7 +57,8 @@ class SourceQueryTool(
 ) : Tool<SourceQueryTool.Input, SourceQueryTool.Output> {
 
     @Serializable data class Input(
-        /** One of [SELECT_NODES] / [SELECT_DAG_SUMMARY] / [SELECT_DOT] (case-insensitive). */
+        /** One of [SELECT_NODES] / [SELECT_DAG_SUMMARY] / [SELECT_DOT] /
+         *  [SELECT_DESCENDANTS] / [SELECT_ANCESTORS] (case-insensitive). */
         val select: String,
         /**
          * Target project. Required when `scope == "project"` (default) or unset.
@@ -91,6 +94,22 @@ class SourceQueryTool(
         // ---- dag_summary filters ----
         /** Max hotspots to return. `select=dag_summary` only. Default 5. */
         val hotspotLimit: Int? = null,
+        // ---- descendants / ancestors filters ----
+        /**
+         * Source node id to traverse from. Required for `select=descendants`
+         * and `select=ancestors`; rejected for other selects. Walks the reverse-
+         * parent index (descendants) or the per-node `parents` list (ancestors),
+         * BFS, cycle-safe. Unknown id fails loud with a `source_query(select=nodes)`
+         * hint.
+         */
+        val root: String? = null,
+        /**
+         * Maximum hop count from [root] to include. `0` = root-only (degenerate
+         * but useful for "does this node exist?"). Positive N = up to N hops.
+         * Null or negative = unbounded transitive closure (the common case).
+         * `select=descendants` / `select=ancestors` only.
+         */
+        val depth: Int? = null,
         // ---- common ----
         /** Post-filter cap. `select=nodes` only. Default 100, clamped `[1, 500]`. */
         val limit: Int? = null,
@@ -133,6 +152,13 @@ class SourceQueryTool(
          * queries because the owning project is already in the Input echo.
          */
         val projectId: String? = null,
+        /**
+         * Hop count from [Input.root] to this row. Populated only by
+         * `select=descendants` / `select=ancestors` — null for all other
+         * selects so old decoders stay forward-compatible (§3a-7). `0` is
+         * the root itself, `1` the immediate neighbors, and so on.
+         */
+        val depthFromRoot: Int? = null,
     )
 
     @Serializable data class Hotspot(
@@ -181,12 +207,22 @@ class SourceQueryTool(
             "you can pipe it into `dot -Tsvg` externally for a one-glance view (nodes with no " +
             "downstream clip binding render dashed). No filters — the point of the view is the " +
             "whole graph; use select=nodes for subsets.\n" +
+            "  • descendants — BFS from `root` through the reverse-parent index, returning every " +
+            "node transitively reachable downstream (children, grandchildren, …). Each row " +
+            "carries a `depthFromRoot` hop count (0 = root itself, 1 = direct children). " +
+            "requires root. Optional depth caps the walk (null or negative = unbounded; 0 = " +
+            "root only). Cycle-safe. Unknown root id fails loud.\n" +
+            "  • ancestors — BFS upstream from `root` via each node's parents, returning every " +
+            "node the root ultimately derives from. Row shape + depth semantics mirror " +
+            "descendants. Use these two selects when you need to reason about propagation " +
+            "(\"what depends on this character_ref?\") or provenance (\"what did this shot " +
+            "fold in from upstream?\").\n" +
             "Common: projectId (required unless scope='all_projects'), limit, offset " +
-            "(select=nodes only). scope='all_projects' (select=nodes only) enumerates every " +
-            "registered project and tags each row with its owning projectId — use for \"find all " +
-            "character_refs across my projects like cyberpunk\" flows. Setting a filter that " +
-            "doesn't apply to the chosen select fails loud. describe_source_node stays as a separate " +
-            "tool for single-entity deep views."
+            "(select=nodes / descendants / ancestors only). scope='all_projects' (select=nodes " +
+            "only) enumerates every registered project and tags each row with its owning " +
+            "projectId — use for \"find all character_refs across my projects like cyberpunk\" " +
+            "flows. Setting a filter that doesn't apply to the chosen select fails loud. " +
+            "describe_source_node stays as a separate tool for single-entity deep views."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.read")
@@ -197,7 +233,10 @@ class SourceQueryTool(
         putJsonObject("properties") {
             putJsonObject("select") {
                 put("type", "string")
-                put("description", "What to query: nodes | dag_summary | dot (case-insensitive).")
+                put(
+                    "description",
+                    "What to query: nodes | dag_summary | dot | descendants | ancestors (case-insensitive).",
+                )
             }
             putJsonObject("projectId") {
                 put("type", "string")
@@ -273,6 +312,22 @@ class SourceQueryTool(
                     "Max hotspots in the dag_summary row. Default 5. select=dag_summary only.",
                 )
             }
+            putJsonObject("root") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Source node id to traverse from. Required for select=descendants / " +
+                        "select=ancestors; rejected elsewhere.",
+                )
+            }
+            putJsonObject("depth") {
+                put("type", "integer")
+                put(
+                    "description",
+                    "Max hop count from root (0 = root only, positive = bounded, null or " +
+                        "negative = unbounded). select=descendants / select=ancestors only.",
+                )
+            }
             putJsonObject("limit") {
                 put("type", "integer")
                 put(
@@ -314,11 +369,15 @@ class SourceQueryTool(
             SELECT_NODES -> runNodesQuery(project, input)
             SELECT_DAG_SUMMARY -> runDagSummaryQuery(project, input)
             SELECT_DOT -> runDotQuery(project)
+            SELECT_DESCENDANTS -> runDescendantsQuery(project, input)
+            SELECT_ANCESTORS -> runAncestorsQuery(project, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
 
     private fun rejectIncompatibleFilters(select: String, input: Input, scope: String) {
+        val isRelativesSelect = select == SELECT_DESCENDANTS || select == SELECT_ANCESTORS
+        val isPaginatedSelect = select == SELECT_NODES || isRelativesSelect
         val misapplied = buildList {
             if (select != SELECT_NODES) {
                 if (input.kind != null) add("kind (select=nodes only)")
@@ -326,13 +385,23 @@ class SourceQueryTool(
                 if (input.contentSubstring != null) add("contentSubstring (select=nodes only)")
                 if (input.caseSensitive != null) add("caseSensitive (select=nodes only)")
                 if (input.id != null) add("id (select=nodes only)")
-                if (input.includeBody != null) add("includeBody (select=nodes only)")
                 if (input.sortBy != null) add("sortBy (select=nodes only)")
-                if (input.limit != null) add("limit (select=nodes only)")
-                if (input.offset != null) add("offset (select=nodes only)")
+            }
+            // includeBody is useful for both nodes and the relatives selects — someone
+            // auditing "what's in my character_ref's downstream" will want full bodies.
+            if (select != SELECT_NODES && !isRelativesSelect && input.includeBody != null) {
+                add("includeBody (select=nodes / descendants / ancestors only)")
+            }
+            if (!isPaginatedSelect) {
+                if (input.limit != null) add("limit (select=nodes / descendants / ancestors only)")
+                if (input.offset != null) add("offset (select=nodes / descendants / ancestors only)")
             }
             if (select != SELECT_DAG_SUMMARY && input.hotspotLimit != null) {
                 add("hotspotLimit (select=dag_summary only)")
+            }
+            if (!isRelativesSelect) {
+                if (input.root != null) add("root (select=descendants / ancestors only)")
+                if (input.depth != null) add("depth (select=descendants / ancestors only)")
             }
         }
         if (misapplied.isNotEmpty()) {
@@ -357,7 +426,12 @@ class SourceQueryTool(
         const val SELECT_NODES = "nodes"
         const val SELECT_DAG_SUMMARY = "dag_summary"
         const val SELECT_DOT = "dot"
-        private val ALL_SELECTS = setOf(SELECT_NODES, SELECT_DAG_SUMMARY, SELECT_DOT)
+        const val SELECT_DESCENDANTS = "descendants"
+        const val SELECT_ANCESTORS = "ancestors"
+        private val ALL_SELECTS = setOf(
+            SELECT_NODES, SELECT_DAG_SUMMARY, SELECT_DOT,
+            SELECT_DESCENDANTS, SELECT_ANCESTORS,
+        )
 
         const val SCOPE_PROJECT = "project"
         const val SCOPE_ALL_PROJECTS = "all_projects"

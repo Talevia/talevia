@@ -300,3 +300,40 @@ before you started"). Normally P2 items wait for priority; this one
 has enough cycle-externality to deserve a P1 bump independent of its
 own merit. Adding that as a P2 "顺手记 debt" append below so the next
 repopulate can re-score.
+
+---
+
+## 2026-04-23 — source-query-by-parent-id (`<this commit>`)
+
+### Import-order churn after adding a single import mid-file
+Cycle 8 added `import io.talevia.core.tool.builtin.project.OpenProjectTool`
+immediately after the existing `CreateProjectTool` import in four
+containers (CLI, Desktop, Server, Android) — locally looked tidy, but
+`OpenProjectTool` belongs alphabetically between `ListProjectsTool` and
+`ProjectQueryTool`, several lines later. Ktlint didn't fire on that
+commit because the inserted import happened to sit in a region where
+alphabetic order wasn't violated from the prior line — but when
+something in an adjacent region changed this cycle, the lint rule
+re-evaluated and 4 files failed. `ktlintFormat` fixed it in one pass.
+Pattern: **imports inserted mid-block by eye rather than by sort are
+cheap to re-sort but read as churn in diffs.** Better discipline
+(cheap): when adding an import, type the full line first, then let the
+IDE / `ktlintFormat` re-sort before diffing. The test passing doesn't
+imply the order is stable under later edits.
+
+### Adding a select to a unified-dispatcher tool is ~100 lines of mechanical edits across 7 call sites
+For this cycle (adding `descendants` + `ancestors` to
+`SourceQueryTool`), the work touched: SELECT_* constants + ALL_SELECTS
+set + Input field additions + helpText paragraph + JSON Schema block +
+`rejectIncompatibleFilters` cases + execute dispatch + one sibling
+file with the traversal. That's 7 coordinated edit sites for every
+select added. For dispatchers with `>10` selects (ProjectQueryTool has
+13, SessionQueryTool has 15), adding one more select is getting
+expensive, and most of the cost is the `rejectIncompatibleFilters`
+matrix — each new filter field costs `O(n_selects)` new reject rules.
+Not a current bottleneck (the dispatchers aren't accumulating selects
+fast), but worth tracking: if the reject matrix hits 30+ rules, an
+annotation-driven "which filter belongs to which select" table
+(`@AppliesTo(SELECT_FOO)` on Input field) may amortise the cost. For
+now, the explicit matrix is readable and the bullets this cycle
+touches don't add new filter fields.

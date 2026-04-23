@@ -12,6 +12,7 @@ import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.source.Source
 import io.talevia.core.domain.source.SourceNode
+import io.talevia.core.domain.source.SourceRef
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
@@ -318,5 +319,199 @@ class SourceQueryToolTest {
             )
         }
         assertTrue(ex.message!!.contains("ghost"), ex.message)
+    }
+
+    // ---- select=descendants / ancestors ----
+
+    /**
+     * Builds a tiny diamond DAG:
+     *   root → a → c
+     *     ↘ b ↗
+     * plus an unrelated island `far`.
+     */
+    private suspend fun diamondRig(): Rig = rig(
+        node("root"),
+        SourceNode(
+            id = SourceNodeId("a"),
+            kind = "test.generic",
+            body = buildJsonObject { put("label", "a") },
+            parents = listOf(SourceRef(SourceNodeId("root"))),
+        ),
+        SourceNode(
+            id = SourceNodeId("b"),
+            kind = "test.generic",
+            body = buildJsonObject { put("label", "b") },
+            parents = listOf(SourceRef(SourceNodeId("root"))),
+        ),
+        SourceNode(
+            id = SourceNodeId("c"),
+            kind = "test.generic",
+            body = buildJsonObject { put("label", "c") },
+            parents = listOf(SourceRef(SourceNodeId("a")), SourceRef(SourceNodeId("b"))),
+        ),
+        node("far"),
+    )
+
+    private fun decodeRows(out: SourceQueryTool.Output) =
+        JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(SourceQueryTool.NodeRow.serializer()),
+            out.rows,
+        )
+
+    @Test fun descendantsWalksReverseParentIndexBfs() = runTest {
+        val rig = diamondRig()
+        val out = SourceQueryTool(rig.store).execute(
+            SourceQueryTool.Input(
+                select = "descendants",
+                projectId = rig.pid.value,
+                root = "root",
+            ),
+            rig.ctx,
+        ).data
+        assertEquals("descendants", out.select)
+        val rows = decodeRows(out)
+        assertEquals(listOf("root", "a", "b", "c"), rows.map { it.id })
+        assertEquals(listOf(0, 1, 1, 2), rows.map { it.depthFromRoot })
+        // Unrelated island is not reached.
+        assertTrue(rows.none { it.id == "far" })
+    }
+
+    @Test fun descendantsDepthZeroReturnsOnlyRoot() = runTest {
+        val rig = diamondRig()
+        val out = SourceQueryTool(rig.store).execute(
+            SourceQueryTool.Input(
+                select = "descendants",
+                projectId = rig.pid.value,
+                root = "root",
+                depth = 0,
+            ),
+            rig.ctx,
+        ).data
+        val rows = decodeRows(out)
+        assertEquals(listOf("root"), rows.map { it.id })
+        assertEquals(listOf(0), rows.map { it.depthFromRoot })
+    }
+
+    @Test fun descendantsDepthOneStopsAtImmediateChildren() = runTest {
+        val rig = diamondRig()
+        val out = SourceQueryTool(rig.store).execute(
+            SourceQueryTool.Input(
+                select = "descendants",
+                projectId = rig.pid.value,
+                root = "root",
+                depth = 1,
+            ),
+            rig.ctx,
+        ).data
+        val rows = decodeRows(out)
+        // c is depth 2, must not appear.
+        assertEquals(setOf("root", "a", "b"), rows.map { it.id }.toSet())
+    }
+
+    @Test fun descendantsNegativeDepthMeansUnbounded() = runTest {
+        val rig = diamondRig()
+        val out = SourceQueryTool(rig.store).execute(
+            SourceQueryTool.Input(
+                select = "descendants",
+                projectId = rig.pid.value,
+                root = "root",
+                depth = -5,
+            ),
+            rig.ctx,
+        ).data
+        assertEquals(4, out.total)
+    }
+
+    @Test fun ancestorsWalksParentsUpwardBfs() = runTest {
+        val rig = diamondRig()
+        val out = SourceQueryTool(rig.store).execute(
+            SourceQueryTool.Input(
+                select = "ancestors",
+                projectId = rig.pid.value,
+                root = "c",
+            ),
+            rig.ctx,
+        ).data
+        assertEquals("ancestors", out.select)
+        val rows = decodeRows(out)
+        // c itself is depth 0; a and b are both depth 1; root is depth 2 (dedup across both paths).
+        assertEquals(setOf("c", "a", "b", "root"), rows.map { it.id }.toSet())
+        val depthByNode = rows.associate { it.id to it.depthFromRoot }
+        assertEquals(0, depthByNode["c"])
+        assertEquals(1, depthByNode["a"])
+        assertEquals(1, depthByNode["b"])
+        assertEquals(2, depthByNode["root"])
+    }
+
+    @Test fun descendantsUnknownRootFailsLoud() = runTest {
+        val rig = diamondRig()
+        val ex = assertFailsWith<IllegalStateException> {
+            SourceQueryTool(rig.store).execute(
+                SourceQueryTool.Input(
+                    select = "descendants",
+                    projectId = rig.pid.value,
+                    root = "ghost",
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("ghost"), ex.message)
+        assertTrue(ex.message!!.contains("source_query"), "error should hint at source_query(select=nodes)")
+    }
+
+    @Test fun descendantsRequiresRoot() = runTest {
+        val rig = diamondRig()
+        val ex = assertFailsWith<IllegalStateException> {
+            SourceQueryTool(rig.store).execute(
+                SourceQueryTool.Input(select = "descendants", projectId = rig.pid.value),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("root"), ex.message)
+    }
+
+    @Test fun rootFieldRejectedOutsideRelativesSelects() = runTest {
+        val rig = diamondRig()
+        val ex = assertFailsWith<IllegalStateException> {
+            SourceQueryTool(rig.store).execute(
+                SourceQueryTool.Input(
+                    select = "nodes",
+                    projectId = rig.pid.value,
+                    root = "root",
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("root"), ex.message)
+    }
+
+    @Test fun descendantsCycleSafe() = runTest {
+        // Pathological DAG with a cycle a→b→a. The data layer doesn't forbid
+        // cycles (SourceDagValidator's concern); the traversal must still
+        // terminate. `stale()` already has this contract; we mirror it here.
+        val rig = rig(
+            SourceNode(
+                id = SourceNodeId("a"),
+                kind = "test.generic",
+                body = buildJsonObject { put("label", "a") },
+                parents = listOf(SourceRef(SourceNodeId("b"))),
+            ),
+            SourceNode(
+                id = SourceNodeId("b"),
+                kind = "test.generic",
+                body = buildJsonObject { put("label", "b") },
+                parents = listOf(SourceRef(SourceNodeId("a"))),
+            ),
+        )
+        val out = SourceQueryTool(rig.store).execute(
+            SourceQueryTool.Input(
+                select = "descendants",
+                projectId = rig.pid.value,
+                root = "a",
+            ),
+            rig.ctx,
+        ).data
+        // Visits both nodes exactly once despite the cycle.
+        assertEquals(2, out.total)
     }
 }

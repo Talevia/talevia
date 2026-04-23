@@ -18,7 +18,6 @@
 
 ## P2 — 记债 / 观望
 
-- **source-query-by-parent-id** — `SourceQueryTool` 能按 id / kind / search 查，但无法「列出直接 / 传递子节点」。对 propagate / fold 相关 reasoning 价值大。**方向：** 新增 `select=descendants` / `select=ancestors`，参数 `root: SourceId, depth: Int = -1`。复用 `deepContentHashOf` 的 DAG 遍历逻辑。Rubric §5.5。
 - **timeline-diff-tool** — `DiffProjectsTool` 给全项目级别 diff，但没法单独看两个 snapshot 之间 Timeline 的变动。**方向：** `project_query(select=timeline_diff, fromSnapshot=..., toSnapshot=...)` 返回 clips/tracks 增删改列表。Rubric §5.1 / §5.4。
 - **gemini-provider-stub** — 只有 Anthropic / OpenAI；provider abstraction 还没被第三个实现压过测试。**方向：** 给 `core/provider/gemini/` 打一个 skeleton，映射 Gemini streaming 事件到 `LlmEvent`，装配点 gated by `GOOGLE_GENAI_API_KEY`。可以只覆盖 text 一轮对话；tool-use 留给后续。Rubric §5.2 + provider 中立红线。
 - **tts-provider-fallback-chain** — `SynthesizeSpeechTool` 目前一个 provider 下去，provider 挂就 tool error。**方向：** 在 Core 容器里接受多个 engine 按优先级注入，`AigcPipeline` 遇到非 cache-hit 失败时切到下一个引擎；lockfile 记录最终用的 provider。Rubric §5.2。

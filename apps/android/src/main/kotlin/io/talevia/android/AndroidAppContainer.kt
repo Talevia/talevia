@@ -30,7 +30,6 @@ import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.TodoWriteTool
 import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
-import io.talevia.core.tool.builtin.project.OpenProjectTool
 import io.talevia.core.tool.builtin.project.DeleteProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
@@ -42,6 +41,7 @@ import io.talevia.core.tool.builtin.project.GcLockfileTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
 import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
+import io.talevia.core.tool.builtin.project.OpenProjectTool
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
 import io.talevia.core.tool.builtin.project.PruneLockfileTool
 import io.talevia.core.tool.builtin.project.RemoveAssetTool
