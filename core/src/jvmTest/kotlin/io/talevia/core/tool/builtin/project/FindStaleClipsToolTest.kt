@@ -17,6 +17,7 @@ import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.domain.lockfile.LockfileEntry
+import io.talevia.core.domain.source.SourceRef
 import io.talevia.core.domain.source.consistency.CharacterRefBody
 import io.talevia.core.domain.source.consistency.StyleBibleBody
 import io.talevia.core.domain.source.consistency.addCharacterRef
@@ -218,6 +219,90 @@ class FindStaleClipsToolTest {
         val report = out.reports.single()
         // Detector reports only the *direct* drifted ids; mei is unchanged so absent.
         assertEquals(listOf("noir"), report.changedSourceIds)
+    }
+
+    @Test fun transitiveConsistencyEditFlagsGrandchildBoundClip() = runTest {
+        // VISION §5.5 / source-consistency-propagation runtime coverage.
+        // Two existing tests each cover half the lane:
+        //   • `TransitiveSourceHashTest.staleClipsFromLockfileFlagsClipWhenGrandparentEdited`
+        //     proves grandparent-edit → grandchild-deep-hash-drift for generic
+        //     (`test.generic`) nodes, but bypasses the tool and the consistency
+        //     kinds (`character_ref` / `style_bible`).
+        //   • `characterEditFlagsBoundClip` (above) proves a consistency-node
+        //     edit surfaces through the tool, but for a *directly-bound*
+        //     character_ref only; the parent-chain path isn't exercised.
+        // This test pins the intersection — a consistency-kind DAG where the
+        // clip binds the child (`mei` character_ref) and the *parent*
+        // (`noir` style_bible) is edited; the tool must still report the clip
+        // stale, with the child's id listed in `changedSourceIds` (deep-hash
+        // drift surfaces on the descendant even though its shallow contentHash
+        // is unchanged). This is the combined-regression shape — a future
+        // refactor that re-introduces shallow-hash-only comparison, or that
+        // drops `parents = [noir]` wiring from `addCharacterRef`'s signature,
+        // breaks this test.
+        val store = newStore()
+        val pid = ProjectId("p-transitive")
+        val asset = AssetId("a-1")
+        seedProjectWithClip(store, pid, videoClip("c-1", asset, binding = setOf(SourceNodeId("mei"))))
+
+        // noir is the style_bible; mei is the character_ref with noir as its
+        // parent (modelling "this character's look builds on this style").
+        store.mutateSource(pid) {
+            it.addStyleBible(
+                SourceNodeId("noir"),
+                StyleBibleBody(name = "noir", description = "high-contrast noir"),
+            ).addCharacterRef(
+                SourceNodeId("mei"),
+                CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
+                parents = listOf(SourceRef(SourceNodeId("noir"))),
+            )
+        }
+        // Snapshot the child's deep hash — which includes the parent's body —
+        // at generation time.
+        val snapshotHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
+        appendLockfile(
+            store,
+            pid,
+            LockfileEntry(
+                inputHash = "h-transitive",
+                toolId = "generate_image",
+                assetId = asset,
+                provenance = fakeProvenance(),
+                sourceBinding = setOf(SourceNodeId("mei")),
+                sourceContentHashes = mapOf(SourceNodeId("mei") to snapshotHash),
+            ),
+        )
+        // Sanity: before any edit, nothing is stale.
+        val toolBefore = FindStaleClipsTool(store)
+        val baseline = toolBefore.execute(FindStaleClipsTool.Input(pid.value), ctx()).data
+        assertEquals(0, baseline.staleClipCount, "freshly-snapshotted project must not report stale")
+
+        // User edits only the parent `noir`. mei's own body + direct parents
+        // list are unchanged, so its SHALLOW contentHash stays identical —
+        // only its deep (folded-with-ancestors) hash shifts. The tool is the
+        // consumer that surfaces this through the lockfile snapshot diff.
+        store.mutateSource(pid) { source ->
+            source.replaceNode(SourceNodeId("noir")) { node ->
+                node.copy(
+                    body = JsonConfig.default.encodeToJsonElement(
+                        StyleBibleBody.serializer(),
+                        StyleBibleBody(name = "noir", description = "vibrant pop"),
+                    ),
+                )
+            }
+        }
+
+        val tool = FindStaleClipsTool(store)
+        val out = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data
+        assertEquals(1, out.staleClipCount, "parent-edit must flag the child-bound clip stale through deep-hash drift")
+        val report = out.reports.single()
+        assertEquals("c-1", report.clipId)
+        // Detector names only the directly-bound-and-drifted id. The parent
+        // (`noir`) caused the drift but isn't in the clip's binding, so it's
+        // not listed — the child (`mei`) *is* in the binding and *did* see a
+        // deep-hash change, so it shows up. Contract: report names the
+        // bound-and-drifted nodes, not the root-cause ancestors.
+        assertEquals(listOf("mei"), report.changedSourceIds)
     }
 
     @Test fun legacyEntryWithoutSnapshotIsSkipped() = runTest {
