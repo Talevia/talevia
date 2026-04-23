@@ -18,7 +18,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **debt-split-server-module-kt** — `apps/server/src/main/kotlin/io/talevia/server/ServerModule.kt` 667 行（per R.5 #4）。HTTP route group（agent / sessions / projects / SSE stream）全装一个 `install(Routing) { … }` 块。**方向：** 按路由分组拆 sibling `configureAgentRoutes()` / `configureSessionRoutes()` 等顶级 Ktor module 函数；ServerModule 只保留 `Application.module()` 入口与 feature install 顺序。Rubric §5.6。
 - **debt-split-desktop-source-panel** — `apps/desktop/.../SourcePanel.kt` 635 行（per R.5 #4）。Source DAG 的列表 / inspector / 图 view 全在一个 Composable。**方向：** 按语义拆 `SourceNodeList` / `SourceNodeInspector` / `SourceDagGraph`，SourcePanel 顶层只管路由 + 状态 hoist。Rubric §5.6。
 - **debt-split-android-media3-video-engine** — `apps/android/.../Media3VideoEngine.kt` 614 行（per R.5 #4）；filters / transitions / subtitles / LUT / overlay 四五类 `Effect` dispatch 全挤在一个类里，三平台对齐扩新 transition 的 cycle 已经多次踩到这个坑。**方向：** 按 Effect 类别拆 sibling（`Media3FilterEffects.kt` / `Media3TransitionEffects.kt` / `Media3SubtitleEffects.kt` / `Media3LutEffect.kt`），engine 保留 render(timeline) 入口 + dispatch 矩阵。Rubric §5.6。
 - **debt-split-cli-repl** — `apps/cli/.../repl/Repl.kt` 589 行（per R.5 #4）。输入循环 + 斜杠命令分派 + 生命周期钩子 + SessionBootstrap 耦合在一个类里。**方向：** 抽 `SlashCommandDispatcher` 到 sibling；REPL 循环保留输入读 / 生命周期；SessionBootstrap 已是独立文件无需动。Rubric §5.6。
