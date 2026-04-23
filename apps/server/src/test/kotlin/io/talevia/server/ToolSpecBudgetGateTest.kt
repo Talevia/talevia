@@ -59,12 +59,22 @@ class ToolSpecBudgetGateTest {
      * small tool without a cycle, but fails the gate on any meaningful
      * spec addition so the bloat isn't silent.
      *
-     * Ratchet plan (from backlog `debt-bound-tool-spec-budget-ci-gate`):
-     *   - current (this cycle): 27_000 — today's baseline + ~7% buffer.
-     *   - after first `debt-consolidate-*` cycles: 20_000 (R.6 P0
-     *     threshold — anything above this is a perf-debt signal).
-     *   - post `debt-shrink-tool-spec-surface` target: 15_000.
-     *   - steady state: 10_000.
+     * Ratchet plan (updated 2026-04-23 after cycle-23 — five
+     * `debt-consolidate-*` bullets landed transitions / filter /
+     * snapshot / maintenance / session; see
+     * `docs/decisions/2026-04-23-debt-tool-spec-budget-ratchet-step-20k.md`
+     * for the partial-progress rationale):
+     *   - 27_000 (pre-ratchet, cycle 6): 25_253 baseline + ~7% buffer.
+     *   - 25_000 (this cycle): 24_384 measured + ~2.5% buffer. The
+     *     five consolidations dropped tool count 97 → 88 (-9%) but
+     *     budget only 25_253 → 24_384 (-3.4%) because action-dispatched
+     *     helpTexts are longer than any individual tool's. 20_000 not
+     *     reachable without deeper surface reduction.
+     *   - 20_000 (next target, R.6 P0 threshold): requires either
+     *     deleting ~10 more tools or trimming helpText across the
+     *     broad surface. Open as `debt-shrink-tool-spec-surface`
+     *     follow-up.
+     *   - 15_000 / 10_000: later ratchet steps, same pattern.
      *
      * Tightening is the only legal direction. A regression that would
      * push the budget over ceiling is a backlog bullet for the next
@@ -73,7 +83,7 @@ class ToolSpecBudgetGateTest {
      * decision file in `docs/decisions/` alongside the ceiling bump
      * explaining why this number increased.
      */
-    private val CEILING_TOKENS: Int = 27_000
+    private val CEILING_TOKENS: Int = 25_000
 
     @Test
     fun registeredToolSpecsFitWithinCeiling() {
