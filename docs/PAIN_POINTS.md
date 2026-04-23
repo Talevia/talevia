@@ -668,3 +668,44 @@ cycle 14 had a green `:apps:server:test` to re-check against, the
 missing `when` case would have fired on the cycle that introduced it,
 not two cycles later. Generalises: every module that compiles but
 doesn't test-run is a deferred-error accumulator.
+
+---
+
+## 2026-04-23 — debt-add-sqldelight-migration-verification (`<this commit>`)
+
+### "Pre-create the antecedent table" is a nicer test pattern than replaying a full historical schema
+First attempt: write a `v1Schema.sql` test fixture that replays a v1
+snapshot (tables + indexes + sample rows) before calling
+`Schema.migrate(driver, 1, ...)`. Got three tests in before realising
+that 1.sqm / 2.sqm only CREATE new tables and 3.sqm uses `DROP TABLE
+IF EXISTS` — so the migrations don't actually *need* the v1 schema to
+exist to exercise their SQL. Switched to a simpler pattern: for each
+migration start-version, pre-create *just the tables the version's
+migrations reference* (usually zero or one), and let the migration run.
+Covers "migration SQL doesn't throw" and "final schema matches
+expectation" without the maintenance drag of full historical snapshots.
+The `verifyMigrations` SqlDelight plugin feature is the "full snapshot"
+approach, tracked as an explicit alternative in the decision doc.
+Observation worth tracking: **when migration SQL is mostly additive
+(CREATE) or guarded (IF EXISTS), lightweight migration tests beat
+snapshot-based ones** — snapshots only pay off when migrations rewrite
+existing rows in place or depend on specific column types / defaults.
+
+### A red test suite hid a debt we couldn't measure — 7+ cycles of "is this my fault?" was raw cost
+This cycle is the second consecutive one consuming debt that
+compounded while `:apps:server:test` was red. The missing migration
+verification is a latent risk that wouldn't have been noticed for
+months under normal iteration because SqlDelight's "migrations compile"
+check is static-only (it doesn't prove runtime correctness). The
+landing of this test isn't a response to any specific incident — it's
+prophylactic. Structural signal: **debt that's invisible under today's
+tooling is the kind that scales worst** — we'll find out it matters on
+the first user-reported data loss, by which time "should have added
+a test" is 0% useful. Argues for the debt-scan to include a
+"runtime-untested critical path" signal, not just "file too long /
+tool count growing". Concrete follow-up worth a future cycle:
+extend the R.5 scan with a heuristic that greps for
+`Schema.migrate\|\.migrate(driver` in `jvmTest/` — if prod has a
+`Schema.migrate` call but `*Test` doesn't exercise it, that's a
+runtime-untested critical path. Wouldn't have been hard to spot
+this gap earlier with a 3-line scan command.
