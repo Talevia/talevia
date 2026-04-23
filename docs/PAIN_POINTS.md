@@ -151,3 +151,41 @@ For bullets authored in future repopulates, prefer phrasing like
 naturally live" over prescribing the path. The current bullet format
 (`**direction:** ...`) already leaves room for this — just be deliberate
 about not over-specifying when writing new bullets.
+
+---
+
+## 2026-04-23 — import-media-tool-bundle-resolver (`<this commit>`)
+
+### Second stale bullet this sprint — backlog-decoupling pattern is generalising
+Cycle 3 (`fork-project-tool-trim-stats-bug`) closed a bullet whose described
+bug was silently fixed; this cycle closes a bullet whose described refactor
+(`MediaStorage.import` → `projects.mutate`) was silently completed in an
+earlier unrelated cycle (`9d0f70f`). Two stale bullets in five cycles is no
+longer an anomaly — it's a rate. Root cause: large refactors (like the
+`MediaStorage` deletion) that touch many files don't go back and sweep the
+backlog for bullets they obsoleted, so the bullets keep riding the P1
+queue. Mitigation for future large refactor commits: the decision file for
+a "delete / consolidate / unify" refactor should include a
+"backlog-sweep:" line listing bullet slugs the refactor obsoletes, and
+the refactor's PR should also delete those bullets in the same commit.
+Then `docs(backlog): repopulate` sees only live bullets, and cycles like
+this one don't waste time re-verifying ghost work. Logged alongside the
+earlier "fix-but-forget-to-flip-the-gate" observation as evidence that
+backlog freshness needs an explicit step in refactor-cycle hygiene, not
+just in repopulate-cycle hygiene.
+
+### `BundleBlobWriter` contract takes `ByteArray` — blocks streaming large imports
+`ImportMediaTool`'s copy-into-bundle branch re-implements
+`FileBundleBlobWriter.writeBlob`'s atomic tmpfile+move pattern rather than
+calling it, because the writer interface takes `bytes: ByteArray` while
+ImportMediaTool has an `okio.Source` it wants to stream (a gigabyte 4K
+rush shouldn't live in memory just to be bundled). Short-term this is
+fine — both paths use the same okio atomic-move pattern so the bundle
+layout is identical. Structural follow-up: add
+`writeBlobStreaming(projectId, assetId, source: okio.Source, format)` to
+`BundleBlobWriter` and migrate both the AIGC byte-buffer callers and
+`ImportMediaTool` onto it. Then "bundle write" is genuinely one code
+path. Not worth its own cycle yet (no active import failures, no active
+imports large enough to notice), but worth tracking here so the third
+caller (likely `ExtractFrameTool` per an active P1 bullet) can push this
+off the pain point list once it shows up.

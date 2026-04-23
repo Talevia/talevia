@@ -3,20 +3,21 @@ package io.talevia.core.platform
 /**
  * User-visible external filesystem abstraction. Explicitly NOT for Project
  * state (use [io.talevia.core.domain.ProjectStore]) and NOT for media assets
- * (use [MediaStorage]) — only for letting the agent read/write a user's
- * free-standing text files: subtitle files (.srt / .vtt), prompt templates,
- * edit scripts, story outlines, anything living under the user's home dir
- * that isn't already managed Project state.
+ * (use `import_media` + [io.talevia.core.domain.Project.assets]) — only for
+ * letting the agent read/write a user's free-standing text files: subtitle
+ * files (.srt / .vtt), prompt templates, edit scripts, story outlines,
+ * anything living under the user's home dir that isn't already managed
+ * Project state.
  *
- * Path semantics mirror [MediaStorage]: raw `String`, absolute paths only,
- * pre-validated with [io.talevia.core.tool.PathGuard]. No custom `Path`
- * wrapper — different platforms (POSIX on JVM/iOS, content URIs on Android)
- * disagree on what a path even is, so we stay strings and let impls decide.
+ * Path semantics: raw `String`, absolute paths only, pre-validated with
+ * [io.talevia.core.tool.PathGuard]. No custom `Path` wrapper — different
+ * platforms (POSIX on JVM/iOS, content URIs on Android) disagree on what
+ * a path even is, so we stay strings and let impls decide.
  *
- * Text-only on purpose. Binary artifacts go through `import_media` +
- * [MediaStorage] where metadata probing, mime-typing, and the asset catalog
- * live. Calling [readText] on binary content yields a clear error instead of
- * handing the LLM a byte bucket it can't make sense of.
+ * Text-only on purpose. Binary artifacts go through `import_media`, which
+ * handles metadata probing, mime-typing, and appends the asset to
+ * `Project.assets`. Calling [readText] on binary content yields a clear
+ * error instead of handing the LLM a byte bucket it can't make sense of.
  *
  * All methods are `suspend` so impls can off-load to an I/O dispatcher.
  */
@@ -104,7 +105,7 @@ interface FileSystem {
     )
 
     companion object {
-        /** 10 MB. Anything larger should go through [MediaStorage] instead. */
+        /** 10 MB. Anything larger should go through `import_media` instead. */
         const val DEFAULT_MAX_READ_BYTES: Long = 10L * 1024 * 1024
 
         /** Guard against pathological directories; the LLM has no use for 10k entries. */
