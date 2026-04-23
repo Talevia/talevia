@@ -430,3 +430,39 @@ unresolved-reference errors on the returned value's fields, the fix
 is almost always (a) add an import you forgot, and/or (b) an explicit
 type argument on the outer generic call — not anywhere the downstream
 errors point.
+
+---
+
+## 2026-04-23 — bundle-source-footage-consolidate (`<this commit>`)
+
+### Third inline `BundleBlobWriter`-equivalent streaming copy — the case for `writeBlobStreaming` is now overwhelming
+`ConsolidateMediaIntoBundleTool.consolidateOne` inline-copies via okio
+`fs.source(p)` + `fs.sink(tmp).buffer().writeAll(...)` + `atomicMove`.
+Third site doing exactly this pattern (after `ImportMediaTool` and
+`FileBundleBlobWriter`). Still duplicating because
+`BundleBlobWriter.writeBlob` takes `bytes: ByteArray` — using it means
+reading entire files into memory, which regresses on gigabyte rush
+imports / consolidations. The pain-point was logged after cycles 5 +
+12; this cycle is the third occurrence, which qualifies for the "three
+callers = lift" rule. Concrete next step: extend `BundleBlobWriter`
+with `suspend fun writeBlobStreaming(projectId, assetId, source:
+okio.Source, format): MediaSource.BundleFile`, migrate all three
+callers (`FileBundleBlobWriter.writeBlob` becomes a `bytes.toSource()`
+wrapper for the byte-buffered AIGC use case). `debt-streaming-bundle-
+blob-writer` would be the slug.
+
+### Desktop + Android + Server + CLI + iOS → 5 coordinated registration sites per new tool
+Seventh cycle since cycle 1 to touch all 5 containers for a new-tool
+wire-up. Cost is small per-cycle (~10 lines total across 5 files) but
+consistent: two sites per container (import line + registration line),
+five containers, plus ktlint re-sorting my imports because inserting
+`ConsolidateMediaIntoBundleTool` mid-block again put it in the wrong
+alphabetical spot until `ktlintFormat` fixed it. Same heuristic as
+cycle 9 ("inserting imports by eye is cheap to re-sort but reads as
+churn") — I just keep forgetting to pre-sort. A script `/register-tool
+<ToolName> <ctorArgs>` that writes the 10-line diff across all 5
+containers + runs ktlintFormat would save a few minutes per
+registration, but the frequency (7/13 cycles ≈ 54%) isn't high
+enough yet to justify tooling. Threshold worth watching: if new-tool
+cycles hit 10 in a row without a break, that's the moment to build
+the helper.

@@ -124,6 +124,7 @@ import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
 import io.talevia.core.tool.builtin.video.ClearTimelineTool
+import io.talevia.core.tool.builtin.video.ConsolidateMediaIntoBundleTool
 import io.talevia.core.tool.builtin.video.DuplicateClipTool
 import io.talevia.core.tool.builtin.video.DuplicateTrackTool
 import io.talevia.core.tool.builtin.video.EditTextClipTool
@@ -359,6 +360,7 @@ class ServerContainer(
         register(ReadPartTool(sessions))
         register(ImportMediaTool(engine, projects, proxyGenerator = FfmpegProxyGenerator()))
         register(ExtractFrameTool(engine, projects, bundleBlobWriter))
+        register(ConsolidateMediaIntoBundleTool(projects))
         register(AddClipTool(projects))
         register(ReplaceClipTool(projects))
         register(SplitClipTool(projects))
