@@ -3,21 +3,12 @@ package io.talevia.desktop
 import io.talevia.core.ProjectId
 import io.talevia.core.domain.source.SourceNode
 import io.talevia.core.domain.source.consistency.ConsistencyKinds
-import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-
-/**
- * Pretty-printed JSON used by the source-node inspector view. Split out
- * as part of `debt-split-desktop-source-panel` (2026-04-23).
- */
-@OptIn(ExperimentalSerializationApi::class)
-internal val SourcePrettyJson: Json = Json { prettyPrint = true; prettyPrintIndent = "  " }
 
 /**
  * `update_source_node_body` is full-replacement, not partial-patch: feed

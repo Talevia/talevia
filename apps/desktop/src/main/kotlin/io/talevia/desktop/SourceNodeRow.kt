@@ -166,7 +166,7 @@ internal fun SourceNodeRow(
                     Spacer(Modifier.height(4.dp))
                     SelectionContainer {
                         Text(
-                            text = SourcePrettyJson.encodeToString(JsonObject.serializer(), node.body as JsonObject),
+                            text = DesktopPrettyJson.encodeToString(JsonObject.serializer(), node.body as JsonObject),
                             fontFamily = FontFamily.Monospace,
                         )
                     }

@@ -27,12 +27,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import io.talevia.core.JsonConfig
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Track
 import io.talevia.core.domain.Transform
-import kotlinx.serialization.ExperimentalSerializationApi
-import kotlinx.serialization.json.Json
 
 /**
  * Per-clip inspector row — collapsed shows headline + chips + action
@@ -110,7 +107,7 @@ internal fun ClipRow(
                 Spacer(Modifier.height(4.dp))
                 SelectionContainer {
                     Text(
-                        text = TimelinePrettyJson.encodeToString(Clip.serializer(), clip),
+                        text = DesktopPrettyJson.encodeToString(Clip.serializer(), clip),
                         fontFamily = FontFamily.Monospace,
                     )
                 }
@@ -164,21 +161,6 @@ private fun isNonDefaultTransform(t: Transform): Boolean =
         t.scaleY != 1f ||
         t.rotationDeg != 0f ||
         t.opacity != 1f
-
-/**
- * Pretty-printed JSON for the inline clip inspector. Named
- * `TimelinePrettyJson` rather than the generic `PrettyJson` because
- * multiple panels (source / lockfile / timeline) each have their own
- * pretty-print instance with slightly different configs; the
- * per-panel prefix avoids the compile-time ambiguity the
- * `debt-split-desktop-source-panel` cycle flagged on its sibling
- * `SourcePrettyJson`.
- */
-@OptIn(ExperimentalSerializationApi::class)
-internal val TimelinePrettyJson: Json = Json(JsonConfig.default) {
-    prettyPrint = true
-    prettyPrintIndent = "  "
-}
 
 /**
  * Inline quick-action row shown on expanded clip inspector:

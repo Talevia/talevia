@@ -31,14 +31,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
-import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.domain.staleClipsFromLockfile
 import kotlinx.coroutines.launch
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -284,17 +282,11 @@ private fun LockfileEntryRow(
                 Spacer(Modifier.height(4.dp))
                 SelectionContainer {
                     Text(
-                        text = PrettyJson.encodeToString(JsonObject.serializer(), entry.provenance.parameters),
+                        text = DesktopPrettyJson.encodeToString(JsonObject.serializer(), entry.provenance.parameters),
                         fontFamily = FontFamily.Monospace,
                     )
                 }
             }
         }
     }
-}
-
-@OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)
-private val PrettyJson = Json(JsonConfig.default) {
-    prettyPrint = true
-    prettyPrintIndent = "  "
 }
