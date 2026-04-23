@@ -352,3 +352,72 @@ Two workarounds:
 Always follow-up a `sed` rewrite with a `git diff --stat` + a
 quick compile-check before moving on — the match count is part of
 the diff; a zero-match rewrite should stand out visibly.
+
+## 2026-04-23 — Testing a bus subscriber under `runTest` (two footguns)
+
+Writing `AgentRunStateTrackerEvictionTest` (cycle 30,
+`debt-bound-agent-run-state-tracker-evict-on-delete`) surfaced
+two non-obvious pitfalls that together cost three red runs
+before landing.
+
+**Footgun 1 — `TestScope(coroutineContext)` inside `runTest` throws**
+at construction with
+`IllegalArgumentException: A CoroutineExceptionHandler was passed
+to TestScope. Please pass it as an argument to a launch or async
+block on an already-created scope`. `runTest`'s coroutine context
+already carries a `TestScopeCoroutineExceptionHandler`, and
+`TestScope(...)` explicitly forbids that — the check exists to
+catch exactly this mistake. Correct pattern: use the built-in
+`backgroundScope` that `runTest` exposes for forever-running
+collectors. It auto-cancels at test end, which is what you
+actually want for a bus subscriber that would otherwise leak the
+test process.
+
+```kotlin
+// ❌ throws:
+// val scope = TestScope(coroutineContext)
+// val tracker = AgentRunStateTracker(bus, scope)
+
+// ✅
+val tracker = AgentRunStateTracker(bus, backgroundScope)
+```
+
+**Footgun 2 — `MutableSharedFlow` with no replay silently drops
+publishes that race ahead of the first subscriber resumption.**
+`EventBus` is a `MutableSharedFlow(extraBufferCapacity=256)` with
+**no** replay. On `StandardTestDispatcher` (the default inside
+`runTest`), constructing `AgentRunStateTracker(bus, scope)`
+schedules the collector via `scope.launch { bus.events.collect { … } }`
+but doesn't start collecting until the dispatcher is driven. A
+`bus.publish(event)` called immediately after construction emits
+into the buffer; when the collector finally resumes, it sees
+nothing — buffered events from before the subscriber joined are
+not replayed.
+
+Fix: after every construct-a-subscriber step, drain with
+`advanceUntilIdle()` + `yield()` **before** the first publish.
+Without this, the seed event is silently swallowed and the "my
+subscriber never saw it" symptom looks like the subscriber is
+broken.
+
+```kotlin
+val tracker = AgentRunStateTracker(bus, backgroundScope)
+advanceUntilIdle()   // let the collector register
+yield()
+bus.publish(BusEvent.AgentRunStateChanged(sid, Generating))
+advanceUntilIdle()   // let the collector process
+yield()
+// assertions…
+```
+
+Existing tests that subscribed via `launchIn(this)` inside
+`runTest` (e.g. `AgentCompactionTest`) hit the same issue and
+resolved it with a single `yield()` immediately after `launchIn`.
+The tracker case is the same principle applied to a subscriber
+that lives inside an injectable scope rather than being `launchIn`-ed
+on `this`.
+
+Together these two footguns explain why "my subscriber test runs
+green locally but red on first write" is a recurring pattern for
+this codebase — both pitfalls hide under a generic assertion
+failure, not a transport error.

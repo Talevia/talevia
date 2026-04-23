@@ -24,10 +24,13 @@ import kotlinx.datetime.Clock
  * Reads are non-suspending: [currentState] hits a [MutableStateFlow]'s
  * atomic `.value`. Writes are driven by a background collector spawned
  * in `init` that tails every [AgentRunState] publish off the given
- * [EventBus] and upserts the session's entry. Per-session keys grow
- * monotonically with session count — evict by session deletion if that
- * becomes load-bearing; today we do not (sessions are bounded to the
- * app's active workload).
+ * [EventBus] and upserts the session's entry. A second collector on
+ * the same bus tails [BusEvent.SessionDeleted] and evicts the deleted
+ * session's entry from both maps so a long-lived process doesn't
+ * accumulate stale state across an indefinite stream of session
+ * create / delete cycles (`debt-bound-agent-run-state-tracker-evict-on-delete`,
+ * audit finding B2 in
+ * `docs/decisions/2026-04-23-debt-audit-unbounded-mutable-collections.md`).
  *
  * Terminal states ([AgentRunState.Cancelled], [AgentRunState.Failed],
  * [AgentRunState.Idle] at the end of a run) are kept — "what was the
@@ -76,19 +79,34 @@ class AgentRunStateTracker(
     init {
         scope.launch {
             bus.events.collect { event ->
-                if (event is BusEvent.AgentRunStateChanged) {
-                    val now = clock.now().toEpochMilliseconds()
-                    val transition = StateTransition(epochMs = now, state = event.state)
-                    _states.update { prev -> prev + (event.sessionId to event.state) }
-                    historyFlowInternal.update { prev ->
-                        val existing = prev[event.sessionId].orEmpty()
-                        val next = if (existing.size >= historyCap) {
-                            existing.drop(existing.size - historyCap + 1) + transition
-                        } else {
-                            existing + transition
+                when (event) {
+                    is BusEvent.AgentRunStateChanged -> {
+                        val now = clock.now().toEpochMilliseconds()
+                        val transition = StateTransition(epochMs = now, state = event.state)
+                        _states.update { prev -> prev + (event.sessionId to event.state) }
+                        historyFlowInternal.update { prev ->
+                            val existing = prev[event.sessionId].orEmpty()
+                            val next = if (existing.size >= historyCap) {
+                                existing.drop(existing.size - historyCap + 1) + transition
+                            } else {
+                                existing + transition
+                            }
+                            prev + (event.sessionId to next)
                         }
-                        prev + (event.sessionId to next)
                     }
+                    is BusEvent.SessionDeleted -> {
+                        // Evict on session deletion so the two maps don't grow
+                        // monotonically with lifetime session count. No-op when
+                        // the session was never tracked (either because no run
+                        // ever started, or because a previous delete already
+                        // cleaned it up) — `Map.minus(key)` is no-op for absent
+                        // keys, so `update` on an absent entry short-circuits
+                        // to the same map and StateFlow skips a downstream
+                        // emission.
+                        _states.update { prev -> prev - event.sessionId }
+                        historyFlowInternal.update { prev -> prev - event.sessionId }
+                    }
+                    else -> Unit
                 }
             }
         }
