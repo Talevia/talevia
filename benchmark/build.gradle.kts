@@ -15,6 +15,8 @@ dependencies {
     implementation(project(":core"))
     implementation(libs.kotlinx.benchmark.runtime)
     implementation(libs.kotlinx.coroutines.core)
+    implementation(libs.kotlinx.serialization.json)
+    implementation(libs.sqldelight.driver.sqlite)
 }
 
 benchmark {
