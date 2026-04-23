@@ -348,7 +348,9 @@ internal class AgentTurnExecutor(
             return
         }
 
-        val pattern = tool.permission.patternFrom(event.input.toString())
+        val inputJson = event.input.toString()
+        val pattern = tool.permission.patternFrom(inputJson)
+        val resolvedPermission = tool.permission.permissionFrom(inputJson)
         // Serialise permission checks across concurrent dispatches so
         // interactive prompts (ask-once-per-tool) never race for the same
         // terminal. The tool body itself still runs concurrently.
@@ -357,7 +359,7 @@ internal class AgentTurnExecutor(
                 rules = input.permissionRules,
                 request = PermissionRequest(
                     sessionId = asstMsg.sessionId,
-                    permission = tool.permission.permission,
+                    permission = resolvedPermission,
                     pattern = pattern,
                     metadata = mapOf("toolId" to event.toolId),
                 ),
@@ -366,7 +368,7 @@ internal class AgentTurnExecutor(
         if (!decision.granted) {
             store.upsertPart(
                 basePart.copy(
-                    state = ToolState.Failed(event.input, "Permission denied: ${tool.permission.permission}"),
+                    state = ToolState.Failed(event.input, "Permission denied: $resolvedPermission"),
                 ),
             )
             return

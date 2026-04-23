@@ -14,7 +14,7 @@ import kotlinx.serialization.builtins.ListSerializer
  * + [ProjectQueryTool.Input.limit] (default 50, clamped 1..500). Returns
  * compact summaries — the full captured `Project` payload is not surfaced
  * here; callers that need the live state still use `get_project_state` /
- * `restore_project_snapshot`.
+ * `project_snapshot_action(action=restore)`.
  */
 @Serializable data class SnapshotRow(
     val snapshotId: String,

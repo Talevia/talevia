@@ -54,7 +54,7 @@ import kotlinx.serialization.serializer
  * same stance as [PruneLockfileTool].
  *
  * Clock is injected for deterministic tests; runtime defaults to
- * [Clock.System], matching [SaveProjectSnapshotTool].
+ * [Clock.System], matching [ProjectSnapshotActionTool].
  */
 class GcLockfileTool(
     private val projects: ProjectStore,

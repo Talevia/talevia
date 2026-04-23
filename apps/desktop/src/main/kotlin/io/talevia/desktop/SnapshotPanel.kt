@@ -45,9 +45,9 @@ import kotlinx.serialization.json.put
  *
  * Lists all snapshots newest-first. Each row shows the label, a
  * human-readable timestamp, and the clip count captured at save time.
- * "Restore" dispatches `restore_project_snapshot` through the shared
+ * "Restore" dispatches `project_snapshot_action(action=restore)` through the shared
  * [AppContainer.tools] registry so validation + bus events are identical
- * to agent-driven restores. "Save now" dispatches `save_project_snapshot`
+ * to agent-driven restores. "Save now" dispatches `project_snapshot_action(action=save)`
  * for quick manual captures without going through chat.
  *
  * Refresh strategy: same BusEvent.PartUpdated subscription as SourcePanel
@@ -94,8 +94,11 @@ fun SnapshotPanel(
     fun saveNow() {
         scope.launch {
             runCatching {
-                container.tools["save_project_snapshot"]!!.dispatch(
-                    buildJsonObject { put("projectId", projectId.value) },
+                container.tools["project_snapshot_action"]!!.dispatch(
+                    buildJsonObject {
+                        put("projectId", projectId.value)
+                        put("action", "save")
+                    },
                     container.uiToolContext(projectId),
                 )
                 log += "snapshot saved"
@@ -107,9 +110,10 @@ fun SnapshotPanel(
         restoring = snapshotId
         scope.launch {
             runCatching {
-                container.tools["restore_project_snapshot"]!!.dispatch(
+                container.tools["project_snapshot_action"]!!.dispatch(
                     buildJsonObject {
                         put("projectId", projectId.value)
+                        put("action", "restore")
                         put("snapshotId", snapshotId)
                     },
                     container.uiToolContext(projectId),

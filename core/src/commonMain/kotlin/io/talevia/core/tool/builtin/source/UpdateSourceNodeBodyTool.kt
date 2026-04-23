@@ -61,7 +61,7 @@ import kotlinx.serialization.serializer
  * fields (`sourceBinding` is by id, not by hash), so `revert_timeline` would be a
  * no-op anyway. Following the same pattern as `set_source_node_parents`, which
  * also doesn't emit snapshots for pure-source mutations. Project-level undo
- * for source edits lives in `save_project_snapshot` / `restore_project_snapshot`.
+ * for source edits lives in `project_snapshot_action(action=save)` / `project_snapshot_action(action=restore)`.
  *
  * **Permission.** `source.write` — same tier as the rest of the source-write family.
  */

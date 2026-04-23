@@ -196,8 +196,11 @@ internal fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) 
     val runSaveSnapshot: () -> Unit = {
         scope.launch {
             runCatching {
-                container.tools["save_project_snapshot"]!!.dispatch(
-                    buildJsonObject { put("projectId", projectId.value) },
+                container.tools["project_snapshot_action"]!!.dispatch(
+                    buildJsonObject {
+                        put("projectId", projectId.value)
+                        put("action", "save")
+                    },
                     container.uiToolContext(projectId),
                 )
                 log += "saved snapshot"

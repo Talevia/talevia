@@ -77,9 +77,8 @@ class TaleviaSystemPromptTest {
         // video assets and reference-image chaining into generate_image/video.
         "extract_frame",
         // Project-level named snapshots (VISION §3.4) — survive across chat sessions.
-        "save_project_snapshot",
+        "project_snapshot_action",
         "project_query(select=snapshots)",
-        "restore_project_snapshot",
         // Fork — closes the third VISION §3.4 leg ("可分支").
         "fork_project",
         // Diff — closes the VISION §3.4 "可 diff" property alongside snapshot + fork.

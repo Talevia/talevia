@@ -65,7 +65,6 @@ import io.talevia.core.tool.builtin.ml.DescribeAssetTool
 import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
 import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
 import io.talevia.core.tool.builtin.project.CreateProjectTool
-import io.talevia.core.tool.builtin.project.DeleteProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.DeleteProjectTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.ExportProjectTool
@@ -78,12 +77,11 @@ import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.project.OpenProjectTool
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import io.talevia.core.tool.builtin.project.ProjectSnapshotActionTool
 import io.talevia.core.tool.builtin.project.PruneLockfileTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
 import io.talevia.core.tool.builtin.project.RemoveAssetTool
 import io.talevia.core.tool.builtin.project.RenameProjectTool
-import io.talevia.core.tool.builtin.project.RestoreProjectSnapshotTool
-import io.talevia.core.tool.builtin.project.SaveProjectSnapshotTool
 import io.talevia.core.tool.builtin.project.SetClipAssetPinnedTool
 import io.talevia.core.tool.builtin.project.SetLockfileEntryPinnedTool
 import io.talevia.core.tool.builtin.project.SetOutputProfileTool
@@ -356,9 +354,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(GcClipRenderCacheTool(projects, engine))
         register(SetLockfileEntryPinnedTool(projects))
         register(SetClipAssetPinnedTool(projects))
-        register(SaveProjectSnapshotTool(projects))
-        register(RestoreProjectSnapshotTool(projects))
-        register(DeleteProjectSnapshotTool(projects))
+        register(ProjectSnapshotActionTool(projects))
         register(ForkProjectTool(projects, this))
         register(DiffProjectsTool(projects))
         register(ExportProjectTool(projects))

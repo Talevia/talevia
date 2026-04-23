@@ -16,7 +16,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **debt-consolidate-project-snapshot-triple** — `core/tool/builtin/project/` 25 工具（第二大 area）；SaveProjectSnapshot + RestoreProjectSnapshot + DeleteProjectSnapshot 是经典 triple。**方向：** 合并为一个 `project_snapshot(action=save|restore|delete, snapshotId?, label?)`，-2 个 `*Tool.kt`。Rubric §5.7。
 - **debt-consolidate-project-lockfile-maintenance** — PruneLockfile + GcLockfile + GcClipRenderCache 都是"定期清扫"语义，3 条近似工具。**方向：** 合一为 `project_maintenance(action=prune-lockfile|gc-lockfile|gc-render-cache)` 或更高层 `project_gc(dryRun, aggressive)`，-2 个工具。Rubric §5.7。
 - **debt-consolidate-session-lifecycle-verbs** — `core/tool/builtin/session/` 13 工具；Archive + Unarchive + Delete + Rename 是 session CRUD 动词群。**方向：** 合并为 `session_action(sessionId, action=archive|unarchive|delete|rename, newTitle?)`，-3 个工具。Rubric §5.7。
 - **export-incremental-render** — CLAUDE.md "Known incomplete" 首条：`ExportTool` memoize 仅到 whole-timeline 层；长 project 只改一个 clip 仍然重新 render 全 timeline（且 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 明确列为延期）。**方向：** 扩 `ExportTool` memoization key 到 per-clip 级别，利用 `clipRenderCache` 做 "render one stale clip + reuse the rest"；决策阶段定义 key 成分（clip spec hash × source binding hash × render profile hash）。**前置：** `debt-add-benchmark-export-tool` baseline 数字写入 decision，用来证明优化有效 + 无退化。Rubric §5.7。

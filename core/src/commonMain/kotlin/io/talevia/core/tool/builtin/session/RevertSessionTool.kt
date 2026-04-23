@@ -42,7 +42,7 @@ import kotlinx.serialization.serializer
  *  - Publishes `BusEvent.SessionReverted` so UIs refresh atomically.
  *
  * **Destructive.** Hard revert — no way to un-revert via tools. The
- * `save_project_snapshot` family covers project-level undo; this tool
+ * `project_snapshot_action(action=save)` family covers project-level undo; this tool
  * is explicitly for the session half. The help text flags the
  * irreversibility so an agent running against a human user can warn.
  *
@@ -88,7 +88,7 @@ class RevertSessionTool(
     override val helpText: String =
         "DESTRUCTIVE. Rewind a session to an anchor message: deletes every message strictly after " +
             "the anchor and rolls the project timeline back to the most recent snapshot at-or-before " +
-            "the anchor. No un-revert — use save_project_snapshot for project-level safety nets. " +
+            "the anchor. No un-revert — use project_snapshot_action(action=save) for project-level safety nets. " +
             "Cancel any in-flight Agent.run on the target session before calling. Use when the user " +
             "says \"undo back to where we defined Mei\"."
     override val inputSerializer: KSerializer<Input> = serializer()

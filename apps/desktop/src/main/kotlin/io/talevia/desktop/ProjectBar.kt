@@ -50,8 +50,8 @@ import kotlinx.serialization.json.put
  * on the desktop expert surface.
  *
  * All mutations route through the existing project tools
- * (`create_project`, `fork_project`, `save_project_snapshot`,
- * `restore_project_snapshot`, `delete_project`). The bar doesn't
+ * (`create_project`, `fork_project`, `project_snapshot_action`,
+ * `delete_project`). The bar doesn't
  * re-implement lifecycle — it's just a UI onto the tool registry.
  *
  * Refreshes the summary list on [BusEvent.PartUpdated] so any change
@@ -243,9 +243,10 @@ fun ProjectBar(
             onSave = {
                 val label = snapshotLabel.takeIf { it.isNotBlank() }
                 dispatch(
-                    "save_project_snapshot",
+                    "project_snapshot_action",
                     buildJsonObject {
                         put("projectId", activeProjectId.value)
+                        put("action", "save")
                         if (label != null) put("label", label)
                     },
                     "save snapshot",
@@ -254,9 +255,10 @@ fun ProjectBar(
             },
             onRestore = { snapshotId ->
                 dispatch(
-                    "restore_project_snapshot",
+                    "project_snapshot_action",
                     buildJsonObject {
                         put("projectId", activeProjectId.value)
+                        put("action", "restore")
                         put("snapshotId", snapshotId)
                     },
                     "restore snapshot $snapshotId",

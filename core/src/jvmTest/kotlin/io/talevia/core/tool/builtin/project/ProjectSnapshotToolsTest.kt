@@ -124,10 +124,10 @@ class ProjectSnapshotToolsTest {
         val rig = rig()
         val clock = FixedClock(Instant.fromEpochMilliseconds(1_700_000_000_000L))
         rig.store.upsert("test", seedProject("p", listOf(videoClip("c-1", AssetId("a-1")))))
-        val tool = SaveProjectSnapshotTool(rig.store, clock)
+        val tool = ProjectSnapshotActionTool(rig.store, clock)
 
         val out = tool.execute(
-            SaveProjectSnapshotTool.Input(projectId = "p"),
+            ProjectSnapshotActionTool.Input(action = "save", projectId = "p"),
             rig.ctx,
         )
 
@@ -148,11 +148,11 @@ class ProjectSnapshotToolsTest {
         val rig = rig()
         val clock = FixedClock(Instant.fromEpochMilliseconds(1_700_000_000_000L))
         rig.store.upsert("test", seedProject("p"))
-        val tool = SaveProjectSnapshotTool(rig.store, clock)
+        val tool = ProjectSnapshotActionTool(rig.store, clock)
 
-        tool.execute(SaveProjectSnapshotTool.Input(projectId = "p", label = "v1"), rig.ctx)
+        tool.execute(ProjectSnapshotActionTool.Input(action = "save", projectId = "p", label = "v1"), rig.ctx)
         clock.instant = Instant.fromEpochMilliseconds(1_700_000_001_000L)
-        tool.execute(SaveProjectSnapshotTool.Input(projectId = "p", label = "v2"), rig.ctx)
+        tool.execute(ProjectSnapshotActionTool.Input(action = "save", projectId = "p", label = "v2"), rig.ctx)
 
         val refreshed = rig.store.get(ProjectId("p"))!!
         assertEquals(listOf("v1", "v2"), refreshed.snapshots.map { it.label })
@@ -350,8 +350,8 @@ class ProjectSnapshotToolsTest {
         rig.store.upsert("test", initialProject)
 
         // Capture snapshot v1.
-        val save = SaveProjectSnapshotTool(rig.store, clock)
-        val v1 = save.execute(SaveProjectSnapshotTool.Input(projectId = "p", label = "v1"), rig.ctx)
+        val save = ProjectSnapshotActionTool(rig.store, clock)
+        val v1 = save.execute(ProjectSnapshotActionTool.Input(action = "save", projectId = "p", label = "v1"), rig.ctx)
 
         // Mutate the live project (drop the lockfile + add a second clip).
         val mutatedAsset = AssetId("a-new")
@@ -371,12 +371,12 @@ class ProjectSnapshotToolsTest {
         // Capture snapshot v2 (post-mutation state) so we can prove restore preserves
         // the entire snapshots list, not just the one being restored.
         clock.instant = Instant.fromEpochMilliseconds(1_700_000_001_000L)
-        save.execute(SaveProjectSnapshotTool.Input(projectId = "p", label = "v2"), rig.ctx)
+        save.execute(ProjectSnapshotActionTool.Input(action = "save", projectId = "p", label = "v2"), rig.ctx)
 
         // Restore back to v1.
-        val restore = RestoreProjectSnapshotTool(rig.store)
+        val restore = ProjectSnapshotActionTool(rig.store)
         val out = restore.execute(
-            RestoreProjectSnapshotTool.Input(projectId = "p", snapshotId = v1.data.snapshotId),
+            ProjectSnapshotActionTool.Input(action = "restore", projectId = "p", snapshotId = v1.data.snapshotId),
             rig.ctx,
         )
 
@@ -403,8 +403,8 @@ class ProjectSnapshotToolsTest {
         val rig = rig()
         rig.store.upsert("test", seedProject("p"))
         val ex = assertFailsWith<IllegalStateException> {
-            RestoreProjectSnapshotTool(rig.store).execute(
-                RestoreProjectSnapshotTool.Input(projectId = "p", snapshotId = "ghost"),
+            ProjectSnapshotActionTool(rig.store).execute(
+                ProjectSnapshotActionTool.Input(action = "restore", projectId = "p", snapshotId = "ghost"),
                 rig.ctx,
             )
         }
@@ -417,8 +417,8 @@ class ProjectSnapshotToolsTest {
         val project = seedProject("p", listOf(videoClip("c-1", AssetId("a-1"))))
         rig.store.upsert("test", project)
 
-        SaveProjectSnapshotTool(rig.store, clock)
-            .execute(SaveProjectSnapshotTool.Input(projectId = "p", label = "v1"), rig.ctx)
+        ProjectSnapshotActionTool(rig.store, clock)
+            .execute(ProjectSnapshotActionTool.Input(action = "save", projectId = "p", label = "v1"), rig.ctx)
 
         val (total, rows) = listSnapshots(rig, "p")
         assertEquals(1, total)
@@ -428,8 +428,8 @@ class ProjectSnapshotToolsTest {
         rig.store.mutate(ProjectId("p")) { it.copy(timeline = Timeline()) }
         assertEquals(0, rig.store.get(ProjectId("p"))!!.timeline.tracks.size)
 
-        RestoreProjectSnapshotTool(rig.store).execute(
-            RestoreProjectSnapshotTool.Input(projectId = "p", snapshotId = snapshotId),
+        ProjectSnapshotActionTool(rig.store).execute(
+            ProjectSnapshotActionTool.Input(action = "restore", projectId = "p", snapshotId = snapshotId),
             rig.ctx,
         )
         assertEquals(1, rig.store.get(ProjectId("p"))!!.timeline.tracks.size)
@@ -440,22 +440,22 @@ class ProjectSnapshotToolsTest {
         val clock = FixedClock(Instant.fromEpochMilliseconds(1_700_000_000_000L))
         rig.store.upsert("test", seedProject("p"))
 
-        val save = SaveProjectSnapshotTool(rig.store, clock)
-        save.execute(SaveProjectSnapshotTool.Input(projectId = "p", label = "keep-me"), rig.ctx)
+        val save = ProjectSnapshotActionTool(rig.store, clock)
+        save.execute(ProjectSnapshotActionTool.Input(action = "save", projectId = "p", label = "keep-me"), rig.ctx)
         clock.instant = Instant.fromEpochMilliseconds(1_700_000_001_000L)
         val victim = save.execute(
-            SaveProjectSnapshotTool.Input(projectId = "p", label = "drop-me"),
+            ProjectSnapshotActionTool.Input(action = "save", projectId = "p", label = "drop-me"),
             rig.ctx,
         ).data.snapshotId
 
-        val out = DeleteProjectSnapshotTool(rig.store).execute(
-            DeleteProjectSnapshotTool.Input(projectId = "p", snapshotId = victim),
+        val out = ProjectSnapshotActionTool(rig.store).execute(
+            ProjectSnapshotActionTool.Input(action = "delete", projectId = "p", snapshotId = victim),
             rig.ctx,
         )
 
         assertEquals(victim, out.data.snapshotId)
         assertEquals("drop-me", out.data.label)
-        assertEquals(1, out.data.remainingSnapshotCount)
+        assertEquals(1, out.data.totalSnapshotCount)
         val remaining = rig.store.get(ProjectId("p"))!!.snapshots
         assertEquals(1, remaining.size)
         assertEquals("keep-me", remaining.single().label)
@@ -464,11 +464,11 @@ class ProjectSnapshotToolsTest {
     @Test fun deleteUnknownSnapshotThrows() = runTest {
         val rig = rig()
         rig.store.upsert("test", seedProject("p"))
-        val tool = DeleteProjectSnapshotTool(rig.store)
+        val tool = ProjectSnapshotActionTool(rig.store)
 
         assertFailsWith<IllegalStateException> {
             tool.execute(
-                DeleteProjectSnapshotTool.Input(projectId = "p", snapshotId = "missing"),
+                ProjectSnapshotActionTool.Input(action = "delete", projectId = "p", snapshotId = "missing"),
                 rig.ctx,
             )
         }
@@ -479,16 +479,16 @@ class ProjectSnapshotToolsTest {
         val clock = FixedClock(Instant.fromEpochMilliseconds(1_700_000_000_000L))
         rig.store.upsert("test", seedProject("p"))
 
-        val sid = SaveProjectSnapshotTool(rig.store, clock).execute(
-            SaveProjectSnapshotTool.Input(projectId = "p", label = "v1"),
+        val sid = ProjectSnapshotActionTool(rig.store, clock).execute(
+            ProjectSnapshotActionTool.Input(action = "save", projectId = "p", label = "v1"),
             rig.ctx,
         ).data.snapshotId
 
-        val tool = DeleteProjectSnapshotTool(rig.store)
-        tool.execute(DeleteProjectSnapshotTool.Input(projectId = "p", snapshotId = sid), rig.ctx)
+        val tool = ProjectSnapshotActionTool(rig.store)
+        tool.execute(ProjectSnapshotActionTool.Input(action = "delete", projectId = "p", snapshotId = sid), rig.ctx)
         // second call throws — silent success would hide typos / stale ids.
         assertFailsWith<IllegalStateException> {
-            tool.execute(DeleteProjectSnapshotTool.Input(projectId = "p", snapshotId = sid), rig.ctx)
+            tool.execute(ProjectSnapshotActionTool.Input(action = "delete", projectId = "p", snapshotId = sid), rig.ctx)
         }
     }
 
@@ -498,13 +498,13 @@ class ProjectSnapshotToolsTest {
         val clip = videoClip("c-1", AssetId("a-1"))
         rig.store.upsert("test", seedProject("p", listOf(clip)))
 
-        val sid = SaveProjectSnapshotTool(rig.store, clock).execute(
-            SaveProjectSnapshotTool.Input(projectId = "p", label = "v1"),
+        val sid = ProjectSnapshotActionTool(rig.store, clock).execute(
+            ProjectSnapshotActionTool.Input(action = "save", projectId = "p", label = "v1"),
             rig.ctx,
         ).data.snapshotId
 
-        DeleteProjectSnapshotTool(rig.store).execute(
-            DeleteProjectSnapshotTool.Input(projectId = "p", snapshotId = sid),
+        ProjectSnapshotActionTool(rig.store).execute(
+            ProjectSnapshotActionTool.Input(action = "delete", projectId = "p", snapshotId = sid),
             rig.ctx,
         )
 
