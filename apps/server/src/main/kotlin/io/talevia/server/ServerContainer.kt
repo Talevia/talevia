@@ -50,107 +50,7 @@ import io.talevia.core.provider.tavily.TavilySearchEngine
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
-import io.talevia.core.tool.builtin.TodoWriteTool
-import io.talevia.core.tool.builtin.aigc.CompareAigcCandidatesTool
-import io.talevia.core.tool.builtin.aigc.GenerateImageTool
-import io.talevia.core.tool.builtin.aigc.GenerateMusicTool
-import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
-import io.talevia.core.tool.builtin.aigc.ReplayLockfileTool
-import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
-import io.talevia.core.tool.builtin.aigc.UpscaleAssetTool
-import io.talevia.core.tool.builtin.fs.EditTool
-import io.talevia.core.tool.builtin.fs.GlobTool
-import io.talevia.core.tool.builtin.fs.GrepTool
-import io.talevia.core.tool.builtin.fs.ListDirectoryTool
-import io.talevia.core.tool.builtin.fs.MultiEditTool
-import io.talevia.core.tool.builtin.fs.ReadFileTool
-import io.talevia.core.tool.builtin.fs.WriteFileTool
-import io.talevia.core.tool.builtin.ml.DescribeAssetTool
-import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
-import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
-import io.talevia.core.tool.builtin.project.CreateProjectTool
-import io.talevia.core.tool.builtin.project.DeleteProjectSnapshotTool
-import io.talevia.core.tool.builtin.project.DeleteProjectTool
-import io.talevia.core.tool.builtin.project.DiffProjectsTool
-import io.talevia.core.tool.builtin.project.ExportProjectTool
-import io.talevia.core.tool.builtin.project.FindStaleClipsTool
-import io.talevia.core.tool.builtin.project.ForkProjectTool
-import io.talevia.core.tool.builtin.project.GcClipRenderCacheTool
-import io.talevia.core.tool.builtin.project.GcLockfileTool
-import io.talevia.core.tool.builtin.project.GetProjectStateTool
-import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
-import io.talevia.core.tool.builtin.project.ListProjectsTool
-import io.talevia.core.tool.builtin.project.OpenProjectTool
-import io.talevia.core.tool.builtin.project.ProjectQueryTool
-import io.talevia.core.tool.builtin.project.PruneLockfileTool
-import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
-import io.talevia.core.tool.builtin.project.RemoveAssetTool
-import io.talevia.core.tool.builtin.project.RenameProjectTool
-import io.talevia.core.tool.builtin.project.RestoreProjectSnapshotTool
-import io.talevia.core.tool.builtin.project.SaveProjectSnapshotTool
-import io.talevia.core.tool.builtin.project.SetClipAssetPinnedTool
-import io.talevia.core.tool.builtin.project.SetLockfileEntryPinnedTool
-import io.talevia.core.tool.builtin.project.SetOutputProfileTool
-import io.talevia.core.tool.builtin.project.ValidateProjectTool
-import io.talevia.core.tool.builtin.session.ArchiveSessionTool
-import io.talevia.core.tool.builtin.session.DeleteSessionTool
-import io.talevia.core.tool.builtin.session.EstimateSessionTokensTool
-import io.talevia.core.tool.builtin.session.ExportSessionTool
-import io.talevia.core.tool.builtin.session.ForkSessionTool
-import io.talevia.core.tool.builtin.session.ReadPartTool
-import io.talevia.core.tool.builtin.session.RenameSessionTool
-import io.talevia.core.tool.builtin.session.RevertSessionTool
-import io.talevia.core.tool.builtin.session.SessionQueryTool
-import io.talevia.core.tool.builtin.session.SetSessionSpendCapTool
-import io.talevia.core.tool.builtin.session.SetToolEnabledTool
-import io.talevia.core.tool.builtin.session.SwitchProjectTool
-import io.talevia.core.tool.builtin.session.UnarchiveSessionTool
-import io.talevia.core.tool.builtin.shell.BashTool
-import io.talevia.core.tool.builtin.source.AddSourceNodeTool
-import io.talevia.core.tool.builtin.source.DescribeSourceNodeTool
-import io.talevia.core.tool.builtin.source.DiffSourceNodesTool
-import io.talevia.core.tool.builtin.source.ExportSourceNodeTool
-import io.talevia.core.tool.builtin.source.ForkSourceNodeTool
-import io.talevia.core.tool.builtin.source.ImportSourceNodeTool
-import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
-import io.talevia.core.tool.builtin.source.RenameSourceNodeTool
-import io.talevia.core.tool.builtin.source.SetSourceNodeParentsTool
-import io.talevia.core.tool.builtin.source.SourceQueryTool
-import io.talevia.core.tool.builtin.source.UpdateSourceNodeBodyTool
-import io.talevia.core.tool.builtin.video.AddClipTool
-import io.talevia.core.tool.builtin.video.AddSubtitlesTool
-import io.talevia.core.tool.builtin.video.AddTrackTool
-import io.talevia.core.tool.builtin.video.AddTransitionTool
-import io.talevia.core.tool.builtin.video.ApplyFilterTool
-import io.talevia.core.tool.builtin.video.ApplyLutTool
-import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
-import io.talevia.core.tool.builtin.video.ClearTimelineTool
-import io.talevia.core.tool.builtin.video.ConsolidateMediaIntoBundleTool
-import io.talevia.core.tool.builtin.video.DuplicateClipTool
-import io.talevia.core.tool.builtin.video.DuplicateTrackTool
-import io.talevia.core.tool.builtin.video.EditTextClipTool
-import io.talevia.core.tool.builtin.video.ExportDryRunTool
 import io.talevia.core.tool.builtin.video.ExportTool
-import io.talevia.core.tool.builtin.video.ExtractFrameTool
-import io.talevia.core.tool.builtin.video.FadeAudioClipTool
-import io.talevia.core.tool.builtin.video.ImportMediaTool
-import io.talevia.core.tool.builtin.video.MoveClipTool
-import io.talevia.core.tool.builtin.video.RelinkAssetTool
-import io.talevia.core.tool.builtin.video.RemoveClipTool
-import io.talevia.core.tool.builtin.video.RemoveFilterTool
-import io.talevia.core.tool.builtin.video.RemoveTrackTool
-import io.talevia.core.tool.builtin.video.RemoveTransitionTool
-import io.talevia.core.tool.builtin.video.ReorderTracksTool
-import io.talevia.core.tool.builtin.video.ReplaceClipTool
-import io.talevia.core.tool.builtin.video.RevertTimelineTool
-import io.talevia.core.tool.builtin.video.SetClipSourceBindingTool
-import io.talevia.core.tool.builtin.video.SetClipTransformTool
-import io.talevia.core.tool.builtin.video.SetClipVolumeTool
-import io.talevia.core.tool.builtin.video.SplitClipTool
-import io.talevia.core.tool.builtin.video.TrimClipTool
-import io.talevia.core.tool.builtin.web.WebFetchTool
-import io.talevia.core.tool.builtin.web.WebSearchTool
-import io.talevia.platform.ffmpeg.FfmpegProxyGenerator
 import io.talevia.platform.ffmpeg.FfmpegVideoEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -352,115 +252,23 @@ class ServerContainer(
         ?.let { TavilySearchEngine(httpClient, it) }
 
     val tools: ToolRegistry = ToolRegistry().apply {
-        register(io.talevia.core.tool.builtin.meta.ListToolsTool(this))
-        register(io.talevia.core.tool.builtin.meta.EstimateTokensTool())
-        register(TodoWriteTool())
-        register(io.talevia.core.tool.builtin.DraftPlanTool())
-        register(io.talevia.core.tool.builtin.ExecutePlanTool(this, sessions))
-        register(SessionQueryTool(sessions, agentStates, projects, toolRegistry = this))
-        register(ExportSessionTool(sessions))
-        register(EstimateSessionTokensTool(sessions))
-        register(ForkSessionTool(sessions))
-        register(RenameSessionTool(sessions))
-        register(SetSessionSpendCapTool(sessions))
-        register(SetToolEnabledTool(sessions))
-        register(SwitchProjectTool(sessions, projects, bus = bus))
-        register(RevertSessionTool(sessions, projects, bus))
-        register(ArchiveSessionTool(sessions))
-        register(UnarchiveSessionTool(sessions))
-        register(DeleteSessionTool(sessions))
-        register(ReadPartTool(sessions))
-        register(ImportMediaTool(engine, projects, proxyGenerator = FfmpegProxyGenerator()))
-        register(ExtractFrameTool(engine, projects, bundleBlobWriter))
-        register(ConsolidateMediaIntoBundleTool(projects))
-        register(RelinkAssetTool(projects))
-        register(AddClipTool(projects))
-        register(ReplaceClipTool(projects))
-        register(SplitClipTool(projects))
-        register(RemoveClipTool(projects))
-        register(MoveClipTool(projects))
-        register(SetClipSourceBindingTool(projects))
-        register(DuplicateClipTool(projects))
-        register(TrimClipTool(projects))
-        register(SetClipVolumeTool(projects))
-        register(FadeAudioClipTool(projects))
-        register(SetClipTransformTool(projects))
-        register(ExportTool(projects, engine))
-        register(ExportDryRunTool(projects))
-        register(ApplyFilterTool(projects))
-        register(RemoveFilterTool(projects))
-        register(ApplyLutTool(projects))
-        register(AddSubtitlesTool(projects))
-        register(EditTextClipTool(projects))
-        register(AddTransitionTool(projects))
-        register(RemoveTransitionTool(projects))
-        register(AddTrackTool(projects))
-        register(DuplicateTrackTool(projects))
-        register(RemoveTrackTool(projects))
-        register(ReorderTracksTool(projects))
-        register(RevertTimelineTool(sessions, projects))
-        register(ClearTimelineTool(projects))
-        register(CreateProjectTool(projects))
-        register(OpenProjectTool(projects))
-        register(CreateProjectFromTemplateTool(projects))
-        register(ListProjectsTool(projects))
-        register(GetProjectStateTool(projects))
-        register(DeleteProjectTool(projects))
-        register(RenameProjectTool(projects))
-        register(FindStaleClipsTool(projects))
-        register(ProjectQueryTool(projects))
-        register(RemoveAssetTool(projects))
-        register(SetOutputProfileTool(projects))
-        register(ValidateProjectTool(projects))
-        register(RegenerateStaleClipsTool(projects, this))
-        register(PruneLockfileTool(projects))
-        register(GcLockfileTool(projects))
-        register(GcClipRenderCacheTool(projects, engine))
-        register(SetLockfileEntryPinnedTool(projects))
-        register(SetClipAssetPinnedTool(projects))
-        register(SaveProjectSnapshotTool(projects))
-        register(RestoreProjectSnapshotTool(projects))
-        register(DeleteProjectSnapshotTool(projects))
-        register(ForkProjectTool(projects, this))
-        register(DiffProjectsTool(projects))
-        register(ExportProjectTool(projects))
-        register(ImportProjectFromJsonTool(projects))
-        register(SourceQueryTool(projects))
-        register(DescribeSourceNodeTool(projects))
-        register(DiffSourceNodesTool(projects))
-        register(RemoveSourceNodeTool(projects))
-        register(ImportSourceNodeTool(projects))
-        register(ExportSourceNodeTool(projects))
-        register(AddSourceNodeTool(projects))
-        register(ForkSourceNodeTool(projects))
-        register(SetSourceNodeParentsTool(projects))
-        register(RenameSourceNodeTool(projects))
-        register(UpdateSourceNodeBodyTool(projects))
-        register(ReadFileTool(fileSystem))
-        register(WriteFileTool(fileSystem))
-        register(EditTool(fileSystem))
-        register(MultiEditTool(fileSystem))
-        register(ListDirectoryTool(fileSystem))
-        register(GlobTool(fileSystem))
-        register(GrepTool(fileSystem))
-        register(BashTool(processRunner))
-        register(WebFetchTool(httpClient))
-        search?.let { register(WebSearchTool(it)) }
-        // All AIGC tools persist into the project bundle via bundleBlobWriter;
-        // reference-asset resolution goes through BundleMediaPathResolver inside
-        // each tool.
-        imageGen?.let { register(GenerateImageTool(it, bundleBlobWriter, projects)) }
-        videoGen?.let { register(GenerateVideoTool(it, bundleBlobWriter, projects)) }
-        musicGen?.let { register(GenerateMusicTool(it, bundleBlobWriter, projects)) }
-        upscale?.let { register(UpscaleAssetTool(it, bundleBlobWriter, projects)) }
-        tts?.let { register(SynthesizeSpeechTool(it, bundleBlobWriter, projects)) }
-        register(CompareAigcCandidatesTool(this))
-        register(ReplayLockfileTool(this, projects))
-        asr?.let {
-            register(TranscribeAssetTool(it, projects))
-            register(AutoSubtitleClipTool(it, projects))
-        }
-        vision?.let { register(DescribeAssetTool(it, projects)) }
+        registerSessionAndMetaTools(sessions, agentStates, projects, bus)
+        registerMediaTools(engine, projects, bundleBlobWriter)
+        registerClipAndTrackTools(projects, sessions)
+        registerProjectTools(projects, engine)
+        registerSourceNodeTools(projects)
+        registerBuiltinFileTools(fileSystem, processRunner, httpClient, search)
+        registerAigcTools(
+            imageGen = imageGen,
+            videoGen = videoGen,
+            musicGen = musicGen,
+            upscale = upscale,
+            tts = tts,
+            asr = asr,
+            vision = vision,
+            bundleBlobWriter = bundleBlobWriter,
+            projects = projects,
+        )
     }
 
     /** Provider registry built from `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` env vars. */
