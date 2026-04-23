@@ -18,7 +18,6 @@
 
 ## P2 — 记债 / 观望
 
-- **debt-split-fork-project-tool** — `ForkProjectTool.kt` 497 行，逼近 500 行阈值，`ForkProject` + 子 forks 继续加功能会越过。**方向：** 先把 duplicate-asset / duplicate-sessions / rename path 的子逻辑抽到 `project/fork/*.kt` 同级文件，预防性拆分。Rubric §3a-3。
 - **debt-registered-tools-contract-test** — 没有 CI 检查能发现「新加了一个 Tool.kt 却忘了在 CliContainer/DesktopContainer/… 注册」。曾经漏过一次（`cb551be` fix）。**方向：** 新增 `RegisteredToolsContractTest`：扫 `core/tool/builtin/**/*Tool.kt`，assert 每个类名都在至少一个 `AppContainer` 的注册 list 里出现。Rubric §3a-8。
 - **source-query-by-parent-id** — `SourceQueryTool` 能按 id / kind / search 查，但无法「列出直接 / 传递子节点」。对 propagate / fold 相关 reasoning 价值大。**方向：** 新增 `select=descendants` / `select=ancestors`，参数 `root: SourceId, depth: Int = -1`。复用 `deepContentHashOf` 的 DAG 遍历逻辑。Rubric §5.5。
 - **timeline-diff-tool** — `DiffProjectsTool` 给全项目级别 diff，但没法单独看两个 snapshot 之间 Timeline 的变动。**方向：** `project_query(select=timeline_diff, fromSnapshot=..., toSnapshot=...)` 返回 clips/tracks 增删改列表。Rubric §5.1 / §5.4。

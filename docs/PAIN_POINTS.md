@@ -233,3 +233,35 @@ abstraction-gap / test-gate-drift / etc.) once there are 3+ entries in
 a theme. Not doing this yet — N=3 is still below the threshold where
 theming pays for itself — but logging here so the next time a theme
 hits 3+ it's obvious what to do.
+
+---
+
+## 2026-04-23 — debt-split-fork-project-tool (`<this commit>`)
+
+### Third "long-file split" in seven cycles — but on a different axis
+Cycles 1 + 2 (ProjectQueryTool / SessionQueryTool) split along the **row
+data class** axis because those dispatchers had per-select row types
+that each new select would grow. This cycle's ForkProjectTool split
+(538 → 376) peeled off **reshape helpers** — different axis entirely,
+because ForkProjectTool is a single-verb tool whose bulk comes from
+variant-spec reshape math, not per-select rows. Observation: the
+`file > 500 lines` debt signal is real but **under-specified** — it
+tells you a file crossed the threshold, not what extraction axis would
+actually shrink it. Each previous long-file cycle discovered the axis
+by reading the file. Worth preserving as a decision-file convention:
+name the axis in the first paragraph of the decision so future similar
+debt bullets can learn the pattern. Already doing this by accident;
+now it's an explicit convention.
+
+### Ktlint `no-blank-line-before-rbrace` fires on mass delete of a trailing block
+After deleting the final block of private helpers in ForkProjectTool,
+the remaining blank line before the class's closing `}` tripped
+`standard:no-blank-line-before-rbrace`. One `ktlintFormat` fixed it
+silently. Pattern worth noting for future mass-delete refactors:
+**ktlintCheck fails after a delete-the-tail refactor slightly more
+often than other refactors**, because the natural pattern ("blank line
+between the last method and the class brace") is ktlint-clean only
+when there's a method in front of it — delete the method and the blank
+becomes a violation. Cheap fix but surprising. Consider running
+`ktlintFormat` preemptively after any edit that removes the last item
+before a closing brace.

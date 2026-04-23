@@ -2,30 +2,26 @@ package io.talevia.core.tool.builtin.project
 
 import io.talevia.core.ProjectId
 import io.talevia.core.ProjectSnapshotId
-import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStore
-import io.talevia.core.domain.Resolution
-import io.talevia.core.domain.TimeRange
-import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.project.fork.VariantReshape
+import io.talevia.core.tool.builtin.project.fork.applyVariantSpec
+import io.talevia.core.tool.builtin.project.fork.regenerateTtsInLanguage
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 import okio.Path.Companion.toPath
-import kotlin.time.Duration
-import kotlin.time.Duration.Companion.seconds
 
 /**
  * Branch a project into a new one (VISION §3.4 — "可分支").
@@ -327,7 +323,7 @@ class ForkProjectTool(
         val forked = projects.get(newPid) ?: error("Fork ${newPid.value} not found after persist")
 
         val regenerations = input.variantSpec?.language?.let { lang ->
-            regenerateTtsInLanguage(newPid, forked, lang.trim(), ctx)
+            regenerateTtsInLanguage(registry, newPid, forked, lang.trim(), ctx)
         } ?: emptyList()
 
         val clipCount = forked.timeline.tracks.sumOf { it.clips.size }
@@ -376,163 +372,5 @@ class ForkProjectTool(
                 "Pass projectId=${newPid.value} to subsequent tool calls on the fork.",
             data = out,
         )
-    }
-
-    /**
-     * Walk the fork's text clips and dispatch `synthesize_speech` for each one
-     * that has a non-blank `text`. Returns one [LanguageRegenResult] per
-     * successful dispatch (including cache-hit reuses — those are still
-     * meaningful signals for the agent's follow-up `replace_clip`).
-     *
-     * Requires a wired [registry] + a registered `synthesize_speech` tool;
-     * fails loud otherwise so mis-deployments don't silently skip expensive
-     * work. A text clip whose text is blank is skipped — no-op clips (pure
-     * timing placeholders) shouldn't produce audio.
-     */
-    private suspend fun regenerateTtsInLanguage(
-        forkId: ProjectId,
-        fork: Project,
-        language: String,
-        ctx: ToolContext,
-    ): List<LanguageRegenResult> {
-        require(language.isNotBlank()) {
-            "variantSpec.language must be a non-blank ISO-639-1 code (e.g. 'en', 'es')"
-        }
-        val reg = registry ?: error(
-            "variantSpec.language was set but this ForkProjectTool has no ToolRegistry wired — " +
-                "install TtsEngine/SynthesizeSpeechTool in the container or drop variantSpec.language.",
-        )
-        val tts = reg["synthesize_speech"] ?: error(
-            "variantSpec.language requires the `synthesize_speech` tool to be registered on this " +
-                "container — wire a TtsEngine or drop variantSpec.language.",
-        )
-
-        val results = mutableListOf<LanguageRegenResult>()
-        for (track in fork.timeline.tracks) {
-            for (clip in track.clips) {
-                if (clip !is Clip.Text) continue
-                if (clip.text.isBlank()) continue
-                val payload = buildJsonObject {
-                    put("text", clip.text)
-                    put("projectId", forkId.value)
-                    put("language", language)
-                    val bindings = clip.sourceBinding.map { it.value }.sorted()
-                    if (bindings.isNotEmpty()) {
-                        put("consistencyBindingIds", JsonArray(bindings.map { JsonPrimitive(it) }))
-                    }
-                }
-                val result = tts.dispatch(payload, ctx)
-                val outputJson = tts.encodeOutput(result).jsonObject
-                val assetId = (outputJson["assetId"] as? JsonPrimitive)?.content
-                    ?: error("synthesize_speech returned no assetId for clip ${clip.id.value}")
-                val cacheHit = (outputJson["cacheHit"] as? JsonPrimitive)?.content == "true"
-                results += LanguageRegenResult(
-                    clipId = clip.id.value,
-                    assetId = assetId,
-                    cacheHit = cacheHit,
-                )
-            }
-        }
-        return results
-    }
-
-    private data class VariantReshape(val project: Project, val clipsDropped: Int, val clipsTruncated: Int)
-
-    /**
-     * Pure-data post-fork reshape. Splitting this out keeps `execute`
-     * short; also makes it obvious that the reshape does NOT touch the
-     * source DAG, lockfile, or render cache — render cache especially
-     * must stay: reshape invalidates memoised exports, but that's
-     * handled naturally because `Timeline.resolution` is part of the
-     * export cache key (see `RenderCache` logic in `ExportProjectTool`).
-     */
-    private fun applyVariantSpec(project: Project, spec: VariantSpec): VariantReshape {
-        var current = project
-        if (spec.aspectRatio != null) {
-            val target = resolveAspectPreset(spec.aspectRatio)
-            current = current.copy(
-                timeline = current.timeline.copy(resolution = target),
-                outputProfile = current.outputProfile.copy(resolution = target),
-            )
-        }
-        var dropped = 0
-        var truncated = 0
-        if (spec.durationSecondsMax != null) {
-            require(spec.durationSecondsMax > 0.0) {
-                "variantSpec.durationSecondsMax must be > 0 (got ${spec.durationSecondsMax})"
-            }
-            val cap: Duration = spec.durationSecondsMax.seconds
-            val trimmedTracks = current.timeline.tracks.map { track ->
-                val (newClips, d, t) = trimTrackClips(track.clips, cap)
-                dropped += d
-                truncated += t
-                withTrackClips(track, newClips)
-            }
-            val cappedDuration = minOf(current.timeline.duration, cap)
-            current = current.copy(
-                timeline = current.timeline.copy(
-                    tracks = trimmedTracks,
-                    duration = cappedDuration,
-                ),
-            )
-        }
-        return VariantReshape(current, dropped, truncated)
-    }
-
-    private fun resolveAspectPreset(aspect: String): Resolution = when (aspect.trim().lowercase()) {
-        "16:9" -> Resolution(1920, 1080)
-        "9:16" -> Resolution(1080, 1920)
-        "1:1" -> Resolution(1080, 1080)
-        "4:5" -> Resolution(1080, 1350)
-        "21:9" -> Resolution(2520, 1080)
-        else -> error(
-            "variantSpec.aspectRatio '$aspect' unknown; accepted presets: 16:9, 9:16, 1:1, 4:5, 21:9",
-        )
-    }
-
-    private fun trimTrackClips(clips: List<Clip>, cap: Duration): Triple<List<Clip>, Int, Int> {
-        var dropped = 0
-        var truncated = 0
-        val out = mutableListOf<Clip>()
-        for (clip in clips) {
-            val start = clip.timeRange.start
-            val end = clip.timeRange.end
-            if (start >= cap) {
-                dropped += 1
-                continue
-            }
-            if (end <= cap) {
-                out += clip
-                continue
-            }
-            // Straddler — truncate timeline range AND source range (same delta).
-            val newDuration = cap - start
-            val truncatedClip = applyDurationTrim(clip, newDuration)
-            out += truncatedClip
-            truncated += 1
-        }
-        return Triple(out, dropped, truncated)
-    }
-
-    private fun applyDurationTrim(clip: Clip, newDuration: Duration): Clip {
-        val newTimelineRange = TimeRange(clip.timeRange.start, newDuration)
-        return when (clip) {
-            is Clip.Video -> clip.copy(
-                timeRange = newTimelineRange,
-                sourceRange = TimeRange(clip.sourceRange.start, newDuration),
-            )
-            is Clip.Audio -> clip.copy(
-                timeRange = newTimelineRange,
-                sourceRange = TimeRange(clip.sourceRange.start, newDuration),
-            )
-            is Clip.Text -> clip.copy(timeRange = newTimelineRange)
-        }
-    }
-
-    private fun withTrackClips(track: Track, clips: List<Clip>): Track = when (track) {
-        is Track.Video -> track.copy(clips = clips)
-        is Track.Audio -> track.copy(clips = clips)
-        is Track.Subtitle -> track.copy(clips = clips)
-        is Track.Effect -> track.copy(clips = clips)
     }
 }
