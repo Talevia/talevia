@@ -18,7 +18,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **debt-split-cli-repl** — `apps/cli/.../repl/Repl.kt` 589 行（per R.5 #4）。输入循环 + 斜杠命令分派 + 生命周期钩子 + SessionBootstrap 耦合在一个类里。**方向：** 抽 `SlashCommandDispatcher` 到 sibling；REPL 循环保留输入读 / 生命周期；SessionBootstrap 已是独立文件无需动。Rubric §5.6。
 - **debt-split-desktop-timeline-panel** — `apps/desktop/.../TimelinePanel.kt` 584 行（per R.5 #4）；clip drag / track layout / playhead 全塞一个 Composable。**方向：** 抽 `TrackRow` / `ClipDrag` / `PlayheadScrubber` 到 sibling Composable。Rubric §5.6。
 - **debt-split-server-container** — `apps/server/.../ServerContainer.kt` 555 行（per R.5 #4）。按 tool 注册 block 线性增长，每次新 tool 都往这里加注册行。**方向：** 复刻 Desktop AppContainer 的 "register tools by category" 分组模式；或提取一个小 `registerAigcTools()` / `registerProjectTools()` helper。Rubric §5.6。
 - **debt-split-cli-container** — `apps/cli/.../CliContainer.kt` 524 行（per R.5 #4）。同 server container，tool 注册堆积。**方向：** 同上。Rubric §5.6。
