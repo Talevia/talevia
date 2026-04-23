@@ -15,15 +15,11 @@ import io.talevia.core.provider.LlmEvent
 import io.talevia.core.provider.LlmProvider
 import io.talevia.core.provider.LlmRequest
 import io.talevia.core.provider.ModelInfo
-import io.talevia.core.provider.ReplayFormatting
 import io.talevia.core.provider.TpmThrottle
 import io.talevia.core.provider.estimateRequestTokens
 import io.talevia.core.provider.sseEvents
 import io.talevia.core.session.FinishReason
-import io.talevia.core.session.Message
-import io.talevia.core.session.Part
 import io.talevia.core.session.TokenUsage
-import io.talevia.core.session.ToolState
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.collect
@@ -32,16 +28,10 @@ import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.addJsonObject
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonArray
-import kotlinx.serialization.json.putJsonObject
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -86,7 +76,7 @@ class OpenAiProvider(
         // so the window doesn't double-book with the retry.
         val reservation = tpmThrottle?.acquire(estimateRequestTokens(request))
 
-        val body = buildRequestBody(request)
+        val body = buildChatCompletionsBody(request, json)
         val encoded = json.encodeToString(JsonElement.serializer(), body)
         val response = httpClient.preparePost("$baseUrl/v1/chat/completions") {
             bearerAuth(apiKey)
@@ -298,127 +288,5 @@ class OpenAiProvider(
     private companion object {
         // Matches "Please try again in 3.363s" / "try again in 450ms" in OpenAI 429 bodies.
         private val retryHintRegex = Regex("""try again in (\d+(?:\.\d+)?)s""")
-    }
-
-    private fun buildRequestBody(request: LlmRequest): JsonObject = buildJsonObject {
-        put("model", request.model.modelId)
-        // OpenAI deprecated `max_tokens` in favour of `max_completion_tokens`; the
-        // newer reasoning / GPT-5 families actively reject the old name with a
-        // 400 ("unsupported_parameter"). `max_completion_tokens` works on every
-        // current chat-completion model including legacy gpt-4o, so we send only
-        // the new name.
-        put("max_completion_tokens", request.maxTokens)
-        request.temperature?.let { put("temperature", it) }
-        put("stream", true)
-        putJsonObject("stream_options") { put("include_usage", true) }
-        // Stable cache-routing hint — identical keys route to the same replica so
-        // that OpenAI's automatic prompt cache hits consistently instead of
-        // bouncing between machines. Agent seeds this from `sessionId`.
-        request.options.openaiPromptCacheKey?.takeIf { it.isNotEmpty() }?.let {
-            put("prompt_cache_key", it)
-        }
-        if (request.tools.isNotEmpty()) {
-            putJsonArray("tools") {
-                request.tools.forEach { spec ->
-                    addJsonObject {
-                        put("type", "function")
-                        putJsonObject("function") {
-                            put("name", spec.id)
-                            put("description", spec.helpText)
-                            put("parameters", spec.inputSchema)
-                        }
-                    }
-                }
-            }
-        }
-        put("messages", buildMessages(request))
-    }
-
-    private fun buildMessages(request: LlmRequest): JsonArray = buildJsonArray {
-        request.systemPrompt?.let { sys ->
-            addJsonObject {
-                put("role", "system")
-                put("content", sys)
-            }
-        }
-        for (mwp in request.messages) when (mwp.message) {
-            is Message.User -> addJsonObject {
-                put("role", "user")
-                put("content", mwp.parts.filterIsInstance<Part.Text>().joinToString("\n") { it.text })
-            }
-            is Message.Assistant -> {
-                val toolParts = mwp.parts.filterIsInstance<Part.Tool>()
-                addJsonObject {
-                    put("role", "assistant")
-                    val text = buildString {
-                        mwp.parts.forEach { p ->
-                            val rendered = when (p) {
-                                is Part.Text -> p.text.takeIf { it.isNotEmpty() }
-                                is Part.Reasoning -> p.text.takeIf { it.isNotEmpty() }?.let { ReplayFormatting.formatReasoning(p) }
-                                is Part.TimelineSnapshot -> ReplayFormatting.formatTimelineSnapshot(p)
-                                else -> null
-                            } ?: return@forEach
-                            if (isNotEmpty()) append('\n')
-                            append(rendered)
-                        }
-                    }
-                    // Every tool part that emits a `role: tool` message below
-                    // MUST appear in this assistant's tool_calls — OpenAI
-                    // rejects the whole request with HTTP 400 "messages with
-                    // role 'tool' must be a response to a preceding message
-                    // with 'tool_calls'" otherwise. That means Failed counts
-                    // too: we emit a `role: tool` for its error message, so
-                    // the tool_call entry has to be here to anchor it.
-                    val replayable = toolParts.filter {
-                        it.state is ToolState.Running ||
-                            it.state is ToolState.Completed ||
-                            it.state is ToolState.Failed
-                    }
-                    // OpenAI assistant messages: `content` is required as a string when
-                    // there are no `tool_calls`. Aborted prior turns leave assistant
-                    // messages with neither text nor tool_calls — emit "" so the
-                    // request validates instead of getting "expected string, got null".
-                    if (text.isNotEmpty()) {
-                        put("content", text)
-                    } else if (replayable.isEmpty()) {
-                        put("content", "")
-                    }
-                    if (replayable.isNotEmpty()) putJsonArray("tool_calls") {
-                        for (p in replayable) addJsonObject {
-                            put("id", p.callId.value)
-                            put("type", "function")
-                            putJsonObject("function") {
-                                put("name", p.toolId)
-                                val input = when (val s = p.state) {
-                                    is ToolState.Running -> s.input
-                                    is ToolState.Completed -> s.input
-                                    // Failed may carry null input when the
-                                    // tool errored pre-dispatch (schema parse,
-                                    // missing required field). Replay as {}
-                                    // so the entry is well-formed; the paired
-                                    // `role: tool` message below still carries
-                                    // the error text.
-                                    is ToolState.Failed -> s.input ?: JsonObject(emptyMap())
-                                    else -> JsonObject(emptyMap())
-                                }
-                                put("arguments", json.encodeToString(JsonElement.serializer(), input))
-                            }
-                        }
-                    }
-                }
-                for (p in toolParts) {
-                    val s = p.state
-                    if (s is ToolState.Completed || s is ToolState.Failed) addJsonObject {
-                        put("role", "tool")
-                        put("tool_call_id", p.callId.value)
-                        put("content", when (s) {
-                            is ToolState.Completed -> s.outputForLlm
-                            is ToolState.Failed -> s.message
-                            else -> ""
-                        })
-                    }
-                }
-            }
-        }
     }
 }

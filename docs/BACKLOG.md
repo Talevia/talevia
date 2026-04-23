@@ -19,7 +19,6 @@
 
 - **debt-resplit-project-query-tool** — `ProjectQueryTool.kt` 在 `6e7bd8f` 首次拆分至 540 行后又长回 547 行，说明上次拆分不彻底 / 漏了一个肥 select 分支。**方向：** 扫一遍各 `handle<Select>` 分支，把任何 > 40 行的单独挪到 `project/query/<select>.kt` 同级；主文件保留 dispatch + schema。Rubric §3a-3。
 - **debt-resplit-session-query-tool** — `SessionQueryTool.kt` 534 行，同类症状；同一轮 repopulate 一并 split。**方向：** 和 ProjectQueryTool 同一个套路。Rubric §3a-3。
-- **debt-trim-openai-provider** — `OpenAiProvider.kt` 424 行，近期高频改动（`seed` 从 image / Sora 请求体移除）显示 request-body builder 是 churn hotspot。**方向：** 把 `buildResponsesBody` / image-gen body / Sora body 三个 request-body builder 抽到 `provider/openai/body/*.kt` 独立文件；主文件只保留 SSE streaming + event mapping。Rubric §3a-3。
 - **debt-trim-agent-kt** — `Agent.kt` 459 行，`agent-interrupt-via-bus` 落地后增量又塞回主类。**方向：** 把 `bus.subscribe().filterIsInstance<BusEvent.SessionCancelRequested>()` 侧通道抽到 `agent/AgentBusCancelWatcher.kt`，由 `Agent.start()` 注入。主类保留 session loop。Rubric §3a-3。
 - **partial-tool-input-streaming** — provider 流式发来 tool JSON delta，core 现在闭门拼到 complete 再 dispatch；UI 只看到「工具在想…」几秒钟没有 feedback。**方向：** `LlmEvent` 新增 `ToolInputDelta(toolCallId, jsonFragment)`；provider 层直通；Part 保留 accumulated JSON 供 dispatch。不改 ToolResult 协议。Rubric §5.4。
 - **tool-output-token-estimate** — `ToolResult` 没带 token 估算，`Compactor` 选哪一条来压缩只能按 part 顺序。**方向：** 在 `ToolResult` 加 `estimatedTokens: Int?`（/4 字节粗估），compaction 按大小降序取 top-N 压掉。Rubric §5.4。
