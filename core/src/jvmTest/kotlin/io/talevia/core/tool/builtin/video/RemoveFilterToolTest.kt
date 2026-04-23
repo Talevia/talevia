@@ -41,21 +41,19 @@ class RemoveFilterToolTest {
             Filter("blur", mapOf("radius" to 4f)),
             Filter("brightness", mapOf("amount" to 0.2f)),
         ),
+        extraClip: Clip.Video? = null,
     ): Pair<FileProjectStore, ProjectId> {
         val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p")
-        val video = Track.Video(
-            id = TrackId("v"),
-            clips = listOf(
-                Clip.Video(
-                    id = ClipId("c-1"),
-                    timeRange = TimeRange(0.seconds, 1.seconds),
-                    sourceRange = TimeRange(0.seconds, 1.seconds),
-                    assetId = AssetId("a-1"),
-                    filters = filters,
-                ),
-            ),
+        val baseClip = Clip.Video(
+            id = ClipId("c-1"),
+            timeRange = TimeRange(0.seconds, 1.seconds),
+            sourceRange = TimeRange(0.seconds, 1.seconds),
+            assetId = AssetId("a-1"),
+            filters = filters,
         )
+        val videoClips = listOfNotNull(baseClip, extraClip)
+        val video = Track.Video(id = TrackId("v"), clips = videoClips)
         val audio = Track.Audio(
             id = TrackId("a"),
             clips = listOf(
@@ -79,17 +77,20 @@ class RemoveFilterToolTest {
         val tool = RemoveFilterTool(store)
         val parts = mutableListOf<Part>()
         val out = tool.execute(
-            RemoveFilterTool.Input(projectId = pid.value, clipId = "c-1", filterName = "blur"),
+            RemoveFilterTool.Input(projectId = pid.value, clipIds = listOf("c-1"), filterName = "blur"),
             ctx(parts),
         ).data
 
-        assertEquals("c-1", out.clipId)
-        assertEquals(1, out.removedCount)
-        assertEquals(1, out.remainingFilterCount)
+        assertEquals(1, out.results.size)
+        val only = out.results.single()
+        assertEquals("c-1", only.clipId)
+        assertEquals(1, only.removedCount)
+        assertEquals(1, only.remainingFilterCount)
+        assertEquals(1, out.totalRemoved)
 
         val project = store.get(pid)!!
         val clip = project.timeline.tracks.filterIsInstance<Track.Video>().single().clips
-            .filterIsInstance<Clip.Video>().single()
+            .filterIsInstance<Clip.Video>().single { it.id.value == "c-1" }
         assertEquals(listOf("brightness"), clip.filters.map { it.name })
         assertEquals(1, parts.count { it is Part.TimelineSnapshot })
     }
@@ -104,30 +105,79 @@ class RemoveFilterToolTest {
         )
         val tool = RemoveFilterTool(store)
         val out = tool.execute(
-            RemoveFilterTool.Input(projectId = pid.value, clipId = "c-1", filterName = "blur"),
+            RemoveFilterTool.Input(projectId = pid.value, clipIds = listOf("c-1"), filterName = "blur"),
             ctx(mutableListOf()),
         ).data
 
-        assertEquals(2, out.removedCount)
-        assertEquals(1, out.remainingFilterCount)
+        val only = out.results.single()
+        assertEquals(2, only.removedCount)
+        assertEquals(1, only.remainingFilterCount)
         val clip = store.get(pid)!!.timeline.tracks.filterIsInstance<Track.Video>().single().clips
-            .filterIsInstance<Clip.Video>().single()
+            .filterIsInstance<Clip.Video>().single { it.id.value == "c-1" }
         assertEquals(listOf("brightness"), clip.filters.map { it.name })
+    }
+
+    @Test fun removesFromMultipleClipsAtomically() = runTest {
+        val extra = Clip.Video(
+            id = ClipId("c-2"),
+            timeRange = TimeRange(2.seconds, 1.seconds),
+            sourceRange = TimeRange(0.seconds, 1.seconds),
+            assetId = AssetId("a-2"),
+            filters = listOf(Filter("blur", emptyMap())),
+        )
+        val (store, pid) = fixture(extraClip = extra)
+        val tool = RemoveFilterTool(store)
+        val out = tool.execute(
+            RemoveFilterTool.Input(
+                projectId = pid.value,
+                clipIds = listOf("c-1", "c-2"),
+                filterName = "blur",
+            ),
+            ctx(mutableListOf()),
+        ).data
+        assertEquals(2, out.results.size)
+        assertEquals(2, out.totalRemoved)
+
+        val clips = store.get(pid)!!.timeline.tracks.filterIsInstance<Track.Video>().single().clips
+            .filterIsInstance<Clip.Video>().associateBy { it.id.value }
+        assertEquals(listOf("brightness"), clips["c-1"]!!.filters.map { it.name })
+        assertEquals(emptyList(), clips["c-2"]!!.filters.map { it.name })
+    }
+
+    @Test fun idempotentWhenFilterNotPresentOnSomeClip() = runTest {
+        val extra = Clip.Video(
+            id = ClipId("c-2"),
+            timeRange = TimeRange(2.seconds, 1.seconds),
+            sourceRange = TimeRange(0.seconds, 1.seconds),
+            assetId = AssetId("a-2"),
+            filters = emptyList(),
+        )
+        val (store, pid) = fixture(extraClip = extra)
+        val tool = RemoveFilterTool(store)
+        val out = tool.execute(
+            RemoveFilterTool.Input(
+                projectId = pid.value,
+                clipIds = listOf("c-1", "c-2"),
+                filterName = "blur",
+            ),
+            ctx(mutableListOf()),
+        ).data
+        assertEquals(1, out.totalRemoved)
+        assertEquals(1, out.results.first { it.clipId == "c-1" }.removedCount)
+        assertEquals(0, out.results.first { it.clipId == "c-2" }.removedCount)
     }
 
     @Test fun idempotentWhenFilterNotPresent() = runTest {
         val (store, pid) = fixture()
         val tool = RemoveFilterTool(store)
         val out = tool.execute(
-            RemoveFilterTool.Input(projectId = pid.value, clipId = "c-1", filterName = "vignette"),
+            RemoveFilterTool.Input(projectId = pid.value, clipIds = listOf("c-1"), filterName = "vignette"),
             ctx(mutableListOf()),
         ).data
 
-        assertEquals(0, out.removedCount)
-        assertEquals(2, out.remainingFilterCount)
-
+        assertEquals(0, out.totalRemoved)
         val clip = store.get(pid)!!.timeline.tracks.filterIsInstance<Track.Video>().single().clips
-            .filterIsInstance<Clip.Video>().single()
+            .filterIsInstance<Clip.Video>().single { it.id.value == "c-1" }
         assertEquals(2, clip.filters.size)
     }
 
@@ -135,11 +185,27 @@ class RemoveFilterToolTest {
         val (store, pid) = fixture(filters = emptyList())
         val tool = RemoveFilterTool(store)
         val out = tool.execute(
-            RemoveFilterTool.Input(projectId = pid.value, clipId = "c-1", filterName = "blur"),
+            RemoveFilterTool.Input(projectId = pid.value, clipIds = listOf("c-1"), filterName = "blur"),
             ctx(mutableListOf()),
         ).data
-        assertEquals(0, out.removedCount)
-        assertEquals(0, out.remainingFilterCount)
+        assertEquals(0, out.totalRemoved)
+    }
+
+    @Test fun midBatchFailureLeavesProjectUntouched() = runTest {
+        val (store, pid) = fixture()
+        val before = store.get(pid)!!
+        val tool = RemoveFilterTool(store)
+        assertFailsWith<IllegalStateException> {
+            tool.execute(
+                RemoveFilterTool.Input(
+                    projectId = pid.value,
+                    clipIds = listOf("c-1", "ghost"),
+                    filterName = "blur",
+                ),
+                ctx(mutableListOf()),
+            )
+        }
+        assertEquals(before.timeline, store.get(pid)!!.timeline)
     }
 
     @Test fun rejectsMissingClip() = runTest {
@@ -147,7 +213,7 @@ class RemoveFilterToolTest {
         val tool = RemoveFilterTool(store)
         val ex = assertFailsWith<IllegalStateException> {
             tool.execute(
-                RemoveFilterTool.Input(projectId = pid.value, clipId = "nope", filterName = "blur"),
+                RemoveFilterTool.Input(projectId = pid.value, clipIds = listOf("nope"), filterName = "blur"),
                 ctx(mutableListOf()),
             )
         }
@@ -159,19 +225,30 @@ class RemoveFilterToolTest {
         val tool = RemoveFilterTool(store)
         val ex = assertFailsWith<IllegalStateException> {
             tool.execute(
-                RemoveFilterTool.Input(projectId = pid.value, clipId = "c-audio", filterName = "blur"),
+                RemoveFilterTool.Input(projectId = pid.value, clipIds = listOf("c-audio"), filterName = "blur"),
                 ctx(mutableListOf()),
             )
         }
         assertTrue(ex.message!!.contains("video"))
     }
 
-    @Test fun emitsTimelineSnapshot() = runTest {
-        val (store, pid) = fixture()
+    @Test fun emitsOneSnapshotForBatch() = runTest {
+        val extra = Clip.Video(
+            id = ClipId("c-2"),
+            timeRange = TimeRange(2.seconds, 1.seconds),
+            sourceRange = TimeRange(0.seconds, 1.seconds),
+            assetId = AssetId("a-2"),
+            filters = listOf(Filter("brightness", emptyMap())),
+        )
+        val (store, pid) = fixture(extraClip = extra)
         val tool = RemoveFilterTool(store)
         val parts = mutableListOf<Part>()
         tool.execute(
-            RemoveFilterTool.Input(projectId = pid.value, clipId = "c-1", filterName = "brightness"),
+            RemoveFilterTool.Input(
+                projectId = pid.value,
+                clipIds = listOf("c-1", "c-2"),
+                filterName = "brightness",
+            ),
             ctx(parts),
         )
         assertEquals(1, parts.count { it is Part.TimelineSnapshot })

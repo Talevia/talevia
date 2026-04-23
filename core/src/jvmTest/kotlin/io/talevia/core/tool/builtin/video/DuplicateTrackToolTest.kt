@@ -54,6 +54,12 @@ class DuplicateTrackToolTest {
         return Rig(store, DuplicateTrackTool(store), ctx, emitted)
     }
 
+    private fun single(sourceTrackId: String, newTrackId: String? = null) =
+        DuplicateTrackTool.Input(
+            projectId = "p",
+            items = listOf(DuplicateTrackTool.Item(sourceTrackId, newTrackId)),
+        )
+
     @Test fun duplicatesVideoTrackWithThreeClipsAndFreshIds() = runTest {
         val clips = (0 until 3).map { i ->
             Clip.Video(
@@ -75,24 +81,20 @@ class DuplicateTrackToolTest {
         )
         val rig = newRig(project)
 
-        val out = rig.tool.execute(
-            DuplicateTrackTool.Input("p", sourceTrackId = "vt"),
-            rig.ctx,
-        )
-        assertEquals("vt", out.data.sourceTrackId)
-        assertEquals("vt-copy-1", out.data.newTrackId)
-        assertEquals(3, out.data.clipCount)
+        val out = rig.tool.execute(single("vt"), rig.ctx).data
+        val only = out.results.single()
+        assertEquals("vt", only.sourceTrackId)
+        assertEquals("vt-copy-1", only.newTrackId)
+        assertEquals(3, only.clipCount)
 
         val saved = rig.store.get(ProjectId("p"))!!
         assertEquals(2, saved.timeline.tracks.size)
         val copy = saved.timeline.tracks.first { it.id.value == "vt-copy-1" } as Track.Video
         assertEquals(3, copy.clips.size)
-        // Every cloned id is fresh and disjoint from the originals.
         val originalIds = clips.map { it.id.value }.toSet()
         val copyIds = copy.clips.map { it.id.value }.toSet()
         assertTrue(copyIds.none { it in originalIds })
         assertEquals(3, copyIds.size)
-        // Timing and attached state preserved 1:1 and in order.
         copy.clips.forEachIndexed { i, cloned ->
             cloned as Clip.Video
             val src = clips[i]
@@ -125,7 +127,7 @@ class DuplicateTrackToolTest {
         )
         val rig = newRig(project)
 
-        rig.tool.execute(DuplicateTrackTool.Input("p", "at"), rig.ctx)
+        rig.tool.execute(single("at"), rig.ctx)
 
         val saved = rig.store.get(ProjectId("p"))!!
         val copy = saved.timeline.tracks.first { it.id.value == "at-copy-1" } as Track.Audio
@@ -159,7 +161,7 @@ class DuplicateTrackToolTest {
         )
         val rig = newRig(project)
 
-        rig.tool.execute(DuplicateTrackTool.Input("p", "st"), rig.ctx)
+        rig.tool.execute(single("st"), rig.ctx)
 
         val saved = rig.store.get(ProjectId("p"))!!
         val copy = saved.timeline.tracks.first { it.id.value == "st-copy-1" } as Track.Subtitle
@@ -185,9 +187,8 @@ class DuplicateTrackToolTest {
         )
         val rig = newRig(project)
 
-        val out = rig.tool.execute(DuplicateTrackTool.Input("p", "et"), rig.ctx)
-
-        assertEquals(0, out.data.clipCount)
+        val out = rig.tool.execute(single("et"), rig.ctx).data
+        assertEquals(0, out.results.single().clipCount)
         val saved = rig.store.get(ProjectId("p"))!!
         val copy = saved.timeline.tracks.firstOrNull { it.id.value == "et-copy-1" }
         assertTrue(copy is Track.Effect, "expected Track.Effect copy, got ${copy?.let { it::class.simpleName }}")
@@ -209,14 +210,64 @@ class DuplicateTrackToolTest {
         )
         val rig = newRig(project)
 
-        val out = rig.tool.execute(
-            DuplicateTrackTool.Input("p", sourceTrackId = "main", newTrackId = "variantA"),
-            rig.ctx,
-        )
-
-        assertEquals("variantA", out.data.newTrackId)
+        val out = rig.tool.execute(single("main", newTrackId = "variantA"), rig.ctx).data
+        assertEquals("variantA", out.results.single().newTrackId)
         val saved = rig.store.get(ProjectId("p"))!!
         assertTrue(saved.timeline.tracks.any { it.id.value == "variantA" })
+    }
+
+    @Test fun batchDuplicatesMultipleTracksAtomically() = runTest {
+        val project = Project(
+            id = ProjectId("p"),
+            timeline = Timeline(
+                tracks = listOf(
+                    Track.Video(TrackId("vt")),
+                    Track.Audio(TrackId("at")),
+                ),
+            ),
+        )
+        val rig = newRig(project)
+
+        rig.tool.execute(
+            DuplicateTrackTool.Input(
+                projectId = "p",
+                items = listOf(
+                    DuplicateTrackTool.Item("vt"),
+                    DuplicateTrackTool.Item("at"),
+                ),
+            ),
+            rig.ctx,
+        )
+        val saved = rig.store.get(ProjectId("p"))!!
+        val ids = saved.timeline.tracks.map { it.id.value }.toSet()
+        assertEquals(setOf("vt", "at", "vt-copy-1", "at-copy-1"), ids)
+    }
+
+    @Test fun midBatchFailureLeavesProjectUntouched() = runTest {
+        val project = Project(
+            id = ProjectId("p"),
+            timeline = Timeline(
+                tracks = listOf(
+                    Track.Video(TrackId("vt")),
+                    Track.Audio(TrackId("at")),
+                ),
+            ),
+        )
+        val rig = newRig(project)
+        val before = rig.store.get(ProjectId("p"))!!
+        assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                DuplicateTrackTool.Input(
+                    projectId = "p",
+                    items = listOf(
+                        DuplicateTrackTool.Item("vt"),
+                        DuplicateTrackTool.Item("ghost"),
+                    ),
+                ),
+                rig.ctx,
+            )
+        }
+        assertEquals(before.timeline, rig.store.get(ProjectId("p"))!!.timeline)
     }
 
     @Test fun unknownSourceTrackIdThrows() = runTest {
@@ -227,7 +278,7 @@ class DuplicateTrackToolTest {
         val rig = newRig(project)
 
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(DuplicateTrackTool.Input("p", sourceTrackId = "ghost"), rig.ctx)
+            rig.tool.execute(single("ghost"), rig.ctx)
         }
         assertTrue("ghost" in ex.message!!, ex.message)
     }
@@ -245,10 +296,7 @@ class DuplicateTrackToolTest {
         val rig = newRig(project)
 
         val ex = assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(
-                DuplicateTrackTool.Input("p", sourceTrackId = "main", newTrackId = "dialogue"),
-                rig.ctx,
-            )
+            rig.tool.execute(single("main", newTrackId = "dialogue"), rig.ctx)
         }
         assertTrue("dialogue" in ex.message!!, ex.message)
     }
@@ -260,11 +308,10 @@ class DuplicateTrackToolTest {
         )
         val rig = newRig(project)
 
-        rig.tool.execute(DuplicateTrackTool.Input("p", "vt"), rig.ctx)
+        rig.tool.execute(single("vt"), rig.ctx)
 
         val snaps = rig.emittedParts.filterIsInstance<Part.TimelineSnapshot>()
         assertEquals(1, snaps.size)
-        // The snapshot reflects post-mutation state (2 tracks).
         assertEquals(2, snaps.single().timeline.tracks.size)
     }
 
@@ -281,8 +328,7 @@ class DuplicateTrackToolTest {
         )
         val rig = newRig(project)
 
-        val out = rig.tool.execute(DuplicateTrackTool.Input("p", "vt"), rig.ctx)
-
-        assertEquals("vt-copy-3", out.data.newTrackId)
+        val out = rig.tool.execute(single("vt"), rig.ctx).data
+        assertEquals("vt-copy-3", out.results.single().newTrackId)
     }
 }

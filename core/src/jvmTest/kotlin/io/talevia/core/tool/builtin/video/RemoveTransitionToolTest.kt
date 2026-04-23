@@ -53,6 +53,19 @@ class RemoveTransitionToolTest {
         return Rig(store, AddTransitionTool(store), RemoveTransitionTool(store), ctx, snapshots, project.id)
     }
 
+    private suspend fun Rig.addOne(
+        from: String,
+        to: String,
+        name: String = "fade",
+        durationSeconds: Double = 0.5,
+    ): AddTransitionTool.ItemResult = add.execute(
+        AddTransitionTool.Input(
+            projectId = projectId.value,
+            items = listOf(AddTransitionTool.Item(from, to, name, durationSeconds)),
+        ),
+        ctx,
+    ).data.results.single()
+
     private fun videoClip(id: String, start: Duration, duration: Duration): Clip.Video = Clip.Video(
         id = ClipId(id),
         timeRange = TimeRange(start, duration),
@@ -72,67 +85,165 @@ class RemoveTransitionToolTest {
         )
     }
 
-    @Test fun removesTransitionByIdAndLeavesVideoClipsIntact() = runTest {
+    @Test fun removesSingletonTransitionAndLeavesVideoClipsIntact() = runTest {
         val rig = newRig(projectWithTwoAdjacentClips())
-        val add = rig.add.execute(
-            AddTransitionTool.Input(rig.projectId.value, "v1", "v2", "fade", 0.5),
-            rig.ctx,
-        ).data
+        val add = rig.addOne("v1", "v2", "fade", 0.5)
         val beforeEffectClipCount = rig.store.get(rig.projectId)!!.timeline.tracks
             .first { it.id.value == add.trackId }.clips.size
         assertEquals(1, beforeEffectClipCount)
 
         val out = rig.remove.execute(
-            RemoveTransitionTool.Input(rig.projectId.value, add.transitionClipId),
+            RemoveTransitionTool.Input(rig.projectId.value, listOf(add.transitionClipId)),
             rig.ctx,
         ).data
-        assertEquals(add.transitionClipId, out.transitionClipId)
-        assertEquals(add.trackId, out.trackId)
-        assertEquals("fade", out.transitionName)
-        assertEquals(0, out.remainingTransitionsOnTrack)
+        assertEquals(1, out.results.size)
+        val only = out.results.single()
+        assertEquals(add.transitionClipId, only.transitionClipId)
+        assertEquals(add.trackId, only.trackId)
+        assertEquals("fade", only.transitionName)
+        assertEquals(0, out.remainingTransitionsTotal)
 
         val proj = rig.store.get(rig.projectId)!!
         val effectTrack = proj.timeline.tracks.first { it.id.value == add.trackId }
         assertEquals(0, effectTrack.clips.size)
         val videoTrack = proj.timeline.tracks.first { it.id.value == "vt" }
         assertEquals(listOf("v1", "v2"), videoTrack.clips.map { it.id.value })
-        videoTrack.clips.forEach { c ->
-            // Flanking video clips are unchanged — same start / duration as before.
-            assertTrue(c.timeRange.start >= Duration.ZERO)
-        }
     }
 
-    @Test fun emitsOneSnapshotPerRemoval() = runTest {
-        val rig = newRig(projectWithTwoAdjacentClips())
-        val add = rig.add.execute(
-            AddTransitionTool.Input(rig.projectId.value, "v1", "v2"),
+    @Test fun removesMultipleTransitionsAtomically() = runTest {
+        val v1 = videoClip("v1", Duration.ZERO, 5.seconds)
+        val v2 = videoClip("v2", 5.seconds, 5.seconds)
+        val v3 = videoClip("v3", 10.seconds, 5.seconds)
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(
+                    tracks = listOf(Track.Video(TrackId("vt"), listOf(v1, v2, v3))),
+                    duration = 15.seconds,
+                ),
+            ),
+        )
+        val twoAdds = rig.add.execute(
+            AddTransitionTool.Input(
+                projectId = rig.projectId.value,
+                items = listOf(
+                    AddTransitionTool.Item("v1", "v2", "fade", 0.5),
+                    AddTransitionTool.Item("v2", "v3", "dissolve", 0.5),
+                ),
+            ),
+            rig.ctx,
+        ).data.results
+        val t1 = twoAdds[0]
+        val t2 = twoAdds[1]
+        assertEquals(t1.trackId, t2.trackId) // reused Effect track
+
+        val out = rig.remove.execute(
+            RemoveTransitionTool.Input(
+                rig.projectId.value,
+                listOf(t1.transitionClipId, t2.transitionClipId),
+            ),
             rig.ctx,
         ).data
+        assertEquals(2, out.results.size)
+        assertEquals(0, out.remainingTransitionsTotal)
+        assertEquals(
+            setOf("fade", "dissolve"),
+            out.results.map { it.transitionName }.toSet(),
+        )
+
+        val proj = rig.store.get(rig.projectId)!!
+        val effectClips = proj.timeline.tracks.first { it.id.value == t1.trackId }.clips
+        assertEquals(0, effectClips.size)
+    }
+
+    @Test fun emitsOneSnapshotPerBatch() = runTest {
+        val v1 = videoClip("v1", Duration.ZERO, 5.seconds)
+        val v2 = videoClip("v2", 5.seconds, 5.seconds)
+        val v3 = videoClip("v3", 10.seconds, 5.seconds)
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(
+                    tracks = listOf(Track.Video(TrackId("vt"), listOf(v1, v2, v3))),
+                    duration = 15.seconds,
+                ),
+            ),
+        )
+        val twoAdds = rig.add.execute(
+            AddTransitionTool.Input(
+                projectId = rig.projectId.value,
+                items = listOf(
+                    AddTransitionTool.Item("v1", "v2", "fade", 0.5),
+                    AddTransitionTool.Item("v2", "v3", "dissolve", 0.5),
+                ),
+            ),
+            rig.ctx,
+        ).data.results
+        val t1 = twoAdds[0]
+        val t2 = twoAdds[1]
         val before = rig.snapshots.size
         rig.remove.execute(
-            RemoveTransitionTool.Input(rig.projectId.value, add.transitionClipId),
+            RemoveTransitionTool.Input(
+                rig.projectId.value,
+                listOf(t1.transitionClipId, t2.transitionClipId),
+            ),
             rig.ctx,
         )
         assertEquals(before + 1, rig.snapshots.size)
+    }
+
+    @Test fun batchAtomicityLeavesProjectUntouchedOnAnyFailure() = runTest {
+        val rig = newRig(projectWithTwoAdjacentClips())
+        val add = rig.addOne("v1", "v2", "fade", 0.5)
+        val beforeProject = rig.store.get(rig.projectId)!!
+        val beforeSnapshotCount = rig.snapshots.size
+
+        // Second id is bogus — the whole batch must abort.
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.remove.execute(
+                RemoveTransitionTool.Input(
+                    rig.projectId.value,
+                    listOf(add.transitionClipId, "does-not-exist"),
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("transitionClipIds[1]"), ex.message)
+
+        val afterProject = rig.store.get(rig.projectId)!!
+        assertEquals(beforeProject.timeline, afterProject.timeline)
+        // No snapshot emitted on failure.
+        assertEquals(beforeSnapshotCount, rig.snapshots.size)
+    }
+
+    @Test fun rejectsEmptyIdList() = runTest {
+        val rig = newRig(projectWithTwoAdjacentClips())
+        val ex = assertFailsWith<IllegalArgumentException> {
+            rig.remove.execute(
+                RemoveTransitionTool.Input(rig.projectId.value, emptyList()),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("must not be empty"))
     }
 
     @Test fun rejectsRegularClipId() = runTest {
         val rig = newRig(projectWithTwoAdjacentClips())
         val ex = assertFailsWith<IllegalStateException> {
             rig.remove.execute(
-                RemoveTransitionTool.Input(rig.projectId.value, "v1"),
+                RemoveTransitionTool.Input(rig.projectId.value, listOf("v1")),
                 rig.ctx,
             )
         }
-        assertTrue(ex.message!!.contains("video track"))
-        assertTrue(ex.message!!.contains("remove_clip"))
+        assertTrue(ex.message!!.contains("video"))
+        assertTrue(ex.message!!.contains("remove_clips"))
     }
 
     @Test fun rejectsUnknownId() = runTest {
         val rig = newRig(projectWithTwoAdjacentClips())
         val ex = assertFailsWith<IllegalStateException> {
             rig.remove.execute(
-                RemoveTransitionTool.Input(rig.projectId.value, "does-not-exist"),
+                RemoveTransitionTool.Input(rig.projectId.value, listOf("does-not-exist")),
                 rig.ctx,
             )
         }
@@ -141,13 +252,10 @@ class RemoveTransitionToolTest {
 
     @Test fun rejectsMissingProject() = runTest {
         val rig = newRig(projectWithTwoAdjacentClips())
-        val add = rig.add.execute(
-            AddTransitionTool.Input(rig.projectId.value, "v1", "v2"),
-            rig.ctx,
-        ).data
+        val add = rig.addOne("v1", "v2")
         val ex = assertFailsWith<IllegalStateException> {
             rig.remove.execute(
-                RemoveTransitionTool.Input("nope", add.transitionClipId),
+                RemoveTransitionTool.Input("nope", listOf(add.transitionClipId)),
                 rig.ctx,
             )
         }
@@ -155,8 +263,6 @@ class RemoveTransitionToolTest {
     }
 
     @Test fun rejectsEffectClipWithoutTransitionSentinel() = runTest {
-        // Seed a non-transition clip on the Effect track (e.g. a bare video clip the
-        // user parked there for other reasons) and confirm remove_transition refuses it.
         val v1 = videoClip("v1", Duration.ZERO, 5.seconds)
         val v2 = videoClip("v2", 5.seconds, 5.seconds)
         val bogusEffect = Clip.Video(
@@ -178,7 +284,7 @@ class RemoveTransitionToolTest {
         val rig = newRig(project)
         val ex = assertFailsWith<IllegalStateException> {
             rig.remove.execute(
-                RemoveTransitionTool.Input(rig.projectId.value, "fx-1"),
+                RemoveTransitionTool.Input(rig.projectId.value, listOf("fx-1")),
                 rig.ctx,
             )
         }
@@ -198,21 +304,25 @@ class RemoveTransitionToolTest {
                 ),
             ),
         )
-        val t1 = rig.add.execute(
-            AddTransitionTool.Input(rig.projectId.value, "v1", "v2", "fade", 0.5),
+        val twoAdds = rig.add.execute(
+            AddTransitionTool.Input(
+                projectId = rig.projectId.value,
+                items = listOf(
+                    AddTransitionTool.Item("v1", "v2", "fade", 0.5),
+                    AddTransitionTool.Item("v2", "v3", "dissolve", 0.5),
+                ),
+            ),
             rig.ctx,
-        ).data
-        val t2 = rig.add.execute(
-            AddTransitionTool.Input(rig.projectId.value, "v2", "v3", "dissolve", 0.5),
-            rig.ctx,
-        ).data
-        assertEquals(t1.trackId, t2.trackId) // reused Effect track
+        ).data.results
+        val t1 = twoAdds[0]
+        val t2 = twoAdds[1]
+        assertEquals(t1.trackId, t2.trackId)
 
         val out = rig.remove.execute(
-            RemoveTransitionTool.Input(rig.projectId.value, t1.transitionClipId),
+            RemoveTransitionTool.Input(rig.projectId.value, listOf(t1.transitionClipId)),
             rig.ctx,
         ).data
-        assertEquals(1, out.remainingTransitionsOnTrack)
+        assertEquals(1, out.remainingTransitionsTotal)
 
         val proj = rig.store.get(rig.projectId)!!
         val effectClips = proj.timeline.tracks.first { it.id.value == t1.trackId }.clips
@@ -221,25 +331,19 @@ class RemoveTransitionToolTest {
 
     @Test fun transitionNameEchoesFirstFilter() = runTest {
         val rig = newRig(projectWithTwoAdjacentClips())
-        val add = rig.add.execute(
-            AddTransitionTool.Input(rig.projectId.value, "v1", "v2", "dissolve", 0.4),
-            rig.ctx,
-        ).data
+        val add = rig.addOne("v1", "v2", "dissolve", 0.4)
         val out = rig.remove.execute(
-            RemoveTransitionTool.Input(rig.projectId.value, add.transitionClipId),
+            RemoveTransitionTool.Input(rig.projectId.value, listOf(add.transitionClipId)),
             rig.ctx,
         ).data
-        assertEquals("dissolve", out.transitionName)
+        assertEquals("dissolve", out.results.single().transitionName)
     }
 
     @Test fun snapshotTimelineReflectsRemoval() = runTest {
         val rig = newRig(projectWithTwoAdjacentClips())
-        val add = rig.add.execute(
-            AddTransitionTool.Input(rig.projectId.value, "v1", "v2"),
-            rig.ctx,
-        ).data
+        val add = rig.addOne("v1", "v2")
         rig.remove.execute(
-            RemoveTransitionTool.Input(rig.projectId.value, add.transitionClipId),
+            RemoveTransitionTool.Input(rig.projectId.value, listOf(add.transitionClipId)),
             rig.ctx,
         )
         val lastSnapshot = rig.snapshots.last()
@@ -250,19 +354,15 @@ class RemoveTransitionToolTest {
 
     @Test fun snapshotIdIsFreshEachRun() = runTest {
         val rig = newRig(projectWithTwoAdjacentClips())
-        val add = rig.add.execute(
-            AddTransitionTool.Input(rig.projectId.value, "v1", "v2"),
-            rig.ctx,
-        ).data
+        val add = rig.addOne("v1", "v2")
         val beforeSnapshotIds = rig.snapshots.map { it.id }.toSet()
         rig.remove.execute(
-            RemoveTransitionTool.Input(rig.projectId.value, add.transitionClipId),
+            RemoveTransitionTool.Input(rig.projectId.value, listOf(add.transitionClipId)),
             rig.ctx,
         )
         val newSnapshotIds = rig.snapshots.map { it.id }.toSet() - beforeSnapshotIds
         assertEquals(1, newSnapshotIds.size)
         val id = newSnapshotIds.single()
-        // Ensure it's a non-empty id (no implicit re-use of the producer's callId).
         assertTrue(id.value.isNotBlank())
         assertNull(beforeSnapshotIds.firstOrNull { it == id })
     }

@@ -56,6 +56,25 @@ class AddClipToolTest {
     private suspend fun Rig.importAsset(path: String, durationSeconds: Double): AssetId =
         media.import(MediaSource.File(path)) { MediaMetadata(duration = durationSeconds.seconds) }.id
 
+    private fun single(
+        assetId: String,
+        timelineStartSeconds: Double? = null,
+        sourceStartSeconds: Double = 0.0,
+        durationSeconds: Double? = null,
+        trackId: String? = null,
+    ) = AddClipTool.Input(
+        projectId = null,
+        items = listOf(
+            AddClipTool.Item(
+                assetId = assetId,
+                timelineStartSeconds = timelineStartSeconds,
+                sourceStartSeconds = sourceStartSeconds,
+                durationSeconds = durationSeconds,
+                trackId = trackId,
+            ),
+        ),
+    )
+
     @Test fun returnsTheInsertedClipWhenAddingIntoMiddleOfTrack() = runTest {
         val existing = Clip.Video(
             id = ClipId("existing"),
@@ -74,24 +93,73 @@ class AddClipToolTest {
         val result = rig.tool.execute(
             AddClipTool.Input(
                 projectId = rig.projectId.value,
-                assetId = assetId.value,
-                timelineStartSeconds = 1.0,
-                durationSeconds = 1.5,
+                items = listOf(
+                    AddClipTool.Item(
+                        assetId = assetId.value,
+                        timelineStartSeconds = 1.0,
+                        durationSeconds = 1.5,
+                    ),
+                ),
             ),
             rig.ctx,
         )
 
-        val out = result.data
-        assertEquals(1.0, out.timelineStartSeconds, 0.001)
-        assertEquals(2.5, out.timelineEndSeconds, 0.001)
+        val only = result.data.results.single()
+        assertEquals(1.0, only.timelineStartSeconds, 0.001)
+        assertEquals(2.5, only.timelineEndSeconds, 0.001)
 
         val refreshed = rig.store.get(rig.projectId)!!
         val added = refreshed.timeline.tracks.flatMap { it.clips }
             .filterIsInstance<Clip.Video>()
-            .first { it.id.value == out.clipId }
+            .first { it.id.value == only.clipId }
         assertEquals(1.seconds, added.timeRange.start)
         assertEquals(1.5.seconds, added.timeRange.duration)
         assertEquals(assetId, added.assetId)
+    }
+
+    @Test fun batchAddsMultipleClipsEndToEndOnSameTrack() = runTest {
+        val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline()))
+        val a1 = rig.importAsset("/tmp/a.mp4", 3.0)
+        val a2 = rig.importAsset("/tmp/b.mp4", 4.0)
+        val a3 = rig.importAsset("/tmp/c.mp4", 2.0)
+
+        val out = rig.tool.execute(
+            AddClipTool.Input(
+                projectId = rig.projectId.value,
+                items = listOf(
+                    AddClipTool.Item(a1.value),
+                    AddClipTool.Item(a2.value),
+                    AddClipTool.Item(a3.value),
+                ),
+            ),
+            rig.ctx,
+        ).data
+        assertEquals(3, out.results.size)
+        assertEquals(0.0, out.results[0].timelineStartSeconds, 0.001)
+        assertEquals(3.0, out.results[1].timelineStartSeconds, 0.001)
+        assertEquals(7.0, out.results[2].timelineStartSeconds, 0.001)
+
+        val refreshed = rig.store.get(rig.projectId)!!
+        assertEquals(3, refreshed.timeline.tracks.single().clips.size)
+    }
+
+    @Test fun midBatchFailureLeavesProjectUntouched() = runTest {
+        val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline()))
+        val a1 = rig.importAsset("/tmp/a.mp4", 3.0)
+        val before = rig.store.get(rig.projectId)!!
+        assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                AddClipTool.Input(
+                    projectId = rig.projectId.value,
+                    items = listOf(
+                        AddClipTool.Item(a1.value),
+                        AddClipTool.Item("missing-asset"),
+                    ),
+                ),
+                rig.ctx,
+            )
+        }
+        assertEquals(before.timeline, rig.store.get(rig.projectId)!!.timeline)
     }
 
     @Test fun explicitNonVideoTrackIsRejected() = runTest {
@@ -103,8 +171,7 @@ class AddClipToolTest {
             rig.tool.execute(
                 AddClipTool.Input(
                     projectId = rig.projectId.value,
-                    assetId = assetId.value,
-                    trackId = "a1",
+                    items = listOf(AddClipTool.Item(assetId.value, trackId = "a1")),
                 ),
                 rig.ctx,
             )
@@ -120,8 +187,7 @@ class AddClipToolTest {
             rig.tool.execute(
                 AddClipTool.Input(
                     projectId = rig.projectId.value,
-                    assetId = assetId.value,
-                    sourceStartSeconds = 3.0,
+                    items = listOf(AddClipTool.Item(assetId.value, sourceStartSeconds = 3.0)),
                 ),
                 rig.ctx,
             )
@@ -144,8 +210,7 @@ class AddClipToolTest {
         rig.tool.execute(
             AddClipTool.Input(
                 projectId = rig.projectId.value,
-                assetId = assetId.value,
-                trackId = "v1",
+                items = listOf(AddClipTool.Item(assetId.value, trackId = "v1")),
             ),
             rig.ctx,
         )
@@ -173,11 +238,10 @@ class AddClipToolTest {
         )
 
         val result = rig.tool.execute(
-            AddClipTool.Input(assetId = assetId.value), // projectId omitted
+            single(assetId = assetId.value),
             ctxBound,
-        )
-
-        assertEquals("v1", result.data.trackId)
+        ).data
+        assertEquals("v1", result.results.single().trackId)
         val refreshed = rig.store.get(rig.projectId)!!
         val videoTrack = refreshed.timeline.tracks.filterIsInstance<Track.Video>().single { it.id.value == "v1" }
         assertEquals(1, videoTrack.clips.size)
@@ -188,9 +252,8 @@ class AddClipToolTest {
             Project(id = ProjectId("p"), timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"))))),
         )
         val assetId = rig.importAsset("/tmp/new.mp4", durationSeconds = 3.0)
-        // rig.ctx has no currentProjectId.
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(AddClipTool.Input(assetId = assetId.value), rig.ctx)
+            rig.tool.execute(single(assetId = assetId.value), rig.ctx)
         }
         assertTrue(ex.message!!.contains("switch_project"), ex.message)
     }

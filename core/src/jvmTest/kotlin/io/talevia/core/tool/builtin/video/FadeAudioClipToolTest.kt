@@ -25,14 +25,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-/**
- * `fade_audio_clip` shapes the attack/release envelope on an audio clip.
- * Tests cover: setting fade-in only preserves existing fade-out, setting
- * fade-out only preserves existing fade-in, both at once, disabling via
- * `0.0`, the audio-only guard, the negative guard, the
- * fade-exceeds-duration guard, the missing-clip fail-loud, and the
- * post-mutation snapshot for `revert_timeline` parity.
- */
 class FadeAudioClipToolTest {
 
     private data class Rig(
@@ -73,6 +65,15 @@ class FadeAudioClipToolTest {
         fadeOutSeconds = fadeOut,
     )
 
+    private fun single(
+        clipId: String,
+        fadeInSeconds: Float? = null,
+        fadeOutSeconds: Float? = null,
+    ) = FadeAudioClipTool.Input(
+        projectId = "p",
+        items = listOf(FadeAudioClipTool.Item(clipId, fadeInSeconds, fadeOutSeconds)),
+    )
+
     @Test fun setsFadeInOnlyPreservesExistingFadeOut() = runTest {
         val rig = newRig(
             Project(
@@ -82,14 +83,12 @@ class FadeAudioClipToolTest {
                 ),
             ),
         )
-        val out = rig.tool.execute(
-            FadeAudioClipTool.Input(rig.projectId.value, "c1", fadeInSeconds = 2.0f),
-            rig.ctx,
-        )
-        assertEquals(0.0f, out.data.oldFadeInSeconds)
-        assertEquals(2.0f, out.data.newFadeInSeconds)
-        assertEquals(1.5f, out.data.oldFadeOutSeconds)
-        assertEquals(1.5f, out.data.newFadeOutSeconds)
+        val out = rig.tool.execute(single("c1", fadeInSeconds = 2.0f), rig.ctx).data
+        val only = out.results.single()
+        assertEquals(0.0f, only.oldFadeInSeconds)
+        assertEquals(2.0f, only.newFadeInSeconds)
+        assertEquals(1.5f, only.oldFadeOutSeconds)
+        assertEquals(1.5f, only.newFadeOutSeconds)
 
         val refreshed = rig.store.get(rig.projectId)!!
         val audio = refreshed.timeline.tracks.single().clips.single() as Clip.Audio
@@ -106,10 +105,7 @@ class FadeAudioClipToolTest {
                 ),
             ),
         )
-        rig.tool.execute(
-            FadeAudioClipTool.Input(rig.projectId.value, "c1", fadeOutSeconds = 2.5f),
-            rig.ctx,
-        )
+        rig.tool.execute(single("c1", fadeOutSeconds = 2.5f), rig.ctx)
         val audio = rig.store.get(rig.projectId)!!.timeline.tracks.single().clips.single() as Clip.Audio
         assertEquals(0.5f, audio.fadeInSeconds)
         assertEquals(2.5f, audio.fadeOutSeconds)
@@ -122,13 +118,34 @@ class FadeAudioClipToolTest {
                 timeline = Timeline(tracks = listOf(Track.Audio(TrackId("a1"), listOf(audioClip("c1"))))),
             ),
         )
-        rig.tool.execute(
-            FadeAudioClipTool.Input(rig.projectId.value, "c1", fadeInSeconds = 1.0f, fadeOutSeconds = 1.0f),
-            rig.ctx,
-        )
+        rig.tool.execute(single("c1", fadeInSeconds = 1.0f, fadeOutSeconds = 1.0f), rig.ctx)
         val audio = rig.store.get(rig.projectId)!!.timeline.tracks.single().clips.single() as Clip.Audio
         assertEquals(1.0f, audio.fadeInSeconds)
         assertEquals(1.0f, audio.fadeOutSeconds)
+    }
+
+    @Test fun batchFadesDifferentClipsAtomically() = runTest {
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(
+                    tracks = listOf(Track.Audio(TrackId("a1"), listOf(audioClip("c1"), audioClip("c2")))),
+                ),
+            ),
+        )
+        rig.tool.execute(
+            FadeAudioClipTool.Input(
+                projectId = "p",
+                items = listOf(
+                    FadeAudioClipTool.Item("c1", fadeInSeconds = 1f),
+                    FadeAudioClipTool.Item("c2", fadeOutSeconds = 2f),
+                ),
+            ),
+            rig.ctx,
+        )
+        val clips = rig.store.get(rig.projectId)!!.timeline.tracks.single().clips.filterIsInstance<Clip.Audio>().associateBy { it.id.value }
+        assertEquals(1f, clips["c1"]!!.fadeInSeconds)
+        assertEquals(2f, clips["c2"]!!.fadeOutSeconds)
     }
 
     @Test fun zeroValueDisablesFade() = runTest {
@@ -140,10 +157,7 @@ class FadeAudioClipToolTest {
                 ),
             ),
         )
-        rig.tool.execute(
-            FadeAudioClipTool.Input(rig.projectId.value, "c1", fadeInSeconds = 0.0f),
-            rig.ctx,
-        )
+        rig.tool.execute(single("c1", fadeInSeconds = 0.0f), rig.ctx)
         val audio = rig.store.get(rig.projectId)!!.timeline.tracks.single().clips.single() as Clip.Audio
         assertEquals(0.0f, audio.fadeInSeconds)
         assertEquals(2.0f, audio.fadeOutSeconds)
@@ -157,7 +171,7 @@ class FadeAudioClipToolTest {
             ),
         )
         assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(FadeAudioClipTool.Input(rig.projectId.value, "c1"), rig.ctx)
+            rig.tool.execute(single("c1"), rig.ctx)
         }
     }
 
@@ -175,10 +189,7 @@ class FadeAudioClipToolTest {
             ),
         )
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                FadeAudioClipTool.Input(rig.projectId.value, "v1", fadeInSeconds = 1.0f),
-                rig.ctx,
-            )
+            rig.tool.execute(single("v1", fadeInSeconds = 1.0f), rig.ctx)
         }
         assertTrue("audio" in ex.message!!, ex.message)
     }
@@ -197,10 +208,7 @@ class FadeAudioClipToolTest {
             ),
         )
         assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                FadeAudioClipTool.Input(rig.projectId.value, "t1", fadeInSeconds = 1.0f),
-                rig.ctx,
-            )
+            rig.tool.execute(single("t1", fadeInSeconds = 1.0f), rig.ctx)
         }
     }
 
@@ -212,10 +220,7 @@ class FadeAudioClipToolTest {
             ),
         )
         assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(
-                FadeAudioClipTool.Input(rig.projectId.value, "c1", fadeInSeconds = -1.0f),
-                rig.ctx,
-            )
+            rig.tool.execute(single("c1", fadeInSeconds = -1.0f), rig.ctx)
         }
     }
 
@@ -230,12 +235,8 @@ class FadeAudioClipToolTest {
                 ),
             ),
         )
-        // 3 + 3 = 6 > 5s clip duration → must fail.
         val ex = assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(
-                FadeAudioClipTool.Input(rig.projectId.value, "c1", fadeInSeconds = 3.0f, fadeOutSeconds = 3.0f),
-                rig.ctx,
-            )
+            rig.tool.execute(single("c1", fadeInSeconds = 3.0f, fadeOutSeconds = 3.0f), rig.ctx)
         }
         assertTrue("overlap" in ex.message!! || "exceed" in ex.message!!, ex.message)
     }
@@ -248,27 +249,22 @@ class FadeAudioClipToolTest {
             ),
         )
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                FadeAudioClipTool.Input(rig.projectId.value, "ghost", fadeInSeconds = 1.0f),
-                rig.ctx,
-            )
+            rig.tool.execute(single("ghost", fadeInSeconds = 1.0f), rig.ctx)
         }
         assertTrue("ghost" in ex.message!!, ex.message)
     }
 
-    @Test fun emitsTimelineSnapshotForRevert() = runTest {
+    @Test fun emitsOneSnapshotPerBatch() = runTest {
         val rig = newRig(
             Project(
                 id = ProjectId("p"),
                 timeline = Timeline(tracks = listOf(Track.Audio(TrackId("a1"), listOf(audioClip("c1"))))),
             ),
         )
-        rig.tool.execute(
-            FadeAudioClipTool.Input(rig.projectId.value, "c1", fadeInSeconds = 1.2f, fadeOutSeconds = 0.8f),
-            rig.ctx,
-        )
-        val snap = rig.emittedParts.filterIsInstance<Part.TimelineSnapshot>().single()
-        val audio = snap.timeline.tracks.single().clips.single() as Clip.Audio
+        rig.tool.execute(single("c1", fadeInSeconds = 1.2f, fadeOutSeconds = 0.8f), rig.ctx)
+        val snaps = rig.emittedParts.filterIsInstance<Part.TimelineSnapshot>()
+        assertEquals(1, snaps.size)
+        val audio = snaps.single().timeline.tracks.single().clips.single() as Clip.Audio
         assertEquals(1.2f, audio.fadeInSeconds)
         assertEquals(0.8f, audio.fadeOutSeconds)
     }

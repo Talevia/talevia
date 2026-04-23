@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.video
 
 import io.talevia.core.ClipId
-import io.talevia.core.ProjectId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.TimeRange
@@ -27,46 +26,39 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * Clone a clip to a new timeline position, preserving everything *except*
- * the clip id and the start time. Filters, transforms, source bindings,
- * volume, fade envelope, text body and style — all copied byte-for-byte.
+ * Clone one or many clips to new timeline positions atomically, preserving
+ * every attached field except the id and the start time. Per-item shape:
+ * each entry carries its own clipId + target timeline-start + optional target
+ * track.
  *
- * `add_clip` can mount the same asset twice, but it throws away the
- * attached state (filters, transforms, bindings). "Put the intro again at
- * 00:30, same look" is a common request that otherwise requires:
- *   1. add_clip(asset, @00:30) to get a fresh placement
- *   2. apply_filter / set_clip_transform / set_clip_volume / …
- *      repeated N times to recreate the original's attachments
+ * Optional target track must match the source clip's kind (Video→Video,
+ * Audio→Audio, Text→Subtitle or Effect). Cross-kind moves rejected loudly.
  *
- * This tool collapses that into one call. The source binding set is
- * preserved so staleness-tracking continues to work on the duplicate
- * (they share the same upstream source nodes — changes to "Mei" still
- * invalidate both copies).
- *
- * Optional [Input.trackId] lets the caller place the duplicate on a
- * different track, provided the kinds match (Video→Video, Audio→Audio,
- * Text→Subtitle or Effect). Cross-kind moves are refused — the clip
- * data model can't survive the transition. Omit `trackId` to place on
- * the source clip's current track (the 95% case).
- *
- * No overlap validation — same Timeline contract as [MoveClipTool].
- * Emits a timeline snapshot for revert_timeline.
+ * No overlap validation — same Timeline contract as move_clips. All-or-nothing;
+ * one snapshot per call.
  */
 @OptIn(ExperimentalUuidApi::class)
 class DuplicateClipTool(
     private val store: ProjectStore,
 ) : Tool<DuplicateClipTool.Input, DuplicateClipTool.Output> {
 
-    @Serializable data class Input(
-        val projectId: String,
+    @Serializable data class Item(
         val clipId: String,
-        /** New `timeRange.start` in seconds. Must be >= 0. Duration is preserved. */
         val timelineStartSeconds: Double,
-        /** Optional target track id. Must be the same kind as the source. Omit to duplicate on the same track. */
         val trackId: String? = null,
     )
 
-    @Serializable data class Output(
+    @Serializable data class Input(
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
+        val items: List<Item>,
+    )
+
+    @Serializable data class ItemResult(
         val originalClipId: String,
         val newClipId: String,
         val sourceTrackId: String,
@@ -75,11 +67,18 @@ class DuplicateClipTool(
         val timelineEndSeconds: Double,
     )
 
-    override val id: String = "duplicate_clip"
+    @Serializable data class Output(
+        val projectId: String,
+        val results: List<ItemResult>,
+        val snapshotId: String,
+    )
+
+    override val id: String = "duplicate_clips"
     override val helpText: String =
-        "Clone a clip (filters, transforms, source bindings, audio envelope, text style) " +
-            "to a new timeline position with a fresh clip id. Optional trackId moves the " +
-            "duplicate to another track of the same kind. Emits a timeline snapshot."
+        "Clone one or many clips (filters, transforms, source bindings, audio envelope, text " +
+            "style) to new timeline positions atomically, each with a fresh clip id. Optional " +
+            "per-item trackId moves the duplicate to another track of the same kind. " +
+            "All-or-nothing; one snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")
@@ -88,91 +87,111 @@ class DuplicateClipTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
-            putJsonObject("clipId") { put("type", "string") }
-            putJsonObject("timelineStartSeconds") {
-                put("type", "number")
-                put("description", "New timeline start position in seconds (must be >= 0).")
-            }
-            putJsonObject("trackId") {
+            putJsonObject("projectId") {
                 put("type", "string")
-                put("description", "Optional target track id of the same kind. Defaults to the source clip's track.")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
+            putJsonObject("items") {
+                put("type", "array")
+                put("description", "Clip duplications. At least one required.")
+                putJsonObject("items") {
+                    put("type", "object")
+                    putJsonObject("properties") {
+                        putJsonObject("clipId") { put("type", "string") }
+                        putJsonObject("timelineStartSeconds") {
+                            put("type", "number")
+                            put("description", "New timeline start position in seconds (must be >= 0).")
+                        }
+                        putJsonObject("trackId") {
+                            put("type", "string")
+                            put(
+                                "description",
+                                "Optional target track id of the same kind. Defaults to the source clip's track.",
+                            )
+                        }
+                    }
+                    put(
+                        "required",
+                        JsonArray(
+                            listOf(
+                                JsonPrimitive("clipId"),
+                                JsonPrimitive("timelineStartSeconds"),
+                            ),
+                        ),
+                    )
+                    put("additionalProperties", false)
+                }
             }
         }
-        put(
-            "required",
-            JsonArray(
-                listOf(
-                    JsonPrimitive("projectId"),
-                    JsonPrimitive("clipId"),
-                    JsonPrimitive("timelineStartSeconds"),
-                ),
-            ),
-        )
+        put("required", JsonArray(listOf(JsonPrimitive("items"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        require(input.timelineStartSeconds >= 0.0) {
-            "timelineStartSeconds must be >= 0 (got ${input.timelineStartSeconds})"
-        }
-        val newStart: Duration = input.timelineStartSeconds.seconds
-        val newClipId = ClipId(Uuid.random().toString())
-
-        var sourceTrackId: String? = null
-        var sourceTrackKind: String? = null
-        var newEndSeconds = 0.0
-
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
-            val originalTrack = project.timeline.tracks.firstOrNull { t ->
-                t.clips.any { it.id.value == input.clipId }
-            } ?: error("clip ${input.clipId} not found in project ${input.projectId}")
-            val original = originalTrack.clips.first { it.id.value == input.clipId }
-            sourceTrackId = originalTrack.id.value
-            sourceTrackKind = trackKindOf(originalTrack)
-
-            val targetTrack = if (input.trackId == null || input.trackId == originalTrack.id.value) {
-                originalTrack
-            } else {
-                val candidate = project.timeline.tracks.firstOrNull { it.id.value == input.trackId }
-                    ?: error("trackId ${input.trackId} not found in project ${input.projectId}")
-                require(trackKindOf(candidate) == trackKindOf(originalTrack)) {
-                    "trackId ${input.trackId} is ${trackKindOf(candidate)} but source clip is ${trackKindOf(originalTrack)}"
-                }
-                candidate
+        require(input.items.isNotEmpty()) { "items must not be empty" }
+        input.items.forEachIndexed { idx, item ->
+            require(item.timelineStartSeconds >= 0.0) {
+                "items[$idx] (${item.clipId}): timelineStartSeconds must be >= 0 (got ${item.timelineStartSeconds})"
             }
+        }
 
-            val cloned = cloneClip(original, newClipId, newStart)
-            newEndSeconds = (newStart + original.timeRange.duration).toDouble(DurationUnit.SECONDS)
+        val pid = ctx.resolveProjectId(input.projectId)
+        val results = mutableListOf<ItemResult>()
 
-            val tracks = project.timeline.tracks.map { t ->
-                if (t.id == targetTrack.id) {
-                    val newClips = (t.clips + cloned).sortedBy { it.timeRange.start }
-                    withClips(t, newClips)
+        val updated = store.mutate(pid) { project ->
+            var tracks = project.timeline.tracks
+            input.items.forEachIndexed { idx, item ->
+                val originalTrack = tracks.firstOrNull { t ->
+                    t.clips.any { it.id.value == item.clipId }
+                } ?: error("items[$idx]: clip ${item.clipId} not found in project ${pid.value}")
+                val original = originalTrack.clips.first { it.id.value == item.clipId }
+
+                val targetTrack = if (item.trackId == null || item.trackId == originalTrack.id.value) {
+                    originalTrack
                 } else {
-                    t
+                    val candidate = tracks.firstOrNull { it.id.value == item.trackId }
+                        ?: error("items[$idx] (${item.clipId}): trackId ${item.trackId} not found in project ${pid.value}")
+                    require(trackKindOf(candidate) == trackKindOf(originalTrack)) {
+                        "items[$idx] (${item.clipId}): trackId ${item.trackId} is ${trackKindOf(candidate)} " +
+                            "but source clip is ${trackKindOf(originalTrack)}"
+                    }
+                    candidate
                 }
+
+                val newStart: Duration = item.timelineStartSeconds.seconds
+                val newClipId = ClipId(Uuid.random().toString())
+                val cloned = cloneClip(original, newClipId, newStart)
+                val newEndSeconds = (newStart + original.timeRange.duration).toDouble(DurationUnit.SECONDS)
+
+                tracks = tracks.map { t ->
+                    if (t.id == targetTrack.id) {
+                        val newClips = (t.clips + cloned).sortedBy { it.timeRange.start }
+                        withClips(t, newClips)
+                    } else {
+                        t
+                    }
+                }
+                results += ItemResult(
+                    originalClipId = item.clipId,
+                    newClipId = newClipId.value,
+                    sourceTrackId = originalTrack.id.value,
+                    targetTrackId = targetTrack.id.value,
+                    timelineStartSeconds = item.timelineStartSeconds,
+                    timelineEndSeconds = newEndSeconds,
+                )
             }
             val duration = tracks.flatMap { it.clips }.maxOfOrNull { it.timeRange.end } ?: Duration.ZERO
             project.copy(timeline = project.timeline.copy(tracks = tracks, duration = duration))
         }
 
-        val finalTrack = updated.timeline.tracks.first { t -> t.clips.any { it.id == newClipId } }
-        val out = Output(
-            originalClipId = input.clipId,
-            newClipId = newClipId.value,
-            sourceTrackId = sourceTrackId!!,
-            targetTrackId = finalTrack.id.value,
-            timelineStartSeconds = input.timelineStartSeconds,
-            timelineEndSeconds = newEndSeconds,
-        )
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
         return ToolResult(
-            title = "duplicate clip ${input.clipId} → ${input.timelineStartSeconds}s",
-            outputForLlm = "Duplicated clip ${input.clipId} (${sourceTrackKind}) as " +
-                "${out.newClipId} on track ${out.targetTrackId} " +
-                "(${out.timelineStartSeconds}s..${out.timelineEndSeconds}s). Timeline snapshot: ${snapshotId.value}",
-            data = out,
+            title = "duplicate × ${results.size}",
+            outputForLlm = "Duplicated ${results.size} clip(s). Snapshot: ${snapshotId.value}",
+            data = Output(pid.value, results, snapshotId.value),
         )
     }
 

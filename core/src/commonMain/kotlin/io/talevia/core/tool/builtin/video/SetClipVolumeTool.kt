@@ -19,18 +19,19 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 
 /**
- * Set the playback volume on an audio clip already on the timeline.
+ * Set the playback volume on one or many audio clips atomically.
  *
  * `Clip.Audio.volume` was settable at construction (e.g. `add_clip` records
  * the asset's natural level) but had no post-creation editor — "lower the
  * background music to 30%" is a basic editing request that previously
  * required `remove_clip` + `add_clip`, which would lose downstream
- * filter / source-binding state. Same shape as `move_clip` / `trim_clip`:
- * one in-place edit that preserves the clip id.
+ * filter / source-binding state.
  *
- * Video clips have no `volume` field today (track-level mixing is a future
- * concern when we model audio rails), and Text clips obviously have no
- * audio — both fail loud rather than silently no-op.
+ * Per-item shape — each entry carries its own clipId + volume so one call
+ * can "dim these three tracks to 0.3 and boost the lead vocal to 1.2" in a
+ * single atomic edit. Video clips have no `volume` field today (track-level
+ * mixing is a future concern when we model audio rails), and Text clips
+ * obviously have no audio — both fail loud rather than silently no-op.
  *
  * Volume is an absolute multiplier in [0, 4]:
  *  - `0.0` mutes the clip without removing it (preserves automation
@@ -41,11 +42,19 @@ import kotlinx.serialization.serializer
  *    the user really wants gain staging at mix time, not at the clip
  *    level.
  *
- * Emits a `Part.TimelineSnapshot` so `revert_timeline` can undo.
+ * All-or-nothing: any item that fails validation (clip not found, wrong
+ * kind, out-of-range volume) aborts the whole batch and leaves
+ * `talevia.json` untouched. One `Part.TimelineSnapshot` per call.
  */
 class SetClipVolumeTool(
     private val store: ProjectStore,
 ) : Tool<SetClipVolumeTool.Input, SetClipVolumeTool.Output> {
+
+    @Serializable data class Item(
+        val clipId: String,
+        /** Absolute multiplier in [0, 4]. 1.0 = unchanged, 0.0 = mute. */
+        val volume: Float,
+    )
 
     @Serializable data class Input(
         /**
@@ -54,25 +63,29 @@ class SetClipVolumeTool(
          * unbound; fail loud points the agent at `switch_project`.
          */
         val projectId: String? = null,
-        val clipId: String,
-        /** Absolute multiplier in [0, 4]. 1.0 = unchanged, 0.0 = mute. */
-        val volume: Float,
+        val items: List<Item>,
     )
 
-    @Serializable data class Output(
+    @Serializable data class ItemResult(
         val clipId: String,
         val trackId: String,
         val oldVolume: Float,
         val newVolume: Float,
     )
 
-    override val id = "set_clip_volume"
+    @Serializable data class Output(
+        val projectId: String,
+        val results: List<ItemResult>,
+        val snapshotId: String,
+    )
+
+    override val id = "set_clip_volumes"
     override val helpText =
-        "Set the playback volume of an audio clip on the timeline (0.0 = mute, " +
-            "1.0 = unchanged, up to 4.0 = +12dB). Audio clips only — video and text " +
-            "clips fail loudly. Preserves clip id and every other attached state " +
-            "(sourceRange, sourceBinding, transforms). Emits a timeline snapshot " +
-            "so revert_timeline can undo."
+        "Set the playback volume of one or many audio clips atomically (0.0 = mute, 1.0 = " +
+            "unchanged, up to 4.0 = +12dB). Each item carries its own clipId + volume so a single " +
+            "call can dim some clips and boost others. Audio clips only — video and text clips " +
+            "fail loudly. Preserves clip ids and every other attached state. All-or-nothing: one " +
+            "invalid item aborts the whole batch. One timeline snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("timeline.write")
@@ -88,73 +101,84 @@ class SetClipVolumeTool(
                     "Optional — omit to use the session's current project (set via switch_project).",
                 )
             }
-            putJsonObject("clipId") { put("type", "string") }
-            putJsonObject("volume") {
-                put("type", "number")
-                put("description", "Absolute multiplier in [0, 4]. 1.0 = unchanged.")
+            putJsonObject("items") {
+                put("type", "array")
+                put("description", "Volume edits to apply. At least one required.")
+                putJsonObject("items") {
+                    put("type", "object")
+                    putJsonObject("properties") {
+                        putJsonObject("clipId") { put("type", "string") }
+                        putJsonObject("volume") {
+                            put("type", "number")
+                            put("description", "Absolute multiplier in [0, 4]. 1.0 = unchanged.")
+                        }
+                    }
+                    put(
+                        "required",
+                        JsonArray(listOf(JsonPrimitive("clipId"), JsonPrimitive("volume"))),
+                    )
+                    put("additionalProperties", false)
+                }
             }
         }
-        put(
-            "required",
-            JsonArray(
-                listOf(
-                    JsonPrimitive("clipId"),
-                    JsonPrimitive("volume"),
-                ),
-            ),
-        )
+        put("required", JsonArray(listOf(JsonPrimitive("items"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        require(input.volume.isFinite()) { "volume must be finite (got ${input.volume})" }
-        require(input.volume >= 0f) { "volume must be >= 0 (got ${input.volume})" }
-        require(input.volume <= MAX_VOLUME) {
-            "volume must be <= $MAX_VOLUME; clip-level gain beyond that belongs in mix-time staging."
+        require(input.items.isNotEmpty()) { "items must not be empty" }
+        input.items.forEachIndexed { idx, item ->
+            require(item.volume.isFinite()) {
+                "items[$idx]: volume must be finite (got ${item.volume})"
+            }
+            require(item.volume >= 0f) {
+                "items[$idx]: volume must be >= 0 (got ${item.volume})"
+            }
+            require(item.volume <= MAX_VOLUME) {
+                "items[$idx]: volume must be <= $MAX_VOLUME (got ${item.volume}); " +
+                    "clip-level gain beyond that belongs in mix-time staging."
+            }
         }
 
         val pid = ctx.resolveProjectId(input.projectId)
-        var foundTrackId: String? = null
-        var oldVolume = 0f
+        val results = mutableListOf<ItemResult>()
+
         val updated = store.mutate(pid) { project ->
-            val newTracks = project.timeline.tracks.map { track ->
-                val target = track.clips.firstOrNull { it.id.value == input.clipId }
-                if (target == null) {
-                    track
-                } else {
-                    val audio = target as? Clip.Audio ?: error(
-                        "set_clip_volume only applies to audio clips; clip ${input.clipId} " +
-                            "is a ${target::class.simpleName}.",
-                    )
-                    foundTrackId = track.id.value
-                    oldVolume = audio.volume
-                    val rebuilt = track.clips.map {
-                        if (it.id == audio.id) audio.copy(volume = input.volume) else it
-                    }
-                    when (track) {
-                        is Track.Video -> track.copy(clips = rebuilt)
-                        is Track.Audio -> track.copy(clips = rebuilt)
-                        is Track.Subtitle -> track.copy(clips = rebuilt)
-                        is Track.Effect -> track.copy(clips = rebuilt)
-                    }
+            var tracks = project.timeline.tracks
+            input.items.forEachIndexed { idx, item ->
+                val hit = tracks.firstNotNullOfOrNull { track ->
+                    track.clips.firstOrNull { it.id.value == item.clipId }?.let { track to it }
+                } ?: error("items[$idx]: clip ${item.clipId} not found in project ${pid.value}")
+                val (track, clip) = hit
+                val audio = clip as? Clip.Audio ?: error(
+                    "items[$idx]: set_clip_volumes only applies to audio clips; clip ${item.clipId} " +
+                        "is a ${clip::class.simpleName}.",
+                )
+                val oldVolume = audio.volume
+                val rebuilt = track.clips.map {
+                    if (it.id == audio.id) audio.copy(volume = item.volume) else it
                 }
+                val newTrack = when (track) {
+                    is Track.Video -> track.copy(clips = rebuilt)
+                    is Track.Audio -> track.copy(clips = rebuilt)
+                    is Track.Subtitle -> track.copy(clips = rebuilt)
+                    is Track.Effect -> track.copy(clips = rebuilt)
+                }
+                tracks = tracks.map { if (it.id == newTrack.id) newTrack else it }
+                results += ItemResult(
+                    clipId = item.clipId,
+                    trackId = track.id.value,
+                    oldVolume = oldVolume,
+                    newVolume = item.volume,
+                )
             }
-            if (foundTrackId == null) {
-                error("clip ${input.clipId} not found in project ${pid.value}")
-            }
-            project.copy(timeline = project.timeline.copy(tracks = newTracks))
+            project.copy(timeline = project.timeline.copy(tracks = tracks))
         }
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
         return ToolResult(
-            title = "set volume ${input.clipId} → ${input.volume}",
-            outputForLlm = "Set audio clip ${input.clipId} on track $foundTrackId volume " +
-                "$oldVolume → ${input.volume}. Timeline snapshot: ${snapshotId.value}",
-            data = Output(
-                clipId = input.clipId,
-                trackId = foundTrackId!!,
-                oldVolume = oldVolume,
-                newVolume = input.volume,
-            ),
+            title = "set volume × ${results.size}",
+            outputForLlm = "Set volume on ${results.size} audio clip(s). Snapshot: ${snapshotId.value}",
+            data = Output(pid.value, results, snapshotId.value),
         )
     }
 

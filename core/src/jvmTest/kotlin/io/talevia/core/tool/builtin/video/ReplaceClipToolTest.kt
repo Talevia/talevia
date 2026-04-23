@@ -70,6 +70,11 @@ class ReplaceClipToolTest {
         createdAtEpochMs = 1_700_000_000_000L,
     )
 
+    private fun single(clipId: String, newAssetId: String) = ReplaceClipTool.Input(
+        projectId = "p",
+        items = listOf(ReplaceClipTool.Item(clipId, newAssetId)),
+    )
+
     @Test fun replacesAssetIdAndPreservesPositionAndFilters() = runTest {
         val originalAsset = AssetId("asset-original")
         val clip = Clip.Video(
@@ -88,26 +93,18 @@ class ReplaceClipToolTest {
         )
         val replacement = rig.importAsset("/tmp/regen.mp4")
 
-        val result = rig.tool.execute(
-            ReplaceClipTool.Input(
-                projectId = rig.projectId.value,
-                clipId = "c-1",
-                newAssetId = replacement.value,
-            ),
-            rig.ctx,
-        )
-
-        assertEquals("c-1", result.data.clipId)
-        assertEquals(originalAsset.value, result.data.previousAssetId)
-        assertEquals(replacement.value, result.data.newAssetId)
-        assertTrue(result.data.sourceBindingIds.isEmpty(), "no lockfile entry → no binding to copy")
+        val result = rig.tool.execute(single("c-1", replacement.value), rig.ctx).data
+        val only = result.results.single()
+        assertEquals("c-1", only.clipId)
+        assertEquals(originalAsset.value, only.previousAssetId)
+        assertEquals(replacement.value, only.newAssetId)
+        assertTrue(only.sourceBindingIds.isEmpty())
 
         val refreshed = rig.store.get(rig.projectId)!!
         val updated = refreshed.timeline.tracks.flatMap { it.clips }
             .filterIsInstance<Clip.Video>()
             .single { it.id.value == "c-1" }
         assertEquals(replacement, updated.assetId)
-        // Position / source range / transforms / filters all preserved.
         assertEquals(TimeRange(2.seconds, 4.seconds), updated.timeRange)
         assertEquals(TimeRange(1.seconds, 4.seconds), updated.sourceRange)
         assertEquals(listOf(Transform(scaleX = 1.5f)), updated.transforms)
@@ -129,7 +126,6 @@ class ReplaceClipToolTest {
             ),
         )
         val replacement = rig.importAsset("/tmp/regen-bound.mp4")
-        // Pretend a regenerate call had already produced this asset bound to a character ref.
         val boundIds = setOf(SourceNodeId("mei"), SourceNodeId("noir"))
         rig.store.mutate(rig.projectId) {
             it.copy(
@@ -146,20 +142,81 @@ class ReplaceClipToolTest {
             )
         }
 
-        rig.tool.execute(
-            ReplaceClipTool.Input(
-                projectId = rig.projectId.value,
-                clipId = "c-1",
-                newAssetId = replacement.value,
-            ),
-            rig.ctx,
-        )
+        rig.tool.execute(single("c-1", replacement.value), rig.ctx)
 
         val refreshed = rig.store.get(rig.projectId)!!
         val updated = refreshed.timeline.tracks.flatMap { it.clips }
             .filterIsInstance<Clip.Video>()
             .single { it.id.value == "c-1" }
         assertEquals(boundIds, updated.sourceBinding)
+    }
+
+    @Test fun batchReplacesMultipleClipsAtomically() = runTest {
+        val c1 = Clip.Video(
+            id = ClipId("c-1"),
+            timeRange = TimeRange(0.seconds, 2.seconds),
+            sourceRange = TimeRange(0.seconds, 2.seconds),
+            assetId = AssetId("asset-a"),
+        )
+        val c2 = Clip.Video(
+            id = ClipId("c-2"),
+            timeRange = TimeRange(2.seconds, 2.seconds),
+            sourceRange = TimeRange(0.seconds, 2.seconds),
+            assetId = AssetId("asset-b"),
+        )
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(c1, c2)))),
+            ),
+        )
+        val r1 = rig.importAsset("/tmp/r1.mp4")
+        val r2 = rig.importAsset("/tmp/r2.mp4")
+
+        rig.tool.execute(
+            ReplaceClipTool.Input(
+                projectId = rig.projectId.value,
+                items = listOf(
+                    ReplaceClipTool.Item("c-1", r1.value),
+                    ReplaceClipTool.Item("c-2", r2.value),
+                ),
+            ),
+            rig.ctx,
+        )
+        val refreshed = rig.store.get(rig.projectId)!!
+        val byId = refreshed.timeline.tracks.single().clips.filterIsInstance<Clip.Video>().associateBy { it.id.value }
+        assertEquals(r1, byId["c-1"]!!.assetId)
+        assertEquals(r2, byId["c-2"]!!.assetId)
+    }
+
+    @Test fun midBatchFailureLeavesProjectUntouched() = runTest {
+        val clip = Clip.Video(
+            id = ClipId("c-1"),
+            timeRange = TimeRange(0.seconds, 2.seconds),
+            sourceRange = TimeRange(0.seconds, 2.seconds),
+            assetId = AssetId("original"),
+        )
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(clip)))),
+            ),
+        )
+        val r1 = rig.importAsset("/tmp/r1.mp4")
+        val before = rig.store.get(rig.projectId)!!
+        assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                ReplaceClipTool.Input(
+                    projectId = rig.projectId.value,
+                    items = listOf(
+                        ReplaceClipTool.Item("c-1", r1.value),
+                        ReplaceClipTool.Item("c-1", "missing"),
+                    ),
+                ),
+                rig.ctx,
+            )
+        }
+        assertEquals(before.timeline, rig.store.get(rig.projectId)!!.timeline)
     }
 
     @Test fun audioClipIsAlsoSupported() = runTest {
@@ -179,14 +236,7 @@ class ReplaceClipToolTest {
         )
         val replacement = rig.importAsset("/tmp/audio-regen.mp3")
 
-        rig.tool.execute(
-            ReplaceClipTool.Input(
-                projectId = rig.projectId.value,
-                clipId = "a-1",
-                newAssetId = replacement.value,
-            ),
-            rig.ctx,
-        )
+        rig.tool.execute(single("a-1", replacement.value), rig.ctx)
 
         val refreshed = rig.store.get(rig.projectId)!!
         val updated = refreshed.timeline.tracks.flatMap { it.clips }
@@ -211,14 +261,7 @@ class ReplaceClipToolTest {
         val replacement = rig.importAsset("/tmp/something.mp4")
 
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                ReplaceClipTool.Input(
-                    projectId = rig.projectId.value,
-                    clipId = "t-1",
-                    newAssetId = replacement.value,
-                ),
-                rig.ctx,
-            )
+            rig.tool.execute(single("t-1", replacement.value), rig.ctx)
         }
         assertTrue(ex.message!!.contains("text clips"), ex.message)
     }
@@ -233,14 +276,7 @@ class ReplaceClipToolTest {
         val replacement = rig.importAsset("/tmp/x.mp4")
 
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                ReplaceClipTool.Input(
-                    projectId = rig.projectId.value,
-                    clipId = "ghost",
-                    newAssetId = replacement.value,
-                ),
-                rig.ctx,
-            )
+            rig.tool.execute(single("ghost", replacement.value), rig.ctx)
         }
         assertTrue(ex.message!!.contains("ghost"), ex.message)
     }
@@ -260,14 +296,7 @@ class ReplaceClipToolTest {
         )
 
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                ReplaceClipTool.Input(
-                    projectId = rig.projectId.value,
-                    clipId = "c-1",
-                    newAssetId = "missing-asset",
-                ),
-                rig.ctx,
-            )
+            rig.tool.execute(single("c-1", "missing-asset"), rig.ctx)
         }
         assertTrue(ex.message!!.contains("missing-asset"), ex.message)
     }

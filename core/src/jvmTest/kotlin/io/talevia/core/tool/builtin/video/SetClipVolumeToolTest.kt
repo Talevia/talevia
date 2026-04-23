@@ -25,14 +25,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-/**
- * `set_clip_volume` adjusts an audio clip's `volume` field in place — the
- * "lower the music" primitive that previously had no tool. Tests cover: the
- * happy path, mute (0.0), >1.0 amplification, the audio-clip-only guard
- * (video / text rejection), the negative-volume guard, the cap-exceeded
- * guard, the missing-clip fail-loud, and the post-mutation snapshot for
- * revert_timeline parity.
- */
 class SetClipVolumeToolTest {
 
     private data class Rig(
@@ -67,6 +59,11 @@ class SetClipVolumeToolTest {
         volume = volume,
     )
 
+    private fun single(clipId: String, volume: Float) = SetClipVolumeTool.Input(
+        projectId = "p",
+        items = listOf(SetClipVolumeTool.Item(clipId, volume)),
+    )
+
     @Test fun setsAudioClipVolumeAndPreservesOtherFields() = runTest {
         val rig = newRig(
             Project(
@@ -74,19 +71,16 @@ class SetClipVolumeToolTest {
                 timeline = Timeline(tracks = listOf(Track.Audio(TrackId("a1"), listOf(audioClip("c1", 1.0f))))),
             ),
         )
-        val out = rig.tool.execute(
-            SetClipVolumeTool.Input(rig.projectId.value, "c1", volume = 0.3f),
-            rig.ctx,
-        )
-        assertEquals("c1", out.data.clipId)
-        assertEquals("a1", out.data.trackId)
-        assertEquals(1.0f, out.data.oldVolume)
-        assertEquals(0.3f, out.data.newVolume)
+        val out = rig.tool.execute(single("c1", 0.3f), rig.ctx).data
+        val only = out.results.single()
+        assertEquals("c1", only.clipId)
+        assertEquals("a1", only.trackId)
+        assertEquals(1.0f, only.oldVolume)
+        assertEquals(0.3f, only.newVolume)
 
         val refreshed = rig.store.get(rig.projectId)!!
         val updated = refreshed.timeline.tracks.single().clips.single() as Clip.Audio
         assertEquals(0.3f, updated.volume)
-        // Non-volume fields preserved.
         assertEquals(0.seconds, updated.timeRange.start)
         assertEquals(5.seconds, updated.sourceRange.duration)
         assertEquals(AssetId("a-c1"), updated.assetId)
@@ -99,14 +93,10 @@ class SetClipVolumeToolTest {
                 timeline = Timeline(tracks = listOf(Track.Audio(TrackId("a1"), listOf(audioClip("c1", 0.5f))))),
             ),
         )
-        rig.tool.execute(
-            SetClipVolumeTool.Input(rig.projectId.value, "c1", volume = 0.0f),
-            rig.ctx,
-        )
+        rig.tool.execute(single("c1", 0.0f), rig.ctx)
         val refreshed = rig.store.get(rig.projectId)!!
         val muted = refreshed.timeline.tracks.single().clips.single() as Clip.Audio
         assertEquals(0.0f, muted.volume)
-        // Clip is still on the timeline (mute, not remove).
         assertEquals(1, refreshed.timeline.tracks.single().clips.size)
     }
 
@@ -117,13 +107,68 @@ class SetClipVolumeToolTest {
                 timeline = Timeline(tracks = listOf(Track.Audio(TrackId("a1"), listOf(audioClip("c1"))))),
             ),
         )
-        rig.tool.execute(
-            SetClipVolumeTool.Input(rig.projectId.value, "c1", volume = 2.5f),
-            rig.ctx,
-        )
+        rig.tool.execute(single("c1", 2.5f), rig.ctx)
         val refreshed = rig.store.get(rig.projectId)!!
         val amped = refreshed.timeline.tracks.single().clips.single() as Clip.Audio
         assertEquals(2.5f, amped.volume)
+    }
+
+    @Test fun batchSetsDifferentVolumesAtomically() = runTest {
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(
+                    Track.Audio(
+                        TrackId("a1"),
+                        listOf(audioClip("c1", 1.0f), audioClip("c2", 1.0f), audioClip("c3", 1.0f)),
+                    ),
+                )),
+            ),
+        )
+        val out = rig.tool.execute(
+            SetClipVolumeTool.Input(
+                projectId = rig.projectId.value,
+                items = listOf(
+                    SetClipVolumeTool.Item("c1", 0.2f),
+                    SetClipVolumeTool.Item("c2", 0.5f),
+                    SetClipVolumeTool.Item("c3", 2.0f),
+                ),
+            ),
+            rig.ctx,
+        ).data
+        assertEquals(3, out.results.size)
+
+        val refreshed = rig.store.get(rig.projectId)!!
+        val clips = refreshed.timeline.tracks.single().clips.filterIsInstance<Clip.Audio>().associateBy { it.id.value }
+        assertEquals(0.2f, clips["c1"]!!.volume)
+        assertEquals(0.5f, clips["c2"]!!.volume)
+        assertEquals(2.0f, clips["c3"]!!.volume)
+    }
+
+    @Test fun midBatchFailureLeavesProjectUntouched() = runTest {
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(
+                    Track.Audio(TrackId("a1"), listOf(audioClip("c1", 1.0f), audioClip("c2", 1.0f))),
+                )),
+            ),
+        )
+        val before = rig.store.get(rig.projectId)!!
+        assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                SetClipVolumeTool.Input(
+                    projectId = rig.projectId.value,
+                    items = listOf(
+                        SetClipVolumeTool.Item("c1", 0.2f),
+                        SetClipVolumeTool.Item("ghost", 0.5f), // fails
+                    ),
+                ),
+                rig.ctx,
+            )
+        }
+        val after = rig.store.get(rig.projectId)!!
+        assertEquals(before.timeline, after.timeline)
     }
 
     @Test fun rejectsVideoClip() = runTest {
@@ -140,10 +185,7 @@ class SetClipVolumeToolTest {
             ),
         )
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                SetClipVolumeTool.Input(rig.projectId.value, "v1", volume = 0.5f),
-                rig.ctx,
-            )
+            rig.tool.execute(single("v1", 0.5f), rig.ctx)
         }
         assertTrue("audio" in ex.message!!, ex.message)
     }
@@ -162,10 +204,7 @@ class SetClipVolumeToolTest {
             ),
         )
         assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                SetClipVolumeTool.Input(rig.projectId.value, "t1", volume = 0.5f),
-                rig.ctx,
-            )
+            rig.tool.execute(single("t1", 0.5f), rig.ctx)
         }
     }
 
@@ -177,12 +216,8 @@ class SetClipVolumeToolTest {
             ),
         )
         assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(
-                SetClipVolumeTool.Input(rig.projectId.value, "c1", volume = -0.5f),
-                rig.ctx,
-            )
+            rig.tool.execute(single("c1", -0.5f), rig.ctx)
         }
-        // Original volume untouched on failure.
         val refreshed = rig.store.get(rig.projectId)!!
         val unchanged = refreshed.timeline.tracks.single().clips.single() as Clip.Audio
         assertEquals(1.0f, unchanged.volume)
@@ -196,10 +231,7 @@ class SetClipVolumeToolTest {
             ),
         )
         assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(
-                SetClipVolumeTool.Input(rig.projectId.value, "c1", volume = 5.0f),
-                rig.ctx,
-            )
+            rig.tool.execute(single("c1", 5.0f), rig.ctx)
         }
     }
 
@@ -211,27 +243,43 @@ class SetClipVolumeToolTest {
             ),
         )
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                SetClipVolumeTool.Input(rig.projectId.value, "ghost", volume = 0.5f),
-                rig.ctx,
-            )
+            rig.tool.execute(single("ghost", 0.5f), rig.ctx)
         }
         assertTrue("ghost" in ex.message!!, ex.message)
     }
 
-    @Test fun emitsTimelineSnapshotForRevert() = runTest {
+    @Test fun emitsOneSnapshotPerBatch() = runTest {
         val rig = newRig(
             Project(
                 id = ProjectId("p"),
-                timeline = Timeline(tracks = listOf(Track.Audio(TrackId("a1"), listOf(audioClip("c1"))))),
+                timeline = Timeline(tracks = listOf(
+                    Track.Audio(TrackId("a1"), listOf(audioClip("c1"), audioClip("c2"))),
+                )),
             ),
         )
         rig.tool.execute(
-            SetClipVolumeTool.Input(rig.projectId.value, "c1", volume = 0.4f),
+            SetClipVolumeTool.Input(
+                projectId = rig.projectId.value,
+                items = listOf(
+                    SetClipVolumeTool.Item("c1", 0.4f),
+                    SetClipVolumeTool.Item("c2", 0.6f),
+                ),
+            ),
             rig.ctx,
         )
-        val snap = rig.emittedParts.filterIsInstance<Part.TimelineSnapshot>().single()
-        val updated = snap.timeline.tracks.single().clips.single() as Clip.Audio
-        assertEquals(0.4f, updated.volume)
+        val snapshots = rig.emittedParts.filterIsInstance<Part.TimelineSnapshot>()
+        assertEquals(1, snapshots.size)
+        val clips = snapshots.single().timeline.tracks.single().clips.filterIsInstance<Clip.Audio>().associateBy { it.id.value }
+        assertEquals(0.4f, clips["c1"]!!.volume)
+        assertEquals(0.6f, clips["c2"]!!.volume)
+    }
+
+    @Test fun rejectsEmptyItems() = runTest {
+        val rig = newRig(
+            Project(id = ProjectId("p"), timeline = Timeline()),
+        )
+        assertFailsWith<IllegalArgumentException> {
+            rig.tool.execute(SetClipVolumeTool.Input("p", items = emptyList()), rig.ctx)
+        }
     }
 }

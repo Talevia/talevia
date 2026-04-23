@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.ProjectId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Track
@@ -20,50 +19,65 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 
 /**
- * Delete a transition by id — the missing companion to [AddTransitionTool].
- * `add_transition` records a transition as a synthetic [Clip.Video] on an
- * [Track.Effect] track whose [Clip.Video.assetId] is the sentinel
- * `"transition:<name>"`; [Clip.Video.filters] carries the engine-side
- * transition name + duration.
+ * Delete one or many transitions by id in a single atomic edit — the list-form
+ * companion to [AddTransitionTool]. `add_transition` records each transition as
+ * a synthetic [Clip.Video] on an [Track.Effect] track whose [Clip.Video.assetId]
+ * is the sentinel `"transition:<name>"`; [Clip.Video.filters] carries the
+ * engine-side transition name + duration.
  *
- * `remove_clip` would technically work on that clip, but it leaks the
- * implementation detail ("transitions are video clips on the effect track")
- * into agent reasoning and accepts any clip id — silently deleting a
- * regular video clip if the agent confuses handles. This tool validates
- * that the target is a transition (effect-track, sentinel assetId) and
- * refuses to touch anything else. It's a tighter contract for an agent
- * that asked to "remove that fade".
+ * Atomic semantics: every listed id must resolve to a real transition clip on
+ * an effect track. If any id is missing, points to a non-effect-track clip, or
+ * points to a non-transition effect clip, the whole batch aborts and
+ * `talevia.json` is left untouched. The strict-validation-or-nothing contract
+ * keeps the agent honest about what it's deleting — silently skipping unknown
+ * ids would mask typos.
  *
  * No ripple — transitions live in the overlap window between two adjacent
- * video clips, so deleting one leaves the timeline's overall timing
- * unchanged. The two underlying clips remain adjacent; the engine falls
- * back to a hard cut at render time.
+ * video clips, so deleting them leaves the timeline's overall timing unchanged.
+ * The two underlying clips remain adjacent; the engine falls back to a hard cut
+ * at render time.
  *
- * Emits a single `Part.TimelineSnapshot` so `revert_timeline` can
- * re-insert the transition.
+ * One `Part.TimelineSnapshot` per call. `revert_timeline` walks back the whole
+ * batch atomically.
  */
 class RemoveTransitionTool(
     private val store: ProjectStore,
 ) : Tool<RemoveTransitionTool.Input, RemoveTransitionTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
-        val transitionClipId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
+        /** Transition clip ids (as returned by `add_transition`). At least one required. */
+        val transitionClipIds: List<String>,
     )
 
-    @Serializable data class Output(
+    @Serializable data class ItemResult(
         val transitionClipId: String,
         val trackId: String,
         val transitionName: String,
-        val remainingTransitionsOnTrack: Int,
     )
 
-    override val id: String = "remove_transition"
+    @Serializable data class Output(
+        val projectId: String,
+        val results: List<ItemResult>,
+        /** Count of transitions still on the affected effect track(s) after removal. */
+        val remainingTransitionsTotal: Int,
+        val snapshotId: String,
+    )
+
+    override val id: String = "remove_transitions"
     override val helpText: String =
-        "Delete a transition by id. Strictly scoped to transitions (effect-track clips with the " +
-            "`transition:<name>` sentinel assetId) — refuses regular video / audio / text clips so " +
-            "you can't remove the wrong thing by id confusion. Does not ripple other clips; the two " +
-            "flanking video clips stay put and render as a hard cut. Emits a timeline snapshot."
+        "Delete one or many transitions atomically by id (the ids returned by add_transitions). " +
+            "Strictly scoped to transitions (effect-track clips with the `transition:<name>` " +
+            "sentinel assetId) — refuses regular video / audio / text clips so you can't remove " +
+            "the wrong thing by id confusion. Does not ripple other clips; flanking video clips " +
+            "stay put and render as a hard cut where the transition was. All-or-nothing: if any " +
+            "listed id is missing or not a transition, nothing is deleted. Emits one timeline " +
+            "snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")
@@ -72,76 +86,97 @@ class RemoveTransitionTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
-            putJsonObject("transitionClipId") {
+            putJsonObject("projectId") {
                 put("type", "string")
-                put("description", "The id returned by add_transition (the synthetic effect-track clip).")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
+            putJsonObject("transitionClipIds") {
+                put("type", "array")
+                put("description", "Transition clip ids (from add_transitions). At least one.")
+                putJsonObject("items") { put("type", "string") }
             }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("transitionClipId"))))
+        put("required", JsonArray(listOf(JsonPrimitive("transitionClipIds"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        var resolvedTrackId: String? = null
-        var resolvedName: String? = null
-        var remaining = 0
+        require(input.transitionClipIds.isNotEmpty()) { "transitionClipIds must not be empty" }
+        val pid = ctx.resolveProjectId(input.projectId)
+        val results = mutableListOf<ItemResult>()
+        var remainingTotal = 0
 
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
-            val tracks = project.timeline.tracks
-
-            val locatedTrack = tracks.firstOrNull { track ->
-                track is Track.Effect && track.clips.any { it.id.value == input.transitionClipId }
-            }
-            val locatedClip = locatedTrack?.clips?.firstOrNull { it.id.value == input.transitionClipId }
-
-            if (locatedTrack == null || locatedClip == null) {
-                // If the id matches a clip on a non-effect track, surface that specifically so the
-                // agent learns they picked the wrong handle rather than a generic "not found".
-                val elsewhere = tracks.firstOrNull { track ->
-                    track !is Track.Effect && track.clips.any { it.id.value == input.transitionClipId }
+        val updated = store.mutate(pid) { project ->
+            var tracks = project.timeline.tracks
+            val touchedTrackIds = mutableSetOf<String>()
+            input.transitionClipIds.forEachIndexed { idx, transitionClipId ->
+                val locatedTrack = tracks.firstOrNull { track ->
+                    track is Track.Effect && track.clips.any { it.id.value == transitionClipId }
                 }
-                if (elsewhere != null) {
+                val locatedClip = locatedTrack?.clips?.firstOrNull { it.id.value == transitionClipId }
+
+                if (locatedTrack == null || locatedClip == null) {
+                    val elsewhere = tracks.firstOrNull { track ->
+                        track !is Track.Effect && track.clips.any { it.id.value == transitionClipId }
+                    }
+                    if (elsewhere != null) {
+                        error(
+                            "transitionClipIds[$idx] ($transitionClipId) is on a ${trackKindOf(elsewhere)} " +
+                                "track, not a transition. Use remove_clips for regular clips.",
+                        )
+                    }
+                    error("transitionClipIds[$idx] ($transitionClipId) not found in project ${pid.value}")
+                }
+                if (locatedClip !is Clip.Video || !locatedClip.assetId.value.startsWith(TRANSITION_ASSET_PREFIX)) {
                     error(
-                        "clip ${input.transitionClipId} is on a ${trackKindOf(elsewhere)} track, not a transition. " +
-                            "Use remove_clip for regular clips.",
+                        "transitionClipIds[$idx] ($transitionClipId) is on the effect track but is not " +
+                            "a transition (assetId '${(locatedClip as? Clip.Video)?.assetId?.value ?: "n/a"}' " +
+                            "does not start with '$TRANSITION_ASSET_PREFIX'). Use remove_clips if you meant " +
+                            "a non-transition effect clip.",
                     )
                 }
-                error("transition ${input.transitionClipId} not found in project ${input.projectId}")
-            }
-            if (locatedClip !is Clip.Video || !locatedClip.assetId.value.startsWith(TRANSITION_ASSET_PREFIX)) {
-                error(
-                    "clip ${input.transitionClipId} is on the effect track but is not a transition (assetId " +
-                        "'${(locatedClip as? Clip.Video)?.assetId?.value ?: "n/a"}' does not start with " +
-                        "'$TRANSITION_ASSET_PREFIX'). Use remove_clip if you meant a non-transition effect clip.",
-                )
-            }
 
-            resolvedTrackId = locatedTrack.id.value
-            resolvedName = locatedClip.filters.firstOrNull()?.name
-                ?: locatedClip.assetId.value.removePrefix(TRANSITION_ASSET_PREFIX)
-            val keep = locatedTrack.clips.filter { it.id.value != input.transitionClipId }
-            remaining = keep.count { clip ->
-                clip is Clip.Video && clip.assetId.value.startsWith(TRANSITION_ASSET_PREFIX)
+                val transitionName = locatedClip.filters.firstOrNull()?.name
+                    ?: locatedClip.assetId.value.removePrefix(TRANSITION_ASSET_PREFIX)
+                results += ItemResult(
+                    transitionClipId = transitionClipId,
+                    trackId = locatedTrack.id.value,
+                    transitionName = transitionName,
+                )
+                touchedTrackIds += locatedTrack.id.value
+
+                val keep = locatedTrack.clips.filter { it.id.value != transitionClipId }
+                val newTrack = (locatedTrack as Track.Effect).copy(clips = keep)
+                tracks = tracks.map { if (it.id == newTrack.id) newTrack else it }
             }
-            val newTrack = (locatedTrack as Track.Effect).copy(clips = keep)
-            project.copy(
-                timeline = project.timeline.copy(
-                    tracks = tracks.map { if (it.id == newTrack.id) newTrack else it },
-                ),
-            )
+            remainingTotal = tracks.filter { it.id.value in touchedTrackIds }.sumOf { track ->
+                track.clips.count { clip ->
+                    clip is Clip.Video && clip.assetId.value.startsWith(TRANSITION_ASSET_PREFIX)
+                }
+            }
+            project.copy(timeline = project.timeline.copy(tracks = tracks))
         }
 
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
+        val summary = buildString {
+            append("Removed ${results.size} transition(s)")
+            if (results.isNotEmpty()) {
+                val names = results.joinToString(", ") { "${it.transitionName} (${it.transitionClipId})" }
+                append(": ").append(names)
+            }
+            append(". Timeline snapshot: ${snapshotId.value}")
+        }
         return ToolResult(
-            title = "remove transition ${input.transitionClipId}",
-            outputForLlm = "Removed ${resolvedName} transition ${input.transitionClipId} from track $resolvedTrackId " +
-                "($remaining transition(s) remain on this effect track). Timeline snapshot: ${snapshotId.value}",
+            title = "remove ${results.size} transition(s)",
+            outputForLlm = summary,
             data = Output(
-                transitionClipId = input.transitionClipId,
-                trackId = resolvedTrackId!!,
-                transitionName = resolvedName!!,
-                remainingTransitionsOnTrack = remaining,
+                projectId = pid.value,
+                results = results,
+                remainingTransitionsTotal = remainingTotal,
+                snapshotId = snapshotId.value,
             ),
         )
     }

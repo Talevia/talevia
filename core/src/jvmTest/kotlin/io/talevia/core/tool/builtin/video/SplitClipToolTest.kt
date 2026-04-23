@@ -24,13 +24,6 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
-/**
- * The happy path for SplitClipTool is exercised via the M6 integration test,
- * but the edge cases — split points at the boundary, audio/text clip handling,
- * source-range offset correctness, and independence from other tracks — were
- * uncovered. Regressions in those areas would silently corrupt the timeline
- * (wrong media offsets during export) rather than throw.
- */
 class SplitClipToolTest {
 
     private data class Rig(
@@ -63,11 +56,12 @@ class SplitClipToolTest {
             assetId = AssetId("a-$id"),
         )
 
+    private fun single(clipId: String, atTimelineSeconds: Double) = SplitClipTool.Input(
+        projectId = "p",
+        items = listOf(SplitClipTool.Item(clipId, atTimelineSeconds)),
+    )
+
     @Test fun splitAtMidpointPartitionsSourceRange() = runTest {
-        // A 10s clip sourced from [2s..12s) split at timeline 7s must produce
-        // a left half of [0s..5s) with source [2s..7s) and a right half of
-        // [5s..10s) with source [7s..12s). If sourceRange math drifts the
-        // right half will render the wrong region during export.
         val clip = videoClip("c1", start = Duration.ZERO, duration = 10.seconds, sourceStart = 2.seconds)
         val project = Project(
             id = ProjectId("p"),
@@ -75,41 +69,78 @@ class SplitClipToolTest {
         )
         val rig = newRig(project)
 
-        val result = rig.tool.execute(
-            SplitClipTool.Input(projectId = "p", clipId = "c1", atTimelineSeconds = 5.0),
-            rig.ctx,
-        )
-        val out = result.data
-
+        val out = rig.tool.execute(single("c1", 5.0), rig.ctx).data.results.single()
         val refreshed = rig.store.get(rig.projectId)!!
         val clips = refreshed.timeline.tracks.single().clips.filterIsInstance<Clip.Video>().sortedBy { it.timeRange.start }
         assertEquals(2, clips.size)
         val (left, right) = clips[0] to clips[1]
         assertEquals(out.leftClipId, left.id.value)
         assertEquals(out.rightClipId, right.id.value)
-        // Timeline ranges: [0..5) and [5..10)
         assertEquals(Duration.ZERO, left.timeRange.start)
         assertEquals(5.seconds, left.timeRange.duration)
         assertEquals(5.seconds, right.timeRange.start)
         assertEquals(5.seconds, right.timeRange.duration)
-        // Source ranges: [2..7) and [7..12)
         assertEquals(2.seconds, left.sourceRange.start)
         assertEquals(5.seconds, left.sourceRange.duration)
         assertEquals(7.seconds, right.sourceRange.start)
         assertEquals(5.seconds, right.sourceRange.duration)
-        // AssetId preserved for both halves.
         assertEquals(clip.assetId, left.assetId)
         assertEquals(clip.assetId, right.assetId)
+    }
+
+    @Test fun batchSplitsMultipleClipsAtomically() = runTest {
+        val c1 = videoClip("c1", start = Duration.ZERO, duration = 10.seconds)
+        val c2 = videoClip("c2", start = 10.seconds, duration = 10.seconds)
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(c1, c2)))),
+            ),
+        )
+        val out = rig.tool.execute(
+            SplitClipTool.Input(
+                projectId = "p",
+                items = listOf(
+                    SplitClipTool.Item("c1", 5.0),
+                    SplitClipTool.Item("c2", 15.0),
+                ),
+            ),
+            rig.ctx,
+        ).data
+        assertEquals(2, out.results.size)
+        val refreshed = rig.store.get(rig.projectId)!!
+        assertEquals(4, refreshed.timeline.tracks.single().clips.size)
+    }
+
+    @Test fun midBatchFailureLeavesProjectUntouched() = runTest {
+        val c1 = videoClip("c1", start = Duration.ZERO, duration = 10.seconds)
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(c1)))),
+            ),
+        )
+        val before = rig.store.get(rig.projectId)!!
+        assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                SplitClipTool.Input(
+                    projectId = "p",
+                    items = listOf(
+                        SplitClipTool.Item("c1", 5.0),
+                        SplitClipTool.Item("ghost", 3.0),
+                    ),
+                ),
+                rig.ctx,
+            )
+        }
+        assertEquals(before.timeline, rig.store.get(rig.projectId)!!.timeline)
     }
 
     @Test fun splitAtClipStartIsRejected() = runTest {
         val clip = videoClip("c1", start = 2.seconds, duration = 5.seconds)
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(clip))))))
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                SplitClipTool.Input(projectId = "p", clipId = "c1", atTimelineSeconds = 2.0),
-                rig.ctx,
-            )
+            rig.tool.execute(single("c1", 2.0), rig.ctx)
         }
         assertTrue(ex.message!!.contains("outside"), "expected 'outside' guard, got: ${ex.message}")
     }
@@ -118,12 +149,8 @@ class SplitClipToolTest {
         val clip = videoClip("c1", start = 2.seconds, duration = 5.seconds)
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(clip))))))
         assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                SplitClipTool.Input(projectId = "p", clipId = "c1", atTimelineSeconds = 7.0),
-                rig.ctx,
-            )
+            rig.tool.execute(single("c1", 7.0), rig.ctx)
         }
-        Unit
     }
 
     @Test fun splitOnAudioClipPartitionsBothRanges() = runTest {
@@ -135,10 +162,7 @@ class SplitClipToolTest {
             volume = 0.8f,
         )
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline(tracks = listOf(Track.Audio(TrackId("t"), listOf(audio))))))
-        rig.tool.execute(
-            SplitClipTool.Input(projectId = "p", clipId = "a1", atTimelineSeconds = 4.0),
-            rig.ctx,
-        )
+        rig.tool.execute(single("a1", 4.0), rig.ctx)
         val refreshed = rig.store.get(rig.projectId)!!
         val clips = refreshed.timeline.tracks.single().clips.filterIsInstance<Clip.Audio>().sortedBy { it.timeRange.start }
         assertEquals(2, clips.size)
@@ -146,7 +170,6 @@ class SplitClipToolTest {
         assertEquals(4.seconds, clips[0].sourceRange.duration)
         assertEquals(7.seconds, clips[1].sourceRange.start)
         assertEquals(6.seconds, clips[1].sourceRange.duration)
-        // Non-range attributes (volume) survive the split.
         assertTrue(clips.all { it.volume == 0.8f })
     }
 
@@ -157,10 +180,7 @@ class SplitClipToolTest {
             text = "hello",
         )
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline(tracks = listOf(Track.Subtitle(TrackId("st"), listOf(text))))))
-        rig.tool.execute(
-            SplitClipTool.Input(projectId = "p", clipId = "t1", atTimelineSeconds = 3.0),
-            rig.ctx,
-        )
+        rig.tool.execute(single("t1", 3.0), rig.ctx)
         val refreshed = rig.store.get(rig.projectId)!!
         val clips = refreshed.timeline.tracks.single().clips.filterIsInstance<Clip.Text>().sortedBy { it.timeRange.start }
         assertEquals(2, clips.size)
@@ -171,8 +191,6 @@ class SplitClipToolTest {
     }
 
     @Test fun otherTracksUnaffected() = runTest {
-        // Split on video track must not touch clips on an audio track with a
-        // different clip id but overlapping timeline range.
         val video = videoClip("c1", start = Duration.ZERO, duration = 10.seconds)
         val audio = Clip.Audio(
             id = ClipId("a1"),
@@ -187,10 +205,7 @@ class SplitClipToolTest {
                 Track.Audio(TrackId("a"), listOf(audio)),
             )),
         ))
-        rig.tool.execute(
-            SplitClipTool.Input(projectId = "p", clipId = "c1", atTimelineSeconds = 5.0),
-            rig.ctx,
-        )
+        rig.tool.execute(single("c1", 5.0), rig.ctx)
         val refreshed = rig.store.get(rig.projectId)!!
         val audioTrack = refreshed.timeline.tracks.filterIsInstance<Track.Audio>().single()
         assertEquals(1, audioTrack.clips.size, "audio track must keep its single clip after video split")
@@ -203,10 +218,7 @@ class SplitClipToolTest {
         val clip = videoClip("c1", start = Duration.ZERO, duration = 5.seconds)
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(clip))))))
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                SplitClipTool.Input(projectId = "p", clipId = "missing", atTimelineSeconds = 1.0),
-                rig.ctx,
-            )
+            rig.tool.execute(single("missing", 1.0), rig.ctx)
         }
         assertTrue(ex.message!!.contains("not found"), ex.message)
         val refreshed = rig.store.get(rig.projectId)!!

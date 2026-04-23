@@ -4,6 +4,7 @@ import io.talevia.core.AssetId
 import io.talevia.core.ClipId
 import io.talevia.core.TrackId
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Track
@@ -28,11 +29,34 @@ import kotlin.time.DurationUnit
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
+/**
+ * Append one or many video clips to the project timeline atomically. Per-item
+ * shape: each entry carries its own assetId + optional placement fields, so a
+ * single call can "append these 5 clips end-to-end on the main track" in one
+ * atomic edit.
+ *
+ * Placement per item:
+ *  - `timelineStartSeconds != null` — place at the given time.
+ *  - `timelineStartSeconds == null` — append after the last clip currently on
+ *    the target track. Within a batch, subsequent items see each other's
+ *    appends (so N append-style items lay end-to-end).
+ *  - `trackId` optional — omit for the first video track (created if absent).
+ *
+ * All-or-nothing; one snapshot per call.
+ */
 @OptIn(ExperimentalUuidApi::class)
 class AddClipTool(
     private val store: ProjectStore,
     private val media: MediaStorage,
 ) : Tool<AddClipTool.Input, AddClipTool.Output> {
+
+    @Serializable data class Item(
+        val assetId: String,
+        val timelineStartSeconds: Double? = null,
+        val sourceStartSeconds: Double = 0.0,
+        val durationSeconds: Double? = null,
+        val trackId: String? = null,
+    )
 
     @Serializable data class Input(
         /**
@@ -41,21 +65,28 @@ class AddClipTool(
          * unbound; fail loud points the agent at `switch_project`.
          */
         val projectId: String? = null,
-        val assetId: String,
-        val timelineStartSeconds: Double? = null,
-        val sourceStartSeconds: Double = 0.0,
-        val durationSeconds: Double? = null,
-        val trackId: String? = null,
+        val items: List<Item>,
     )
-    @Serializable data class Output(
+
+    @Serializable data class ItemResult(
         val clipId: String,
         val timelineStartSeconds: Double,
         val timelineEndSeconds: Double,
         val trackId: String,
     )
 
-    override val id = "add_clip"
-    override val helpText = "Append a video clip to the project timeline (optionally on a specific track and at a specific time)."
+    @Serializable data class Output(
+        val projectId: String,
+        val results: List<ItemResult>,
+        val snapshotId: String,
+    )
+
+    override val id = "add_clips"
+    override val helpText =
+        "Append one or many video clips to the project timeline atomically. Each item is " +
+            "{ assetId, timelineStartSeconds?, sourceStartSeconds?, durationSeconds?, trackId? }. " +
+            "Omitted timelineStartSeconds means 'append after the last clip on the target track'. " +
+            "Within a batch subsequent appends see each other. All-or-nothing; one snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("timeline.write")
@@ -71,80 +102,117 @@ class AddClipTool(
                     "Optional — omit to use the session's current project (set via switch_project).",
                 )
             }
-            putJsonObject("assetId") { put("type", "string") }
-            putJsonObject("timelineStartSeconds") { put("type", "number"); put("description", "If omitted, append after the last clip on the track.") }
-            putJsonObject("sourceStartSeconds") { put("type", "number"); put("description", "Trim offset into the source media.") }
-            putJsonObject("durationSeconds") { put("type", "number"); put("description", "If omitted, use the asset's full remaining duration.") }
-            putJsonObject("trackId") { put("type", "string"); put("description", "Optional track to add to; otherwise the first Video track (created if absent).") }
+            putJsonObject("items") {
+                put("type", "array")
+                put("description", "Clips to add. At least one required.")
+                putJsonObject("items") {
+                    put("type", "object")
+                    putJsonObject("properties") {
+                        putJsonObject("assetId") { put("type", "string") }
+                        putJsonObject("timelineStartSeconds") {
+                            put("type", "number")
+                            put("description", "If omitted, append after the last clip on the track.")
+                        }
+                        putJsonObject("sourceStartSeconds") {
+                            put("type", "number")
+                            put("description", "Trim offset into the source media.")
+                        }
+                        putJsonObject("durationSeconds") {
+                            put("type", "number")
+                            put("description", "If omitted, use the asset's full remaining duration.")
+                        }
+                        putJsonObject("trackId") {
+                            put("type", "string")
+                            put("description", "Optional track to add to; otherwise the first Video track (created if absent).")
+                        }
+                    }
+                    put("required", JsonArray(listOf(JsonPrimitive("assetId"))))
+                    put("additionalProperties", false)
+                }
+            }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("assetId"))))
+        put("required", JsonArray(listOf(JsonPrimitive("items"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        require(input.sourceStartSeconds >= 0.0) { "sourceStartSeconds must be >= 0" }
-        input.timelineStartSeconds?.let {
-            require(it >= 0.0) { "timelineStartSeconds must be >= 0" }
-        }
-        input.durationSeconds?.let {
-            require(it > 0.0) { "durationSeconds must be > 0" }
+        require(input.items.isNotEmpty()) { "items must not be empty" }
+        input.items.forEachIndexed { idx, item ->
+            require(item.sourceStartSeconds >= 0.0) {
+                "items[$idx] (asset ${item.assetId}): sourceStartSeconds must be >= 0"
+            }
+            item.timelineStartSeconds?.let {
+                require(it >= 0.0) {
+                    "items[$idx] (asset ${item.assetId}): timelineStartSeconds must be >= 0"
+                }
+            }
+            item.durationSeconds?.let {
+                require(it > 0.0) {
+                    "items[$idx] (asset ${item.assetId}): durationSeconds must be > 0"
+                }
+            }
         }
 
-        val asset = media.get(AssetId(input.assetId))
-            ?: error("Asset ${input.assetId} not found; import_media first.")
-
-        val sourceStart: Duration = input.sourceStartSeconds.seconds
-        val remaining = asset.metadata.duration - sourceStart
-        require(sourceStart < asset.metadata.duration) {
-            "sourceStartSeconds ${input.sourceStartSeconds} exceeds asset duration ${asset.metadata.duration.inWholeMilliseconds / 1000.0}s"
+        // Resolve all assets outside the mutex so mutate doesn't do I/O.
+        val assets: List<MediaAsset> = input.items.mapIndexed { idx, item ->
+            media.get(AssetId(item.assetId))
+                ?: error("items[$idx]: asset ${item.assetId} not found; import_media first.")
         }
-        val clipDuration: Duration = (input.durationSeconds?.seconds ?: remaining).coerceAtMost(remaining)
-        require(clipDuration > Duration.ZERO) { "clip duration must be > 0" }
-        val clipId = ClipId(Uuid.random().toString())
 
         val pid = ctx.resolveProjectId(input.projectId)
+        val results = mutableListOf<ItemResult>()
+
         val updated = store.mutate(pid) { project ->
-            val videoTrack = pickVideoTrack(project.timeline.tracks, input.trackId)
-            val tlStart = input.timelineStartSeconds?.seconds ?: videoTrack.clips.maxOfOrNull { it.timeRange.end } ?: Duration.ZERO
-            require(tlStart >= Duration.ZERO) { "timelineStartSeconds must be >= 0" }
-            val newClip = Clip.Video(
-                id = clipId,
-                timeRange = TimeRange(tlStart, clipDuration),
-                sourceRange = TimeRange(sourceStart, clipDuration),
-                assetId = asset.id,
-            )
-            val newClips = (videoTrack.clips + newClip).sortedBy { it.timeRange.start }
-            val newTrack = videoTrack.copy(clips = newClips)
-            val tracks = upsertTrackPreservingOrder(project.timeline.tracks, newTrack)
+            var tracks = project.timeline.tracks
+            input.items.forEachIndexed { idx, item ->
+                val asset = assets[idx]
+                val sourceStart: Duration = item.sourceStartSeconds.seconds
+                val remaining = asset.metadata.duration - sourceStart
+                require(sourceStart < asset.metadata.duration) {
+                    "items[$idx] (asset ${item.assetId}): sourceStartSeconds ${item.sourceStartSeconds} exceeds asset " +
+                        "duration ${asset.metadata.duration.inWholeMilliseconds / 1000.0}s"
+                }
+                val clipDuration: Duration = (item.durationSeconds?.seconds ?: remaining).coerceAtMost(remaining)
+                require(clipDuration > Duration.ZERO) { "items[$idx] (asset ${item.assetId}): clip duration must be > 0" }
+
+                val videoTrack = pickVideoTrack(tracks, item.trackId)
+                val tlStart = item.timelineStartSeconds?.seconds
+                    ?: videoTrack.clips.maxOfOrNull { it.timeRange.end }
+                    ?: Duration.ZERO
+                require(tlStart >= Duration.ZERO) {
+                    "items[$idx] (asset ${item.assetId}): timelineStartSeconds must be >= 0"
+                }
+
+                val clipId = ClipId(Uuid.random().toString())
+                val newClip = Clip.Video(
+                    id = clipId,
+                    timeRange = TimeRange(tlStart, clipDuration),
+                    sourceRange = TimeRange(sourceStart, clipDuration),
+                    assetId = asset.id,
+                )
+                val newClips = (videoTrack.clips + newClip).sortedBy { it.timeRange.start }
+                val newTrack = videoTrack.copy(clips = newClips)
+                tracks = upsertTrackPreservingOrder(tracks, newTrack)
+
+                results += ItemResult(
+                    clipId = clipId.value,
+                    timelineStartSeconds = tlStart.toDouble(DurationUnit.SECONDS),
+                    timelineEndSeconds = (tlStart + clipDuration).toDouble(DurationUnit.SECONDS),
+                    trackId = newTrack.id.value,
+                )
+            }
             val duration = tracks.flatMap { it.clips }.maxOfOrNull { it.timeRange.end } ?: Duration.ZERO
             project.copy(timeline = project.timeline.copy(tracks = tracks, duration = duration))
         }
 
-        val addedTrack = updated.timeline.tracks.firstOrNull { track ->
-            track is Track.Video && track.clips.any { it.id == clipId }
-        } as? Track.Video ?: error("Added clip $clipId not found after mutation")
-        val addedClip = addedTrack.clips.firstOrNull { it.id == clipId } as? Clip.Video
-            ?: error("Added clip $clipId not found on track ${addedTrack.id.value}")
-        val out = Output(
-            clipId = addedClip.id.value,
-            timelineStartSeconds = addedClip.timeRange.start.toDouble(DurationUnit.SECONDS),
-            timelineEndSeconds = addedClip.timeRange.end.toDouble(DurationUnit.SECONDS),
-            trackId = addedTrack.id.value,
-        )
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
         return ToolResult(
-            title = "add clip @ ${formatSeconds(out.timelineStartSeconds)}s",
-            outputForLlm = "Added clip ${out.clipId} on track ${out.trackId} (${out.timelineStartSeconds}s..${out.timelineEndSeconds}s). Timeline snapshot: ${snapshotId.value}",
-            data = out,
+            title = "add ${results.size} clip(s)",
+            outputForLlm = "Added ${results.size} clip(s). Snapshot: ${snapshotId.value}",
+            data = Output(pid.value, results, snapshotId.value),
         )
     }
 
-    private fun formatSeconds(s: Double): String {
-        val cs = (s * 100).toLong()
-        return "${cs / 100}.${(cs % 100).toString().padStart(2, '0')}"
-    }
-
-    @OptIn(ExperimentalUuidApi::class)
     private fun pickVideoTrack(tracks: List<Track>, requestedId: String?): Track.Video {
         val match = if (requestedId != null) {
             val requested = tracks.firstOrNull { it.id.value == requestedId }

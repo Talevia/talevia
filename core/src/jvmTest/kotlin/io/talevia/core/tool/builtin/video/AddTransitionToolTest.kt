@@ -15,6 +15,7 @@ import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionDecision
+import io.talevia.core.session.Part
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -38,22 +39,24 @@ class AddTransitionToolTest {
         val store: FileProjectStore,
         val tool: AddTransitionTool,
         val ctx: ToolContext,
+        val snapshots: MutableList<Part.TimelineSnapshot>,
         val projectId: ProjectId,
     )
 
     private fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
         val tool = AddTransitionTool(store)
+        val snapshots = mutableListOf<Part.TimelineSnapshot>()
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),
             callId = CallId("c"),
             askPermission = { PermissionDecision.Once },
-            emitPart = { },
+            emitPart = { part -> if (part is Part.TimelineSnapshot) snapshots += part },
             messages = emptyList(),
         )
         kotlinx.coroutines.runBlocking { store.upsert("test", project) }
-        return Rig(store, tool, ctx, project.id)
+        return Rig(store, tool, ctx, snapshots, project.id)
     }
 
     private fun videoClip(id: String, start: Duration, duration: Duration): Clip.Video = Clip.Video(
@@ -63,9 +66,17 @@ class AddTransitionToolTest {
         assetId = AssetId("a-$id"),
     )
 
+    private fun singleItem(
+        from: String,
+        to: String,
+        name: String = "fade",
+        durationSeconds: Double = 0.5,
+    ): AddTransitionTool.Input = AddTransitionTool.Input(
+        projectId = "p",
+        items = listOf(AddTransitionTool.Item(from, to, name, durationSeconds)),
+    )
+
     @Test fun nonAdjacentClipsAreRejected() = runTest {
-        // Clip v1 ends at 5s, v2 starts at 6s — one-second gap. Transition tool
-        // should refuse instead of silently producing a degenerate overlap.
         val v1 = videoClip("v1", Duration.ZERO, 5.seconds)
         val v2 = videoClip("v2", 6.seconds, 5.seconds)
         val rig = newRig(Project(
@@ -73,10 +84,7 @@ class AddTransitionToolTest {
             timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(v1, v2)))),
         ))
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                AddTransitionTool.Input(projectId = "p", fromClipId = "v1", toClipId = "v2"),
-                rig.ctx,
-            )
+            rig.tool.execute(singleItem("v1", "v2"), rig.ctx)
         }
         assertTrue(ex.message!!.contains("adjacent"), "expected adjacency guard, got: ${ex.message}")
     }
@@ -88,10 +96,7 @@ class AddTransitionToolTest {
             timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(v1)))),
         ))
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                AddTransitionTool.Input(projectId = "p", fromClipId = "ghost", toClipId = "v1"),
-                rig.ctx,
-            )
+            rig.tool.execute(singleItem("ghost", "v1"), rig.ctx)
         }
         assertTrue(ex.message!!.contains("fromClipId"), ex.message)
     }
@@ -103,10 +108,7 @@ class AddTransitionToolTest {
             timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(v1)))),
         ))
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                AddTransitionTool.Input(projectId = "p", fromClipId = "v1", toClipId = "ghost"),
-                rig.ctx,
-            )
+            rig.tool.execute(singleItem("v1", "ghost"), rig.ctx)
         }
         assertTrue(ex.message!!.contains("toClipId"), ex.message)
     }
@@ -122,19 +124,12 @@ class AddTransitionToolTest {
             )),
         ))
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                AddTransitionTool.Input(projectId = "p", fromClipId = "left", toClipId = "right"),
-                rig.ctx,
-            )
+            rig.tool.execute(singleItem("left", "right"), rig.ctx)
         }
         assertTrue(ex.message!!.contains("same track"), ex.message)
     }
 
     @Test fun reusesExistingEffectTrackAcrossTransitions() = runTest {
-        // Two adjacent pairs: v1→v2 and v2→v3. After two add_transition calls
-        // we must have exactly ONE Effect track containing both transitions
-        // (sorted by timeRange.start), otherwise the UI will render duplicate
-        // effect lanes and the data model no longer has a canonical effect row.
         val v1 = videoClip("v1", Duration.ZERO, 5.seconds)
         val v2 = videoClip("v2", 5.seconds, 5.seconds)
         val v3 = videoClip("v3", 10.seconds, 5.seconds)
@@ -142,39 +137,27 @@ class AddTransitionToolTest {
             id = ProjectId("p"),
             timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(v1, v2, v3)))),
         ))
-        rig.tool.execute(
-            AddTransitionTool.Input(projectId = "p", fromClipId = "v2", toClipId = "v3", transitionName = "dissolve", durationSeconds = 0.4),
-            rig.ctx,
-        )
-        rig.tool.execute(
-            AddTransitionTool.Input(projectId = "p", fromClipId = "v1", toClipId = "v2", transitionName = "fade", durationSeconds = 0.8),
-            rig.ctx,
-        )
+        rig.tool.execute(singleItem("v2", "v3", "dissolve", 0.4), rig.ctx)
+        rig.tool.execute(singleItem("v1", "v2", "fade", 0.8), rig.ctx)
 
         val refreshed = rig.store.get(rig.projectId)!!
         val effectTracks = refreshed.timeline.tracks.filterIsInstance<Track.Effect>()
         assertEquals(1, effectTracks.size, "Effect track must be reused, not duplicated per transition")
         val clips = effectTracks.single().clips.filterIsInstance<Clip.Video>()
         assertEquals(2, clips.size)
-        // Sorted by start — v1→v2 transition (around 5s) must come before v2→v3 (around 10s).
         assertTrue(clips[0].timeRange.start < clips[1].timeRange.start, "transitions must be sorted by start")
         assertEquals("fade", clips[0].filters.single().name)
         assertEquals("dissolve", clips[1].filters.single().name)
     }
 
     @Test fun transitionCenteredOnJoinPoint() = runTest {
-        // A 0.5s fade between two clips joined at 5s should span [4.75s, 5.25s).
-        // Off-centering regresses the cross-fade silently during render.
         val v1 = videoClip("v1", Duration.ZERO, 5.seconds)
         val v2 = videoClip("v2", 5.seconds, 5.seconds)
         val rig = newRig(Project(
             id = ProjectId("p"),
             timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(v1, v2)))),
         ))
-        rig.tool.execute(
-            AddTransitionTool.Input(projectId = "p", fromClipId = "v1", toClipId = "v2", transitionName = "fade", durationSeconds = 0.5),
-            rig.ctx,
-        )
+        rig.tool.execute(singleItem("v1", "v2", "fade", 0.5), rig.ctx)
         val refreshed = rig.store.get(rig.projectId)!!
         val transition = refreshed.timeline.tracks.filterIsInstance<Track.Effect>()
             .single().clips.single() as Clip.Video
@@ -198,12 +181,94 @@ class AddTransitionToolTest {
             )),
         ))
 
-        rig.tool.execute(
-            AddTransitionTool.Input(projectId = "p", fromClipId = "v1", toClipId = "v2"),
-            rig.ctx,
-        )
+        rig.tool.execute(singleItem("v1", "v2"), rig.ctx)
 
         val refreshed = rig.store.get(rig.projectId)!!
         assertEquals(listOf("vtrack", "fx", "atrack"), refreshed.timeline.tracks.map { it.id.value })
+    }
+
+    @Test fun batchInsertsMultipleTransitionsAtomically() = runTest {
+        val v1 = videoClip("v1", Duration.ZERO, 5.seconds)
+        val v2 = videoClip("v2", 5.seconds, 5.seconds)
+        val v3 = videoClip("v3", 10.seconds, 5.seconds)
+        val rig = newRig(Project(
+            id = ProjectId("p"),
+            timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(v1, v2, v3)))),
+        ))
+        val out = rig.tool.execute(
+            AddTransitionTool.Input(
+                projectId = "p",
+                items = listOf(
+                    AddTransitionTool.Item("v1", "v2", "fade", 0.5),
+                    AddTransitionTool.Item("v2", "v3", "dissolve", 0.4),
+                ),
+            ),
+            rig.ctx,
+        ).data
+        assertEquals(2, out.results.size)
+        val refreshed = rig.store.get(rig.projectId)!!
+        val effectClips = refreshed.timeline.tracks.filterIsInstance<Track.Effect>()
+            .single().clips.filterIsInstance<Clip.Video>()
+        assertEquals(2, effectClips.size)
+    }
+
+    @Test fun emitsOneSnapshotPerBatch() = runTest {
+        val v1 = videoClip("v1", Duration.ZERO, 5.seconds)
+        val v2 = videoClip("v2", 5.seconds, 5.seconds)
+        val v3 = videoClip("v3", 10.seconds, 5.seconds)
+        val rig = newRig(Project(
+            id = ProjectId("p"),
+            timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(v1, v2, v3)))),
+        ))
+        val before = rig.snapshots.size
+        rig.tool.execute(
+            AddTransitionTool.Input(
+                projectId = "p",
+                items = listOf(
+                    AddTransitionTool.Item("v1", "v2"),
+                    AddTransitionTool.Item("v2", "v3"),
+                ),
+            ),
+            rig.ctx,
+        )
+        assertEquals(before + 1, rig.snapshots.size)
+    }
+
+    @Test fun batchFailureLeavesProjectUntouched() = runTest {
+        val v1 = videoClip("v1", Duration.ZERO, 5.seconds)
+        val v2 = videoClip("v2", 5.seconds, 5.seconds)
+        val v3 = videoClip("v3", 11.seconds, 5.seconds) // gap → v2→v3 not adjacent
+        val rig = newRig(Project(
+            id = ProjectId("p"),
+            timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(v1, v2, v3)))),
+        ))
+        val beforeProject = rig.store.get(rig.projectId)!!
+        val beforeSnapshots = rig.snapshots.size
+
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                AddTransitionTool.Input(
+                    projectId = "p",
+                    items = listOf(
+                        AddTransitionTool.Item("v1", "v2"), // ok
+                        AddTransitionTool.Item("v2", "v3"), // not adjacent → fail
+                    ),
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("items[1]"), ex.message)
+
+        val afterProject = rig.store.get(rig.projectId)!!
+        assertEquals(beforeProject.timeline, afterProject.timeline)
+        assertEquals(beforeSnapshots, rig.snapshots.size)
+    }
+
+    @Test fun rejectsEmptyItemsList() = runTest {
+        val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline()))
+        val ex = assertFailsWith<IllegalArgumentException> {
+            rig.tool.execute(AddTransitionTool.Input("p", items = emptyList()), rig.ctx)
+        }
+        assertTrue(ex.message!!.contains("must not be empty"))
     }
 }

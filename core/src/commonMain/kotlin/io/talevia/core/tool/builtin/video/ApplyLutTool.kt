@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.video
 
 import io.talevia.core.AssetId
-import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Filter
@@ -25,27 +24,26 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 
 /**
- * Apply a 3D LUT (`.cube` / `.3dl`) to a video clip. The LUT comes from *either*:
+ * Apply a 3D LUT (`.cube` / `.3dl`) to one or many video clips in a single
+ * atomic edit. The same LUT source is broadcast to every `clipIds` entry —
+ * matching `apply_filter`'s broadcast pattern.
  *
+ * The LUT comes from *either*:
  *  - `lutAssetId` — the asset id of an imported LUT file (direct-use), or
  *  - `styleBibleId` — a `core.consistency.style_bible` node that carries
- *    `lutReference`. The tool resolves the style_bible's current LUT at apply time.
+ *    `lutReference`. Resolved once per call at apply time.
  *
  * VISION §3.3 names `style_bible.lutReference` as the canonical home for a
- * project-global LUT, but until this tool existed nothing read it — the field was
- * data without a consumer. Going through the style_bible path also attaches the
- * style_bible's nodeId to the clip's `sourceBinding`, so future staleness
- * machinery can propagate edits (e.g. swapping the LUT inside the style_bible)
- * through the DAG the same way AIGC clips already participate.
+ * project-global LUT. The style_bible path also attaches the style_bible's
+ * nodeId to each clip's `sourceBinding` so future staleness machinery can
+ * propagate edits through the DAG.
  *
  * Implementation details:
- * - `Filter.assetId` carries the LUT asset id (v0: a dedicated filter name
+ * - `Filter.assetId` carries the LUT asset id (a dedicated filter name
  *   `"lut"` avoids fighting the existing numeric-param contract on `Filter`).
- * - FFmpeg renders this as `lut3d=file=<resolved path>`. Android Media3 and iOS
- *   AVFoundation engines currently no-op filters entirely (see CLAUDE.md
- *   "Known incomplete") — that gap is inherited here rather than re-opened.
- * - Exactly one of `lutAssetId` / `styleBibleId` must be provided; both or
- *   neither fail loudly so the LLM can't quietly pick one.
+ * - Exactly one of `lutAssetId` / `styleBibleId` must be provided.
+ * - Non-video clipIds or unresolvable clipIds abort the whole batch.
+ * - One `Part.TimelineSnapshot` per call.
  */
 class ApplyLutTool(
     private val store: ProjectStore,
@@ -53,25 +51,36 @@ class ApplyLutTool(
 ) : Tool<ApplyLutTool.Input, ApplyLutTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
-        val clipId: String,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
+        val clipIds: List<String>,
         val lutAssetId: String? = null,
         val styleBibleId: String? = null,
     )
 
-    @Serializable data class Output(
+    @Serializable data class ItemResult(
         val clipId: String,
+        val filterCount: Int,
+    )
+
+    @Serializable data class Output(
+        val projectId: String,
         val lutAssetId: String,
         val styleBibleId: String?,
-        val filterCount: Int,
+        val results: List<ItemResult>,
+        val snapshotId: String,
     )
 
     override val id: String = "apply_lut"
     override val helpText: String =
-        "Apply a 3D LUT to a video clip. Pass lutAssetId for a direct LUT, or styleBibleId " +
-            "to pull the LUT from a style_bible node's lutReference. Exactly one of the two. " +
-            "The style_bible path also binds the clip to the style_bible node so future " +
-            "edits cascade through stale-clip detection."
+        "Apply a 3D LUT to one or many video clips atomically. Pass `lutAssetId` for a direct " +
+            "LUT, or `styleBibleId` to pull the LUT from a style_bible node's lutReference. " +
+            "Exactly one of the two. The style_bible path also binds each clip to the style_bible " +
+            "node so future edits cascade through stale-clip detection. All-or-nothing."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")
@@ -80,31 +89,46 @@ class ApplyLutTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
-            putJsonObject("clipId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
+            putJsonObject("clipIds") {
+                put("type", "array")
+                put("description", "Video clip ids to apply the LUT to. At least one.")
+                putJsonObject("items") { put("type", "string") }
+            }
             putJsonObject("lutAssetId") {
                 put("type", "string")
                 put("description", "Asset id of an imported LUT (.cube / .3dl). Mutually exclusive with styleBibleId.")
             }
             putJsonObject("styleBibleId") {
                 put("type", "string")
-                put("description", "Source-node id of a core.consistency.style_bible. Its lutReference is resolved at apply time. Mutually exclusive with lutAssetId.")
+                put(
+                    "description",
+                    "Source-node id of a core.consistency.style_bible. Its lutReference is resolved at apply time. " +
+                        "Mutually exclusive with lutAssetId.",
+                )
             }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("clipId"))))
+        put("required", JsonArray(listOf(JsonPrimitive("clipIds"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        require(input.clipIds.isNotEmpty()) { "clipIds must not be empty" }
         val lutArg = input.lutAssetId?.takeIf { it.isNotBlank() }
         val styleArg = input.styleBibleId?.takeIf { it.isNotBlank() }
         require((lutArg == null) xor (styleArg == null)) {
             "exactly one of lutAssetId or styleBibleId must be provided"
         }
 
-        val pid = ProjectId(input.projectId)
+        val pid = ctx.resolveProjectId(input.projectId)
         var resolvedLutId: AssetId? = null
-        var filterCount = 0
+        val results = mutableListOf<ItemResult>()
 
         val updated = store.mutate(pid) { project ->
             val lutId: AssetId = if (lutArg != null) {
@@ -124,34 +148,38 @@ class ApplyLutTool(
             media.get(lutId) ?: error("LUT asset '${lutId.value}' not found in the project's asset catalog")
             resolvedLutId = lutId
 
-            var found = false
-            val newTracks = project.timeline.tracks.map { track ->
-                val target = track.clips.firstOrNull { it.id.value == input.clipId } ?: return@map track
-                found = true
-                if (target !is Clip.Video) error("apply_lut only supports video clips; clip ${input.clipId} is ${target::class.simpleName}")
-                val newFilters = target.filters + Filter(name = "lut", assetId = lutId)
-                val newBinding = if (styleArg != null) target.sourceBinding + SourceNodeId(styleArg) else target.sourceBinding
-                val replaced = target.copy(filters = newFilters, sourceBinding = newBinding)
-                filterCount = newFilters.size
-                replaceClipOnTrack(track, target, replaced)
+            var tracks = project.timeline.tracks
+            input.clipIds.forEachIndexed { idx, clipId ->
+                val hit = tracks.firstNotNullOfOrNull { t ->
+                    t.clips.firstOrNull { it.id.value == clipId }?.let { t to it }
+                } ?: error("clipIds[$idx] ($clipId) not found in project ${pid.value}")
+                val (track, clip) = hit
+                if (clip !is Clip.Video) {
+                    error("clipIds[$idx] ($clipId): apply_lut only supports video clips; clip is ${clip::class.simpleName}")
+                }
+                val newFilters = clip.filters + Filter(name = "lut", assetId = lutId)
+                val newBinding = if (styleArg != null) clip.sourceBinding + SourceNodeId(styleArg) else clip.sourceBinding
+                val replaced = clip.copy(filters = newFilters, sourceBinding = newBinding)
+                val newTrack = replaceClipOnTrack(track, clip, replaced)
+                tracks = tracks.map { if (it.id == newTrack.id) newTrack else it }
+                results += ItemResult(clipId = clipId, filterCount = newFilters.size)
             }
-            if (!found) error("clip ${input.clipId} not found in project ${input.projectId}")
-            project.copy(timeline = project.timeline.copy(tracks = newTracks))
+            project.copy(timeline = project.timeline.copy(tracks = tracks))
         }
 
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
-        val out = Output(
-            clipId = input.clipId,
-            lutAssetId = resolvedLutId!!.value,
-            styleBibleId = styleArg,
-            filterCount = filterCount,
-        )
         val sourceNote = if (styleArg != null) " (from style_bible '$styleArg')" else ""
         return ToolResult(
-            title = "apply LUT to ${input.clipId}",
-            outputForLlm = "Applied LUT '${out.lutAssetId}'$sourceNote to clip ${input.clipId}; " +
-                "$filterCount filter(s) now attached. Timeline snapshot: ${snapshotId.value}",
-            data = out,
+            title = "apply LUT × ${results.size}",
+            outputForLlm = "Applied LUT '${resolvedLutId!!.value}'$sourceNote to ${results.size} clip(s). " +
+                "Snapshot: ${snapshotId.value}",
+            data = Output(
+                projectId = pid.value,
+                lutAssetId = resolvedLutId!!.value,
+                styleBibleId = styleArg,
+                results = results,
+                snapshotId = snapshotId.value,
+            ),
         )
     }
 

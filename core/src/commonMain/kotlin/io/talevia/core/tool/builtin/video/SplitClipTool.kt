@@ -24,10 +24,27 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
+/**
+ * Split one or many clips at the given timeline positions in a single atomic edit.
+ *
+ * Per-item shape: each entry carries its own clipId + atTimelineSeconds. Items
+ * are applied in order; a split's output ids are returned in the same order.
+ * Cascading splits on the same clip within one call are allowed — after a
+ * split, the later op can reference either resulting half by the id the
+ * previous op produced (but the agent cannot know those ids in the same
+ * assistant message, so that pattern normally requires a second call).
+ *
+ * All-or-nothing. One `Part.TimelineSnapshot` per call.
+ */
 @OptIn(ExperimentalUuidApi::class)
 class SplitClipTool(
     private val store: ProjectStore,
 ) : Tool<SplitClipTool.Input, SplitClipTool.Output> {
+
+    @Serializable data class Item(
+        val clipId: String,
+        val atTimelineSeconds: Double,
+    )
 
     @Serializable data class Input(
         /**
@@ -36,13 +53,26 @@ class SplitClipTool(
          * unbound; fail loud points the agent at `switch_project`.
          */
         val projectId: String? = null,
-        val clipId: String,
-        val atTimelineSeconds: Double,
+        val items: List<Item>,
     )
-    @Serializable data class Output(val leftClipId: String, val rightClipId: String)
 
-    override val id = "split_clip"
-    override val helpText = "Split a clip in two at the given timeline position. New clip IDs are generated for both halves."
+    @Serializable data class ItemResult(
+        val originalClipId: String,
+        val leftClipId: String,
+        val rightClipId: String,
+    )
+
+    @Serializable data class Output(
+        val projectId: String,
+        val results: List<ItemResult>,
+        val snapshotId: String,
+    )
+
+    override val id = "split_clips"
+    override val helpText = "Split one or many clips at the given timeline positions atomically. " +
+        "Each item produces two fresh clip ids (left + right halves). All-or-nothing: any item " +
+        "whose split point lies outside the clip's time range aborts the whole batch. One " +
+        "timeline snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("timeline.write")
@@ -58,41 +88,72 @@ class SplitClipTool(
                     "Optional — omit to use the session's current project (set via switch_project).",
                 )
             }
-            putJsonObject("clipId") { put("type", "string") }
-            putJsonObject("atTimelineSeconds") { put("type", "number"); put("description", "Absolute timeline position to split at.") }
+            putJsonObject("items") {
+                put("type", "array")
+                put("description", "Split operations. At least one required.")
+                putJsonObject("items") {
+                    put("type", "object")
+                    putJsonObject("properties") {
+                        putJsonObject("clipId") { put("type", "string") }
+                        putJsonObject("atTimelineSeconds") {
+                            put("type", "number")
+                            put("description", "Absolute timeline position to split at (strictly between clip's start and end).")
+                        }
+                    }
+                    put(
+                        "required",
+                        JsonArray(listOf(JsonPrimitive("clipId"), JsonPrimitive("atTimelineSeconds"))),
+                    )
+                    put("additionalProperties", false)
+                }
+            }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("clipId"), JsonPrimitive("atTimelineSeconds"))))
+        put("required", JsonArray(listOf(JsonPrimitive("items"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        require(input.items.isNotEmpty()) { "items must not be empty" }
         val pid = ctx.resolveProjectId(input.projectId)
-        var left: ClipId? = null
-        var right: ClipId? = null
+        val results = mutableListOf<ItemResult>()
+
         val updated = store.mutate(pid) { project ->
-            var found = false
-            val splitAt = input.atTimelineSeconds.seconds
-            val newTracks = project.timeline.tracks.map { track ->
-                val target = track.clips.firstOrNull { it.id.value == input.clipId } ?: return@map track
-                found = true
-                if (splitAt <= target.timeRange.start || splitAt >= target.timeRange.end) {
-                    error("Split point ${input.atTimelineSeconds}s is outside clip ${target.timeRange.start}..${target.timeRange.end}")
+            var tracks = project.timeline.tracks
+            input.items.forEachIndexed { idx, item ->
+                var found = false
+                var leftId: ClipId? = null
+                var rightId: ClipId? = null
+                val splitAt = item.atTimelineSeconds.seconds
+                tracks = tracks.map { track ->
+                    val target = track.clips.firstOrNull { it.id.value == item.clipId }
+                        ?: return@map track
+                    found = true
+                    if (splitAt <= target.timeRange.start || splitAt >= target.timeRange.end) {
+                        error(
+                            "items[$idx] (${item.clipId}): split point ${item.atTimelineSeconds}s " +
+                                "is outside clip ${target.timeRange.start}..${target.timeRange.end}",
+                        )
+                    }
+                    val offset = splitAt - target.timeRange.start
+                    val (l, r) = splitClip(target, offset)
+                    leftId = l.id
+                    rightId = r.id
+                    rebuildTrack(track, target, listOf(l, r))
                 }
-                val offset = splitAt - target.timeRange.start
-                val (l, r) = splitClip(target, offset)
-                left = l.id; right = r.id
-                rebuildTrack(track, target, listOf(l, r))
+                if (!found) error("items[$idx]: clip ${item.clipId} not found in project ${pid.value}")
+                results += ItemResult(
+                    originalClipId = item.clipId,
+                    leftClipId = leftId!!.value,
+                    rightClipId = rightId!!.value,
+                )
             }
-            if (!found) error("clip ${input.clipId} not found in project ${pid.value}")
-            project.copy(timeline = project.timeline.copy(tracks = newTracks))
+            project.copy(timeline = project.timeline.copy(tracks = tracks))
         }
-        val cs = (input.atTimelineSeconds * 100).toLong()
-        val pretty = "${cs / 100}.${(cs % 100).toString().padStart(2, '0')}"
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
         return ToolResult(
-            title = "split clip @ ${pretty}s",
-            outputForLlm = "Split clip ${input.clipId} into ${left?.value} + ${right?.value}. Timeline snapshot: ${snapshotId.value}",
-            data = Output(left!!.value, right!!.value),
+            title = "split × ${results.size}",
+            outputForLlm = "Split ${results.size} clip(s). Snapshot: ${snapshotId.value}",
+            data = Output(pid.value, results, snapshotId.value),
         )
     }
 

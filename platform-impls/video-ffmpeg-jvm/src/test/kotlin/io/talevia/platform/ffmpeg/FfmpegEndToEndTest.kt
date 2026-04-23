@@ -30,6 +30,7 @@ import io.talevia.core.tool.builtin.video.ImportMediaTool
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -124,17 +125,13 @@ class FfmpegEndToEndTest {
         val assetIdA = (importA.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
         val assetIdB = (importB.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
 
-        registry["add_clip"]!!.dispatch(
+        registry["add_clips"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("assetId", assetIdA)
-            },
-            ctx,
-        )
-        registry["add_clip"]!!.dispatch(
-            buildJsonObject {
-                put("projectId", projectId.value)
-                put("assetId", assetIdB)
+                putJsonArray("items") {
+                    addJsonObject { put("assetId", assetIdA) }
+                    addJsonObject { put("assetId", assetIdB) }
+                }
             },
             ctx,
         )
@@ -206,10 +203,12 @@ class FfmpegEndToEndTest {
             ctx,
         )
         val assetId = (import.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
-        registry["add_clip"]!!.dispatch(
+        registry["add_clips"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("assetId", assetId)
+                putJsonArray("items") {
+                    addJsonObject { put("assetId", assetId) }
+                }
             },
             ctx,
         )
@@ -304,30 +303,31 @@ class FfmpegEndToEndTest {
         val assetIdA = (importA.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
         val assetIdB = (importB.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
 
-        val addA = registry["add_clip"]!!.dispatch(
+        val addBoth = registry["add_clips"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("assetId", assetIdA)
+                putJsonArray("items") {
+                    addJsonObject { put("assetId", assetIdA) }
+                    addJsonObject { put("assetId", assetIdB) }
+                }
             },
             ctx,
         )
-        val addB = registry["add_clip"]!!.dispatch(
-            buildJsonObject {
-                put("projectId", projectId.value)
-                put("assetId", assetIdB)
-            },
-            ctx,
-        )
-        val clipIdA = (addA.data as io.talevia.core.tool.builtin.video.AddClipTool.Output).clipId
-        val clipIdB = (addB.data as io.talevia.core.tool.builtin.video.AddClipTool.Output).clipId
+        val addResults = (addBoth.data as io.talevia.core.tool.builtin.video.AddClipTool.Output).results
+        val clipIdA = addResults[0].clipId
+        val clipIdB = addResults[1].clipId
 
-        registry["add_transition"]!!.dispatch(
+        registry["add_transitions"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("fromClipId", clipIdA)
-                put("toClipId", clipIdB)
-                put("transitionName", "fade")
-                put("durationSeconds", 0.5)
+                putJsonArray("items") {
+                    addJsonObject {
+                        put("fromClipId", clipIdA)
+                        put("toClipId", clipIdB)
+                        put("transitionName", "fade")
+                        put("durationSeconds", 0.5)
+                    }
+                }
             },
             ctx,
         )
@@ -466,10 +466,12 @@ class FfmpegEndToEndTest {
             ctx,
         )
         val assetId = (import.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
-        registry["add_clip"]!!.dispatch(
+        registry["add_clips"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("assetId", assetId)
+                putJsonArray("items") {
+                    addJsonObject { put("assetId", assetId) }
+                }
             },
             ctx,
         )

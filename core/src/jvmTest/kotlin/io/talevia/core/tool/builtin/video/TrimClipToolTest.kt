@@ -28,15 +28,6 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-/**
- * `trim_clip` adjusts an existing clip's `sourceRange` and/or duration without
- * removing/re-adding (which would lose attached filters/transforms). Tests
- * exercise: tail trim (shrink), head trim (advance source.start, preserve
- * timeline.start), simultaneous head+tail, audio-clip parity, the Text-clip
- * rejection, the both-fields-omitted rejection, the asset-bounds guard, the
- * negative-time and zero-duration guards, the missing-clip fail-loud, and the
- * post-mutation snapshot for revert_timeline.
- */
 class TrimClipToolTest {
 
     private data class Rig(
@@ -68,6 +59,15 @@ class TrimClipToolTest {
     private suspend fun Rig.importAsset(path: String, durationSeconds: Double): AssetId =
         media.import(MediaSource.File(path)) { MediaMetadata(duration = durationSeconds.seconds) }.id
 
+    private fun single(
+        clipId: String,
+        newSourceStartSeconds: Double? = null,
+        newDurationSeconds: Double? = null,
+    ) = TrimClipTool.Input(
+        projectId = "p",
+        items = listOf(TrimClipTool.Item(clipId, newSourceStartSeconds, newDurationSeconds)),
+    )
+
     @Test fun trimsTailToShorterDuration() = runTest {
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline()))
         val assetId = rig.importAsset("/tmp/v.mp4", durationSeconds = 30.0)
@@ -85,19 +85,17 @@ class TrimClipToolTest {
             ),
         )
 
-        val out = rig.tool.execute(
-            TrimClipTool.Input(rig.projectId.value, "c1", newDurationSeconds = 4.0),
-            rig.ctx,
-        )
-        assertEquals("c1", out.data.clipId)
-        assertEquals("v1", out.data.trackId)
-        assertEquals(5.0, out.data.newSourceStartSeconds, 0.001) // unchanged
-        assertEquals(4.0, out.data.newDurationSeconds, 0.001)
-        assertEquals(6.0, out.data.newTimelineEndSeconds, 0.001) // 2 + 4
+        val out = rig.tool.execute(single("c1", newDurationSeconds = 4.0), rig.ctx).data
+        val only = out.results.single()
+        assertEquals("c1", only.clipId)
+        assertEquals("v1", only.trackId)
+        assertEquals(5.0, only.newSourceStartSeconds, 0.001)
+        assertEquals(4.0, only.newDurationSeconds, 0.001)
+        assertEquals(6.0, only.newTimelineEndSeconds, 0.001)
 
         val refreshed = rig.store.get(rig.projectId)!!
         val trimmed = refreshed.timeline.tracks.single().clips.single() as Clip.Video
-        assertEquals(2.seconds, trimmed.timeRange.start) // preserved
+        assertEquals(2.seconds, trimmed.timeRange.start)
         assertEquals(4.seconds, trimmed.timeRange.duration)
         assertEquals(5.seconds, trimmed.sourceRange.start)
         assertEquals(4.seconds, trimmed.sourceRange.duration)
@@ -120,17 +118,13 @@ class TrimClipToolTest {
             ),
         )
 
-        rig.tool.execute(
-            TrimClipTool.Input(rig.projectId.value, "c1", newSourceStartSeconds = 3.0),
-            rig.ctx,
-        )
+        rig.tool.execute(single("c1", newSourceStartSeconds = 3.0), rig.ctx)
         val refreshed = rig.store.get(rig.projectId)!!
         val trimmed = refreshed.timeline.tracks.single().clips.single() as Clip.Video
-        // Timeline anchor stays at 7s — caller chains move_clip if they want to slide.
         assertEquals(7.seconds, trimmed.timeRange.start)
-        assertEquals(10.seconds, trimmed.timeRange.duration) // duration unchanged
+        assertEquals(10.seconds, trimmed.timeRange.duration)
         assertEquals(3.seconds, trimmed.sourceRange.start)
-        assertEquals(10.seconds, trimmed.sourceRange.duration) // duration unchanged
+        assertEquals(10.seconds, trimmed.sourceRange.duration)
     }
 
     @Test fun trimsHeadAndTailTogether() = runTest {
@@ -150,21 +144,85 @@ class TrimClipToolTest {
             ),
         )
 
-        rig.tool.execute(
-            TrimClipTool.Input(
-                projectId = rig.projectId.value,
-                clipId = "c1",
-                newSourceStartSeconds = 4.0,
-                newDurationSeconds = 3.5,
-            ),
-            rig.ctx,
-        )
+        rig.tool.execute(single("c1", newSourceStartSeconds = 4.0, newDurationSeconds = 3.5), rig.ctx)
         val trimmed = rig.store.get(rig.projectId)!!
             .timeline.tracks.single().clips.single() as Clip.Video
         assertEquals(0.seconds, trimmed.timeRange.start)
         assertEquals(3.5.seconds, trimmed.timeRange.duration)
         assertEquals(4.seconds, trimmed.sourceRange.start)
         assertEquals(3.5.seconds, trimmed.sourceRange.duration)
+    }
+
+    @Test fun batchTrimsMultipleClipsAtomically() = runTest {
+        val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline()))
+        val assetId = rig.importAsset("/tmp/v.mp4", durationSeconds = 30.0)
+        val c1 = Clip.Video(
+            id = ClipId("c1"),
+            timeRange = TimeRange(0.seconds, 10.seconds),
+            sourceRange = TimeRange(0.seconds, 10.seconds),
+            assetId = assetId,
+        )
+        val c2 = Clip.Video(
+            id = ClipId("c2"),
+            timeRange = TimeRange(10.seconds, 10.seconds),
+            sourceRange = TimeRange(0.seconds, 10.seconds),
+            assetId = assetId,
+        )
+        rig.store.upsert(
+            "test",
+            Project(
+                id = rig.projectId,
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(c1, c2)))),
+            ),
+        )
+
+        rig.tool.execute(
+            TrimClipTool.Input(
+                projectId = rig.projectId.value,
+                items = listOf(
+                    TrimClipTool.Item("c1", newDurationSeconds = 5.0),
+                    TrimClipTool.Item("c2", newSourceStartSeconds = 2.0, newDurationSeconds = 3.0),
+                ),
+            ),
+            rig.ctx,
+        )
+        val refreshed = rig.store.get(rig.projectId)!!
+        val byId = refreshed.timeline.tracks.single().clips.filterIsInstance<Clip.Video>().associateBy { it.id.value }
+        assertEquals(5.seconds, byId["c1"]!!.timeRange.duration)
+        assertEquals(3.seconds, byId["c2"]!!.timeRange.duration)
+        assertEquals(2.seconds, byId["c2"]!!.sourceRange.start)
+    }
+
+    @Test fun midBatchFailureLeavesProjectUntouched() = runTest {
+        val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline()))
+        val assetId = rig.importAsset("/tmp/v.mp4", durationSeconds = 5.0)
+        val clip = Clip.Video(
+            id = ClipId("c1"),
+            timeRange = TimeRange(0.seconds, 4.seconds),
+            sourceRange = TimeRange(0.seconds, 4.seconds),
+            assetId = assetId,
+        )
+        rig.store.upsert(
+            "test",
+            Project(
+                id = rig.projectId,
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(clip)))),
+            ),
+        )
+        val before = rig.store.get(rig.projectId)!!
+        assertFailsWith<IllegalArgumentException> {
+            rig.tool.execute(
+                TrimClipTool.Input(
+                    projectId = rig.projectId.value,
+                    items = listOf(
+                        TrimClipTool.Item("c1", newDurationSeconds = 3.0),
+                        TrimClipTool.Item("c1", newSourceStartSeconds = 4.0, newDurationSeconds = 4.0),
+                    ),
+                ),
+                rig.ctx,
+            )
+        }
+        assertEquals(before.timeline, rig.store.get(rig.projectId)!!.timeline)
     }
 
     @Test fun trimsAudioClip() = runTest {
@@ -185,15 +243,11 @@ class TrimClipToolTest {
             ),
         )
 
-        rig.tool.execute(
-            TrimClipTool.Input(rig.projectId.value, "ac1", newDurationSeconds = 2.0),
-            rig.ctx,
-        )
+        rig.tool.execute(single("ac1", newDurationSeconds = 2.0), rig.ctx)
         val trimmed = rig.store.get(rig.projectId)!!
             .timeline.tracks.single().clips.single() as Clip.Audio
         assertEquals(2.seconds, trimmed.timeRange.duration)
         assertEquals(2.seconds, trimmed.sourceRange.duration)
-        // Volume (and other Audio-specific fields) preserved through trim.
         assertEquals(0.8f, trimmed.volume)
     }
 
@@ -214,10 +268,7 @@ class TrimClipToolTest {
         )
 
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                TrimClipTool.Input(rig.projectId.value, "t1", newDurationSeconds = 2.0),
-                rig.ctx,
-            )
+            rig.tool.execute(single("t1", newDurationSeconds = 2.0), rig.ctx)
         }
         assertTrue("text" in ex.message!! || "subtitle" in ex.message!!, ex.message)
     }
@@ -240,7 +291,7 @@ class TrimClipToolTest {
         )
 
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(TrimClipTool.Input(rig.projectId.value, "c1"), rig.ctx)
+            rig.tool.execute(single("c1"), rig.ctx)
         }
         assertTrue("at least one" in ex.message!!, ex.message)
     }
@@ -262,20 +313,10 @@ class TrimClipToolTest {
             ),
         )
 
-        // sourceStart 3 + duration 4 = 7s, asset is 5s — must refuse.
         val ex = assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(
-                TrimClipTool.Input(
-                    projectId = rig.projectId.value,
-                    clipId = "c1",
-                    newSourceStartSeconds = 3.0,
-                    newDurationSeconds = 4.0,
-                ),
-                rig.ctx,
-            )
+            rig.tool.execute(single("c1", newSourceStartSeconds = 3.0, newDurationSeconds = 4.0), rig.ctx)
         }
         assertTrue("extends past" in ex.message!!, ex.message)
-        // Original clip untouched on failure.
         val refreshed = rig.store.get(rig.projectId)!!
         val unchanged = refreshed.timeline.tracks.single().clips.single() as Clip.Video
         assertEquals(0.seconds, unchanged.sourceRange.start)
@@ -300,10 +341,7 @@ class TrimClipToolTest {
         )
 
         assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(
-                TrimClipTool.Input(rig.projectId.value, "c1", newSourceStartSeconds = -0.5),
-                rig.ctx,
-            )
+            rig.tool.execute(single("c1", newSourceStartSeconds = -0.5), rig.ctx)
         }
     }
 
@@ -325,10 +363,7 @@ class TrimClipToolTest {
         )
 
         assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(
-                TrimClipTool.Input(rig.projectId.value, "c1", newDurationSeconds = 0.0),
-                rig.ctx,
-            )
+            rig.tool.execute(single("c1", newDurationSeconds = 0.0), rig.ctx)
         }
     }
 
@@ -350,14 +385,10 @@ class TrimClipToolTest {
         )
 
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                TrimClipTool.Input(rig.projectId.value, "ghost", newDurationSeconds = 2.0),
-                rig.ctx,
-            )
+            rig.tool.execute(single("ghost", newDurationSeconds = 2.0), rig.ctx)
         }
         assertTrue("ghost" in ex.message!!, ex.message)
         val refreshed = rig.store.get(rig.projectId)!!
-        // Original duration untouched on failure.
         val unchanged = refreshed.timeline.tracks.single().clips.single() as Clip.Video
         assertEquals(3.seconds, unchanged.timeRange.duration)
     }
@@ -379,10 +410,7 @@ class TrimClipToolTest {
             ),
         )
 
-        rig.tool.execute(
-            TrimClipTool.Input(rig.projectId.value, "c1", newDurationSeconds = 2.5),
-            rig.ctx,
-        )
+        rig.tool.execute(single("c1", newDurationSeconds = 2.5), rig.ctx)
         val snap = rig.emittedParts.filterIsInstance<Part.TimelineSnapshot>().single()
         val trimmed = snap.timeline.tracks.single().clips.single() as Clip.Video
         assertEquals(2.5.seconds, trimmed.timeRange.duration)

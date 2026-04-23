@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.ProjectId
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionSpec
@@ -19,64 +18,61 @@ import kotlinx.serialization.serializer
 import kotlin.time.Duration
 
 /**
- * Drop a single track (and, with `force=true`, every clip on it). The complement
- * to `add_track`.
+ * Drop one or many tracks (and, with `force=true`, every clip on them) in a
+ * single atomic edit. The complement to `add_track`.
  *
- * Timeline authoring verbs already cover `add_track` / `add_clip` / `remove_clip`
- * / `move_clip` / `clear_timeline`, but none of them drop a single track. Two
- * concrete gaps were left:
+ * Broadcast shape — a single shared `force` flag applies to the whole batch.
+ * If any track is non-empty and `force=false`, the whole batch aborts with
+ * the offending track's clip count so the agent can retry with `force=true`
+ * or remove clips first.
  *
- *  - Orphan empty tracks — the agent might `add_track` in anticipation of
- *    picture-in-picture or a music stem and then decide not to populate it.
- *    Without this tool the agent can't clean up its own skeleton; the user is
- *    left looking at a phantom track.
- *  - Targeted demolition — `clear_timeline` nukes every track; `remove_clip` per
- *    clip then leaves the empty track behind. "Drop the whole B-roll track" was
- *    previously unexpressible in a single call.
+ * `Timeline.duration` is recomputed from the remaining clips' `timeRange.end`.
+ * Permission tier matches `clear_timeline` (`project.destructive`) — even an
+ * empty track counts as destructive because the agent may have declared the
+ * track with downstream intent.
  *
- * Default `force=false` protects against accidental loss: if the track has clips,
- * the tool throws with the clip count and instructs the caller to pass
- * `force=true` or remove clips first. Empty tracks drop cleanly either way.
- *
- * `Timeline.duration` is recomputed from the remaining clips' `timeRange.end` —
- * matching the `AddClipTool` / `MoveClipTool` / `TrimClipTool` convention
- * — so dropping the track that held the tail clip shrinks the reported duration.
- *
- * Permission tier matches `clear_timeline` (`project.destructive`). Even the
- * "empty track" case counts as destructive because the agent may have declared
- * the track with downstream intent (user was told about it; subsequent tool
- * calls might reference its id).
- *
- * Emits a `Part.TimelineSnapshot` so `revert_timeline` can roll the drop — clips
- * and track alike — back in one step.
+ * Emits one `Part.TimelineSnapshot` so `revert_timeline` can roll the whole
+ * batch back in one step.
  */
 class RemoveTrackTool(
     private val store: ProjectStore,
 ) : Tool<RemoveTrackTool.Input, RemoveTrackTool.Output> {
 
     @Serializable data class Input(
-        val projectId: String,
-        val trackId: String,
         /**
-         * Drop the track even when it holds clips (every clip on it is discarded
-         * too). Default `false` throws if the track is non-empty.
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
+        val trackIds: List<String>,
+        /**
+         * Drop tracks even when they hold clips (every clip on them is
+         * discarded too). Default `false` throws if any target track is
+         * non-empty, leaving the whole batch untouched.
          */
         val force: Boolean = false,
     )
 
-    @Serializable data class Output(
-        val projectId: String,
+    @Serializable data class ItemResult(
         val trackId: String,
         val trackKind: String,
         val droppedClipCount: Int,
     )
 
-    override val id: String = "remove_track"
+    @Serializable data class Output(
+        val projectId: String,
+        val results: List<ItemResult>,
+        val forced: Boolean,
+        val snapshotId: String,
+    )
+
+    override val id: String = "remove_tracks"
     override val helpText: String =
-        "Drop a single track from the timeline. Non-empty tracks require force=true (protects " +
-            "against accidental loss); empty tracks drop cleanly either way. Force=true discards " +
-            "every clip on the track as well. Other tracks are untouched. Emits a timeline " +
-            "snapshot so revert_timeline can undo."
+        "Drop one or many tracks from the timeline atomically. Non-empty tracks require " +
+            "force=true; otherwise the whole batch aborts with the offending clip count. " +
+            "Force=true discards every clip on the listed tracks. Other tracks untouched. " +
+            "One timeline snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.destructive")
@@ -84,57 +80,77 @@ class RemoveTrackTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
-            putJsonObject("trackId") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
+            putJsonObject("trackIds") {
+                put("type", "array")
+                put("description", "Track ids to drop. At least one required.")
+                putJsonObject("items") { put("type", "string") }
+            }
             putJsonObject("force") {
                 put("type", "boolean")
                 put(
                     "description",
-                    "Drop the track even if it holds clips (discards those clips). Default false.",
+                    "Drop tracks even if they hold clips (discards those clips). Default false.",
                 )
             }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("trackId"))))
+        put("required", JsonArray(listOf(JsonPrimitive("trackIds"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        var trackKind = ""
-        var droppedClips = 0
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
-            val target = project.timeline.tracks.firstOrNull { it.id.value == input.trackId }
-                ?: error("trackId '${input.trackId}' not found in project ${input.projectId}")
-            if (target.clips.isNotEmpty() && !input.force) {
-                error(
-                    "track '${input.trackId}' has ${target.clips.size} clip(s); pass force=true to " +
-                        "drop the track and its clips, or remove the clips first",
-                )
+        require(input.trackIds.isNotEmpty()) { "trackIds must not be empty" }
+        val pid = ctx.resolveProjectId(input.projectId)
+        val results = mutableListOf<ItemResult>()
+
+        val updated = store.mutate(pid) { project ->
+            var tracks = project.timeline.tracks
+            input.trackIds.forEachIndexed { idx, trackId ->
+                val target = tracks.firstOrNull { it.id.value == trackId }
+                    ?: error("trackIds[$idx] '$trackId' not found in project ${pid.value}")
+                if (target.clips.isNotEmpty() && !input.force) {
+                    error(
+                        "trackIds[$idx] '$trackId' has ${target.clips.size} clip(s); pass " +
+                            "force=true to drop the track(s) and their clips, or remove the clips first",
+                    )
+                }
+                val kind = trackKind(target)
+                val droppedClips = target.clips.size
+                tracks = tracks.filter { it.id.value != trackId }
+                results += ItemResult(trackId = trackId, trackKind = kind, droppedClipCount = droppedClips)
             }
-            trackKind = when (target) {
-                is Track.Video -> "video"
-                is Track.Audio -> "audio"
-                is Track.Subtitle -> "subtitle"
-                is Track.Effect -> "effect"
-            }
-            droppedClips = target.clips.size
-            val newTracks = project.timeline.tracks.filter { it.id.value != input.trackId }
-            val duration = newTracks.flatMap { it.clips }.maxOfOrNull { it.timeRange.end } ?: Duration.ZERO
-            project.copy(
-                timeline = project.timeline.copy(tracks = newTracks, duration = duration),
-            )
+            val duration = tracks.flatMap { it.clips }.maxOfOrNull { it.timeRange.end } ?: Duration.ZERO
+            project.copy(timeline = project.timeline.copy(tracks = tracks, duration = duration))
         }
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
+        val summary = buildString {
+            append("Dropped ${results.size} track(s)")
+            val totalClips = results.sumOf { it.droppedClipCount }
+            if (totalClips > 0) append(" with $totalClips clip(s)")
+            append(". Timeline snapshot: ${snapshotId.value}")
+        }
         return ToolResult(
-            title = "remove $trackKind track ${input.trackId}",
-            outputForLlm = "Removed $trackKind track ${input.trackId} from project ${input.projectId}" +
-                (if (droppedClips > 0) " (dropped $droppedClips clip(s))" else "") +
-                ". Timeline snapshot: ${snapshotId.value}",
+            title = "remove ${results.size} track(s)",
+            outputForLlm = summary,
             data = Output(
-                projectId = input.projectId,
-                trackId = input.trackId,
-                trackKind = trackKind,
-                droppedClipCount = droppedClips,
+                projectId = pid.value,
+                results = results,
+                forced = input.force,
+                snapshotId = snapshotId.value,
             ),
         )
+    }
+
+    private fun trackKind(track: Track): String = when (track) {
+        is Track.Video -> "video"
+        is Track.Audio -> "audio"
+        is Track.Subtitle -> "subtitle"
+        is Track.Effect -> "effect"
     }
 }

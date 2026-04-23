@@ -51,6 +51,12 @@ class DuplicateClipToolTest {
         return Rig(store, DuplicateClipTool(store), ctx)
     }
 
+    private fun single(clipId: String, timelineStartSeconds: Double, trackId: String? = null) =
+        DuplicateClipTool.Input(
+            projectId = "p",
+            items = listOf(DuplicateClipTool.Item(clipId, timelineStartSeconds, trackId)),
+        )
+
     @Test fun duplicatesVideoClipPreservingFiltersAndBindings() = runTest {
         val v = Clip.Video(
             id = ClipId("c1"),
@@ -70,21 +76,18 @@ class DuplicateClipToolTest {
         )
         val rig = newRig(project)
 
-        val out = rig.tool.execute(
-            DuplicateClipTool.Input("p", "c1", timelineStartSeconds = 10.0),
-            rig.ctx,
-        )
-        assertNotEquals("c1", out.data.newClipId)
-        assertEquals("vt", out.data.sourceTrackId)
-        assertEquals("vt", out.data.targetTrackId)
+        val out = rig.tool.execute(single("c1", 10.0), rig.ctx).data
+        val only = out.results.single()
+        assertNotEquals("c1", only.newClipId)
+        assertEquals("vt", only.sourceTrackId)
+        assertEquals("vt", only.targetTrackId)
 
         val saved = rig.store.get(ProjectId("p"))!!
         val track = saved.timeline.tracks.single() as Track.Video
         assertEquals(2, track.clips.size)
-        val dup = track.clips.first { it.id.value == out.data.newClipId } as Clip.Video
+        val dup = track.clips.first { it.id.value == only.newClipId } as Clip.Video
         assertEquals(10.seconds, dup.timeRange.start)
         assertEquals(3.seconds, dup.timeRange.duration)
-        // Attached state carried across.
         assertEquals(2, dup.filters.size)
         assertEquals("sepia", dup.filters[0].name)
         assertEquals(1, dup.transforms.size)
@@ -112,7 +115,7 @@ class DuplicateClipToolTest {
         )
         val rig = newRig(project)
 
-        rig.tool.execute(DuplicateClipTool.Input("p", "a1", 30.0), rig.ctx)
+        rig.tool.execute(single("a1", 30.0), rig.ctx)
         val saved = rig.store.get(ProjectId("p"))!!
         val dup = (saved.timeline.tracks.single() as Track.Audio).clips
             .first { it.id.value != "a1" } as Clip.Audio
@@ -137,7 +140,7 @@ class DuplicateClipToolTest {
         )
         val rig = newRig(project)
 
-        rig.tool.execute(DuplicateClipTool.Input("p", "t1", 5.0), rig.ctx)
+        rig.tool.execute(single("t1", 5.0), rig.ctx)
         val saved = rig.store.get(ProjectId("p"))!!
         val dup = (saved.timeline.tracks.single() as Track.Subtitle).clips
             .first { it.id.value != "t1" } as Clip.Text
@@ -145,6 +148,71 @@ class DuplicateClipToolTest {
         assertEquals(72f, dup.style.fontSize)
         assertEquals("#FF0000", dup.style.color)
         assertTrue(dup.style.bold)
+    }
+
+    @Test fun batchDuplicatesMultipleClipsAtomically() = runTest {
+        val v1 = Clip.Video(
+            id = ClipId("c1"),
+            timeRange = TimeRange(Duration.ZERO, 3.seconds),
+            sourceRange = TimeRange(Duration.ZERO, 3.seconds),
+            assetId = AssetId("a1"),
+        )
+        val v2 = Clip.Video(
+            id = ClipId("c2"),
+            timeRange = TimeRange(3.seconds, 3.seconds),
+            sourceRange = TimeRange(Duration.ZERO, 3.seconds),
+            assetId = AssetId("a2"),
+        )
+        val project = Project(
+            id = ProjectId("p"),
+            timeline = Timeline(
+                tracks = listOf(Track.Video(TrackId("vt"), listOf(v1, v2))),
+                duration = 6.seconds,
+            ),
+        )
+        val rig = newRig(project)
+        val out = rig.tool.execute(
+            DuplicateClipTool.Input(
+                projectId = "p",
+                items = listOf(
+                    DuplicateClipTool.Item("c1", 10.0),
+                    DuplicateClipTool.Item("c2", 20.0),
+                ),
+            ),
+            rig.ctx,
+        ).data
+        assertEquals(2, out.results.size)
+        val saved = rig.store.get(ProjectId("p"))!!
+        assertEquals(4, saved.timeline.tracks.single().clips.size)
+    }
+
+    @Test fun midBatchFailureLeavesProjectUntouched() = runTest {
+        val v = Clip.Video(
+            id = ClipId("c1"),
+            timeRange = TimeRange(Duration.ZERO, 3.seconds),
+            sourceRange = TimeRange(Duration.ZERO, 3.seconds),
+            assetId = AssetId("a"),
+        )
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(tracks = listOf(Track.Video(TrackId("vt"), listOf(v)))),
+            ),
+        )
+        val before = rig.store.get(ProjectId("p"))!!
+        assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                DuplicateClipTool.Input(
+                    projectId = "p",
+                    items = listOf(
+                        DuplicateClipTool.Item("c1", 5.0),
+                        DuplicateClipTool.Item("ghost", 10.0),
+                    ),
+                ),
+                rig.ctx,
+            )
+        }
+        assertEquals(before.timeline, rig.store.get(ProjectId("p"))!!.timeline)
     }
 
     @Test fun movesToDifferentSameKindTrack() = runTest {
@@ -166,12 +234,10 @@ class DuplicateClipToolTest {
         )
         val rig = newRig(project)
 
-        val out = rig.tool.execute(
-            DuplicateClipTool.Input("p", "c1", 0.0, trackId = "overlay"),
-            rig.ctx,
-        )
-        assertEquals("main", out.data.sourceTrackId)
-        assertEquals("overlay", out.data.targetTrackId)
+        val out = rig.tool.execute(single("c1", 0.0, trackId = "overlay"), rig.ctx).data
+        val only = out.results.single()
+        assertEquals("main", only.sourceTrackId)
+        assertEquals("overlay", only.targetTrackId)
         val saved = rig.store.get(ProjectId("p"))!!
         val main = saved.timeline.tracks.first { it.id.value == "main" }
         val overlay = saved.timeline.tracks.first { it.id.value == "overlay" }
@@ -199,10 +265,7 @@ class DuplicateClipToolTest {
         val rig = newRig(project)
 
         val ex = assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(
-                DuplicateClipTool.Input("p", "c1", 0.0, trackId = "at"),
-                rig.ctx,
-            )
+            rig.tool.execute(single("c1", 0.0, trackId = "at"), rig.ctx)
         }
         assertTrue("audio" in ex.message!! && "video" in ex.message!!, ex.message)
     }
@@ -214,7 +277,7 @@ class DuplicateClipToolTest {
         )
         val rig = newRig(project)
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(DuplicateClipTool.Input("p", "ghost", 0.0), rig.ctx)
+            rig.tool.execute(single("ghost", 0.0), rig.ctx)
         }
         assertTrue("ghost" in ex.message!!, ex.message)
     }
@@ -234,9 +297,9 @@ class DuplicateClipToolTest {
             ),
         )
         val rig = newRig(project)
-        val first = rig.tool.execute(DuplicateClipTool.Input("p", "c1", 10.0), rig.ctx)
-        val second = rig.tool.execute(DuplicateClipTool.Input("p", "c1", 20.0), rig.ctx)
-        assertNotEquals(first.data.newClipId, second.data.newClipId)
+        val first = rig.tool.execute(single("c1", 10.0), rig.ctx).data.results.single()
+        val second = rig.tool.execute(single("c1", 20.0), rig.ctx).data.results.single()
+        assertNotEquals(first.newClipId, second.newClipId)
         val saved = rig.store.get(ProjectId("p"))!!
         assertEquals(3, (saved.timeline.tracks.single() as Track.Video).clips.size)
     }

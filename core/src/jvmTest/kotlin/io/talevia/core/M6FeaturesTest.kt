@@ -33,6 +33,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.add
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -58,14 +59,18 @@ class M6FeaturesTest {
             register(ApplyFilterTool(projects))
         }
 
-        val addResp = r["add_clip"]!!.dispatch(
+        val addResp = r["add_clips"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("assetId", fakeAsset.id.value)
+                putJsonArray("items") {
+                    addJsonObject {
+                        put("assetId", fakeAsset.id.value)
+                    }
+                }
             },
             ctx,
         )
-        val clipId = (addResp.data as AddClipTool.Output).clipId
+        val clipId = (addResp.data as AddClipTool.Output).results.single().clipId
 
         r["apply_filter"]!!.dispatch(
             buildJsonObject {
@@ -132,13 +137,17 @@ class M6FeaturesTest {
         ))
 
         val r = ToolRegistry().apply { register(AddTransitionTool(projects)) }
-        r["add_transition"]!!.dispatch(
+        r["add_transitions"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("fromClipId", "v1")
-                put("toClipId", "v2")
-                put("transitionName", "fade")
-                put("durationSeconds", 0.5)
+                putJsonArray("items") {
+                    addJsonObject {
+                        put("fromClipId", "v1")
+                        put("toClipId", "v2")
+                        put("transitionName", "fade")
+                        put("durationSeconds", 0.5)
+                    }
+                }
             },
             ctx,
         )

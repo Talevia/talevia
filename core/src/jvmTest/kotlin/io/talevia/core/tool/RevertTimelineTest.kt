@@ -77,10 +77,13 @@ class RevertTimelineTest {
 
         val addClip = AddClipTool(projects, media)
         val addResult = addClip.execute(
-            AddClipTool.Input(projectId = projectId.value, assetId = asset.id.value),
+            AddClipTool.Input(
+                projectId = projectId.value,
+                items = listOf(AddClipTool.Item(assetId = asset.id.value)),
+            ),
             ctx,
         )
-        assertTrue(addResult.outputForLlm.contains("Timeline snapshot:"), "add_clip should surface snapshot id")
+        assertTrue(addResult.outputForLlm.contains("Snapshot:"), "add_clips should surface snapshot id")
         assertEquals(1, projects.get(projectId)!!.timeline.tracks.flatMap { it.clips }.size)
 
         val revert = RevertTimelineTool(sessions, projects)
@@ -92,7 +95,7 @@ class RevertTimelineTest {
         assertEquals(0, projects.get(projectId)!!.timeline.tracks.flatMap { it.clips }.size)
 
         val snapshots = sessions.listSessionParts(sessionId).filterIsInstance<Part.TimelineSnapshot>()
-        // baseline + add_clip's snapshot + revert's snapshot
+        // baseline + add_clips' snapshot + revert's snapshot
         assertEquals(3, snapshots.size)
 
         driver.close()
@@ -126,12 +129,14 @@ class RevertTimelineTest {
 
         val addClip = AddClipTool(projects, media)
         val addResp = addClip.execute(
-            AddClipTool.Input(projectId = projectId.value, assetId = asset.id.value),
+            AddClipTool.Input(
+                projectId = projectId.value,
+                items = listOf(AddClipTool.Item(assetId = asset.id.value)),
+            ),
             ctxFor("c1", "m1"),
         )
-        val clipId = addResp.data.clipId
-        // Extract the snapshot PartId surfaced in outputForLlm (mid-state: one clip, no filter).
-        val midSnapshotId = Regex("Timeline snapshot: (\\S+)").find(addResp.outputForLlm)!!.groupValues[1]
+        val clipId = addResp.data.results.single().clipId
+        val midSnapshotId = addResp.data.snapshotId
 
         val applyFilter = ApplyFilterTool(projects)
         applyFilter.execute(

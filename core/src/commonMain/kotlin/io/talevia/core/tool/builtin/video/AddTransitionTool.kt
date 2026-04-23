@@ -27,9 +27,15 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * Insert a transition between two adjacent clips on the same track. The transition
- * is recorded as a thin Effect-track clip whose timeRange spans the overlap region;
- * the engines render it during export.
+ * Insert one or many transitions atomically between adjacent clip pairs. Each
+ * transition is recorded as a thin Effect-track clip whose timeRange spans the
+ * overlap region; engines render it during export.
+ *
+ * Per-item shape — every transition has its own `fromClipId / toClipId /
+ * transitionName / durationSeconds`, because "add a 0.5s fade here and a 1s
+ * dissolve there" is the natural batch request. Each pair must be on the same
+ * track and already adjacent (from.end == to.start). Failures mid-batch abort
+ * the whole call and leave `talevia.json` untouched.
  *
  * Like [ApplyFilterTool], the data model lands first; engine rendering of
  * non-cut transitions follows once the basic timeline is stable on every platform.
@@ -39,6 +45,13 @@ class AddTransitionTool(
     private val store: ProjectStore,
 ) : Tool<AddTransitionTool.Input, AddTransitionTool.Output> {
 
+    @Serializable data class Item(
+        val fromClipId: String,
+        val toClipId: String,
+        val transitionName: String = "fade",
+        val durationSeconds: Double = 0.5,
+    )
+
     @Serializable data class Input(
         /**
          * Optional — omit to default to the session's current project binding
@@ -46,15 +59,29 @@ class AddTransitionTool(
          * unbound; fail loud points the agent at `switch_project`.
          */
         val projectId: String? = null,
+        val items: List<Item>,
+    )
+
+    @Serializable data class ItemResult(
+        val transitionClipId: String,
+        val trackId: String,
+        val transitionName: String,
         val fromClipId: String,
         val toClipId: String,
-        val transitionName: String = "fade",
-        val durationSeconds: Double = 0.5,
     )
-    @Serializable data class Output(val transitionClipId: String, val trackId: String)
 
-    override val id = "add_transition"
-    override val helpText = "Add a named transition (fade, dissolve, slide, ...) between two adjacent clips."
+    @Serializable data class Output(
+        val projectId: String,
+        val results: List<ItemResult>,
+        val snapshotId: String,
+    )
+
+    override val id = "add_transitions"
+    override val helpText = "Add one or many transitions atomically between adjacent clip pairs. " +
+        "Each item specifies fromClipId, toClipId, optional transitionName (default 'fade') and " +
+        "durationSeconds (default 0.5). Each pair must be on the same track and already adjacent. " +
+        "All-or-nothing: if any item fails validation, nothing is inserted. One timeline snapshot " +
+        "per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("timeline.write")
@@ -70,67 +97,107 @@ class AddTransitionTool(
                     "Optional — omit to use the session's current project (set via switch_project).",
                 )
             }
-            putJsonObject("fromClipId") { put("type", "string") }
-            putJsonObject("toClipId") { put("type", "string") }
-            putJsonObject("transitionName") { put("type", "string"); put("description", "fade | dissolve | slide | wipe (engine-specific)") }
-            putJsonObject("durationSeconds") { put("type", "number"); put("description", "Default 0.5s; longer transitions overlap more material.") }
+            putJsonObject("items") {
+                put("type", "array")
+                put("description", "Transitions to insert. At least one required.")
+                putJsonObject("items") {
+                    put("type", "object")
+                    putJsonObject("properties") {
+                        putJsonObject("fromClipId") { put("type", "string") }
+                        putJsonObject("toClipId") { put("type", "string") }
+                        putJsonObject("transitionName") {
+                            put("type", "string")
+                            put("description", "fade | dissolve | slide | wipe (engine-specific)")
+                        }
+                        putJsonObject("durationSeconds") {
+                            put("type", "number")
+                            put("description", "Default 0.5s; longer transitions overlap more material.")
+                        }
+                    }
+                    put(
+                        "required",
+                        JsonArray(listOf(JsonPrimitive("fromClipId"), JsonPrimitive("toClipId"))),
+                    )
+                    put("additionalProperties", false)
+                }
+            }
         }
-        put("required", JsonArray(listOf(
-            JsonPrimitive("fromClipId"), JsonPrimitive("toClipId"),
-        )))
+        put("required", JsonArray(listOf(JsonPrimitive("items"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        require(input.durationSeconds > 0.0) { "durationSeconds must be > 0" }
+        require(input.items.isNotEmpty()) { "items must not be empty" }
+        input.items.forEachIndexed { idx, item ->
+            require(item.durationSeconds > 0.0) {
+                "items[$idx].durationSeconds must be > 0 (got ${item.durationSeconds})"
+            }
+        }
         val pid = ctx.resolveProjectId(input.projectId)
-        val transitionId = ClipId(Uuid.random().toString())
-        var resolvedTrackId: TrackId? = null
+        val results = mutableListOf<ItemResult>()
 
         val updated = store.mutate(pid) { project ->
-            val from = project.timeline.tracks.firstNotNullOfOrNull { track ->
-                track.clips.firstOrNull { it.id.value == input.fromClipId }?.let { track to it }
-            }?.let { (track, clip) -> track to clip }
-                ?: error("fromClipId ${input.fromClipId} not found")
-            val to = project.timeline.tracks.firstNotNullOfOrNull { track ->
-                track.clips.firstOrNull { it.id.value == input.toClipId }?.let { track to it }
-            }?.let { (track, clip) -> track to clip }
-                ?: error("toClipId ${input.toClipId} not found")
-            val (fromTrack, fromClip) = from
-            val (toTrack, toClip) = to
-            if (fromTrack.id != toTrack.id) {
-                error("transition only supported between clips on the same track")
-            }
-            if (fromClip !is Clip.Video || toClip !is Clip.Video) {
-                error("transition only supports video clips")
-            }
-            if (fromClip.timeRange.end != toClip.timeRange.start) {
-                error("transition only supported between adjacent clips (from ends ${fromClip.timeRange.end}, to starts ${toClip.timeRange.start})")
-            }
-            val duration = input.durationSeconds.seconds
-            val midpoint = fromClip.timeRange.end - duration / 2
-            val transitionRange = TimeRange(midpoint, duration)
+            var tracks = project.timeline.tracks
+            input.items.forEachIndexed { idx, item ->
+                val from = tracks.firstNotNullOfOrNull { track ->
+                    track.clips.firstOrNull { it.id.value == item.fromClipId }?.let { track to it }
+                } ?: error("items[$idx]: fromClipId ${item.fromClipId} not found")
+                val to = tracks.firstNotNullOfOrNull { track ->
+                    track.clips.firstOrNull { it.id.value == item.toClipId }?.let { track to it }
+                } ?: error("items[$idx]: toClipId ${item.toClipId} not found")
+                val (fromTrack, fromClip) = from
+                val (toTrack, toClip) = to
+                if (fromTrack.id != toTrack.id) {
+                    error("items[$idx]: transition only supported between clips on the same track")
+                }
+                if (fromClip !is Clip.Video || toClip !is Clip.Video) {
+                    error("items[$idx]: transition only supports video clips")
+                }
+                if (fromClip.timeRange.end != toClip.timeRange.start) {
+                    error(
+                        "items[$idx]: transition only supported between adjacent clips " +
+                            "(from ends ${fromClip.timeRange.end}, to starts ${toClip.timeRange.start})",
+                    )
+                }
+                val duration = item.durationSeconds.seconds
+                val midpoint = fromClip.timeRange.end - duration / 2
+                val transitionRange = TimeRange(midpoint, duration)
 
-            val effectTrack = pickEffectTrack(project.timeline.tracks)
-            val transitionClip = Clip.Video(
-                // Use a synthetic Video clip on the Effect track to carry the transition spec via filters[0].
-                id = transitionId,
-                timeRange = transitionRange,
-                sourceRange = TimeRange(Duration.ZERO, duration),
-                assetId = io.talevia.core.AssetId("transition:${input.transitionName}"),
-                filters = listOf(Filter(input.transitionName, mapOf("durationSeconds" to input.durationSeconds.toFloat()))),
-            )
-            val newClips = (effectTrack.clips + transitionClip).sortedBy { it.timeRange.start }
-            val newTrack = effectTrack.copy(clips = newClips)
-            resolvedTrackId = newTrack.id
-            project.copy(timeline = project.timeline.copy(tracks = upsertTrackPreservingOrder(project.timeline.tracks, newTrack)))
+                val transitionId = ClipId(Uuid.random().toString())
+                val effectTrack = pickEffectTrack(tracks)
+                val transitionClip = Clip.Video(
+                    id = transitionId,
+                    timeRange = transitionRange,
+                    sourceRange = TimeRange(Duration.ZERO, duration),
+                    assetId = io.talevia.core.AssetId("transition:${item.transitionName}"),
+                    filters = listOf(
+                        Filter(item.transitionName, mapOf("durationSeconds" to item.durationSeconds.toFloat())),
+                    ),
+                )
+                val newClips = (effectTrack.clips + transitionClip).sortedBy { it.timeRange.start }
+                val newTrack = effectTrack.copy(clips = newClips)
+                tracks = upsertTrackPreservingOrder(tracks, newTrack)
+
+                results += ItemResult(
+                    transitionClipId = transitionId.value,
+                    trackId = newTrack.id.value,
+                    transitionName = item.transitionName,
+                    fromClipId = item.fromClipId,
+                    toClipId = item.toClipId,
+                )
+            }
+            project.copy(timeline = project.timeline.copy(tracks = tracks))
         }
 
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
         return ToolResult(
-            title = "transition ${input.transitionName}",
-            outputForLlm = "Added ${input.transitionName} transition between ${input.fromClipId} and ${input.toClipId}. Timeline snapshot: ${snapshotId.value}",
-            data = Output(transitionId.value, resolvedTrackId!!.value),
+            title = "add ${results.size} transition(s)",
+            outputForLlm = buildString {
+                append("Added ${results.size} transition(s): ")
+                append(results.joinToString(", ") { "${it.transitionName} between ${it.fromClipId}→${it.toClipId}" })
+                append(". Timeline snapshot: ${snapshotId.value}")
+            },
+            data = Output(pid.value, results, snapshotId.value),
         )
     }
 

@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.ProjectId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Track
@@ -21,45 +20,42 @@ import kotlinx.serialization.serializer
 import kotlin.time.DurationUnit
 
 /**
- * Set fade-in / fade-out ramps on an existing audio clip. The sibling of
- * [SetClipVolumeTool]: `set_clip_volume` controls the steady-state level,
- * this controls the attack / release envelope. Together they cover the
- * basics of "music swells in, dips during dialogue, fades out" workflows.
+ * Set fade-in / fade-out ramps on one or many audio clips atomically. The sibling
+ * of [SetClipVolumeTool]: `set_clip_volumes` controls steady-state level; this
+ * controls the attack/release envelope.
  *
- * Each field is optional; at least one must be set. Unspecified fields
- * keep the clip's current value, so "add a 2s fade-in" doesn't clobber
- * an existing 1s fade-out.
+ * Per-item shape — each entry carries its own clipId + fadeIn/fadeOut so one
+ * call can "2s fade-in on the music, 1s fade-out on the ambience" in a single
+ * atomic edit.
  *
- * Validation: both lengths must be non-negative, finite, and their sum
- * must not exceed the clip's timeline duration — overlapping fades have
- * no well-defined envelope. Applied to a non-audio clip the tool fails
- * loudly; the envelope has no meaning on text clips and video clips
- * have no audio-track fields yet (track-level mixing is a future
- * concern).
- *
- * Domain-only mutation today: the FFmpeg / AVFoundation / Media3 engines
- * don't apply audio envelopes yet (same "compiler captures intent,
- * renderer catches up" pattern as `set_clip_volume` and
- * `set_clip_transform`). Shipping the tool first lets the agent accept
- * fade requests and record them in the Project; the engine work is
- * tracked separately.
- *
- * Emits a `Part.TimelineSnapshot` so `revert_timeline` can undo.
+ * Each item's fields are optional; at least one must be set. Unspecified fields
+ * inherit from the clip's current value. Sum of fade-in + fade-out must not
+ * exceed the clip's timeline duration — overlapping fades have no well-defined
+ * envelope. Audio clips only. All-or-nothing; one snapshot per call.
  */
 class FadeAudioClipTool(
     private val store: ProjectStore,
 ) : Tool<FadeAudioClipTool.Input, FadeAudioClipTool.Output> {
 
-    @Serializable data class Input(
-        val projectId: String,
+    @Serializable data class Item(
         val clipId: String,
-        /** Fade-in ramp length in seconds. `0.0` disables; omit to keep current. */
+        /** Fade-in ramp length in seconds. 0.0 disables; omit to keep current. */
         val fadeInSeconds: Float? = null,
-        /** Fade-out ramp length in seconds. `0.0` disables; omit to keep current. */
+        /** Fade-out ramp length in seconds. 0.0 disables; omit to keep current. */
         val fadeOutSeconds: Float? = null,
     )
 
-    @Serializable data class Output(
+    @Serializable data class Input(
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
+        val items: List<Item>,
+    )
+
+    @Serializable data class ItemResult(
         val clipId: String,
         val trackId: String,
         val oldFadeInSeconds: Float,
@@ -68,12 +64,18 @@ class FadeAudioClipTool(
         val newFadeOutSeconds: Float,
     )
 
-    override val id = "fade_audio_clip"
+    @Serializable data class Output(
+        val projectId: String,
+        val results: List<ItemResult>,
+        val snapshotId: String,
+    )
+
+    override val id = "fade_audio_clips"
     override val helpText =
-        "Set fade-in / fade-out envelope on an audio clip (the attack/release pair around " +
-            "set_clip_volume's steady-state level). Each field optional; at least one must be " +
-            "set. 0.0 disables. Sum of fade-in + fade-out must not exceed the clip's timeline " +
-            "duration. Audio clips only. Emits a timeline snapshot so revert_timeline can undo."
+        "Set fade-in / fade-out envelope on one or many audio clips atomically. Each item must " +
+            "specify at least one of fadeInSeconds / fadeOutSeconds (0.0 disables). Sum of the " +
+            "two must not exceed the clip's timeline duration. Audio clips only. All-or-nothing. " +
+            "One snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("timeline.write")
@@ -82,94 +84,105 @@ class FadeAudioClipTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
-            putJsonObject("clipId") { put("type", "string") }
-            putJsonObject("fadeInSeconds") {
-                put("type", "number")
-                put("description", "Fade-in ramp length in seconds. 0.0 disables. Omit to keep current.")
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
             }
-            putJsonObject("fadeOutSeconds") {
-                put("type", "number")
-                put("description", "Fade-out ramp length in seconds. 0.0 disables. Omit to keep current.")
+            putJsonObject("items") {
+                put("type", "array")
+                put("description", "Fade edits to apply. At least one required.")
+                putJsonObject("items") {
+                    put("type", "object")
+                    putJsonObject("properties") {
+                        putJsonObject("clipId") { put("type", "string") }
+                        putJsonObject("fadeInSeconds") {
+                            put("type", "number")
+                            put("description", "Fade-in ramp seconds. 0.0 disables. Omit to keep current.")
+                        }
+                        putJsonObject("fadeOutSeconds") {
+                            put("type", "number")
+                            put("description", "Fade-out ramp seconds. 0.0 disables. Omit to keep current.")
+                        }
+                    }
+                    put("required", JsonArray(listOf(JsonPrimitive("clipId"))))
+                    put("additionalProperties", false)
+                }
             }
         }
-        put(
-            "required",
-            JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("clipId"))),
-        )
+        put("required", JsonArray(listOf(JsonPrimitive("items"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        require(input.fadeInSeconds != null || input.fadeOutSeconds != null) {
-            "fade_audio_clip requires at least one of fadeInSeconds / fadeOutSeconds."
-        }
-        input.fadeInSeconds?.let {
-            require(it.isFinite() && it >= 0f) { "fadeInSeconds must be finite and >= 0 (got $it)" }
-        }
-        input.fadeOutSeconds?.let {
-            require(it.isFinite() && it >= 0f) { "fadeOutSeconds must be finite and >= 0 (got $it)" }
-        }
-
-        var foundTrackId: String? = null
-        var oldIn = 0f
-        var oldOut = 0f
-        var newIn = 0f
-        var newOut = 0f
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
-            val newTracks = project.timeline.tracks.map { track ->
-                val target = track.clips.firstOrNull { it.id.value == input.clipId }
-                if (target == null) {
-                    track
-                } else {
-                    val audio = target as? Clip.Audio ?: error(
-                        "fade_audio_clip only applies to audio clips; clip ${input.clipId} " +
-                            "is a ${target::class.simpleName}.",
-                    )
-                    foundTrackId = track.id.value
-                    oldIn = audio.fadeInSeconds
-                    oldOut = audio.fadeOutSeconds
-                    newIn = input.fadeInSeconds ?: oldIn
-                    newOut = input.fadeOutSeconds ?: oldOut
-                    val clipDurationSeconds =
-                        audio.timeRange.duration.toDouble(DurationUnit.SECONDS).toFloat()
-                    require(newIn + newOut <= clipDurationSeconds + 1e-3f) {
-                        "fadeIn ($newIn) + fadeOut ($newOut) would exceed clip duration " +
-                            "($clipDurationSeconds); fades would overlap."
-                    }
-                    val rebuilt = track.clips.map { clip ->
-                        if (clip.id == audio.id) {
-                            audio.copy(fadeInSeconds = newIn, fadeOutSeconds = newOut)
-                        } else {
-                            clip
-                        }
-                    }
-                    when (track) {
-                        is Track.Video -> track.copy(clips = rebuilt)
-                        is Track.Audio -> track.copy(clips = rebuilt)
-                        is Track.Subtitle -> track.copy(clips = rebuilt)
-                        is Track.Effect -> track.copy(clips = rebuilt)
-                    }
+        require(input.items.isNotEmpty()) { "items must not be empty" }
+        input.items.forEachIndexed { idx, item ->
+            require(item.fadeInSeconds != null || item.fadeOutSeconds != null) {
+                "items[$idx] (${item.clipId}): at least one of fadeInSeconds / fadeOutSeconds required"
+            }
+            item.fadeInSeconds?.let {
+                require(it.isFinite() && it >= 0f) {
+                    "items[$idx] (${item.clipId}): fadeInSeconds must be finite and >= 0 (got $it)"
                 }
             }
-            if (foundTrackId == null) {
-                error("clip ${input.clipId} not found in project ${input.projectId}")
+            item.fadeOutSeconds?.let {
+                require(it.isFinite() && it >= 0f) {
+                    "items[$idx] (${item.clipId}): fadeOutSeconds must be finite and >= 0 (got $it)"
+                }
             }
-            project.copy(timeline = project.timeline.copy(tracks = newTracks))
+        }
+
+        val pid = ctx.resolveProjectId(input.projectId)
+        val results = mutableListOf<ItemResult>()
+
+        val updated = store.mutate(pid) { project ->
+            var tracks = project.timeline.tracks
+            input.items.forEachIndexed { idx, item ->
+                val hit = tracks.firstNotNullOfOrNull { track ->
+                    track.clips.firstOrNull { it.id.value == item.clipId }?.let { track to it }
+                } ?: error("items[$idx]: clip ${item.clipId} not found in project ${pid.value}")
+                val (track, clip) = hit
+                val audio = clip as? Clip.Audio ?: error(
+                    "items[$idx]: fade_audio_clips only applies to audio clips; clip ${item.clipId} " +
+                        "is a ${clip::class.simpleName}.",
+                )
+                val oldIn = audio.fadeInSeconds
+                val oldOut = audio.fadeOutSeconds
+                val newIn = item.fadeInSeconds ?: oldIn
+                val newOut = item.fadeOutSeconds ?: oldOut
+                val clipDurationSeconds = audio.timeRange.duration.toDouble(DurationUnit.SECONDS).toFloat()
+                require(newIn + newOut <= clipDurationSeconds + 1e-3f) {
+                    "items[$idx] (${item.clipId}): fadeIn ($newIn) + fadeOut ($newOut) would exceed " +
+                        "clip duration ($clipDurationSeconds); fades would overlap."
+                }
+                val rebuilt = track.clips.map { c ->
+                    if (c.id == audio.id) audio.copy(fadeInSeconds = newIn, fadeOutSeconds = newOut) else c
+                }
+                val newTrack = when (track) {
+                    is Track.Video -> track.copy(clips = rebuilt)
+                    is Track.Audio -> track.copy(clips = rebuilt)
+                    is Track.Subtitle -> track.copy(clips = rebuilt)
+                    is Track.Effect -> track.copy(clips = rebuilt)
+                }
+                tracks = tracks.map { if (it.id == newTrack.id) newTrack else it }
+                results += ItemResult(
+                    clipId = item.clipId,
+                    trackId = track.id.value,
+                    oldFadeInSeconds = oldIn,
+                    newFadeInSeconds = newIn,
+                    oldFadeOutSeconds = oldOut,
+                    newFadeOutSeconds = newOut,
+                )
+            }
+            project.copy(timeline = project.timeline.copy(tracks = tracks))
         }
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
         return ToolResult(
-            title = "fade audio ${input.clipId}",
-            outputForLlm = "Set fade on audio clip ${input.clipId} (track $foundTrackId): " +
-                "in $oldIn→$newIn s, out $oldOut→$newOut s. Timeline snapshot: ${snapshotId.value}",
-            data = Output(
-                clipId = input.clipId,
-                trackId = foundTrackId!!,
-                oldFadeInSeconds = oldIn,
-                newFadeInSeconds = newIn,
-                oldFadeOutSeconds = oldOut,
-                newFadeOutSeconds = newOut,
-            ),
+            title = "fade audio × ${results.size}",
+            outputForLlm = "Set fades on ${results.size} audio clip(s). Snapshot: ${snapshotId.value}",
+            data = Output(pid.value, results, snapshotId.value),
         )
     }
 }

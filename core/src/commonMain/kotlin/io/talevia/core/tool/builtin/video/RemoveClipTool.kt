@@ -18,29 +18,35 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
+import kotlin.time.Duration
 
 /**
- * Delete a clip from the timeline by id (the missing primitive from the
- * cut/stitch/filter/transition lineup the agent uses to *edit* — VISION §1
+ * Delete one or many clips from the timeline atomically — the missing primitive
+ * from the cut/stitch/filter/transition lineup the agent uses to *edit* (VISION §1
  * "传统剪辑与特效渲染（cut / stitch / filter / transition / OpenGL shader / 合成）").
  *
- * Until this tool landed, the agent could `add_clip` / `replace_clip` /
- * `split_clip` but had no way to *remove* one. The only workaround was
- * `revert_timeline` to a prior snapshot, which discards every later edit too —
- * a bulldozer where a scalpel was needed. This tool closes that gap.
+ * Broadcast shape — a single shared `ripple` flag governs the whole batch. The
+ * rare case of "ripple some, leave gaps on others" deserves two calls rather
+ * than complicating the common case with per-item flags.
  *
  * By default, other clips' timeRanges are not adjusted — the gap is left as-is
  * so existing transitions / subtitles aligned to specific timeline timestamps
- * don't drift. Pass `ripple=true` to close the gap: every clip on the **same
- * track** whose `timeRange.start >= removed.timeRange.end` shifts left by the
+ * don't drift. Pass `ripple=true` to close each gap: every clip on the same
+ * track whose `timeRange.start >= removed.timeRange.end` shifts left by the
  * removed clip's duration. Overlapping / layered clips on the same track
  * (`start < removed.end`) are left alone — they were intentionally placed to
  * overlap, and shifting them would destroy the overlap semantics. Other
- * tracks are never touched; if the user wants sequence-wide ripple, chain
- * this with `move_clip` on the sibling tracks (audio-video sync cases).
+ * tracks are never touched.
  *
- * Emits a single `Part.TimelineSnapshot` post-mutation so `revert_timeline` can
- * roll the deletion — ripple included — back in one step.
+ * Ripple cascades within the batch: when removing two clips A and B on the
+ * same track with `ripple=true`, after A's removal the positions of B and
+ * all clips after A have already shifted. We apply removals **in the order
+ * listed** so the agent can predict cumulative effects, and we re-resolve
+ * each clipId in the current (possibly shifted) state.
+ *
+ * All-or-nothing: any clipId that doesn't resolve aborts the whole batch.
+ * One `Part.TimelineSnapshot` per call; `revert_timeline` rolls the whole
+ * batch back in one step.
  */
 class RemoveClipTool(
     private val store: ProjectStore,
@@ -53,33 +59,38 @@ class RemoveClipTool(
          * unbound; fail loud points the agent at `switch_project`.
          */
         val projectId: String? = null,
-        val clipId: String,
+        val clipIds: List<String>,
         /**
-         * When `true`, close the gap on the removed clip's track by shifting
+         * When `true`, close each gap on the removed clip's track by shifting
          * every later non-overlapping clip left by the removed clip's
-         * duration. Default `false` preserves the historical "leave the gap"
-         * semantics. Does NOT ripple across tracks — chain `move_clip` on
-         * sibling tracks if sync requires it.
+         * duration. Default `false` preserves "leave the gap" semantics. Does
+         * NOT ripple across tracks.
          */
         val ripple: Boolean = false,
     )
 
-    @Serializable data class Output(
+    @Serializable data class ItemResult(
         val clipId: String,
         val trackId: String,
-        val remainingClipsOnTrack: Int,
-        val rippled: Boolean,
+        val durationSeconds: Double,
         val shiftedClipCount: Int,
-        val shiftSeconds: Double,
     )
 
-    override val id = "remove_clip"
+    @Serializable data class Output(
+        val projectId: String,
+        val results: List<ItemResult>,
+        val rippled: Boolean,
+        val snapshotId: String,
+    )
+
+    override val id = "remove_clips"
     override val helpText =
-        "Delete a clip from the timeline by id. Pass `ripple=true` to close the gap on the same " +
+        "Delete one or many clips atomically. Shared `ripple=true` closes the gap on each clip's " +
             "track (every later clip shifts left by the removed clip's duration); default `false` " +
-            "leaves the gap so transitions / subtitles aligned to specific timestamps don't drift. " +
-            "Ripple is single-track only — chain `move_clip` on other tracks when sync requires it. " +
-            "Emits a timeline snapshot so revert_timeline can undo the deletion."
+            "leaves gaps so transitions / subtitles aligned to specific timestamps don't drift. " +
+            "Ripple is single-track only — chain `move_clips` on other tracks when sync requires " +
+            "it. All-or-nothing: if any clipId is missing, nothing is deleted. One timeline " +
+            "snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("timeline.write")
@@ -95,85 +106,90 @@ class RemoveClipTool(
                     "Optional — omit to use the session's current project (set via switch_project).",
                 )
             }
-            putJsonObject("clipId") { put("type", "string") }
+            putJsonObject("clipIds") {
+                put("type", "array")
+                put("description", "Clip ids to delete. At least one required.")
+                putJsonObject("items") { put("type", "string") }
+            }
             putJsonObject("ripple") {
                 put("type", "boolean")
-                put(
-                    "description",
-                    "Close the gap on the removed clip's track. Default false.",
-                )
+                put("description", "Close the gap on each removed clip's track. Default false.")
             }
         }
-        put("required", JsonArray(listOf(JsonPrimitive("clipId"))))
+        put("required", JsonArray(listOf(JsonPrimitive("clipIds"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        require(input.clipIds.isNotEmpty()) { "clipIds must not be empty" }
         val pid = ctx.resolveProjectId(input.projectId)
-        var foundTrackId: String? = null
-        var removedRange: TimeRange? = null
-        var shifted = 0
-        var remaining = 0
+        val results = mutableListOf<ItemResult>()
+
         val updated = store.mutate(pid) { project ->
-            val newTracks = project.timeline.tracks.map { track ->
-                val target = track.clips.firstOrNull { it.id.value == input.clipId }
-                if (target == null) {
-                    track
-                } else {
-                    foundTrackId = track.id.value
-                    removedRange = target.timeRange
-                    val keep = track.clips.filter { it.id.value != input.clipId }
-                    val shiftedClips = if (input.ripple) {
-                        keep.map { clip ->
-                            if (clip.timeRange.start >= target.timeRange.end) {
-                                shifted += 1
-                                clip.shiftStart(-target.timeRange.duration)
-                            } else {
-                                clip
-                            }
-                        }
+            var tracks = project.timeline.tracks
+            input.clipIds.forEachIndexed { idx, clipId ->
+                var foundTrackId: String? = null
+                var removedRange: TimeRange? = null
+                var shifted = 0
+                tracks = tracks.map { track ->
+                    val target = track.clips.firstOrNull { it.id.value == clipId }
+                    if (target == null) {
+                        track
                     } else {
-                        keep
-                    }
-                    remaining = shiftedClips.size
-                    when (track) {
-                        is Track.Video -> track.copy(clips = shiftedClips)
-                        is Track.Audio -> track.copy(clips = shiftedClips)
-                        is Track.Subtitle -> track.copy(clips = shiftedClips)
-                        is Track.Effect -> track.copy(clips = shiftedClips)
+                        foundTrackId = track.id.value
+                        removedRange = target.timeRange
+                        val keep = track.clips.filter { it.id.value != clipId }
+                        val shiftedClips = if (input.ripple) {
+                            keep.map { clip ->
+                                if (clip.timeRange.start >= target.timeRange.end) {
+                                    shifted += 1
+                                    clip.shiftStart(-target.timeRange.duration)
+                                } else {
+                                    clip
+                                }
+                            }
+                        } else {
+                            keep
+                        }
+                        when (track) {
+                            is Track.Video -> track.copy(clips = shiftedClips)
+                            is Track.Audio -> track.copy(clips = shiftedClips)
+                            is Track.Subtitle -> track.copy(clips = shiftedClips)
+                            is Track.Effect -> track.copy(clips = shiftedClips)
+                        }
                     }
                 }
+                if (foundTrackId == null) {
+                    error("clipIds[$idx] ($clipId) not found in project ${pid.value}")
+                }
+                results += ItemResult(
+                    clipId = clipId,
+                    trackId = foundTrackId!!,
+                    durationSeconds = removedRange!!.duration.inWholeMilliseconds / 1000.0,
+                    shiftedClipCount = shifted,
+                )
             }
-            if (foundTrackId == null) {
-                error("clip ${input.clipId} not found in project ${pid.value}")
-            }
-            project.copy(timeline = project.timeline.copy(tracks = newTracks))
+            project.copy(timeline = project.timeline.copy(tracks = tracks))
         }
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
-        val shiftSeconds = removedRange?.duration?.inWholeMilliseconds?.let { it / 1000.0 } ?: 0.0
-        val rippleNote = if (input.ripple) " Rippled $shifted clip(s) left by ${shiftSeconds}s." else ""
+        val summary = buildString {
+            append("Removed ${results.size} clip(s)")
+            if (input.ripple) append(" (rippled)")
+            append(". Timeline snapshot: ${snapshotId.value}")
+        }
         return ToolResult(
-            title = "remove clip ${input.clipId}",
-            outputForLlm = "Removed clip ${input.clipId} from track $foundTrackId " +
-                "($remaining clip(s) remain on the track).$rippleNote Timeline snapshot: ${snapshotId.value}",
+            title = "remove ${results.size} clip(s)",
+            outputForLlm = summary,
             data = Output(
-                clipId = input.clipId,
-                trackId = foundTrackId!!,
-                remainingClipsOnTrack = remaining,
+                projectId = pid.value,
+                results = results,
                 rippled = input.ripple,
-                shiftedClipCount = shifted,
-                shiftSeconds = shiftSeconds,
+                snapshotId = snapshotId.value,
             ),
         )
     }
 
-    /**
-     * Shift a clip's [Clip.timeRange] by the given delta (`sourceRange` is
-     * untouched — ripple changes WHEN the clip plays, not WHICH source bytes
-     * it reads). Declared as a local helper so the ripple arm of `execute`
-     * keeps its per-variant copy(...) clear.
-     */
-    private fun Clip.shiftStart(delta: kotlin.time.Duration): Clip {
+    private fun Clip.shiftStart(delta: Duration): Clip {
         val newRange = timeRange.copy(start = timeRange.start + delta)
         return when (this) {
             is Clip.Video -> copy(timeRange = newRange)

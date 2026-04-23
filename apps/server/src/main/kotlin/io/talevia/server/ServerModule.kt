@@ -419,6 +419,7 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
     is BusEvent.ProjectValidationWarning -> "project.validation.warning"
     is BusEvent.AigcCostRecorded -> "aigc.cost.recorded"
+    is BusEvent.AigcCacheProbe -> "aigc.cache.probe"
 }
 
 @Serializable data class CreateProjectRequest(val title: String)
@@ -612,6 +613,11 @@ data class BusEventDto(
                 toolId = e.toolId,
                 assetId = e.assetId,
                 costCents = e.costCents,
+            )
+            is BusEvent.AigcCacheProbe -> BusEventDto(
+                "aigc.cache.probe",
+                sessionId = null,
+                toolId = e.toolId,
             )
         }
     }

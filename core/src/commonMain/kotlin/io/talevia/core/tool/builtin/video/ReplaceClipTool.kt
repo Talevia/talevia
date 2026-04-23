@@ -22,33 +22,27 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 
 /**
- * Swap the asset that an existing clip plays, preserving its position, transforms,
- * and filters. Closes the regenerate-after-stale loop (VISION §3.2):
+ * Swap the asset on one or many clips atomically, preserving position,
+ * transforms, and filters. Per-item shape so a single call can splice in
+ * several regenerated assets after a stale-clip cascade (VISION §3.2).
  *
- *   1. user edits a `character_ref`
- *   2. agent calls `find_stale_clips` → list of stale clipIds
- *   3. agent calls `generate_image` (or other AIGC tool) with the same bindings → new assetId
- *   4. agent calls `replace_clip(clipId, newAssetId)` — the old asset is unhooked and
- *      the clip continues to occupy the same timeline slot.
+ * Side effect per item: if the new asset has a lockfile entry with a
+ * non-empty `sourceBinding`, that's copied onto the replaced clip so future
+ * stale-clip detection is DAG-aware.
  *
- * Without this tool the agent would have to delete-then-add (no delete tool exists)
- * or `add_clip` again (creating a duplicate) — both of which break the workflow.
- *
- * Side effect on `Clip.sourceBinding`: if the new asset has a lockfile entry with a
- * non-empty `sourceBinding`, we copy that into the replaced clip. This means
- * regenerated clips become *correctly* DAG-aware even though `add_clip` itself
- * doesn't thread bindings — the clip becomes properly reactive to *future* source
- * edits. Imported assets (no lockfile entry) leave the binding untouched.
- *
- * Only the asset id and source binding change. To resize the clip, use other tools
- * — duration / sourceRange are preserved deliberately so re-render keeps timing.
- * Audio clips are supported the same way; text clips don't have an asset and are
- * rejected loudly.
+ * Only assetId + sourceBinding change per clip — duration / sourceRange are
+ * preserved. Audio clips supported; text clips rejected loudly.
+ * All-or-nothing; one snapshot per call.
  */
 class ReplaceClipTool(
     private val store: ProjectStore,
     private val media: MediaStorage,
 ) : Tool<ReplaceClipTool.Input, ReplaceClipTool.Output> {
+
+    @Serializable data class Item(
+        val clipId: String,
+        val newAssetId: String,
+    )
 
     @Serializable data class Input(
         /**
@@ -57,24 +51,29 @@ class ReplaceClipTool(
          * unbound; fail loud points the agent at `switch_project`.
          */
         val projectId: String? = null,
-        val clipId: String,
-        val newAssetId: String,
+        val items: List<Item>,
     )
 
-    @Serializable data class Output(
+    @Serializable data class ItemResult(
         val clipId: String,
         val previousAssetId: String,
         val newAssetId: String,
         val sourceBindingIds: List<String>,
     )
 
-    override val id: String = "replace_clip"
+    @Serializable data class Output(
+        val projectId: String,
+        val results: List<ItemResult>,
+        val snapshotId: String,
+    )
+
+    override val id: String = "replace_clips"
     override val helpText: String =
-        "Swap the asset on an existing clip without changing its timeline position, " +
-            "transforms, or filters. Use after find_stale_clips + a regeneration tool to " +
-            "splice the regenerated asset back in. The clip's sourceBinding is updated " +
-            "from the new asset's lockfile entry when present, so future stale-clip " +
-            "detection sees the regenerated bindings."
+        "Swap the asset on one or many clips atomically, preserving timeline position, " +
+            "transforms, and filters. Each item is { clipId, newAssetId }. Useful after " +
+            "find_stale_clips + regeneration to splice in the new assets. Each clip's " +
+            "sourceBinding is updated from the new asset's lockfile entry when present. " +
+            "All-or-nothing; one snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")
@@ -90,76 +89,83 @@ class ReplaceClipTool(
                     "Optional — omit to use the session's current project (set via switch_project).",
                 )
             }
-            putJsonObject("clipId") { put("type", "string") }
-            putJsonObject("newAssetId") {
-                put("type", "string")
-                put("description", "The replacement asset; must already exist in the project's asset catalog (e.g. from a fresh generate_image call).")
+            putJsonObject("items") {
+                put("type", "array")
+                put("description", "Replace operations. At least one required.")
+                putJsonObject("items") {
+                    put("type", "object")
+                    putJsonObject("properties") {
+                        putJsonObject("clipId") { put("type", "string") }
+                        putJsonObject("newAssetId") {
+                            put("type", "string")
+                            put("description", "Replacement asset; must already exist in the project's asset catalog.")
+                        }
+                    }
+                    put(
+                        "required",
+                        JsonArray(listOf(JsonPrimitive("clipId"), JsonPrimitive("newAssetId"))),
+                    )
+                    put("additionalProperties", false)
+                }
             }
         }
-        put(
-            "required",
-            JsonArray(
-                listOf(
-                    JsonPrimitive("clipId"),
-                    JsonPrimitive("newAssetId"),
-                ),
-            ),
-        )
+        put("required", JsonArray(listOf(JsonPrimitive("items"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        require(input.items.isNotEmpty()) { "items must not be empty" }
+        input.items.forEachIndexed { idx, item ->
+            val newAssetId = AssetId(item.newAssetId)
+            media.get(newAssetId)
+                ?: error("items[$idx] (${item.clipId}): asset ${item.newAssetId} not found; import or generate it first.")
+        }
         val pid = ctx.resolveProjectId(input.projectId)
-        val newAssetId = AssetId(input.newAssetId)
-        media.get(newAssetId) ?: error("Asset ${input.newAssetId} not found; import or generate it first.")
-
-        var previousAssetId: String? = null
-        var newBinding: Set<SourceNodeId> = emptySet()
+        val results = mutableListOf<ItemResult>()
 
         val updated = store.mutate(pid) { project ->
-            // The lockfile lookup runs *inside* mutate so we read the same Project
-            // snapshot the rewrite is built on.
-            val lockBinding = project.lockfile.findByAssetId(newAssetId)?.sourceBinding ?: emptySet()
-            newBinding = lockBinding
-
-            var found = false
-            val newTracks = project.timeline.tracks.map { track ->
-                val target = track.clips.firstOrNull { it.id.value == input.clipId } ?: return@map track
-                found = true
-                val replaced: Clip = when (target) {
-                    is Clip.Video -> {
-                        previousAssetId = target.assetId.value
-                        target.copy(assetId = newAssetId, sourceBinding = lockBinding)
+            var tracks = project.timeline.tracks
+            input.items.forEachIndexed { idx, item ->
+                val newAssetId = AssetId(item.newAssetId)
+                val lockBinding: Set<SourceNodeId> =
+                    project.lockfile.findByAssetId(newAssetId)?.sourceBinding ?: emptySet()
+                var previousAssetId: String? = null
+                var found = false
+                tracks = tracks.map { track ->
+                    val target = track.clips.firstOrNull { it.id.value == item.clipId } ?: return@map track
+                    found = true
+                    val replaced: Clip = when (target) {
+                        is Clip.Video -> {
+                            previousAssetId = target.assetId.value
+                            target.copy(assetId = newAssetId, sourceBinding = lockBinding)
+                        }
+                        is Clip.Audio -> {
+                            previousAssetId = target.assetId.value
+                            target.copy(assetId = newAssetId, sourceBinding = lockBinding)
+                        }
+                        is Clip.Text -> error(
+                            "items[$idx] (${item.clipId}): replace_clips does not apply to text clips " +
+                                "(no underlying asset).",
+                        )
                     }
-                    is Clip.Audio -> {
-                        previousAssetId = target.assetId.value
-                        target.copy(assetId = newAssetId, sourceBinding = lockBinding)
-                    }
-                    is Clip.Text -> error("replace_clip does not apply to text clips (no underlying asset).")
+                    replaceClipOnTrack(track, target, replaced)
                 }
-                replaceClipOnTrack(track, target, replaced)
+                if (!found) error("items[$idx]: clip ${item.clipId} not found in project ${pid.value}")
+                results += ItemResult(
+                    clipId = item.clipId,
+                    previousAssetId = previousAssetId ?: error("internal: previousAssetId not captured"),
+                    newAssetId = newAssetId.value,
+                    sourceBindingIds = lockBinding.map { it.value },
+                )
             }
-            if (!found) error("clip ${input.clipId} not found in project ${pid.value}")
-            project.copy(timeline = project.timeline.copy(tracks = newTracks))
+            project.copy(timeline = project.timeline.copy(tracks = tracks))
         }
 
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
-        val out = Output(
-            clipId = input.clipId,
-            previousAssetId = previousAssetId ?: error("internal: previousAssetId not captured"),
-            newAssetId = newAssetId.value,
-            sourceBindingIds = newBinding.map { it.value },
-        )
-        val bindingNote = if (newBinding.isEmpty()) {
-            ""
-        } else {
-            " Copied sourceBinding ${out.sourceBindingIds} from new asset's lockfile entry."
-        }
         return ToolResult(
-            title = "replace clip ${input.clipId}",
-            outputForLlm = "Replaced asset on clip ${input.clipId}: ${out.previousAssetId} → ${out.newAssetId}.$bindingNote " +
-                "Timeline snapshot: ${snapshotId.value}",
-            data = out,
+            title = "replace × ${results.size}",
+            outputForLlm = "Replaced asset on ${results.size} clip(s). Snapshot: ${snapshotId.value}",
+            data = Output(pid.value, results, snapshotId.value),
         )
     }
 

@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.video
 
 import io.talevia.core.ClipId
-import io.talevia.core.ProjectId
 import io.talevia.core.TrackId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
@@ -23,62 +22,63 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * Clone a whole track — same kind, fresh ids, every clip copied with a fresh
- * [ClipId] but all attached state preserved (filters, transforms,
- * sourceBinding, audio envelope, text style).
+ * Clone one or many whole tracks atomically. Per-item shape: each entry
+ * carries its own sourceTrackId + optional newTrackId.
  *
- * [DuplicateClipTool] handles the single-clip case and [AddTrackTool] creates
- * an empty track — whole-track cloning sat between them with no direct path.
- * Concretely it unlocks:
+ * Per item: same kind, fresh ids, every clip copied with a fresh [ClipId] but
+ * all attached state preserved (filters, transforms, sourceBinding, audio
+ * envelope, text style).
  *
- *  - A/B a whole dialogue track: duplicate "dialogue", tweak volume / fade on
- *    the copy, compare by muting one or the other.
- *  - Mirror a subtitle track for a localisation variant: duplicate the English
- *    subtitles, then edit each text clip's body — timing and placement are
- *    carried across verbatim.
+ * Cloned tracks are **appended** to the timeline in the order listed. Optional
+ * per-item `newTrackId` must not collide with any existing track or any
+ * earlier-in-batch clone; omit to auto-generate `${sourceTrackId}-copy-${n}`.
  *
- * The cloned track is **appended** to the timeline (not inserted adjacent to
- * the source). Appending is predictable; the agent can re-order afterwards if
- * needed, and a stable position avoids surprising off-by-one track indexing
- * when the LLM refers back to an existing layout.
- *
- * [Input.newTrackId] is optional. When omitted a fresh stable id is chosen of
- * the form `${sourceTrackId}-copy-${n}` where `n` is the smallest non-negative
- * integer that doesn't collide with an existing track id — this stays
- * readable in transcripts and survives replay, unlike a random UUID.
- * When provided explicitly, a collision with any existing track id throws.
- *
- * Emits a [io.talevia.core.session.Part.TimelineSnapshot] so `revert_timeline`
- * can undo the clone in one call.
+ * All-or-nothing; one snapshot per call.
  */
 @OptIn(ExperimentalUuidApi::class)
 class DuplicateTrackTool(
     private val store: ProjectStore,
 ) : Tool<DuplicateTrackTool.Input, DuplicateTrackTool.Output> {
 
-    @Serializable data class Input(
-        val projectId: String,
+    @Serializable data class Item(
         val sourceTrackId: String,
         /**
          * Optional explicit id for the cloned track. Must not collide with an
-         * existing track id. Omit to auto-generate `${sourceTrackId}-copy-${n}`.
+         * existing track id nor with another item's newTrackId in the same batch.
+         * Omit to auto-generate `${sourceTrackId}-copy-${n}`.
          */
         val newTrackId: String? = null,
     )
 
-    @Serializable data class Output(
-        val projectId: String,
+    @Serializable data class Input(
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
+        val items: List<Item>,
+    )
+
+    @Serializable data class ItemResult(
         val sourceTrackId: String,
         val newTrackId: String,
         val clipCount: Int,
     )
 
-    override val id: String = "duplicate_track"
+    @Serializable data class Output(
+        val projectId: String,
+        val results: List<ItemResult>,
+        val snapshotId: String,
+    )
+
+    override val id: String = "duplicate_tracks"
     override val helpText: String =
-        "Clone a whole track — same kind, fresh ids, every clip copied with a fresh ClipId but " +
-            "all attached state preserved (filters, transforms, source bindings, audio envelope, " +
-            "text style). The new track is appended to the timeline. Optional newTrackId must not " +
-            "collide with an existing track. Emits a timeline snapshot."
+        "Clone one or many whole tracks atomically. Each item is { sourceTrackId, newTrackId? }. " +
+            "Every clip on the source gets a fresh ClipId but all attached state preserved. Cloned " +
+            "tracks are appended in the order listed. Optional newTrackId must not collide with " +
+            "existing or earlier-in-batch tracks; omit to auto-generate '<sourceTrackId>-copy-<n>'. " +
+            "All-or-nothing; one snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")
@@ -86,67 +86,80 @@ class DuplicateTrackTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
-            putJsonObject("sourceTrackId") { put("type", "string") }
-            putJsonObject("newTrackId") {
+            putJsonObject("projectId") {
                 put("type", "string")
                 put(
                     "description",
-                    "Optional explicit id for the cloned track. Defaults to '<sourceTrackId>-copy-<n>'. " +
-                        "Fails if an existing track has the same id.",
+                    "Optional — omit to use the session's current project (set via switch_project).",
                 )
             }
+            putJsonObject("items") {
+                put("type", "array")
+                put("description", "Track duplications. At least one required.")
+                putJsonObject("items") {
+                    put("type", "object")
+                    putJsonObject("properties") {
+                        putJsonObject("sourceTrackId") { put("type", "string") }
+                        putJsonObject("newTrackId") {
+                            put("type", "string")
+                            put(
+                                "description",
+                                "Optional explicit id for the cloned track. Defaults to " +
+                                    "'<sourceTrackId>-copy-<n>'. Fails if collides with existing " +
+                                    "or earlier-in-batch track.",
+                            )
+                        }
+                    }
+                    put("required", JsonArray(listOf(JsonPrimitive("sourceTrackId"))))
+                    put("additionalProperties", false)
+                }
+            }
         }
-        put(
-            "required",
-            JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("sourceTrackId"))),
-        )
+        put("required", JsonArray(listOf(JsonPrimitive("items"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        var resolvedNewId = ""
-        var clipCount = 0
-        var sourceKind = ""
+        require(input.items.isNotEmpty()) { "items must not be empty" }
+        val pid = ctx.resolveProjectId(input.projectId)
+        val results = mutableListOf<ItemResult>()
 
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
-            val source = project.timeline.tracks.firstOrNull { it.id.value == input.sourceTrackId }
-                ?: error("sourceTrackId '${input.sourceTrackId}' not found in project ${input.projectId}")
+        val updated = store.mutate(pid) { project ->
+            var tracks = project.timeline.tracks
+            input.items.forEachIndexed { idx, item ->
+                val source = tracks.firstOrNull { it.id.value == item.sourceTrackId }
+                    ?: error("items[$idx]: sourceTrackId '${item.sourceTrackId}' not found in project ${pid.value}")
 
-            val existingIds = project.timeline.tracks.map { it.id.value }.toSet()
-            val chosenId = if (input.newTrackId != null) {
-                val requested = input.newTrackId
-                require(requested !in existingIds) {
-                    "newTrackId '$requested' collides with an existing track in project ${input.projectId}"
+                val existingIds = tracks.map { it.id.value }.toSet()
+                val chosenId = if (item.newTrackId != null) {
+                    val requested = item.newTrackId
+                    require(requested !in existingIds) {
+                        "items[$idx] (${item.sourceTrackId}): newTrackId '$requested' collides with an " +
+                            "existing track in project ${pid.value}"
+                    }
+                    requested
+                } else {
+                    generateCopyId(item.sourceTrackId, existingIds)
                 }
-                requested
-            } else {
-                generateCopyId(input.sourceTrackId, existingIds)
+
+                val clonedClips = source.clips.map { cloneClip(it) }
+                val cloned: Track = rebuildTrackWithNewId(source, TrackId(chosenId), clonedClips)
+
+                tracks = tracks + cloned
+                results += ItemResult(
+                    sourceTrackId = item.sourceTrackId,
+                    newTrackId = chosenId,
+                    clipCount = clonedClips.size,
+                )
             }
-
-            val clonedClips = source.clips.map { cloneClip(it) }
-            val cloned: Track = rebuildTrackWithNewId(source, TrackId(chosenId), clonedClips)
-
-            resolvedNewId = chosenId
-            clipCount = clonedClips.size
-            sourceKind = trackKindOf(source)
-
-            val tracks = project.timeline.tracks + cloned
             project.copy(timeline = project.timeline.copy(tracks = tracks))
         }
 
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
-        val out = Output(
-            projectId = input.projectId,
-            sourceTrackId = input.sourceTrackId,
-            newTrackId = resolvedNewId,
-            clipCount = clipCount,
-        )
         return ToolResult(
-            title = "duplicate track ${input.sourceTrackId} → $resolvedNewId",
-            outputForLlm = "Duplicated $sourceKind track ${input.sourceTrackId} as $resolvedNewId " +
-                "with $clipCount clip(s) in project ${input.projectId}. Timeline snapshot: ${snapshotId.value}",
-            data = out,
+            title = "duplicate ${results.size} track(s)",
+            outputForLlm = "Duplicated ${results.size} track(s). Snapshot: ${snapshotId.value}",
+            data = Output(pid.value, results, snapshotId.value),
         )
     }
 
@@ -173,12 +186,5 @@ class DuplicateTrackTool(
         is Track.Audio -> Track.Audio(id = newId, clips = clips)
         is Track.Subtitle -> Track.Subtitle(id = newId, clips = clips)
         is Track.Effect -> Track.Effect(id = newId, clips = clips)
-    }
-
-    private fun trackKindOf(track: Track): String = when (track) {
-        is Track.Video -> "video"
-        is Track.Audio -> "audio"
-        is Track.Subtitle -> "subtitle"
-        is Track.Effect -> "effect"
     }
 }

@@ -20,33 +20,25 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 
 /**
- * Surgical edits on an existing [Clip.Text] — text body or style
- * fields. The missing counterpart to `add_subtitles`:
- * once a subtitle is on the timeline, fixing a typo or bumping the
- * font size should not require removing and re-adding the clip (which
- * drops the id, breaks any downstream tool state that captured the
- * id, and resets transforms).
+ * Surgical edits on one or many [Clip.Text] clips — text body and/or style
+ * fields, in a single atomic call. Per-item shape: each entry carries its
+ * own clipId + any subset of fields; at least one field per item must be
+ * set.
  *
- * Partial-patch semantics — optional per-field overrides, at least one required:
+ * Partial-patch semantics (per item):
  *   - `null` → keep current value.
  *   - A provided value → replace.
  *   - `""` on `backgroundColor` → clear (set to null).
  *
- * Works on text clips on any track kind (Subtitle or Effect). Emits
- * a timeline snapshot so the edit is revertable. `timeRange` is not
- * touched — use `move_clip` / `trim_clip` for positional edits.
+ * Works on text clips on any track kind (Subtitle or Effect). `timeRange`
+ * is not touched — use `move_clips` / `trim_clips` for positional edits.
+ * All-or-nothing; one snapshot per call.
  */
 class EditTextClipTool(
     private val store: ProjectStore,
 ) : Tool<EditTextClipTool.Input, EditTextClipTool.Output> {
 
-    @Serializable data class Input(
-        /**
-         * Optional — omit to default to the session's current project binding
-         * (`ToolContext.currentProjectId`). Required when the session is
-         * unbound; fail loud points the agent at `switch_project`.
-         */
-        val projectId: String? = null,
+    @Serializable data class Item(
         val clipId: String,
         /** New body text. Null = keep. Must be non-blank when provided. */
         val newText: String? = null,
@@ -59,16 +51,33 @@ class EditTextClipTool(
         val italic: Boolean? = null,
     )
 
-    @Serializable data class Output(
+    @Serializable data class Input(
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
+        val items: List<Item>,
+    )
+
+    @Serializable data class ItemResult(
         val clipId: String,
         val updatedFields: List<String>,
     )
 
-    override val id: String = "edit_text_clip"
+    @Serializable data class Output(
+        val projectId: String,
+        val results: List<ItemResult>,
+        val snapshotId: String,
+    )
+
+    override val id: String = "edit_text_clips"
     override val helpText: String =
-        "Edit an existing text clip's body and/or style fields in place. " +
-            "All fields optional; at least one required. Preserves clip id, " +
-            "track, transforms, and timeRange."
+        "Edit one or many text clips' body and/or style fields in place, atomically. Each item " +
+            "carries its own clipId + any subset of { newText, fontFamily, fontSize, color, " +
+            "backgroundColor, bold, italic }; at least one field per item is required. Preserves " +
+            "clip ids, tracks, transforms, and timeRanges. All-or-nothing; one snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")
@@ -84,89 +93,119 @@ class EditTextClipTool(
                     "Optional — omit to use the session's current project (set via switch_project).",
                 )
             }
-            putJsonObject("clipId") { put("type", "string") }
-            putJsonObject("newText") {
-                put("type", "string")
-                put("description", "Replace the text body. Must be non-blank.")
+            putJsonObject("items") {
+                put("type", "array")
+                put("description", "Text edits to apply. At least one required.")
+                putJsonObject("items") {
+                    put("type", "object")
+                    putJsonObject("properties") {
+                        putJsonObject("clipId") { put("type", "string") }
+                        putJsonObject("newText") {
+                            put("type", "string")
+                            put("description", "Replace the text body. Must be non-blank.")
+                        }
+                        putJsonObject("fontFamily") { put("type", "string") }
+                        putJsonObject("fontSize") {
+                            put("type", "number")
+                            put("description", "Point size; must be > 0.")
+                        }
+                        putJsonObject("color") {
+                            put("type", "string")
+                            put("description", "CSS-style hex (e.g. #FFFFFF).")
+                        }
+                        putJsonObject("backgroundColor") {
+                            put("type", "string")
+                            put("description", "Background hex; '' clears (transparent).")
+                        }
+                        putJsonObject("bold") { put("type", "boolean") }
+                        putJsonObject("italic") { put("type", "boolean") }
+                    }
+                    put("required", JsonArray(listOf(JsonPrimitive("clipId"))))
+                    put("additionalProperties", false)
+                }
             }
-            putJsonObject("fontFamily") { put("type", "string") }
-            putJsonObject("fontSize") { put("type", "number"); put("description", "Point size; must be > 0.") }
-            putJsonObject("color") { put("type", "string"); put("description", "CSS-style hex (e.g. #FFFFFF).") }
-            putJsonObject("backgroundColor") {
-                put("type", "string")
-                put("description", "Background hex; '' clears (transparent).")
-            }
-            putJsonObject("bold") { put("type", "boolean") }
-            putJsonObject("italic") { put("type", "boolean") }
         }
-        put(
-            "required",
-            JsonArray(listOf(JsonPrimitive("clipId"))),
-        )
+        put("required", JsonArray(listOf(JsonPrimitive("items"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val changed = buildList {
-            if (input.newText != null) add("text")
-            if (input.fontFamily != null) add("fontFamily")
-            if (input.fontSize != null) add("fontSize")
-            if (input.color != null) add("color")
-            if (input.backgroundColor != null) add("backgroundColor")
-            if (input.bold != null) add("bold")
-            if (input.italic != null) add("italic")
+        require(input.items.isNotEmpty()) { "items must not be empty" }
+        input.items.forEachIndexed { idx, item ->
+            val changed = buildList {
+                if (item.newText != null) add("text")
+                if (item.fontFamily != null) add("fontFamily")
+                if (item.fontSize != null) add("fontSize")
+                if (item.color != null) add("color")
+                if (item.backgroundColor != null) add("backgroundColor")
+                if (item.bold != null) add("bold")
+                if (item.italic != null) add("italic")
+            }
+            require(changed.isNotEmpty()) {
+                "items[$idx] (${item.clipId}): at least one field to change is required"
+            }
+            item.newText?.let { require(it.isNotBlank()) { "items[$idx] (${item.clipId}): newText must be non-blank" } }
+            item.fontFamily?.let { require(it.isNotBlank()) { "items[$idx] (${item.clipId}): fontFamily must be non-blank" } }
+            item.fontSize?.let { require(it > 0f) { "items[$idx] (${item.clipId}): fontSize must be > 0 (got $it)" } }
+            item.color?.let { require(it.isNotBlank()) { "items[$idx] (${item.clipId}): color must be non-blank" } }
         }
-        require(changed.isNotEmpty()) { "edit_text_clip requires at least one field to change" }
-        input.newText?.let { require(it.isNotBlank()) { "newText must be non-blank" } }
-        input.fontFamily?.let { require(it.isNotBlank()) { "fontFamily must be non-blank" } }
-        input.fontSize?.let { require(it > 0f) { "fontSize must be > 0 (got $it)" } }
-        input.color?.let { require(it.isNotBlank()) { "color must be non-blank" } }
 
         val pid = ctx.resolveProjectId(input.projectId)
-        var found = false
+        val results = mutableListOf<ItemResult>()
+
         val updated = store.mutate(pid) { project ->
-            val newTracks = project.timeline.tracks.map { track ->
-                val target = track.clips.firstOrNull { it.id.value == input.clipId } ?: return@map track
-                found = true
-                if (target !is Clip.Text) error("edit_text_clip only supports text clips")
+            var tracks = project.timeline.tracks
+            input.items.forEachIndexed { idx, item ->
+                val hit = tracks.firstNotNullOfOrNull { track ->
+                    track.clips.firstOrNull { it.id.value == item.clipId }?.let { track to it }
+                } ?: error("items[$idx]: clip ${item.clipId} not found in project ${pid.value}")
+                val (track, clip) = hit
+                val target = clip as? Clip.Text
+                    ?: error("items[$idx]: edit_text_clips only supports text clips (clip ${item.clipId})")
+
+                val changed = buildList {
+                    if (item.newText != null) add("text")
+                    if (item.fontFamily != null) add("fontFamily")
+                    if (item.fontSize != null) add("fontSize")
+                    if (item.color != null) add("color")
+                    if (item.backgroundColor != null) add("backgroundColor")
+                    if (item.bold != null) add("bold")
+                    if (item.italic != null) add("italic")
+                }
                 val newStyle = TextStyle(
-                    fontFamily = input.fontFamily ?: target.style.fontFamily,
-                    fontSize = input.fontSize ?: target.style.fontSize,
-                    color = input.color ?: target.style.color,
-                    backgroundColor = when (input.backgroundColor) {
+                    fontFamily = item.fontFamily ?: target.style.fontFamily,
+                    fontSize = item.fontSize ?: target.style.fontSize,
+                    color = item.color ?: target.style.color,
+                    backgroundColor = when (item.backgroundColor) {
                         null -> target.style.backgroundColor
                         "" -> null
-                        else -> input.backgroundColor
+                        else -> item.backgroundColor
                     },
-                    bold = input.bold ?: target.style.bold,
-                    italic = input.italic ?: target.style.italic,
+                    bold = item.bold ?: target.style.bold,
+                    italic = item.italic ?: target.style.italic,
                 )
                 val newClip = target.copy(
-                    text = input.newText ?: target.text,
+                    text = item.newText ?: target.text,
                     style = newStyle,
                 )
-                replaceClip(track, target, newClip)
+                val rebuilt = track.clips.map { if (it.id == target.id) newClip else it }
+                val newTrack = when (track) {
+                    is Track.Video -> track.copy(clips = rebuilt)
+                    is Track.Audio -> track.copy(clips = rebuilt)
+                    is Track.Subtitle -> track.copy(clips = rebuilt)
+                    is Track.Effect -> track.copy(clips = rebuilt)
+                }
+                tracks = tracks.map { if (it.id == newTrack.id) newTrack else it }
+                results += ItemResult(clipId = item.clipId, updatedFields = changed)
             }
-            project.copy(timeline = project.timeline.copy(tracks = newTracks))
+            project.copy(timeline = project.timeline.copy(tracks = tracks))
         }
-        if (!found) error("clip ${input.clipId} not found in project ${pid.value}")
 
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
         return ToolResult(
-            title = "edit text clip ${input.clipId}",
-            outputForLlm = "Updated text clip ${input.clipId} (${changed.joinToString(", ")}). " +
-                "Timeline snapshot: ${snapshotId.value}",
-            data = Output(input.clipId, changed),
+            title = "edit text × ${results.size}",
+            outputForLlm = "Updated ${results.size} text clip(s). Snapshot: ${snapshotId.value}",
+            data = Output(pid.value, results, snapshotId.value),
         )
-    }
-
-    private fun replaceClip(track: Track, removed: Clip, replacement: Clip): Track {
-        val clips = track.clips.map { if (it.id == removed.id) replacement else it }
-        return when (track) {
-            is Track.Video -> track.copy(clips = clips)
-            is Track.Audio -> track.copy(clips = clips)
-            is Track.Subtitle -> track.copy(clips = clips)
-            is Track.Effect -> track.copy(clips = clips)
-        }
     }
 }

@@ -89,10 +89,13 @@ class SessionRevertTest {
         )
         val addClip = AddClipTool(projects, media)
         val addResp = addClip.execute(
-            AddClipTool.Input(projectId = projectId.value, assetId = asset.id.value),
+            AddClipTool.Input(
+                projectId = projectId.value,
+                items = listOf(AddClipTool.Item(assetId = asset.id.value)),
+            ),
             ctxFor("c-add", a1),
         )
-        val clipId = addResp.data.clipId
+        val clipId = addResp.data.results.single().clipId
         assertEquals(1, projects.get(projectId)!!.timeline.tracks.flatMap { it.clips }.size)
 
         // Turn 2: user message u2, assistant a2 running apply_filter → second mutation.

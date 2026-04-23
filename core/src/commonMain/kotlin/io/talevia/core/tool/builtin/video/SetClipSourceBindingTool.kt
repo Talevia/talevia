@@ -1,6 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
@@ -21,53 +20,59 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 
 /**
- * Rebind an existing clip to a new set of [io.talevia.core.domain.source.SourceNode] ids,
- * or clear the binding entirely. Closes the VISION §4 "professional path" gap where
- * `sourceBinding` is populated at creation time (by `add_clip` or the AIGC pipeline copying
- * from the lockfile) but has no post-hoc mutation path: a professional user wanting to
- * retroactively tie a hand-authored clip to a `character_ref`, or swap which upstream
- * source nodes a clip depends on, would otherwise have to delete and re-add the clip —
- * which drops the id, orphans any downstream tool state, and resets transforms / filters.
+ * Rebind one or many existing clips to a new set of
+ * [io.talevia.core.domain.source.SourceNode] ids — or clear the binding.
+ * Per-item shape: each entry carries its own clipId + replacement binding list.
  *
  * Semantics:
- *  - `sourceBinding` is the full replacement set. An empty list clears the binding
- *    (valid — matches the "hand-authored, not incremental-compile eligible" state
- *    documented on [Clip.sourceBinding]).
- *  - Every provided id must resolve in `project.source.byId`. Unknown ids fail-loud with
- *    the full missing set so the agent can decide whether to `add_source_node` first
- *    or drop the offending id.
- *  - Works uniformly across all three Clip variants (Video / Audio / Text) — each has its
- *    own `copy()` because they're sealed subclasses, so the replacement walks a
- *    `when`-expression.
- *  - Everything else on the clip — timeRange, sourceRange, filters, transforms, asset,
- *    volume, text, style — is preserved. This is a pure rebind.
- *  - Emits a `Part.TimelineSnapshot` post-mutation so `revert_timeline` can undo, matching
- *    every other timeline-mutating tool.
+ *  - `sourceBinding` is the full replacement set per item. An empty list
+ *    clears that clip's binding.
+ *  - Every provided source-node id must resolve in `project.source.byId`.
+ *    Unknown ids (across any item) fail-loud with the full missing set.
+ *  - Works uniformly across all three Clip variants (Video / Audio / Text).
+ *  - Everything else on the clip — timeRange, sourceRange, filters,
+ *    transforms, asset, volume, text, style — is preserved.
+ *  - All-or-nothing. One `Part.TimelineSnapshot` per call.
  */
 class SetClipSourceBindingTool(
     private val store: ProjectStore,
 ) : Tool<SetClipSourceBindingTool.Input, SetClipSourceBindingTool.Output> {
 
-    @Serializable data class Input(
-        val projectId: String,
+    @Serializable data class Item(
         val clipId: String,
         /** Full replacement set of source-node ids. Empty list clears the binding. */
         val sourceBinding: List<String>,
     )
 
-    @Serializable data class Output(
-        val projectId: String,
+    @Serializable data class Input(
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
+        val items: List<Item>,
+    )
+
+    @Serializable data class ItemResult(
         val clipId: String,
         val previousBinding: List<String>,
         val newBinding: List<String>,
     )
 
-    override val id: String = "set_clip_source_binding"
+    @Serializable data class Output(
+        val projectId: String,
+        val results: List<ItemResult>,
+        val snapshotId: String,
+    )
+
+    override val id: String = "set_clip_source_bindings"
     override val helpText: String =
-        "Replace (or clear) an existing clip's sourceBinding — the set of source-node ids " +
-            "it derives from. Use this to retroactively tie a hand-authored clip to a " +
-            "character_ref, or swap which upstream nodes a clip depends on, without losing " +
-            "the clip id, filters, or transforms. Empty list clears the binding."
+        "Replace (or clear) one or many clips' sourceBinding — the set of source-node ids each " +
+            "clip derives from. Use this to retroactively tie hand-authored clips to a " +
+            "character_ref, or swap which upstream nodes clips depend on, without losing clip " +
+            "ids, filters, or transforms. Empty list clears a clip's binding. All-or-nothing: " +
+            "unknown source-node ids in any item abort the whole batch."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")
@@ -76,81 +81,89 @@ class SetClipSourceBindingTool(
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
         putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
-            putJsonObject("clipId") { put("type", "string") }
-            putJsonObject("sourceBinding") {
-                put("type", "array")
-                putJsonObject("items") { put("type", "string") }
+            putJsonObject("projectId") {
+                put("type", "string")
                 put(
                     "description",
-                    "Full replacement set of source-node ids. Empty list clears the binding.",
+                    "Optional — omit to use the session's current project (set via switch_project).",
                 )
             }
+            putJsonObject("items") {
+                put("type", "array")
+                put("description", "Rebind operations. At least one required.")
+                putJsonObject("items") {
+                    put("type", "object")
+                    putJsonObject("properties") {
+                        putJsonObject("clipId") { put("type", "string") }
+                        putJsonObject("sourceBinding") {
+                            put("type", "array")
+                            putJsonObject("items") { put("type", "string") }
+                            put(
+                                "description",
+                                "Full replacement set of source-node ids. Empty list clears the binding.",
+                            )
+                        }
+                    }
+                    put(
+                        "required",
+                        JsonArray(listOf(JsonPrimitive("clipId"), JsonPrimitive("sourceBinding"))),
+                    )
+                    put("additionalProperties", false)
+                }
+            }
         }
-        put(
-            "required",
-            JsonArray(
-                listOf(
-                    JsonPrimitive("projectId"),
-                    JsonPrimitive("clipId"),
-                    JsonPrimitive("sourceBinding"),
-                ),
-            ),
-        )
+        put("required", JsonArray(listOf(JsonPrimitive("items"))))
         put("additionalProperties", false)
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        var previousBinding: List<String> = emptyList()
-        val newBindingSet = input.sourceBinding.map { SourceNodeId(it) }.toSet()
+        require(input.items.isNotEmpty()) { "items must not be empty" }
+        val pid = ctx.resolveProjectId(input.projectId)
+        val results = mutableListOf<ItemResult>()
 
-        val updated = store.mutate(ProjectId(input.projectId)) { project ->
-            val missing = newBindingSet.filter { it !in project.source.byId }
-            require(missing.isEmpty()) {
-                "unknown source node ids: ${missing.joinToString(", ") { it.value }}"
+        val updated = store.mutate(pid) { project ->
+            var tracks = project.timeline.tracks
+            input.items.forEachIndexed { idx, item ->
+                val newBindingSet = item.sourceBinding.map { SourceNodeId(it) }.toSet()
+                val missing = newBindingSet.filter { it !in project.source.byId }
+                require(missing.isEmpty()) {
+                    "items[$idx] (${item.clipId}): unknown source node ids: " +
+                        missing.joinToString(", ") { it.value }
+                }
+
+                val hit = tracks.firstNotNullOfOrNull { track ->
+                    track.clips.firstOrNull { it.id.value == item.clipId }?.let { track to it }
+                } ?: error("items[$idx]: clip ${item.clipId} not found in project ${pid.value}")
+                val (track, clip) = hit
+                val previousBinding = clip.sourceBinding.map { it.value }.sorted()
+
+                val rebound: Clip = when (clip) {
+                    is Clip.Video -> clip.copy(sourceBinding = newBindingSet)
+                    is Clip.Audio -> clip.copy(sourceBinding = newBindingSet)
+                    is Clip.Text -> clip.copy(sourceBinding = newBindingSet)
+                }
+                val rebuilt = track.clips.map { if (it.id == clip.id) rebound else it }
+                val newTrack = when (track) {
+                    is Track.Video -> track.copy(clips = rebuilt)
+                    is Track.Audio -> track.copy(clips = rebuilt)
+                    is Track.Subtitle -> track.copy(clips = rebuilt)
+                    is Track.Effect -> track.copy(clips = rebuilt)
+                }
+                tracks = tracks.map { if (it.id == newTrack.id) newTrack else it }
+                results += ItemResult(
+                    clipId = item.clipId,
+                    previousBinding = previousBinding,
+                    newBinding = newBindingSet.map { it.value }.sorted(),
+                )
             }
-
-            val target = project.timeline.tracks
-                .flatMap { track -> track.clips.map { track to it } }
-                .firstOrNull { (_, clip) -> clip.id.value == input.clipId }
-                ?: error("clip ${input.clipId} not found in project ${input.projectId}")
-            val (sourceTrack, clip) = target
-            previousBinding = clip.sourceBinding.map { it.value }.sorted()
-
-            val rebound: Clip = when (clip) {
-                is Clip.Video -> clip.copy(sourceBinding = newBindingSet)
-                is Clip.Audio -> clip.copy(sourceBinding = newBindingSet)
-                is Clip.Text -> clip.copy(sourceBinding = newBindingSet)
-            }
-
-            val newTracks = project.timeline.tracks.map { track ->
-                if (track.id == sourceTrack.id) replaceClip(track, clip, rebound) else track
-            }
-            project.copy(timeline = project.timeline.copy(tracks = newTracks))
+            project.copy(timeline = project.timeline.copy(tracks = tracks))
         }
 
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
-        val newBindingList = newBindingSet.map { it.value }.sorted()
         return ToolResult(
-            title = "rebind clip ${input.clipId}",
-            outputForLlm = "Rebound clip ${input.clipId} from [${previousBinding.joinToString(", ")}] " +
-                "to [${newBindingList.joinToString(", ")}]. Timeline snapshot: ${snapshotId.value}",
-            data = Output(
-                projectId = input.projectId,
-                clipId = input.clipId,
-                previousBinding = previousBinding,
-                newBinding = newBindingList,
-            ),
+            title = "rebind × ${results.size}",
+            outputForLlm = "Rebound source bindings on ${results.size} clip(s). Snapshot: ${snapshotId.value}",
+            data = Output(pid.value, results, snapshotId.value),
         )
-    }
-
-    private fun replaceClip(track: Track, removed: Clip, replacement: Clip): Track {
-        val clips = track.clips.map { if (it.id == removed.id) replacement else it }
-        return when (track) {
-            is Track.Video -> track.copy(clips = clips)
-            is Track.Audio -> track.copy(clips = clips)
-            is Track.Subtitle -> track.copy(clips = clips)
-            is Track.Effect -> track.copy(clips = clips)
-        }
     }
 }
