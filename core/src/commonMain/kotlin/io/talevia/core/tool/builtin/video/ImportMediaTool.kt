@@ -6,6 +6,8 @@ import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
+import io.talevia.core.platform.BundleBlobWriter
+import io.talevia.core.platform.FileBundleBlobWriter
 import io.talevia.core.platform.NoopProxyGenerator
 import io.talevia.core.platform.ProxyGenerator
 import io.talevia.core.platform.VideoEngine
@@ -28,8 +30,6 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 import okio.FileSystem
 import okio.Path.Companion.toPath
-import okio.buffer
-import okio.use
 import kotlin.time.DurationUnit
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -69,6 +69,16 @@ class ImportMediaTool(
      * tests that exercise bundle copy can inject a fake.
      */
     private val fs: FileSystem = FileSystem.SYSTEM,
+    /**
+     * Streams bytes into `<bundleRoot>/media/<assetId>.<ext>` when
+     * [Input.copy_into_bundle] is true. Defaults to
+     * [FileBundleBlobWriter] over [projects] / [fs] so production wiring is
+     * automatic; tests can inject a fake. Sharing this primitive with the
+     * AIGC tools means the tmpfile + atomicMove + ext-normalisation logic
+     * lives in exactly one place (see
+     * `docs/decisions/2026-04-23-debt-streaming-bundle-blob-writer.md`).
+     */
+    private val bundleBlobWriter: BundleBlobWriter = FileBundleBlobWriter(projects, fs),
     /**
      * Threshold in bytes for the `copy_into_bundle = null` (auto) mode:
      * files at or below this size are copied into the bundle (travel with
@@ -393,7 +403,7 @@ class ImportMediaTool(
         path: String,
         bundleRoot: okio.Path?,
         copyChoice: Boolean?,
-        @Suppress("UNUSED_PARAMETER") projectId: ProjectId,
+        projectId: ProjectId,
     ): ProbeResult = runCatching {
         val metadata = engine.probe(MediaSource.File(path))
         val newAssetId = AssetId(Uuid.random().toString())
@@ -410,24 +420,19 @@ class ImportMediaTool(
             requireNotNull(bundleRoot) { "bundleRoot must be non-null when shouldCopy is true" }
             val ext = path.substringAfterLast('.', missingDelimiterValue = "bin")
                 .ifBlank { "bin" }
-            val mediaDir = bundleRoot.resolve("media")
-            fs.createDirectories(mediaDir)
-            val target = mediaDir.resolve("${newAssetId.value}.$ext")
-            // Stream the bytes through okio. atomicMove via a tmpfile keeps a
-            // half-copied file from leaking if the JVM dies mid-copy.
-            val tmp = mediaDir.resolve(
-                "${target.name}.tmp.${
-                    kotlin.random.Random.nextLong()
-                        .toString(radix = 36)
-                        .removePrefix("-")
-                }",
+            // Stream through BundleBlobWriter so the tmpfile + atomicMove
+            // logic lives in exactly one place (shared with AIGC byte-path
+            // writes via the same primitive). Bytes flow Source → sink
+            // without materialising in a ByteArray — bundle copies of
+            // 500 MB footage don't peak RSS.
+            val bundleSource = bundleBlobWriter.writeBlobStreaming(
+                projectId = projectId,
+                assetId = newAssetId,
+                source = fs.source(path.toPath()),
+                format = ext,
             )
-            fs.source(path.toPath()).use { src ->
-                fs.sink(tmp).buffer().use { sink -> sink.writeAll(src) }
-            }
-            fs.atomicMove(tmp, target)
-            sourcePath = target.toString()
-            MediaSource.BundleFile("media/${target.name}")
+            sourcePath = bundleRoot.resolve(bundleSource.relativePath).toString()
+            bundleSource
         }
         val asset = MediaAsset(id = newAssetId, source = source, metadata = metadata)
         val proxies = runCatching { proxyGenerator.generate(asset, sourcePath) }.getOrDefault(emptyList())

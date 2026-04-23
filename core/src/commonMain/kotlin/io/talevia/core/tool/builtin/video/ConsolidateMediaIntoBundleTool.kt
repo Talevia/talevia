@@ -1,10 +1,13 @@
 package io.talevia.core.tool.builtin.video
 
 import io.talevia.core.AssetId
+import io.talevia.core.ProjectId
 import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
+import io.talevia.core.platform.BundleBlobWriter
+import io.talevia.core.platform.FileBundleBlobWriter
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
@@ -19,8 +22,6 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 import okio.FileSystem
 import okio.Path.Companion.toPath
-import okio.buffer
-import okio.use
 
 /**
  * Copy every `MediaSource.File` asset on the project into the bundle's
@@ -36,17 +37,17 @@ import okio.use
  * twice on the same project is a no-op (second call reports
  * `consolidated=0, alreadyBundled=N`).
  *
- * Streams bytes via okio `source`/`sink.writeAll` + atomic `tmpfile`
- * move so a gigabyte rush doesn't live in memory mid-copy and so a
- * crashed JVM doesn't leak a half-written `.mp4` in `media/`. Same copy
- * pattern as `import_media`'s `copy_into_bundle=true` branch — the two
- * tools' inline streaming copy is logged as a pain-point for eventual
- * consolidation behind a streaming `BundleBlobWriter` variant.
+ * Streams through [BundleBlobWriter.writeBlobStreaming] + atomic tmpfile
+ * move so a gigabyte copy doesn't live in memory mid-run and so a crashed
+ * JVM doesn't leak a half-written `.mp4` in `media/`. Same primitive as
+ * `import_media`'s `copy_into_bundle=true` branch — the shared writer
+ * keeps the tmpfile + atomicMove logic in one place.
  */
 class ConsolidateMediaIntoBundleTool(
     private val projects: ProjectStore,
     private val fs: FileSystem = FileSystem.SYSTEM,
     private val clock: Clock = Clock.System,
+    private val bundleBlobWriter: BundleBlobWriter = FileBundleBlobWriter(projects, fs),
 ) : Tool<ConsolidateMediaIntoBundleTool.Input, ConsolidateMediaIntoBundleTool.Output> {
 
     @Serializable data class Input(
@@ -110,13 +111,17 @@ class ConsolidateMediaIntoBundleTool(
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         val pid = ctx.resolveProjectId(input.projectId)
-        val bundleRoot = projects.pathOf(pid)
+        // Keep the same "must be registered at a path" guard the inline
+        // implementation had — `BundleBlobWriter.writeBlobStreaming` would
+        // throw IllegalStateException on an unregistered project, but a
+        // single early error with the specific next-step hint reads better
+        // for the LLM / operator.
+        projects.pathOf(pid)
             ?: error(
                 "consolidate_media_into_bundle requires a file-backed ProjectStore with the " +
                     "project registered at a path. Project ${pid.value} has no registered bundle " +
                     "path; open_project / create_project(path=...) first.",
             )
-        val mediaDir = bundleRoot.resolve("media")
 
         val project = projects.get(pid) ?: error("Project ${pid.value} not found")
 
@@ -132,7 +137,7 @@ class ConsolidateMediaIntoBundleTool(
                 is MediaSource.Http -> unsupported += 1
                 is MediaSource.Platform -> unsupported += 1
                 is MediaSource.File -> {
-                    val outcome = consolidateOne(asset, src, mediaDir)
+                    val outcome = consolidateOne(asset, src, pid)
                     outcome.consolidated?.let { (newAsset, summary) ->
                         replacements[asset.id] = newAsset
                         consolidated += summary
@@ -179,10 +184,10 @@ class ConsolidateMediaIntoBundleTool(
         val failure: FailedConsolidation? = null,
     )
 
-    private fun consolidateOne(
+    private suspend fun consolidateOne(
         asset: MediaAsset,
         src: MediaSource.File,
-        mediaDir: okio.Path,
+        projectId: ProjectId,
     ): OneOutcome = runCatching {
         val sourcePath = src.path.toPath()
         if (!fs.exists(sourcePath)) {
@@ -195,26 +200,24 @@ class ConsolidateMediaIntoBundleTool(
             )
         }
         val ext = src.path.substringAfterLast('.', missingDelimiterValue = "bin").ifBlank { "bin" }
-        fs.createDirectories(mediaDir)
-        val target = mediaDir.resolve("${asset.id.value}.$ext")
-        val tmp = mediaDir.resolve(
-            "${target.name}.tmp.${kotlin.random.Random.nextLong().toString(radix = 36).removePrefix("-")}",
+        // Stream through BundleBlobWriter so the tmpfile + atomicMove
+        // primitive is shared with import_media + AIGC byte-path writes.
+        val newSource = bundleBlobWriter.writeBlobStreaming(
+            projectId = projectId,
+            assetId = asset.id,
+            source = fs.source(sourcePath),
+            format = ext,
         )
-        fs.source(sourcePath).use { input ->
-            fs.sink(tmp).buffer().use { sink -> sink.writeAll(input) }
-        }
-        fs.atomicMove(tmp, target)
 
-        val bundleRelative = "media/${target.name}"
         val newAsset = asset.copy(
-            source = MediaSource.BundleFile(bundleRelative),
+            source = newSource,
             updatedAtEpochMs = clock.now().toEpochMilliseconds(),
         )
         OneOutcome(
             consolidated = newAsset to ConsolidatedAsset(
                 assetId = asset.id.value,
                 originalPath = src.path,
-                bundleRelativePath = bundleRelative,
+                bundleRelativePath = newSource.relativePath,
             ),
         )
     }.getOrElse { t ->
