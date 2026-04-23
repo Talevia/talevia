@@ -3,7 +3,6 @@ package io.talevia.core.tool.builtin.project
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.ProjectSnapshotId
@@ -23,8 +22,8 @@ import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.builtin.project.query.TimelineDiffRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.builtins.ListSerializer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -95,10 +94,7 @@ class ProjectQueryTimelineDiffTest {
         ).data
         assertEquals(1, out.total)
         assertEquals(1, out.returned)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(TimelineDiffRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(TimelineDiffRow.serializer())
         return rows.single()
     }
 

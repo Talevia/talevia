@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.source
 
 import io.talevia.core.CallId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
@@ -15,8 +14,10 @@ import io.talevia.core.domain.source.SourceNode
 import io.talevia.core.domain.source.SourceRef
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.source.query.DagSummaryRow
+import io.talevia.core.tool.builtin.source.query.NodeRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -78,10 +79,7 @@ class SourceQueryToolTest {
         ).data
         assertEquals("nodes", out.select)
         assertEquals(3, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(NodeRow.serializer())
         // Default sortBy=id ascending.
         assertEquals(listOf("a-node", "b-node", "c-node"), rows.map { it.id })
     }
@@ -110,10 +108,7 @@ class SourceQueryToolTest {
             rig.ctx,
         ).data
         assertEquals(1, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(NodeRow.serializer())
         assertEquals("lily", rows.first().id)
     }
 
@@ -143,10 +138,7 @@ class SourceQueryToolTest {
             rig.ctx,
         ).data
         assertEquals(1, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(NodeRow.serializer())
         assertEquals("mei", rows.first().id)
         assertNotNull(rows.first().snippet)
         assertNotNull(rows.first().matchOffset)
@@ -191,20 +183,14 @@ class SourceQueryToolTest {
             SourceQueryTool.Input(select = "nodes", projectId = rig.pid.value),
             rig.ctx,
         ).data
-        val withoutRows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            withoutBody.rows,
-        )
+        val withoutRows = withoutBody.rows.decodeRowsAs(NodeRow.serializer())
         assertNull(withoutRows.first().body)
 
         val withBody = SourceQueryTool(rig.store).execute(
             SourceQueryTool.Input(select = "nodes", projectId = rig.pid.value, includeBody = true),
             rig.ctx,
         ).data
-        val withRows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            withBody.rows,
-        )
+        val withRows = withBody.rows.decodeRowsAs(NodeRow.serializer())
         assertNotNull(withRows.first().body)
     }
 
@@ -234,14 +220,8 @@ class SourceQueryToolTest {
         ).data
         assertEquals(2, page2.returned)
 
-        val r1 = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            page1.rows,
-        )
-        val r2 = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            page2.rows,
-        )
+        val r1 = page1.rows.decodeRowsAs(NodeRow.serializer())
+        val r2 = page2.rows.decodeRowsAs(NodeRow.serializer())
         assertEquals(emptyList(), r1.map { it.id }.intersect(r2.map { it.id }.toSet()).toList())
     }
 
@@ -254,10 +234,7 @@ class SourceQueryToolTest {
             rig.ctx,
         ).data
         assertEquals(1, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.DagSummaryRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(DagSummaryRow.serializer())
         assertEquals(0, rows.first().nodeCount)
         assertTrue(rows.first().summaryText.contains("empty graph"))
     }
@@ -272,10 +249,7 @@ class SourceQueryToolTest {
             SourceQueryTool.Input(select = "dag_summary", projectId = rig.pid.value),
             rig.ctx,
         ).data
-        val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.DagSummaryRow.serializer()),
-            out.rows,
-        ).first()
+        val row = out.rows.decodeRowsAs(DagSummaryRow.serializer()).first()
         assertEquals(3, row.nodeCount)
         assertEquals(2, row.nodesByKind["test.alpha"])
         assertEquals(1, row.nodesByKind["test.beta"])
@@ -353,10 +327,7 @@ class SourceQueryToolTest {
     )
 
     private fun decodeRows(out: SourceQueryTool.Output) =
-        JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            out.rows,
-        )
+        out.rows.decodeRowsAs(NodeRow.serializer())
 
     @Test fun descendantsWalksReverseParentIndexBfs() = runTest {
         val rig = diamondRig()

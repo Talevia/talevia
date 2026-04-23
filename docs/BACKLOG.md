@@ -15,8 +15,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **debt-query-dispatcher-abstraction** — `ProjectQueryTool` / `SessionQueryTool` / `SourceQueryTool` 三个 unified-dispatcher 都靠 "handler per select + 每个 select 自己的 row 类型 + 输出裸 `JsonArray` 让 caller 用 `Owner.Row.serializer()` 解码" 这同一套惯例，两次 resplit (2026-04-21 / 2026-04-23) 都卡在同一种结构劣化上；第四个 query tool 默认会再撞一次。**方向：** 在 `core/tool/query/` 引入 `QueryDispatcher<I, O>` 基类承担 select → handler 路由 + row 序列化器表，row 类型从 day 1 强制 top-level；同步加 test-kit helper `Output.decodeRows(select): List<T>` 把 10+ 个测试文件里手写的 `decodeFromJsonElement(ListSerializer(...))` 3 行 helper 收敛掉。Rubric §5.6。
-
 ## P2 — 记债 / 观望
 
 - **bundle-mobile-document-picker** — Android / iOS 当前限制于 app sandbox 内的 bundle (`<filesDir>/projects/` / `Documents/projects/`)。用户没法从 SAF / Files.app 选一个外部 bundle 打开。**方向：** Android 接 `Storage Access Framework` (`Intent.ACTION_OPEN_DOCUMENT_TREE`)，iOS 接 `UIDocumentPickerViewController`，结果 URI / NSURL 通过 platform-specific resolver 转成 Okio Path 喂给 `FileProjectStore.openAt`。Rubric §5.4 / mobile。

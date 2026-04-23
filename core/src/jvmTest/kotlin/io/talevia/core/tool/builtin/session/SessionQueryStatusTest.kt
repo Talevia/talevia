@@ -2,7 +2,6 @@ package io.talevia.core.tool.builtin.session
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.CallId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.SessionId
 import io.talevia.core.agent.AgentRunState
@@ -14,13 +13,13 @@ import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.builtin.session.query.StatusRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.yield
-import kotlinx.serialization.builtins.ListSerializer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -72,10 +71,7 @@ class SessionQueryStatusTest {
         ).data
 
         assertEquals(SessionQueryTool.SELECT_STATUS, out.select)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(StatusRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(StatusRow.serializer())
         assertEquals(1, rows.size)
         assertEquals("s-never", rows[0].sessionId)
         assertEquals("idle", rows[0].state)
@@ -93,10 +89,7 @@ class SessionQueryStatusTest {
             SessionQueryTool.Input(select = "status", sessionId = "s-1"),
             rig.ctx,
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(StatusRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(StatusRow.serializer())
         assertEquals("generating", rows[0].state)
         assertEquals(false, rows[0].neverRan)
         rig.scopeJob.cancel()
@@ -116,10 +109,7 @@ class SessionQueryStatusTest {
             SessionQueryTool.Input(select = "status", sessionId = "s-f"),
             rig.ctx,
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(StatusRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(StatusRow.serializer())
         assertEquals("failed", rows[0].state)
         assertEquals("provider 503", rows[0].cause)
         rig.scopeJob.cancel()
@@ -138,10 +128,7 @@ class SessionQueryStatusTest {
             SessionQueryTool.Input(select = "status", sessionId = "s-x"),
             rig.ctx,
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(StatusRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(StatusRow.serializer())
         // Post-run Idle: state=idle, neverRan=false (distinguishable from the never-ran case).
         assertEquals("idle", rows[0].state)
         assertEquals(false, rows[0].neverRan)
@@ -168,10 +155,7 @@ class SessionQueryStatusTest {
             SessionQueryTool.Input(select = "status", sessionId = "s-empty"),
             rig.ctx,
         ).data
-        val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(StatusRow.serializer()),
-            out.rows,
-        ).single()
+        val row = out.rows.decodeRowsAs(StatusRow.serializer()).single()
         assertEquals(0, row.estimatedTokens)
         assertEquals(120_000, row.compactionThreshold)
         assertEquals(0f, row.percent)
@@ -230,10 +214,7 @@ class SessionQueryStatusTest {
             SessionQueryTool.Input(select = "status", sessionId = "s-token"),
             rig.ctx,
         ).data
-        val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(StatusRow.serializer()),
-            out.rows,
-        ).single()
+        val row = out.rows.decodeRowsAs(StatusRow.serializer()).single()
         // TokenEstimator is a heuristic (~4 chars/token), so we assert shape not exact
         // equality: non-zero, under threshold, percent matches the ratio.
         assertTrue(row.estimatedTokens!! > 0, "expected token count > 0, got ${row.estimatedTokens}")

@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.provider
 
 import io.talevia.core.CallId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.SessionId
 import io.talevia.core.permission.PermissionDecision
@@ -11,10 +10,12 @@ import io.talevia.core.provider.LlmRequest
 import io.talevia.core.provider.ModelInfo
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.provider.query.ModelRow
+import io.talevia.core.tool.builtin.provider.query.ProviderRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.builtins.ListSerializer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -63,10 +64,7 @@ class ProviderQueryToolTest {
         assertEquals("providers", out.select)
         assertEquals(2, out.total)
         assertNull(out.error)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ProviderQueryTool.ProviderRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(ProviderRow.serializer())
         assertEquals(setOf("anthropic", "openai"), rows.map { it.providerId }.toSet())
         assertEquals("anthropic", rows.single { it.isDefault }.providerId)
     }
@@ -100,10 +98,7 @@ class ProviderQueryToolTest {
         assertEquals("models", out.select)
         assertEquals(2, out.total)
         assertNull(out.error)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ProviderQueryTool.ModelRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(ModelRow.serializer())
         assertEquals(listOf("opus-4", "haiku-4"), rows.map { it.modelId })
         assertTrue(rows.all { it.providerId == "anthropic" })
         assertEquals(true, rows.first { it.modelId == "opus-4" }.supportsThinking)

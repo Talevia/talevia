@@ -3,10 +3,23 @@ package io.talevia.core.tool.builtin.project
 import io.talevia.core.JsonConfig
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
-import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.project.query.AssetRow
+import io.talevia.core.tool.builtin.project.query.ClipDetailRow
+import io.talevia.core.tool.builtin.project.query.ClipForAssetRow
+import io.talevia.core.tool.builtin.project.query.ClipForSourceRow
+import io.talevia.core.tool.builtin.project.query.ClipRow
+import io.talevia.core.tool.builtin.project.query.ConsistencyPropagationRow
+import io.talevia.core.tool.builtin.project.query.LockfileEntryDetailRow
+import io.talevia.core.tool.builtin.project.query.LockfileEntryRow
+import io.talevia.core.tool.builtin.project.query.ProjectMetadataRow
+import io.talevia.core.tool.builtin.project.query.SnapshotRow
+import io.talevia.core.tool.builtin.project.query.SpendSummaryRow
+import io.talevia.core.tool.builtin.project.query.TimelineDiffRow
+import io.talevia.core.tool.builtin.project.query.TrackRow
+import io.talevia.core.tool.builtin.project.query.TransitionRow
 import io.talevia.core.tool.builtin.project.query.rejectIncompatibleProjectQueryFilters
 import io.talevia.core.tool.builtin.project.query.runAssetsQuery
 import io.talevia.core.tool.builtin.project.query.runClipDetailQuery
@@ -22,6 +35,7 @@ import io.talevia.core.tool.builtin.project.query.runTimelineClipsQuery
 import io.talevia.core.tool.builtin.project.query.runTimelineDiffQuery
 import io.talevia.core.tool.builtin.project.query.runTracksQuery
 import io.talevia.core.tool.builtin.project.query.runTransitionsQuery
+import io.talevia.core.tool.query.QueryDispatcher
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -59,7 +73,7 @@ class ProjectQueryTool(
      * relative-age assertions stay deterministic.
      */
     private val clock: kotlinx.datetime.Clock = kotlinx.datetime.Clock.System,
-) : Tool<ProjectQueryTool.Input, ProjectQueryTool.Output> {
+) : QueryDispatcher<ProjectQueryTool.Input, ProjectQueryTool.Output>() {
 
     @Serializable data class Input(
         /**
@@ -188,11 +202,28 @@ class ProjectQueryTool(
     // plus the KDoc on the matching `Input` property here.
     override val inputSchema: JsonObject = PROJECT_QUERY_INPUT_SCHEMA
 
+    override val selects: Set<String> = ALL_SELECTS
+
+    override fun rowSerializerFor(select: String): KSerializer<*> = when (select) {
+        SELECT_TRACKS -> TrackRow.serializer()
+        SELECT_TIMELINE_CLIPS -> ClipRow.serializer()
+        SELECT_ASSETS -> AssetRow.serializer()
+        SELECT_TRANSITIONS -> TransitionRow.serializer()
+        SELECT_LOCKFILE_ENTRIES -> LockfileEntryRow.serializer()
+        SELECT_CLIPS_FOR_ASSET -> ClipForAssetRow.serializer()
+        SELECT_CLIPS_FOR_SOURCE -> ClipForSourceRow.serializer()
+        SELECT_CLIP -> ClipDetailRow.serializer()
+        SELECT_LOCKFILE_ENTRY -> LockfileEntryDetailRow.serializer()
+        SELECT_PROJECT_METADATA -> ProjectMetadataRow.serializer()
+        SELECT_CONSISTENCY_PROPAGATION -> ConsistencyPropagationRow.serializer()
+        SELECT_SPEND -> SpendSummaryRow.serializer()
+        SELECT_SNAPSHOTS -> SnapshotRow.serializer()
+        SELECT_TIMELINE_DIFF -> TimelineDiffRow.serializer()
+        else -> error("No row serializer registered for select='$select'")
+    }
+
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val select = input.select.trim().lowercase()
-        if (select !in ALL_SELECTS) {
-            error("select must be one of ${ALL_SELECTS.joinToString(", ")} (got '${input.select}')")
-        }
+        val select = canonicalSelect(input.select)
         rejectIncompatibleProjectQueryFilters(select, input)
 
         val pid = ctx.resolveProjectId(input.projectId)
@@ -236,7 +267,7 @@ class ProjectQueryTool(
         const val SELECT_SPEND = "spend"
         const val SELECT_SNAPSHOTS = "snapshots"
         const val SELECT_TIMELINE_DIFF = "timeline_diff"
-        private val ALL_SELECTS = setOf(
+        internal val ALL_SELECTS = setOf(
             SELECT_TRACKS, SELECT_TIMELINE_CLIPS, SELECT_ASSETS,
             SELECT_TRANSITIONS, SELECT_LOCKFILE_ENTRIES,
             SELECT_CLIPS_FOR_ASSET, SELECT_CLIPS_FOR_SOURCE,

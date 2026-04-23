@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.source
 
 import io.talevia.core.CallId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
@@ -19,8 +18,9 @@ import io.talevia.core.domain.source.consistency.resolveConsistencyBindings
 import io.talevia.core.domain.source.stale
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.source.query.NodeRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.buildJsonArray
@@ -285,10 +285,7 @@ class SourceToolsTest {
             rig.ctx,
         ).data
         assertEquals(1, onlyChar.returned)
-        val charRows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            onlyChar.rows,
-        )
+        val charRows = onlyChar.rows.decodeRowsAs(NodeRow.serializer())
         assertEquals("character-mei", charRows.first().id)
 
         val byPrefix = tool.execute(
@@ -300,10 +297,7 @@ class SourceToolsTest {
             rig.ctx,
         ).data
         assertEquals(2, byPrefix.returned)
-        val prefixRows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            byPrefix.rows,
-        )
+        val prefixRows = byPrefix.rows.decodeRowsAs(NodeRow.serializer())
         assertTrue(prefixRows.all { it.contentHash.isNotEmpty() })
     }
 
@@ -322,10 +316,7 @@ class SourceToolsTest {
             SourceQueryTool.Input(select = "nodes", projectId = rig.pid.value, includeBody = true),
             rig.ctx,
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(NodeRow.serializer())
         assertNotNull(rows.first().body)
     }
 

@@ -65,7 +65,7 @@ internal fun runNodesQuery(
     val page = sorted.drop(offset).take(limit)
     val rows = page.map { hit -> hit.node.toRow(includeBody = includeBody, snippet = hit.snippet, offset = hit.offset) }
     val jsonRows = JsonConfig.default.encodeToJsonElement(
-        ListSerializer(SourceQueryTool.NodeRow.serializer()),
+        ListSerializer(NodeRow.serializer()),
         rows,
     )
 
@@ -101,7 +101,7 @@ private fun SourceNode.toRow(
     includeBody: Boolean,
     snippet: String?,
     offset: Int?,
-): SourceQueryTool.NodeRow = SourceQueryTool.NodeRow(
+): NodeRow = NodeRow(
     id = id.value,
     kind = kind,
     revision = revision,

@@ -2,7 +2,6 @@ package io.talevia.core.tool.builtin.project
 
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
@@ -16,8 +15,8 @@ import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.builtin.project.query.SpendSummaryRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -94,10 +93,7 @@ class ProjectQuerySpendTest {
 
         assertEquals("spend", out.select)
         assertEquals(1, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SpendSummaryRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(SpendSummaryRow.serializer())
         val row = rows.single()
         assertEquals(5, row.entryCount)
         assertEquals(4, row.knownCostEntries)
@@ -126,10 +122,7 @@ class ProjectQuerySpendTest {
             ProjectQueryTool.Input(projectId = pid.value, select = "spend"),
             ctx(),
         ).data
-        val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SpendSummaryRow.serializer()),
-            out.rows,
-        ).single()
+        val row = out.rows.decodeRowsAs(SpendSummaryRow.serializer()).single()
         assertEquals(0L, row.totalCostCents)
         assertEquals(0, row.entryCount)
         assertEquals(0, row.knownCostEntries)
@@ -148,10 +141,7 @@ class ProjectQuerySpendTest {
             ProjectQueryTool.Input(projectId = pid.value, select = "spend"),
             ctx(),
         ).data
-        val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SpendSummaryRow.serializer()),
-            out.rows,
-        ).single()
+        val row = out.rows.decodeRowsAs(SpendSummaryRow.serializer()).single()
         assertEquals(0L, row.totalCostCents)
         assertEquals(1, row.knownCostEntries)
         assertEquals(0, row.unknownCostEntries)

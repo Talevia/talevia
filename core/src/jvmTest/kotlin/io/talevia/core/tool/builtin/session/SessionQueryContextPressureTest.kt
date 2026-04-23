@@ -2,7 +2,6 @@ package io.talevia.core.tool.builtin.session
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.CallId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
@@ -19,9 +18,9 @@ import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.builtin.session.query.ContextPressureRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
-import kotlinx.serialization.builtins.ListSerializer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -114,10 +113,7 @@ class SessionQueryContextPressureTest {
         SessionQueryTool(sessions)
 
     private fun rows(out: SessionQueryTool.Output): List<ContextPressureRow> =
-        JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ContextPressureRow.serializer()),
-            out.rows,
-        )
+        out.rows.decodeRowsAs(ContextPressureRow.serializer())
 
     @Test fun missingSessionIdRejected() = runTest {
         val (sessions, _, _) = fixture()

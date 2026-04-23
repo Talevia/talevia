@@ -2,7 +2,6 @@ package io.talevia.core.tool.builtin.project
 
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
@@ -17,8 +16,8 @@ import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.builtin.project.query.LockfileEntryRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -94,10 +93,7 @@ class ProjectQueryLockfileFiltersTest {
             ctx(),
         ).data
         assertEquals(2, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(LockfileEntryRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(LockfileEntryRow.serializer())
         assertEquals(setOf("new-1", "mid-1"), rows.map { it.inputHash }.toSet())
     }
 
@@ -118,10 +114,7 @@ class ProjectQueryLockfileFiltersTest {
             ),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(LockfileEntryRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(LockfileEntryRow.serializer())
         assertEquals(setOf("h2", "h1"), rows.map { it.inputHash }.toSet())
         assertTrue(rows.all { "mei" in it.sourceBindingIds })
     }
@@ -143,10 +136,7 @@ class ProjectQueryLockfileFiltersTest {
             ),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(LockfileEntryRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(LockfileEntryRow.serializer())
         assertEquals(listOf("new-mei"), rows.map { it.inputHash })
     }
 

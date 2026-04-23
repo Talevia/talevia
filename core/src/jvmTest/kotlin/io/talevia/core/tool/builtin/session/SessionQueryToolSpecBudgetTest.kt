@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.session
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
-import io.talevia.core.JsonConfig
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.permission.PermissionSpec
@@ -12,10 +11,10 @@ import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.EchoTool
 import io.talevia.core.tool.builtin.session.query.ToolSpecBudgetRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -147,10 +146,7 @@ class SessionQueryToolSpecBudgetTest {
     // --- helpers --------------------------------------------------------
 
     private fun decodeSingle(rows: JsonArray): ToolSpecBudgetRow {
-        val list = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ToolSpecBudgetRow.serializer()),
-            rows,
-        )
+        val list = rows.decodeRowsAs(ToolSpecBudgetRow.serializer())
         assertEquals(1, list.size, "tool_spec_budget is single-row")
         return list.single()
     }

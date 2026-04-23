@@ -3,7 +3,6 @@ package io.talevia.core.tool.builtin.source
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
@@ -21,8 +20,9 @@ import io.talevia.core.domain.source.SourceNode
 import io.talevia.core.domain.source.SourceRef
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.source.query.DotRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -85,11 +85,8 @@ class SourceQueryDotTest {
         parents = parents.map { SourceRef(SourceNodeId(it)) },
     )
 
-    private fun rows(out: SourceQueryTool.Output): SourceQueryTool.DotRow =
-        JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.DotRow.serializer()),
-            out.rows,
-        ).single()
+    private fun rows(out: SourceQueryTool.Output): DotRow =
+        out.rows.decodeRowsAs(DotRow.serializer()).single()
 
     private suspend fun run(store: FileProjectStore, ctx: ToolContext, pid: ProjectId): SourceQueryTool.Output {
         val tool = SourceQueryTool(store)

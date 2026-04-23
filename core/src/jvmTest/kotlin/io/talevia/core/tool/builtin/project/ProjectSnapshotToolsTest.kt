@@ -3,7 +3,6 @@ package io.talevia.core.tool.builtin.project
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.ProjectSnapshotId
@@ -30,10 +29,10 @@ import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.builtin.project.query.SnapshotRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -117,10 +116,7 @@ class ProjectSnapshotToolsTest {
             ),
             rig.ctx,
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SnapshotRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(SnapshotRow.serializer())
         return out.total to rows
     }
 

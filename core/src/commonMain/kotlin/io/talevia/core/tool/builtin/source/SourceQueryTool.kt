@@ -4,20 +4,22 @@ import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
-import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.source.query.DagSummaryRow
+import io.talevia.core.tool.builtin.source.query.DotRow
+import io.talevia.core.tool.builtin.source.query.NodeRow
 import io.talevia.core.tool.builtin.source.query.runAncestorsQuery
 import io.talevia.core.tool.builtin.source.query.runDagSummaryQuery
 import io.talevia.core.tool.builtin.source.query.runDescendantsQuery
 import io.talevia.core.tool.builtin.source.query.runDotQuery
 import io.talevia.core.tool.builtin.source.query.runNodesAllProjectsQuery
 import io.talevia.core.tool.builtin.source.query.runNodesQuery
+import io.talevia.core.tool.query.QueryDispatcher
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
@@ -49,12 +51,12 @@ import kotlinx.serialization.serializer
  *
  * Output is uniform: `{select, total, returned, rows}` where `rows` is a
  * [JsonArray] whose shape depends on `select`. Consumers decode with the
- * matching row serializer (`SourceQueryTool.NodeRow.serializer()` /
- * `DagSummaryRow.serializer()`); wire encoding is [JsonConfig.default].
+ * matching row serializer ([NodeRow.serializer()] / [DagSummaryRow.serializer()]
+ * / [DotRow.serializer()]); wire encoding is [JsonConfig.default].
  */
 class SourceQueryTool(
     private val projects: ProjectStore,
-) : Tool<SourceQueryTool.Input, SourceQueryTool.Output> {
+) : QueryDispatcher<SourceQueryTool.Input, SourceQueryTool.Output>() {
 
     @Serializable data class Input(
         /** One of [SELECT_NODES] / [SELECT_DAG_SUMMARY] / [SELECT_DOT] /
@@ -130,66 +132,10 @@ class SourceQueryTool(
         val sourceRevision: Long,
     )
 
-    // ---- row data classes (nested public — tests + UI decode via .serializer()) ----
-
-    @Serializable data class NodeRow(
-        val id: String,
-        val kind: String,
-        val revision: Long,
-        val contentHash: String,
-        val parentIds: List<String>,
-        /** Short human-readable summary (name + clip-description for typed nodes, key list for opaque). */
-        val summary: String,
-        /** Full JSON body — populated only when [Input.includeBody] is true. */
-        val body: JsonElement? = null,
-        /** Excerpt around the first `contentSubstring` hit. Populated only when that filter is set. */
-        val snippet: String? = null,
-        /** Character offset of the `contentSubstring` match. Populated only when that filter is set. */
-        val matchOffset: Int? = null,
-        /**
-         * Owning project id — populated only when `scope=all_projects` so the
-         * cross-project caller can pinpoint each hit. Null on single-project
-         * queries because the owning project is already in the Input echo.
-         */
-        val projectId: String? = null,
-        /**
-         * Hop count from [Input.root] to this row. Populated only by
-         * `select=descendants` / `select=ancestors` — null for all other
-         * selects so old decoders stay forward-compatible (§3a-7). `0` is
-         * the root itself, `1` the immediate neighbors, and so on.
-         */
-        val depthFromRoot: Int? = null,
-    )
-
-    @Serializable data class Hotspot(
-        val nodeId: String,
-        val kind: String,
-        val directClipCount: Int,
-        val transitiveClipCount: Int,
-    )
-
-    @Serializable data class DagSummaryRow(
-        val nodeCount: Int,
-        val nodesByKind: Map<String, Int>,
-        val rootNodeIds: List<String>,
-        val leafNodeIds: List<String>,
-        val maxDepth: Int,
-        val hotspots: List<Hotspot>,
-        val orphanedNodeIds: List<String>,
-        val summaryText: String,
-    )
-
-    /**
-     * Single-row payload for `select=dot`. [dot] is a complete Graphviz DOT
-     * document; [nodeCount] / [edgeCount] are echoes so consumers can branch
-     * (e.g. "don't bother rendering an empty graph") without re-parsing the
-     * DOT text.
-     */
-    @Serializable data class DotRow(
-        val dot: String,
-        val nodeCount: Int,
-        val edgeCount: Int,
-    )
+    // Row types — NodeRow / DagSummaryRow / DotRow / Hotspot — live in
+    // `io.talevia.core.tool.builtin.source.query` as top-level
+    // @Serializable data classes alongside their handlers. See
+    // `QueryDispatcher` KDoc for the top-level-row convention.
 
     override val id: String = "source_query"
     override val helpText: String =
@@ -344,11 +290,17 @@ class SourceQueryTool(
         put("additionalProperties", false)
     }
 
+    override val selects: Set<String> = ALL_SELECTS
+
+    override fun rowSerializerFor(select: String): KSerializer<*> = when (select) {
+        SELECT_NODES, SELECT_DESCENDANTS, SELECT_ANCESTORS -> NodeRow.serializer()
+        SELECT_DAG_SUMMARY -> DagSummaryRow.serializer()
+        SELECT_DOT -> DotRow.serializer()
+        else -> error("No row serializer registered for select='$select'")
+    }
+
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val select = input.select.trim().lowercase()
-        if (select !in ALL_SELECTS) {
-            error("select must be one of ${ALL_SELECTS.joinToString(", ")} (got '${input.select}')")
-        }
+        val select = canonicalSelect(input.select)
         val scope = (input.scope?.trim()?.lowercase()?.takeIf { it.isNotEmpty() }) ?: SCOPE_PROJECT
         if (scope !in ALL_SCOPES) {
             error("scope must be one of ${ALL_SCOPES.joinToString(", ")} (got '${input.scope}')")
@@ -428,7 +380,7 @@ class SourceQueryTool(
         const val SELECT_DOT = "dot"
         const val SELECT_DESCENDANTS = "descendants"
         const val SELECT_ANCESTORS = "ancestors"
-        private val ALL_SELECTS = setOf(
+        internal val ALL_SELECTS = setOf(
             SELECT_NODES, SELECT_DAG_SUMMARY, SELECT_DOT,
             SELECT_DESCENDANTS, SELECT_ANCESTORS,
         )

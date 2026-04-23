@@ -8,7 +8,28 @@ import io.talevia.core.domain.source.Source
 import io.talevia.core.domain.source.childIndex
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.source.SourceQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable
+data class Hotspot(
+    val nodeId: String,
+    val kind: String,
+    val directClipCount: Int,
+    val transitiveClipCount: Int,
+)
+
+@Serializable
+data class DagSummaryRow(
+    val nodeCount: Int,
+    val nodesByKind: Map<String, Int>,
+    val rootNodeIds: List<String>,
+    val leafNodeIds: List<String>,
+    val maxDepth: Int,
+    val hotspots: List<Hotspot>,
+    val orphanedNodeIds: List<String>,
+    val summaryText: String,
+)
 
 /**
  * `select=dag_summary` — one-row structural overview: per-kind counts, roots,
@@ -42,7 +63,7 @@ internal fun runDagSummaryQuery(
     val maxDepth = computeMaxDepth(source, children)
 
     val orphans = mutableListOf<String>()
-    val hotspotCandidates = mutableListOf<SourceQueryTool.Hotspot>()
+    val hotspotCandidates = mutableListOf<Hotspot>()
     for (node in nodes) {
         val reports = project.clipsBoundTo(node.id)
         if (reports.isEmpty()) {
@@ -50,7 +71,7 @@ internal fun runDagSummaryQuery(
             continue
         }
         val direct = reports.count { it.directlyBound }
-        hotspotCandidates += SourceQueryTool.Hotspot(
+        hotspotCandidates += Hotspot(
             nodeId = node.id.value,
             kind = node.kind,
             directClipCount = direct,
@@ -59,7 +80,7 @@ internal fun runDagSummaryQuery(
     }
     val hotspots = hotspotCandidates
         .sortedWith(
-            compareByDescending<SourceQueryTool.Hotspot> { it.transitiveClipCount }
+            compareByDescending<Hotspot> { it.transitiveClipCount }
                 .thenBy { it.nodeId },
         )
         .take(hotspotLimit)
@@ -75,7 +96,7 @@ internal fun runDagSummaryQuery(
         hotspots = hotspots,
     )
 
-    val row = SourceQueryTool.DagSummaryRow(
+    val row = DagSummaryRow(
         nodeCount = nodes.size,
         nodesByKind = nodesByKind,
         rootNodeIds = rootIds,
@@ -86,7 +107,7 @@ internal fun runDagSummaryQuery(
         summaryText = summaryText,
     )
     val jsonRows = JsonConfig.default.encodeToJsonElement(
-        ListSerializer(SourceQueryTool.DagSummaryRow.serializer()),
+        ListSerializer(DagSummaryRow.serializer()),
         listOf(row),
     ) as kotlinx.serialization.json.JsonArray
 
@@ -144,7 +165,7 @@ private fun buildSummary(
     leafCount: Int,
     maxDepth: Int,
     orphanCount: Int,
-    hotspots: List<SourceQueryTool.Hotspot>,
+    hotspots: List<Hotspot>,
 ): String {
     if (nodeCount == 0) {
         return "Source DAG for '$projectId': 0 nodes (empty graph)."

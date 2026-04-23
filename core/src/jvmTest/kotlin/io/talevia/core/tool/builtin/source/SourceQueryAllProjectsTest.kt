@@ -1,7 +1,6 @@
 package io.talevia.core.tool.builtin.source
 
 import io.talevia.core.CallId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
@@ -14,8 +13,9 @@ import io.talevia.core.domain.source.Source
 import io.talevia.core.domain.source.SourceNode
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.source.query.NodeRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -82,10 +82,7 @@ class SourceQueryAllProjectsTest {
         ).data
 
         assertEquals(3, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(NodeRow.serializer())
         // Every row must carry its owning projectId so callers can pinpoint hits.
         assertTrue(rows.all { it.projectId != null })
         assertEquals(
@@ -116,10 +113,7 @@ class SourceQueryAllProjectsTest {
         ).data
 
         assertEquals(2, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(NodeRow.serializer())
         assertEquals(setOf("mei", "lin"), rows.map { it.id }.toSet())
     }
 
@@ -155,10 +149,7 @@ class SourceQueryAllProjectsTest {
             ctx(),
         ).data
 
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(NodeRow.serializer())
         assertEquals(1, rows.size, "Only mei should match cyberpunk")
         val hit = rows.single()
         assertEquals("mei", hit.id)
@@ -242,10 +233,7 @@ class SourceQueryAllProjectsTest {
             SourceQueryTool.Input(select = "nodes", projectId = "proj-a"),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SourceQueryTool.NodeRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(NodeRow.serializer())
         assertEquals(listOf("mei"), rows.map { it.id })
         // Single-project scope leaves projectId null on the row (the owning id is already in Input).
         assertTrue(rows.all { it.projectId == null })

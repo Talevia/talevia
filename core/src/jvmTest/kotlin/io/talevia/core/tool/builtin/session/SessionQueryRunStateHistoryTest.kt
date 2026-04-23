@@ -2,7 +2,6 @@ package io.talevia.core.tool.builtin.session
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.CallId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
@@ -17,13 +16,13 @@ import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.builtin.session.query.RunStateTransitionRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
-import kotlinx.serialization.builtins.ListSerializer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -84,10 +83,7 @@ class SessionQueryRunStateHistoryTest {
     }
 
     private fun rows(out: SessionQueryTool.Output): List<RunStateTransitionRow> =
-        JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(RunStateTransitionRow.serializer()),
-            out.rows,
-        )
+        out.rows.decodeRowsAs(RunStateTransitionRow.serializer())
 
     @Test fun missingSessionIdRejected() = runTest {
         val (sessions, tracker) = fixture()

@@ -3,7 +3,6 @@ package io.talevia.core.tool.builtin.project
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
@@ -31,8 +30,8 @@ import io.talevia.core.tool.builtin.project.query.ConsistencyPropagationRow
 import io.talevia.core.tool.builtin.project.query.LockfileEntryDetailRow
 import io.talevia.core.tool.builtin.project.query.ProjectMetadataRow
 import io.talevia.core.tool.builtin.project.query.TrackRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.builtins.ListSerializer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -149,10 +148,7 @@ class ProjectQueryToolTest {
         ).data
         assertEquals("tracks", out.select)
         assertEquals(4, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(TrackRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(TrackRow.serializer())
         assertEquals(listOf(0, 1, 2, 3), rows.map { it.index })
         assertEquals(listOf("video", "audio", "subtitle", "effect"), rows.map { it.trackKind })
         assertTrue(rows.last().isEmpty)
@@ -187,10 +183,7 @@ class ProjectQueryToolTest {
             ),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(TrackRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(TrackRow.serializer())
         assertEquals(2, rows.first().clipCount)
     }
 
@@ -203,10 +196,7 @@ class ProjectQueryToolTest {
             ctx(),
         ).data
         assertEquals(4, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ClipRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(ClipRow.serializer())
         assertEquals(setOf("video", "audio", "text"), rows.map { it.clipKind }.toSet())
     }
 
@@ -222,10 +212,7 @@ class ProjectQueryToolTest {
             ),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ClipRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(ClipRow.serializer())
         assertEquals(setOf("c-1", "c-3", "c-4"), rows.map { it.clipId }.toSet())
     }
 
@@ -239,10 +226,7 @@ class ProjectQueryToolTest {
             ),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ClipRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(ClipRow.serializer())
         assertEquals(listOf("c-1"), rows.map { it.clipId })
     }
 
@@ -256,10 +240,7 @@ class ProjectQueryToolTest {
             ),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ClipRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(ClipRow.serializer())
         assertEquals("c-1", rows.first().clipId) // 5s is longest
     }
 
@@ -286,10 +267,7 @@ class ProjectQueryToolTest {
             ProjectQueryTool.Input(projectId = pid.value, select = "assets"),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(AssetRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(AssetRow.serializer())
         val kindsById = rows.associate { it.assetId to it.kind }
         assertEquals("video", kindsById["v-used"])
         assertEquals("video", kindsById["v-unused"])
@@ -312,10 +290,7 @@ class ProjectQueryToolTest {
             ProjectQueryTool.Input(projectId = pid.value, select = "assets", onlyUnused = true),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(AssetRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(AssetRow.serializer())
         assertEquals(setOf("v-unused", "img"), rows.map { it.assetId }.toSet())
     }
 
@@ -325,10 +300,7 @@ class ProjectQueryToolTest {
             ProjectQueryTool.Input(projectId = pid.value, select = "assets", sortBy = "id"),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(AssetRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(AssetRow.serializer())
         assertEquals(listOf("a-used", "img", "v-unused", "v-used"), rows.map { it.assetId })
     }
 
@@ -338,10 +310,7 @@ class ProjectQueryToolTest {
             ProjectQueryTool.Input(projectId = pid.value, select = "assets"),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(AssetRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(AssetRow.serializer())
         assertEquals(2, rows.single { it.assetId == "v-used" }.inUseByClips)
     }
 
@@ -623,10 +592,7 @@ class ProjectQueryToolTest {
             ctx(),
         ).data
         assertEquals(1, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ClipRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(ClipRow.serializer())
         assertEquals("c-pinned", rows.single().clipId)
     }
 
@@ -672,10 +638,7 @@ class ProjectQueryToolTest {
         // a-pinned / a-unpinned / a-imported → referenced by clips.
         // a-lockfile-only → referenced by lockfile.
         // a-truly-orphan → referenced by nothing. Only this one qualifies.
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(AssetRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(AssetRow.serializer())
         assertEquals(listOf("a-truly-orphan"), rows.map { it.assetId })
     }
 
@@ -689,10 +652,7 @@ class ProjectQueryToolTest {
             ),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(AssetRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(AssetRow.serializer())
         val ids = rows.map { it.assetId }
         assertTrue("a-pinned" in ids && "a-lockfile-only" in ids, ids.toString())
         assertTrue("a-truly-orphan" !in ids, ids.toString())
@@ -774,10 +734,7 @@ class ProjectQueryToolTest {
             ProjectQueryTool.Input(projectId = pid.value, select = "tracks", sortBy = "recent"),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(TrackRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(TrackRow.serializer())
         // t-b touched at 2000; t-a and t-c preserved at 1000. Within the 1000 tier,
         // stable tie-break is by trackId (t-a before t-c).
         assertEquals(listOf("t-b", "t-a", "t-c"), rows.map { it.trackId })
@@ -847,10 +804,7 @@ class ProjectQueryToolTest {
             ProjectQueryTool.Input(projectId = pid.value, select = "timeline_clips", sortBy = "recent"),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ClipRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(ClipRow.serializer())
         // Both stamped at 2000; deterministic tiebreaker by clipId.
         assertEquals(listOf("c-new", "c-old"), rows.map { it.clipId })
     }
@@ -906,10 +860,7 @@ class ProjectQueryToolTest {
             ProjectQueryTool.Input(projectId = pid.value, select = "assets", sortBy = "recent"),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(AssetRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(AssetRow.serializer())
         // a3 @ 3000 (newest), a2 @ 2000, a1 @ 1000.
         assertEquals(listOf("a3", "a2", "a1"), rows.map { it.assetId })
         assertEquals(3_000L, rows[0].updatedAtEpochMs)
@@ -927,10 +878,7 @@ class ProjectQueryToolTest {
         ).data
         assertEquals("clip", out.select)
         assertEquals(1, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ClipDetailRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(ClipDetailRow.serializer())
         val r = rows.single()
         assertEquals("c-1", r.clipId)
         assertEquals("v", r.trackId)
@@ -988,10 +936,7 @@ class ProjectQueryToolTest {
         ).data
         assertEquals("lockfile_entry", out.select)
         assertEquals(1, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(LockfileEntryDetailRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(LockfileEntryDetailRow.serializer())
         val r = rows.single()
         assertEquals("h-pinned", r.inputHash)
         assertEquals("a-pinned", r.assetId)
@@ -1037,10 +982,7 @@ class ProjectQueryToolTest {
             ),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(LockfileEntryDetailRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(LockfileEntryDetailRow.serializer())
         assertEquals("msg-77", rows.single().originatingMessageId)
     }
 
@@ -1078,10 +1020,7 @@ class ProjectQueryToolTest {
         ).data
         assertEquals("project_metadata", out.select)
         assertEquals(1, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ProjectMetadataRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(ProjectMetadataRow.serializer())
         val r = rows.single()
         assertEquals("demo", r.title)
         assertEquals(4, r.trackCount)
@@ -1221,10 +1160,7 @@ class ProjectQueryToolTest {
         assertEquals("consistency_propagation", out.select)
         // Two clips bind "mei" directly (c-hit, c-miss); c-unbound binds only style.
         assertEquals(2, out.total)
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ConsistencyPropagationRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(ConsistencyPropagationRow.serializer())
         val hit = rows.single { it.clipId == "c-hit" }
         assertTrue(hit.aigcEntryFound)
         assertTrue(hit.promptContainsKeywords, "prompt 'portrait of Mei' should match 'Mei' keyword")
@@ -1248,10 +1184,7 @@ class ProjectQueryToolTest {
             ),
             ctx(),
         ).data
-        val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ConsistencyPropagationRow.serializer()),
-            out.rows,
-        )
+        val rows = out.rows.decodeRowsAs(ConsistencyPropagationRow.serializer())
         assertEquals(2, rows.size)
         assertTrue(rows.all { !it.aigcEntryFound })
         assertTrue(rows.all { !it.promptContainsKeywords })

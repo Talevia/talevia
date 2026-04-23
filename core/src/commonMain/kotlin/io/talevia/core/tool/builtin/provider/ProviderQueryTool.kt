@@ -3,12 +3,15 @@ package io.talevia.core.tool.builtin.provider
 import io.talevia.core.JsonConfig
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.provider.ProviderRegistry
-import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.provider.query.ModelRow
+import io.talevia.core.tool.builtin.provider.query.ProviderRow
+import io.talevia.core.tool.builtin.provider.query.runModelsQuery
+import io.talevia.core.tool.builtin.provider.query.runProvidersQuery
+import io.talevia.core.tool.query.QueryDispatcher
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -42,12 +45,13 @@ import kotlinx.serialization.serializer
  *
  * Output is uniform: `{select, total, returned, rows}` where `rows` is a
  * [JsonArray] whose shape depends on `select`. Consumers decode with the
- * matching row serializer — `ProviderQueryTool.ProviderRow.serializer()` or
- * `ProviderQueryTool.ModelRow.serializer()`.
+ * matching row serializer — [ProviderRow.serializer] or [ModelRow.serializer].
+ * Row types live in the `provider/query/` sibling package per the
+ * [QueryDispatcher] top-level-row convention.
  */
 class ProviderQueryTool(
     private val providers: ProviderRegistry,
-) : Tool<ProviderQueryTool.Input, ProviderQueryTool.Output> {
+) : QueryDispatcher<ProviderQueryTool.Input, ProviderQueryTool.Output>() {
 
     @Serializable data class Input(
         /** One of [SELECT_PROVIDERS] / [SELECT_MODELS] (case-insensitive). */
@@ -72,21 +76,6 @@ class ProviderQueryTool(
          * [SELECT_PROVIDERS] or on success.
          */
         val error: String? = null,
-    )
-
-    @Serializable data class ProviderRow(
-        val providerId: String,
-        val isDefault: Boolean,
-    )
-
-    @Serializable data class ModelRow(
-        val providerId: String,
-        val modelId: String,
-        val name: String,
-        val contextWindow: Int,
-        val supportsTools: Boolean,
-        val supportsThinking: Boolean,
-        val supportsImages: Boolean,
     )
 
     override val id: String = "provider_query"
@@ -135,97 +124,23 @@ class ProviderQueryTool(
         put("additionalProperties", false)
     }
 
+    override val selects: Set<String> = ALL_SELECTS
+
+    override fun rowSerializerFor(select: String): KSerializer<*> = when (select) {
+        SELECT_PROVIDERS -> ProviderRow.serializer()
+        SELECT_MODELS -> ModelRow.serializer()
+        else -> error("No row serializer registered for select='$select'")
+    }
+
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val select = input.select.trim().lowercase()
-        if (select !in ALL_SELECTS) {
-            error("select must be one of ${ALL_SELECTS.joinToString(", ")} (got '${input.select}')")
-        }
+        val select = canonicalSelect(input.select)
         rejectIncompatibleFilters(select, input)
 
         return when (select) {
-            SELECT_PROVIDERS -> runProvidersQuery()
-            SELECT_MODELS -> runModelsQuery(input.providerId!!)
+            SELECT_PROVIDERS -> runProvidersQuery(providers)
+            SELECT_MODELS -> runModelsQuery(providers, input.providerId!!)
             else -> error("unreachable — select validated above: '$select'")
         }
-    }
-
-    private fun runProvidersQuery(): ToolResult<Output> {
-        val defaultId = providers.default?.id
-        val rows = providers.all().map { ProviderRow(providerId = it.id, isDefault = it.id == defaultId) }
-        val summary = when {
-            rows.isEmpty() ->
-                "No LLM providers configured in this runtime — set ANTHROPIC_API_KEY / " +
-                    "OPENAI_API_KEY / GEMINI_API_KEY in the environment or via SecretStore."
-            rows.size == 1 -> "1 provider: ${rows.single().providerId} (default)."
-            else -> {
-                val names = rows.joinToString(", ") { s -> s.providerId + if (s.isDefault) "*" else "" }
-                "${rows.size} providers: $names (default marked *)."
-            }
-        }
-        val encoded = JsonConfig.default.encodeToJsonElement(
-            ListSerializer(ProviderRow.serializer()),
-            rows,
-        ) as JsonArray
-        return ToolResult(
-            title = "provider_query providers (${rows.size})",
-            outputForLlm = summary,
-            data = Output(
-                select = SELECT_PROVIDERS,
-                total = rows.size,
-                returned = rows.size,
-                rows = encoded,
-            ),
-        )
-    }
-
-    private suspend fun runModelsQuery(providerId: String): ToolResult<Output> {
-        val provider = providers.get(providerId)
-            ?: error(
-                "Provider '$providerId' is not registered. Call provider_query(select=providers) " +
-                    "to see valid ids.",
-            )
-
-        val attempt = runCatching { provider.listModels() }
-        val errorMsg = attempt.exceptionOrNull()?.let { it.message ?: it::class.simpleName ?: "unknown error" }
-        val raw = attempt.getOrNull().orEmpty()
-
-        val rows = raw.map {
-            ModelRow(
-                providerId = provider.id,
-                modelId = it.id,
-                name = it.name,
-                contextWindow = it.contextWindow,
-                supportsTools = it.supportsTools,
-                supportsThinking = it.supportsThinking,
-                supportsImages = it.supportsImages,
-            )
-        }
-        val encoded = JsonConfig.default.encodeToJsonElement(
-            ListSerializer(ModelRow.serializer()),
-            rows,
-        ) as JsonArray
-
-        val summary = when {
-            errorMsg != null -> "Failed to list models for ${provider.id}: $errorMsg"
-            rows.isEmpty() ->
-                "Provider ${provider.id} returned no models (listModels may not be implemented yet)."
-            else ->
-                "${rows.size} model(s) on ${provider.id}: " +
-                    rows.take(5).joinToString(", ") { it.modelId } +
-                    if (rows.size > 5) ", …" else ""
-        }
-
-        return ToolResult(
-            title = "provider_query models on ${provider.id} (${rows.size})",
-            outputForLlm = summary,
-            data = Output(
-                select = SELECT_MODELS,
-                total = rows.size,
-                returned = rows.size,
-                rows = encoded,
-                error = errorMsg,
-            ),
-        )
     }
 
     private fun rejectIncompatibleFilters(select: String, input: Input) {
@@ -247,6 +162,6 @@ class ProviderQueryTool(
     companion object {
         const val SELECT_PROVIDERS = "providers"
         const val SELECT_MODELS = "models"
-        private val ALL_SELECTS = setOf(SELECT_PROVIDERS, SELECT_MODELS)
+        internal val ALL_SELECTS = setOf(SELECT_PROVIDERS, SELECT_MODELS)
     }
 }

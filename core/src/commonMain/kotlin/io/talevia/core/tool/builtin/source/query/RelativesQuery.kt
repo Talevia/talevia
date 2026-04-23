@@ -94,12 +94,12 @@ private fun runRelativesQuery(
     val offset = (input.offset ?: 0).coerceAtLeast(0)
     val paged = depthOf.entries.drop(offset).take(limit)
 
-    val rows: List<SourceQueryTool.NodeRow> = paged.map { (nodeId, depth) ->
+    val rows: List<NodeRow> = paged.map { (nodeId, depth) ->
         val node = byId[nodeId]!!
         node.toRelativesRow(depth, includeBody)
     }
     val jsonRows: JsonArray = JsonConfig.default.encodeToJsonElement(
-        ListSerializer(SourceQueryTool.NodeRow.serializer()),
+        ListSerializer(NodeRow.serializer()),
         rows,
     ) as JsonArray
 
@@ -127,7 +127,7 @@ private fun runRelativesQuery(
 private fun SourceNode.toRelativesRow(
     depthFromRoot: Int,
     includeBody: Boolean,
-): SourceQueryTool.NodeRow = SourceQueryTool.NodeRow(
+): NodeRow = NodeRow(
     id = id.value,
     kind = kind,
     revision = revision,

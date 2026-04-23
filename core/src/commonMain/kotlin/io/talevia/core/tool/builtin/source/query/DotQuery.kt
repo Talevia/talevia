@@ -5,8 +5,22 @@ import io.talevia.core.domain.Project
 import io.talevia.core.domain.clipsBoundTo
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.source.SourceQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
+
+/**
+ * Single-row payload for `select=dot`. [dot] is a complete Graphviz DOT
+ * document; [nodeCount] / [edgeCount] are echoes so consumers can branch
+ * (e.g. "don't bother rendering an empty graph") without re-parsing the
+ * DOT text.
+ */
+@Serializable
+data class DotRow(
+    val dot: String,
+    val nodeCount: Int,
+    val edgeCount: Int,
+)
 
 /**
  * `select=dot` — render the project's Source DAG as a single Graphviz DOT
@@ -19,7 +33,7 @@ import kotlinx.serialization.json.JsonArray
  *
  * Node labels carry id + kind; nodes with no downstream clip bindings are
  * styled dashed so orphans are visible in the rendered SVG without forcing
- * the caller to diff against [SourceQueryTool.DagSummaryRow.orphanedNodeIds].
+ * the caller to diff against [DagSummaryRow.orphanedNodeIds].
  */
 internal fun runDotQuery(
     project: Project,
@@ -27,9 +41,9 @@ internal fun runDotQuery(
     val dot = buildDot(project)
     val nodeCount = project.source.nodes.size
     val edgeCount = project.source.nodes.sumOf { it.parents.size }
-    val row = SourceQueryTool.DotRow(dot = dot, nodeCount = nodeCount, edgeCount = edgeCount)
+    val row = DotRow(dot = dot, nodeCount = nodeCount, edgeCount = edgeCount)
     val jsonRows = JsonConfig.default.encodeToJsonElement(
-        ListSerializer(SourceQueryTool.DotRow.serializer()),
+        ListSerializer(DotRow.serializer()),
         listOf(row),
     ) as JsonArray
 

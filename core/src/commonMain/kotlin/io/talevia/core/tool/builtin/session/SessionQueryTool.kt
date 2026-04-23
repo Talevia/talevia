@@ -5,10 +5,24 @@ import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.session.SessionStore
-import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.session.query.AncestorRow
+import io.talevia.core.tool.builtin.session.query.CacheStatsRow
+import io.talevia.core.tool.builtin.session.query.CompactionRow
+import io.talevia.core.tool.builtin.session.query.ContextPressureRow
+import io.talevia.core.tool.builtin.session.query.ForkRow
+import io.talevia.core.tool.builtin.session.query.MessageDetailRow
+import io.talevia.core.tool.builtin.session.query.MessageRow
+import io.talevia.core.tool.builtin.session.query.PartRow
+import io.talevia.core.tool.builtin.session.query.RunStateTransitionRow
+import io.talevia.core.tool.builtin.session.query.SessionMetadataRow
+import io.talevia.core.tool.builtin.session.query.SessionRow
+import io.talevia.core.tool.builtin.session.query.SpendSummaryRow
+import io.talevia.core.tool.builtin.session.query.StatusRow
+import io.talevia.core.tool.builtin.session.query.ToolCallRow
+import io.talevia.core.tool.builtin.session.query.ToolSpecBudgetRow
 import io.talevia.core.tool.builtin.session.query.runAncestorsQuery
 import io.talevia.core.tool.builtin.session.query.runCacheStatsQuery
 import io.talevia.core.tool.builtin.session.query.runCompactionsQuery
@@ -24,6 +38,7 @@ import io.talevia.core.tool.builtin.session.query.runSpendQuery
 import io.talevia.core.tool.builtin.session.query.runStatusQuery
 import io.talevia.core.tool.builtin.session.query.runToolCallsQuery
 import io.talevia.core.tool.builtin.session.query.runToolSpecBudgetQuery
+import io.talevia.core.tool.query.QueryDispatcher
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -82,7 +97,7 @@ class SessionQueryTool(
      * dispatch time, after the composition root has finished wiring.
      */
     private val toolRegistry: ToolRegistry? = null,
-) : Tool<SessionQueryTool.Input, SessionQueryTool.Output> {
+) : QueryDispatcher<SessionQueryTool.Input, SessionQueryTool.Output>() {
 
     @Serializable data class Input(
         /** One of [SELECT_SESSIONS] / [SELECT_MESSAGES] / [SELECT_PARTS] /
@@ -188,11 +203,29 @@ class SessionQueryTool(
 
     override val inputSchema: JsonObject = SESSION_QUERY_INPUT_SCHEMA
 
+    override val selects: Set<String> = ALL_SELECTS
+
+    override fun rowSerializerFor(select: String): KSerializer<*> = when (select) {
+        SELECT_SESSIONS -> SessionRow.serializer()
+        SELECT_MESSAGES -> MessageRow.serializer()
+        SELECT_PARTS -> PartRow.serializer()
+        SELECT_FORKS -> ForkRow.serializer()
+        SELECT_ANCESTORS -> AncestorRow.serializer()
+        SELECT_TOOL_CALLS -> ToolCallRow.serializer()
+        SELECT_COMPACTIONS -> CompactionRow.serializer()
+        SELECT_STATUS -> StatusRow.serializer()
+        SELECT_SESSION_METADATA -> SessionMetadataRow.serializer()
+        SELECT_MESSAGE -> MessageDetailRow.serializer()
+        SELECT_SPEND -> SpendSummaryRow.serializer()
+        SELECT_CACHE_STATS -> CacheStatsRow.serializer()
+        SELECT_CONTEXT_PRESSURE -> ContextPressureRow.serializer()
+        SELECT_RUN_STATE_HISTORY -> RunStateTransitionRow.serializer()
+        SELECT_TOOL_SPEC_BUDGET -> ToolSpecBudgetRow.serializer()
+        else -> error("No row serializer registered for select='$select'")
+    }
+
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val select = input.select.trim().lowercase()
-        if (select !in ALL_SELECTS) {
-            error("select must be one of ${ALL_SELECTS.joinToString(", ")} (got '${input.select}')")
-        }
+        val select = canonicalSelect(input.select)
         rejectIncompatibleFilters(select, input)
 
         val limit = (input.limit ?: DEFAULT_LIMIT).coerceIn(MIN_LIMIT, MAX_LIMIT)
@@ -279,7 +312,7 @@ class SessionQueryTool(
         const val SELECT_CONTEXT_PRESSURE = "context_pressure"
         const val SELECT_RUN_STATE_HISTORY = "run_state_history"
         const val SELECT_TOOL_SPEC_BUDGET = "tool_spec_budget"
-        private val ALL_SELECTS = setOf(
+        internal val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
             SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
             SELECT_SESSION_METADATA, SELECT_MESSAGE, SELECT_SPEND, SELECT_CACHE_STATS,

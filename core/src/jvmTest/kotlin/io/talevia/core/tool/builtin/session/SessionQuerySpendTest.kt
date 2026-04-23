@@ -3,7 +3,6 @@ package io.talevia.core.tool.builtin.session
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
-import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
@@ -21,9 +20,9 @@ import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.builtin.session.query.SpendSummaryRow
+import io.talevia.core.tool.query.decodeRowsAs
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
-import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -117,10 +116,7 @@ class SessionQuerySpendTest {
         ).data
 
         assertEquals("spend", out.select)
-        val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SpendSummaryRow.serializer()),
-            out.rows,
-        ).single()
+        val row = out.rows.decodeRowsAs(SpendSummaryRow.serializer()).single()
         // Matching entries: a (4), b (15), d (null)
         assertEquals(3, row.entryCount)
         assertEquals(2, row.knownCostEntries)
@@ -140,10 +136,7 @@ class SessionQuerySpendTest {
             SessionQueryTool.Input(select = "spend", sessionId = sid.value),
             ctx(),
         ).data
-        val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SpendSummaryRow.serializer()),
-            out.rows,
-        ).single()
+        val row = out.rows.decodeRowsAs(SpendSummaryRow.serializer()).single()
         assertEquals(0L, row.totalCostCents)
         assertEquals(0, row.entryCount)
         assertTrue(row.byTool.isEmpty())
@@ -156,10 +149,7 @@ class SessionQuerySpendTest {
             SessionQueryTool.Input(select = "spend", sessionId = sid.value),
             ctx(),
         ).data
-        val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SpendSummaryRow.serializer()),
-            out.rows,
-        ).single()
+        val row = out.rows.decodeRowsAs(SpendSummaryRow.serializer()).single()
         assertEquals(0L, row.totalCostCents)
         assertFalse(row.projectResolved, "no project store wired → projectResolved=false")
     }

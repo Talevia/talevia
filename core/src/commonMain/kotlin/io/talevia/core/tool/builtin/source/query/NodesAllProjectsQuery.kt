@@ -98,7 +98,7 @@ internal suspend fun runNodesAllProjectsQuery(
 
     val page = sorted.drop(offset).take(limit)
     val rows = page.map { hit ->
-        SourceQueryTool.NodeRow(
+        NodeRow(
             id = hit.node.id.value,
             kind = hit.node.kind,
             revision = hit.node.revision,
@@ -112,7 +112,7 @@ internal suspend fun runNodesAllProjectsQuery(
         )
     }
     val jsonRows = JsonConfig.default.encodeToJsonElement(
-        ListSerializer(SourceQueryTool.NodeRow.serializer()),
+        ListSerializer(NodeRow.serializer()),
         rows,
     )
 
