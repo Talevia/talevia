@@ -34,9 +34,6 @@ import okio.Path.Companion.toPath
  * permissions sees the prompt before another machine's project is
  * registered locally.
  */
-// TODO(file-bundle-migration): register `OpenProjectTool(projects)` in
-// each AppContainer's tool registry — JVM (CLI / Desktop / Server),
-// Android, iOS. Currently no container references this tool.
 class OpenProjectTool(
     private val projects: ProjectStore,
 ) : Tool<OpenProjectTool.Input, OpenProjectTool.Output> {

@@ -265,3 +265,38 @@ when there's a method in front of it — delete the method and the blank
 becomes a violation. Cheap fix but surprising. Consider running
 `ktlintFormat` preemptively after any edit that removes the last item
 before a closing brace.
+
+---
+
+## 2026-04-23 — debt-registered-tools-contract-test (`<this commit>`)
+
+### Writing the "static invariant" test found a real bug the test is designed to catch
+Dry-run-scanning all 104 `Tool.kt` files against all 5 `AppContainer`s
+found exactly one tool missing from every container: `OpenProjectTool`,
+sitting there with a `TODO(file-bundle-migration): register
+OpenProjectTool(projects) in each AppContainer's tool registry` comment.
+Exact shape of the bug the new test is designed to catch: class file
+exists, no container wires it, TODO never flipped. Wiring the tool plus
+adding the test in the same commit is the cleanest closure — but the
+general pattern is worth naming: **when you build a static invariant
+check, expect the first run to find something**. If it doesn't, the
+invariant is either trivially satisfied (not worth enforcing) or too
+lax (missing the real failure cases). Scan-then-fix is the honest
+first-cycle of any static-check cycle; skipping the scan and shipping
+with a broken-on-day-one test devalues the guard.
+
+### `apps/server:test` has been pre-existing red for at least 7 cycles
+The `debt-server-container-env-defaults` bullet has been sitting in P2
+since before cycle 1, noting that 15 server tests NPE on `clean main`
+because `ServerContainer.kt:215` uses `env["TALEVIA_RECENTS_PATH"]!!`
+but every server test passes `env = emptyMap()`. Every cycle that's
+touched something potentially-server-adjacent has had to `git stash`,
+re-run `:apps:server:test` to verify the pre-existing red, then
+continue. This cycle hit the same pattern. Structural implication: a
+backlog-bullet debt item sitting unfixed while its test suite stays
+red is **blocking** other cycles' validation runs (you can't tell
+"your change broke the server tests" from "the server tests were red
+before you started"). Normally P2 items wait for priority; this one
+has enough cycle-externality to deserve a P1 bump independent of its
+own merit. Adding that as a P2 "顺手记 debt" append below so the next
+repopulate can re-score.
