@@ -86,3 +86,35 @@ project-query test (see 2026-04-22 entry). That's 10+ copies of the same
 test-kit helper like `Output.decodeRows(ser: KSerializer<T>): List<T>`
 collapses all of them. Evidence that we need a typed-output facade
 (same missing abstraction as the 2026-04-22 first entry).
+
+---
+
+## 2026-04-23 — fork-project-tool-trim-stats-bug (`<this commit>`)
+
+### "Fix-but-forget-to-flip-the-gate" drift — passing tests that are still `@Ignore`d
+The backlog bullet for this cycle described a real bug: `ForkProjectTool`
+was re-applying `variantSpec` against an already-trimmed project and
+always getting `(0, 0)` trim-stats. Walking the code today, that bug is
+**gone** — `applyVariantSpec` runs once on the pre-persist `baseFork` and
+`Output` pulls stats directly from that single `reshape` local. But the
+guarding test (`variantSpecDropsTailClipsAndTruncatesStraddlers`) was
+still `@Ignore`d, wearing a `TODO(file-bundle-migration):` comment that
+described the fix as if it hadn't landed yet. Whoever fixed the source
+didn't unskip the test or delete the TODO, so the backlog bullet (and a
+future reader — me) spent the first half of this cycle verifying a bug
+that wasn't live. Structural signal: every `@Ignore` / `@Disabled` is a
+**silently-lying gate** — promises future coverage it doesn't actually
+enforce, and lets bug-fix commits skip confronting the coverage contract.
+Concrete mitigations worth considering:
+1. Debt-scan already counts `@Ignore`s; tightening enforcement so any
+   `@Ignore` surviving > 1 repopulate cycle graduates to P0
+   "unskip-or-delete" would have caught this before the bullet description
+   rotted.
+2. A ktlint / detekt rule requiring `@Ignore` to carry either an issue-id
+   or an expiry date would force skips to be self-dating.
+3. Backlog bullets describing bugs should include a one-liner on how to
+   verify the bug still exists (typically the test name), so future
+   cycles start with `git grep @Ignore ${testName}` rather than inferring
+   live-or-dead from the source. This is more important than it sounds —
+   when backlog descriptions decouple from reality, the `/iterate-gap`
+   loop can spend cycles on ghost work.

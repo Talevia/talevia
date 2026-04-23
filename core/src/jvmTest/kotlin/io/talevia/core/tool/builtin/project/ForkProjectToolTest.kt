@@ -410,12 +410,6 @@ class ForkProjectToolTest {
         assertEquals(ProjectId("p-var-src"), forked.parentProjectId)
     }
 
-    // TODO(file-bundle-migration): ForkProjectTool counts clipsDroppedByTrim /
-    // clipsTruncatedByTrim by re-running applyVariantSpec on the persisted
-    // (already-trimmed) project — both return 0. SqlDelight happened to pass
-    // for unrelated reasons; FileProjectStore's exact round-trip surfaces the
-    // bug. Fix: use the FIRST reshape's stats in Output instead of recomputing.
-    @kotlin.test.Ignore
     @Test fun variantSpecDurationDropsTailClipsAndTruncatesStraddlers() = runTest {
         val rig = rig()
         seedThreeClipSource(rig.store)
