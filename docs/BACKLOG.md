@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **debt-add-benchmark-export-tool** — R.6 #4 scan 子 bullet 之 3：`ExportTool.render()` + `FileProjectStore.openAt` 是第二核心路径，直接决定用户感知的"编辑→看成片"时延。**方向：** 在 `debt-add-benchmark-infra` 落地后，给 `platform-impls/video-ffmpeg-jvm` 加 "10-clip timeline export" benchmark（wall-time + peak RSS）；baseline 写进 decision，后续驱动 `export-incremental-render` 能否上线的判断。**前置：** `debt-add-benchmark-infra` 已落地。Rubric §5.7。
 
 ## P1 — 中优，做完 P0 再排
 

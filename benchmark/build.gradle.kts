@@ -17,6 +17,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.sqldelight.driver.sqlite)
+    implementation(libs.okio)
+    implementation(libs.okio.fakefilesystem)
 }
 
 benchmark {
