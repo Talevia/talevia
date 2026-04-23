@@ -4,18 +4,66 @@ import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Project
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.JsonObject
+
+@Serializable data class LockfileEntryProvenance(
+    val providerId: String,
+    val modelId: String,
+    val modelVersion: String? = null,
+    val seed: Long,
+    val createdAtEpochMs: Long,
+)
+
+@Serializable data class LockfileEntryDriftedNode(
+    val nodeId: String,
+    val snapshotContentHash: String,
+    /** Null when the bound node has since been deleted from the project. */
+    val currentContentHash: String? = null,
+)
+
+@Serializable data class LockfileEntryClipRef(
+    val clipId: String,
+    val trackId: String,
+    val clipType: String,
+)
 
 /**
- * `select=lockfile_entry` — single-row drill-down replacing the deleted
- * `describe_lockfile_entry` tool. Looks up by `inputHash` (most-recent
- * match, same semantics as `Lockfile.findByInputHash`). Returns full
- * provenance + source-binding snapshot + drifted-nodes list + baseInputs
- * + live clip references on the current timeline.
- *
- * Consolidated under `project_query` per the
- * `debt-consolidate-project-describe-queries` backlog bullet.
+ * `select=lockfile_entry` — single-row drill-down replacing the
+ * deleted `describe_lockfile_entry` tool. Looks up by `inputHash`;
+ * returns full provenance, source-binding snapshot / drift state,
+ * baseInputs, clip references on the current timeline.
  */
+@Serializable data class LockfileEntryDetailRow(
+    val inputHash: String,
+    val toolId: String,
+    val assetId: String,
+    val pinned: Boolean,
+    val provenance: LockfileEntryProvenance,
+    val sourceBindingIds: List<String> = emptyList(),
+    val sourceContentHashes: Map<String, String> = emptyMap(),
+    val baseInputs: JsonObject,
+    val baseInputsEmpty: Boolean,
+    val currentlyStale: Boolean,
+    val driftedNodes: List<LockfileEntryDriftedNode> = emptyList(),
+    val clipReferences: List<LockfileEntryClipRef> = emptyList(),
+    /**
+     * The fully-expanded prompt the AIGC tool sent to the provider,
+     * after consistency-fold (character_ref / style_bible etc.
+     * prepended). Null for tools without a prompt concept (upscale,
+     * synthesize_speech) and for pre-cycle-7 legacy entries.
+     */
+    val resolvedPrompt: String? = null,
+    /**
+     * Session message id whose tool call produced this entry. Lets
+     * the audit path trace "which prompt generated this image?"
+     * without grepping session parts. Null for pre-provenance-cycle
+     * legacy entries. VISION §5.2.
+     */
+    val originatingMessageId: String? = null,
+)
+
 internal fun runLockfileEntryDetailQuery(
     project: Project,
     input: ProjectQueryTool.Input,
@@ -35,7 +83,7 @@ internal fun runLockfileEntryDetailQuery(
     val driftedNodes = entry.sourceContentHashes.mapNotNull { (nodeId, snapshot) ->
         val current = currentHashesById[nodeId.value]
         if (current == null || current != snapshot) {
-            ProjectQueryTool.LockfileEntryDriftedNode(
+            LockfileEntryDriftedNode(
                 nodeId = nodeId.value,
                 snapshotContentHash = snapshot,
                 currentContentHash = current,
@@ -56,7 +104,7 @@ internal fun runLockfileEntryDetailQuery(
                 }
                 if (clipAssetId != entry.assetId) continue
                 add(
-                    ProjectQueryTool.LockfileEntryClipRef(
+                    LockfileEntryClipRef(
                         clipId = clip.id.value,
                         trackId = track.id.value,
                         clipType = kind,
@@ -66,12 +114,12 @@ internal fun runLockfileEntryDetailQuery(
         }
     }
 
-    val row = ProjectQueryTool.LockfileEntryDetailRow(
+    val row = LockfileEntryDetailRow(
         inputHash = entry.inputHash,
         toolId = entry.toolId,
         assetId = entry.assetId.value,
         pinned = entry.pinned,
-        provenance = ProjectQueryTool.LockfileEntryProvenance(
+        provenance = LockfileEntryProvenance(
             providerId = entry.provenance.providerId,
             modelId = entry.provenance.modelId,
             modelVersion = entry.provenance.modelVersion,
@@ -89,7 +137,7 @@ internal fun runLockfileEntryDetailQuery(
         originatingMessageId = entry.originatingMessageId?.value,
     )
     val rows = encodeRows(
-        ListSerializer(ProjectQueryTool.LockfileEntryDetailRow.serializer()),
+        ListSerializer(LockfileEntryDetailRow.serializer()),
         listOf(row),
     )
 

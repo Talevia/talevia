@@ -5,15 +5,46 @@ import io.talevia.core.domain.Project
 import io.talevia.core.domain.clipsBoundTo
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 
 /**
+ * `select=consistency_propagation` — verifies that a consistency-style
+ * source node (character_ref / style_bible / brand_palette / …) actually
+ * reached the prompts of clips bound to it, by substring-matching the
+ * node's body string values against each clip's lockfile entry
+ * `baseInputs.prompt`. Supports VISION §5.5 "did my character_ref really
+ * influence shot-3?" — a provider can nominally see a binding but still
+ * not incorporate it.
+ *
+ * Row per bound clip. `aigcEntryFound=false` → clip is not AIGC-backed or
+ * its lockfile entry is missing (nothing to audit). `keywordsInBody` is
+ * a deterministic slice of string values from the node's top-level body
+ * JSON; `keywordsMatchedInPrompt` is the subset that appear (case-
+ * insensitive substring) in `baseInputs.prompt`. `promptContainsKeywords`
+ * is convenience.
+ */
+@Serializable data class ConsistencyPropagationRow(
+    val clipId: String,
+    val trackId: String,
+    val assetId: String? = null,
+    val directlyBound: Boolean,
+    val boundVia: List<String> = emptyList(),
+    val aigcEntryFound: Boolean,
+    val lockfileInputHash: String? = null,
+    val aigcToolId: String? = null,
+    val keywordsInBody: List<String> = emptyList(),
+    val keywordsMatchedInPrompt: List<String> = emptyList(),
+    val promptContainsKeywords: Boolean = false,
+)
+
+/**
  * `select=consistency_propagation` — VISION §5.5 audit: did the bound
- * consistency source node (character_ref / style_bible / brand_palette /
- * …) actually reach the prompts of its bound clips' AIGC generations?
+ * consistency source node actually reach the prompts of its bound clips'
+ * AIGC generations?
  *
  * For each clip in the transitive-downstream closure of
  * [ProjectQueryTool.Input.sourceNodeId], looks up the AIGC lockfile
@@ -23,12 +54,6 @@ import kotlinx.serialization.json.JsonPrimitive
  * without an asset), and clips whose asset lacks a lockfile entry,
  * are still reported with `aigcEntryFound=false` so the auditor sees
  * the full surface.
- *
- * Keyword extraction is intentionally simple: top-level string values
- * in the node's body JSON. Long values and digits are kept as-is;
- * blank strings and primitives that aren't strings are skipped. The
- * caller (a linter, an LLM, a UI) can compose further heuristics;
- * this primitive exposes the raw hit-map.
  */
 internal fun runConsistencyPropagationQuery(
     project: Project,
@@ -56,7 +81,7 @@ internal fun runConsistencyPropagationQuery(
             val needle = prompt.lowercase()
             keywords.filter { kw -> kw.lowercase() in needle }
         }
-        ProjectQueryTool.ConsistencyPropagationRow(
+        ConsistencyPropagationRow(
             clipId = r.clipId.value,
             trackId = r.trackId.value,
             assetId = aid?.value,
@@ -71,7 +96,7 @@ internal fun runConsistencyPropagationQuery(
         )
     }
     val page = reports.drop(offset).take(limit)
-    val rows = encodeRows(ListSerializer(ProjectQueryTool.ConsistencyPropagationRow.serializer()), page)
+    val rows = encodeRows(ListSerializer(ConsistencyPropagationRow.serializer()), page)
     val propagated = reports.count { it.promptContainsKeywords }
     val covered = reports.count { it.aigcEntryFound }
     val summary = buildString {
@@ -112,8 +137,5 @@ private fun extractKeywords(body: JsonElement): List<String> {
         if (s.isBlank()) continue
         out += s
     }
-    // Extension point: if nested arrays of strings start mattering
-    // (e.g. style_bible.aesthetics: ["cinematic", "warm"]), walk them
-    // inside the `for` loop above.
     return out.toList()
 }

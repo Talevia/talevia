@@ -4,15 +4,24 @@ import io.talevia.core.domain.Project
 import io.talevia.core.domain.Track
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class TrackRow(
+    val trackId: String,
+    val trackKind: String,
+    val index: Int,
+    val clipCount: Int,
+    val isEmpty: Boolean,
+    val firstClipStartSeconds: Double? = null,
+    val lastClipEndSeconds: Double? = null,
+    val spanSeconds: Double? = null,
+    /** Stamped by [io.talevia.core.domain.FileProjectStore]; null on pre-recency blobs. */
+    val updatedAtEpochMs: Long? = null,
+)
 
 /**
  * `select=tracks` — one row per timeline track with kind, clip count, span.
- *
- * Carved out of `ProjectQueryTool.runTracks` when that file crossed the
- * 500-line long-file threshold (decision
- * `docs/decisions/2026-04-21-debt-split-projectquerytool.md`). Behavior is
- * identical to the old private method.
  */
 internal fun runTracksQuery(
     project: Project,
@@ -45,7 +54,7 @@ internal fun runTracksQuery(
     }
 
     val page = sorted.drop(offset).take(limit)
-    val rows = encodeRows(ListSerializer(ProjectQueryTool.TrackRow.serializer()), page)
+    val rows = encodeRows(ListSerializer(TrackRow.serializer()), page)
     val llmBody = when {
         page.isEmpty() -> "No tracks match the given filter."
         else -> page.joinToString("\n") { r ->
@@ -75,10 +84,10 @@ internal fun runTracksQuery(
     )
 }
 
-private fun buildTrackRow(track: Track, index: Int, kind: String): ProjectQueryTool.TrackRow {
+private fun buildTrackRow(track: Track, index: Int, kind: String): TrackRow {
     val clips = track.clips
     if (clips.isEmpty()) {
-        return ProjectQueryTool.TrackRow(
+        return TrackRow(
             trackId = track.id.value,
             trackKind = kind,
             index = index,
@@ -89,7 +98,7 @@ private fun buildTrackRow(track: Track, index: Int, kind: String): ProjectQueryT
     }
     val firstStart = clips.minOf { it.timeRange.start }
     val lastEnd = clips.maxOf { it.timeRange.end }
-    return ProjectQueryTool.TrackRow(
+    return TrackRow(
         trackId = track.id.value,
         trackKind = kind,
         index = index,

@@ -15,7 +15,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **debt-resplit-project-query-tool** — `ProjectQueryTool.kt` 在 `6e7bd8f` 首次拆分至 540 行后又长回 547 行，说明上次拆分不彻底 / 漏了一个肥 select 分支。**方向：** 扫一遍各 `handle<Select>` 分支，把任何 > 40 行的单独挪到 `project/query/<select>.kt` 同级；主文件保留 dispatch + schema。Rubric §3a-3。
 - **debt-resplit-session-query-tool** — `SessionQueryTool.kt` 534 行，同类症状；同一轮 repopulate 一并 split。**方向：** 和 ProjectQueryTool 同一个套路。Rubric §3a-3。
 - **fork-project-tool-trim-stats-bug** — `ForkProjectTool` 的 `Output.clipsDroppedByTrim` / `clipsTruncatedByTrim` 通过对 **持久化后已经 trim 过的 project** 再跑一次 `applyVariantSpec` 来统计，永远拿到 `(0, 0)`。`SqlDelightProjectStore` 时代意外 pass，`baad43f` 切到 `FileProjectStore` 的精确 round-trip 后暴露 —— `ForkProjectToolTest.variantSpecDurationDropsTailClipsAndTruncatesStraddlers` 当前 `@Ignore` 着。**方向：** 改用第一次 `applyVariantSpec(baseFork, spec)` 调用的 `reshape` 数字塞进 `Output`，把第二次 `apply` 删掉；解开 `@Ignore`。Rubric §3a-3 / 正确性。
 - **bundle-cross-machine-export-smoke** — `baad43f` 的核心目标"git push 出去的 bundle 在另一台机器能 reproduce export"还没 e2e 验证过。CI 里也没 cross-machine 同等物。**方向：** 在 `apps/cli` 或 `apps/server` 测试里加一个 smoke test：`talevia new /tmp/a` → 加 clip + AIGC（fake provider）+ ApplyLut → export → 记 hash → `cp -r /tmp/a /tmp/b` → `talevia open /tmp/b` → 重新 export → assert hash 相同。Rubric §3.1（产物可 pin） / §5.3。

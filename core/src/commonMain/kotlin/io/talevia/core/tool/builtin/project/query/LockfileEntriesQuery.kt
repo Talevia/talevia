@@ -4,17 +4,25 @@ import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.Project
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class LockfileEntryRow(
+    val inputHash: String,
+    val toolId: String,
+    val assetId: String,
+    val providerId: String,
+    val modelId: String,
+    val seed: Long,
+    val createdAtEpochMs: Long,
+    val sourceBindingIds: List<String> = emptyList(),
+    val pinned: Boolean,
+)
 
 /**
  * `select=lockfile_entries` — AIGC lockfile entries on a project,
- * most-recent first. Replaces the pre-consolidation
- * `list_lockfile_entries` tool. Filters:
- *  - [ProjectQueryTool.Input.toolId] (producing tool)
- *  - [ProjectQueryTool.Input.onlyPinned] (hero shots)
- *  - [ProjectQueryTool.Input.sourceNodeId] (entries bound to one source node —
- *    "this character's generation history")
- *  - [ProjectQueryTool.Input.sinceEpochMs] (created at or after this timestamp)
+ * most-recent first. Filters: toolId / onlyPinned / sourceNodeId /
+ * sinceEpochMs.
  */
 internal fun runLockfileEntriesQuery(
     project: Project,
@@ -39,7 +47,7 @@ internal fun runLockfileEntriesQuery(
     val recent = filtered.asReversed().drop(offset).take(limit)
 
     val rows = recent.map { e ->
-        ProjectQueryTool.LockfileEntryRow(
+        LockfileEntryRow(
             inputHash = e.inputHash,
             toolId = e.toolId,
             assetId = e.assetId.value,
@@ -51,7 +59,7 @@ internal fun runLockfileEntriesQuery(
             pinned = e.pinned,
         )
     }
-    val jsonRows = encodeRows(ListSerializer(ProjectQueryTool.LockfileEntryRow.serializer()), rows)
+    val jsonRows = encodeRows(ListSerializer(LockfileEntryRow.serializer()), rows)
     val scopeParts = buildList {
         input.toolId?.takeIf { it.isNotBlank() }?.let { add("toolId=$it") }
         if (input.onlyPinned == true) add("pinned")

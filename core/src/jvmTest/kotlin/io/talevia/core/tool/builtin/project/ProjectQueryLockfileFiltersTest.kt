@@ -16,6 +16,7 @@ import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.project.query.LockfileEntryRow
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
@@ -94,7 +95,7 @@ class ProjectQueryLockfileFiltersTest {
         ).data
         assertEquals(2, out.total)
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ProjectQueryTool.LockfileEntryRow.serializer()),
+            ListSerializer(LockfileEntryRow.serializer()),
             out.rows,
         )
         assertEquals(setOf("new-1", "mid-1"), rows.map { it.inputHash }.toSet())
@@ -118,7 +119,7 @@ class ProjectQueryLockfileFiltersTest {
             ctx(),
         ).data
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ProjectQueryTool.LockfileEntryRow.serializer()),
+            ListSerializer(LockfileEntryRow.serializer()),
             out.rows,
         )
         assertEquals(setOf("h2", "h1"), rows.map { it.inputHash }.toSet())
@@ -143,7 +144,7 @@ class ProjectQueryLockfileFiltersTest {
             ctx(),
         ).data
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ProjectQueryTool.LockfileEntryRow.serializer()),
+            ListSerializer(LockfileEntryRow.serializer()),
             out.rows,
         )
         assertEquals(listOf("new-mei"), rows.map { it.inputHash })

@@ -3,21 +3,29 @@ package io.talevia.core.tool.builtin.project.query
 import io.talevia.core.domain.Project
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 
 /**
- * `select=spend` — aggregate AIGC spend across the project's lockfile, as a
- * single summary row. Each lockfile entry carries a `costCents: Long?` stamped
- * at generation time by [io.talevia.core.cost.AigcPricing]; `null` means "no
- * pricing rule for that provider+model". We sum known values, count unknown
- * entries separately, and break down by toolId and sessionId so UI can answer
- * both "which tool is burning budget" and "which session was expensive".
- *
- * Intentional: no filter by toolId / sessionId at this layer. Callers who want
- * per-tool detail call `select=lockfile_entries&toolId=generate_image` and sum
- * themselves; this select is the fast aggregate path for the dashboard line
- * "project X has spent $Y".
+ * `select=spend` — single-row aggregate of AIGC spend across the project's
+ * lockfile. [totalCostCents] sums on every entry whose stamped `costCents`
+ * is non-null; entries with `null` cost (no pricing rule) are counted in
+ * [unknownCostEntries] and NOT rolled into [totalCostCents] — silent
+ * zero-coalescing would misrepresent spend as cheaper than it is. [byTool]
+ * / [bySession] break the total down so dashboards can answer "which tool
+ * / session ate the budget".
  */
+@Serializable data class SpendSummaryRow(
+    val projectId: String,
+    val totalCostCents: Long,
+    val entryCount: Int,
+    val knownCostEntries: Int,
+    val unknownCostEntries: Int,
+    val byTool: Map<String, Long> = emptyMap(),
+    val bySession: Map<String, Long> = emptyMap(),
+    val unknownByTool: Map<String, Int> = emptyMap(),
+)
+
 internal fun runSpendQuery(
     project: Project,
 ): ToolResult<ProjectQueryTool.Output> {
@@ -46,7 +54,7 @@ internal fun runSpendQuery(
         }
     }
 
-    val row = ProjectQueryTool.SpendSummaryRow(
+    val row = SpendSummaryRow(
         projectId = project.id.value,
         totalCostCents = totalCents,
         entryCount = entries.size,
@@ -57,7 +65,7 @@ internal fun runSpendQuery(
         unknownByTool = unknownByTool.sortedByKey(),
     )
     val rows = encodeRows(
-        ListSerializer(ProjectQueryTool.SpendSummaryRow.serializer()),
+        ListSerializer(SpendSummaryRow.serializer()),
         listOf(row),
     )
     val topTool = byTool.entries.maxByOrNull { it.value }

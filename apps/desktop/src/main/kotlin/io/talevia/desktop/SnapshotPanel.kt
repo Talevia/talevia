@@ -33,6 +33,7 @@ import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import io.talevia.core.tool.builtin.project.query.SnapshotRow
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Instant
 import kotlinx.serialization.builtins.ListSerializer
@@ -61,7 +62,7 @@ fun SnapshotPanel(
 ) {
     val scope = rememberCoroutineScope()
     val snapshots = remember(projectId) {
-        mutableStateListOf<ProjectQueryTool.SnapshotRow>()
+        mutableStateListOf<SnapshotRow>()
     }
     var restoring by remember { mutableStateOf<String?>(null) }
 
@@ -77,7 +78,7 @@ fun SnapshotPanel(
             )
             val data = result.data as? ProjectQueryTool.Output ?: return
             val rows = JsonConfig.default.decodeFromJsonElement(
-                ListSerializer(ProjectQueryTool.SnapshotRow.serializer()),
+                ListSerializer(SnapshotRow.serializer()),
                 data.rows,
             )
             snapshots.clear()
@@ -158,7 +159,7 @@ fun SnapshotPanel(
 
 @Composable
 private fun SnapshotRow(
-    snap: ProjectQueryTool.SnapshotRow,
+    snap: SnapshotRow,
     restoring: Boolean,
     onRestore: () -> Unit,
 ) {

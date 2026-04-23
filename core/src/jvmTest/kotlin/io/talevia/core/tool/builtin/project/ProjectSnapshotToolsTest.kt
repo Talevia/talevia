@@ -29,6 +29,7 @@ import io.talevia.core.domain.source.addNode
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.project.query.SnapshotRow
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -106,7 +107,7 @@ class ProjectSnapshotToolsTest {
         clock: Clock = Clock.System,
         maxAgeDays: Int? = null,
         limit: Int? = null,
-    ): Pair<Int, List<ProjectQueryTool.SnapshotRow>> {
+    ): Pair<Int, List<SnapshotRow>> {
         val out = ProjectQueryTool(rig.store, clock).execute(
             ProjectQueryTool.Input(
                 projectId = projectId,
@@ -117,7 +118,7 @@ class ProjectSnapshotToolsTest {
             rig.ctx,
         ).data
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ProjectQueryTool.SnapshotRow.serializer()),
+            ListSerializer(SnapshotRow.serializer()),
             out.rows,
         )
         return out.total to rows

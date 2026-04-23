@@ -5,9 +5,22 @@ import io.talevia.core.domain.Project
 import io.talevia.core.domain.Track
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
+
+@Serializable data class TransitionRow(
+    val transitionClipId: String,
+    val trackId: String,
+    val transitionName: String,
+    val startSeconds: Double,
+    val durationSeconds: Double,
+    val endSeconds: Double,
+    val fromClipId: String? = null,
+    val toClipId: String? = null,
+    val orphaned: Boolean = false,
+)
 
 /**
  * `select=transitions` — one row per transition on the timeline, with
@@ -36,7 +49,7 @@ internal fun runTransitionsQuery(
             val fromClip = videoTracks.findClipEndingNear(midpoint)
             val toClip = videoTracks.findClipStartingNear(midpoint)
             val orphaned = fromClip == null && toClip == null
-            ProjectQueryTool.TransitionRow(
+            TransitionRow(
                 transitionClipId = clip.id.value,
                 trackId = track.id.value,
                 transitionName = name,
@@ -52,7 +65,7 @@ internal fun runTransitionsQuery(
 
     val filtered = if (input.onlyOrphaned == true) rows.filter { it.orphaned } else rows
     val page = filtered.drop(offset).take(limit)
-    val jsonRows = encodeRows(ListSerializer(ProjectQueryTool.TransitionRow.serializer()), page)
+    val jsonRows = encodeRows(ListSerializer(TransitionRow.serializer()), page)
 
     val orphanCount = rows.count { it.orphaned }
     val body = if (page.isEmpty()) {

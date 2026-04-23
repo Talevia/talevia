@@ -7,18 +7,51 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Track
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class ProjectMetadataProfile(
+    val resolutionWidth: Int,
+    val resolutionHeight: Int,
+    val frameRate: Int,
+    val videoCodec: String,
+    val audioCodec: String,
+)
+
+@Serializable data class ProjectMetadataSnapshotSummary(
+    val id: String,
+    val label: String,
+    val capturedAtEpochMs: Long,
+)
 
 /**
  * `select=project_metadata` — single-row drill-down replacing the
- * deleted `describe_project` tool. Aggregates project state across
- * timeline / source DAG / lockfile / snapshots into one compact
- * descriptor plus a pre-rendered [ProjectMetadataRow.summaryText] the
- * LLM can quote verbatim when resuming a session.
- *
- * Consolidated under `project_query` per the
- * `debt-consolidate-project-describe-queries` backlog bullet.
+ * deleted `describe_project` tool. Compact aggregate across every
+ * axis: timeline, tracks-by-kind, clips-by-kind, source-nodes-by-
+ * kind, lockfile-by-tool, snapshots, plus a pre-rendered
+ * `summaryText` the LLM can quote verbatim.
  */
+@Serializable data class ProjectMetadataRow(
+    val title: String,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+    val timelineDurationSeconds: Double,
+    val trackCount: Int,
+    val tracksByKind: Map<String, Int>,
+    val clipCount: Int,
+    val clipsByKind: Map<String, Int>,
+    val assetCount: Int,
+    val sourceNodeCount: Int,
+    val sourceNodesByKind: Map<String, Int>,
+    val lockfileEntryCount: Int,
+    val lockfileByTool: Map<String, Int>,
+    val snapshotCount: Int,
+    val recentSnapshots: List<ProjectMetadataSnapshotSummary> = emptyList(),
+    val outputProfile: ProjectMetadataProfile? = null,
+    /** Pre-rendered ~300-char human summary, LLM-quotable verbatim. */
+    val summaryText: String,
+)
+
 internal const val METADATA_MAX_RECENT_SNAPSHOTS: Int = 5
 
 internal suspend fun runProjectMetadataQuery(
@@ -85,7 +118,7 @@ internal suspend fun runProjectMetadataQuery(
     val profileSummary = if (profile == OutputProfile.DEFAULT_1080P) {
         null
     } else {
-        ProjectQueryTool.ProjectMetadataProfile(
+        ProjectMetadataProfile(
             resolutionWidth = profile.resolution.width,
             resolutionHeight = profile.resolution.height,
             frameRate = fpsOf(profile),
@@ -98,7 +131,7 @@ internal suspend fun runProjectMetadataQuery(
         .sortedByDescending { it.capturedAtEpochMs }
         .take(METADATA_MAX_RECENT_SNAPSHOTS)
         .map {
-            ProjectQueryTool.ProjectMetadataSnapshotSummary(
+            ProjectMetadataSnapshotSummary(
                 id = it.id.value,
                 label = it.label,
                 capturedAtEpochMs = it.capturedAtEpochMs,
@@ -119,7 +152,7 @@ internal suspend fun runProjectMetadataQuery(
         snapshotCount = project.snapshots.size,
     )
 
-    val row = ProjectQueryTool.ProjectMetadataRow(
+    val row = ProjectMetadataRow(
         title = meta.title,
         createdAtEpochMs = meta.createdAtEpochMs,
         updatedAtEpochMs = meta.updatedAtEpochMs,
@@ -139,7 +172,7 @@ internal suspend fun runProjectMetadataQuery(
         summaryText = summaryText,
     )
     val rows = encodeRows(
-        ListSerializer(ProjectQueryTool.ProjectMetadataRow.serializer()),
+        ListSerializer(ProjectMetadataRow.serializer()),
         listOf(row),
     )
     return ToolResult(

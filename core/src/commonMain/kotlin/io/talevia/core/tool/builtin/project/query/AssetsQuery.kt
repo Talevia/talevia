@@ -6,17 +6,27 @@ import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlin.time.DurationUnit
+
+@Serializable data class AssetRow(
+    val assetId: String,
+    val kind: String,
+    val durationSeconds: Double,
+    val width: Int? = null,
+    val height: Int? = null,
+    val hasVideoTrack: Boolean,
+    val hasAudioTrack: Boolean,
+    val sourceKind: String,
+    val inUseByClips: Int,
+    /** Stamped by [io.talevia.core.domain.FileProjectStore]; null on pre-recency blobs. */
+    val updatedAtEpochMs: Long? = null,
+)
 
 /**
  * `select=assets` — one row per asset in the project catalog with kind,
  * duration, resolution, codec flags, source kind, reference count.
- *
- * Carved out of `ProjectQueryTool.runAssets` when that file crossed the
- * 500-line long-file threshold (decision
- * `docs/decisions/2026-04-21-debt-split-projectquerytool.md`). Behavior is
- * identical to the old private method.
  */
 internal fun runAssetsQuery(
     project: Project,
@@ -85,7 +95,7 @@ internal fun runAssetsQuery(
     }
 
     val page = sorted.drop(offset).take(limit)
-    val rows = encodeRows(ListSerializer(ProjectQueryTool.AssetRow.serializer()), page)
+    val rows = encodeRows(ListSerializer(AssetRow.serializer()), page)
     val scopeBits = buildList {
         add("kind=$kindFilter")
         if (input.onlyUnused == true) add("unused-only")
@@ -120,7 +130,7 @@ private fun classifyAsset(asset: MediaAsset): String {
     }
 }
 
-private fun buildAssetRow(asset: MediaAsset, kind: String, refCount: Int): ProjectQueryTool.AssetRow {
+private fun buildAssetRow(asset: MediaAsset, kind: String, refCount: Int): AssetRow {
     val res = asset.metadata.resolution
     val sourceKind = when (asset.source) {
         is MediaSource.File -> "file"
@@ -128,7 +138,7 @@ private fun buildAssetRow(asset: MediaAsset, kind: String, refCount: Int): Proje
         is MediaSource.Http -> "http"
         is MediaSource.Platform -> "platform"
     }
-    return ProjectQueryTool.AssetRow(
+    return AssetRow(
         assetId = asset.id.value,
         kind = kind,
         durationSeconds = asset.metadata.duration.toDouble(DurationUnit.SECONDS),

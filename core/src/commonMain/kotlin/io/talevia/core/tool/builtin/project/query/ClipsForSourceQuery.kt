@@ -5,12 +5,20 @@ import io.talevia.core.domain.Project
 import io.talevia.core.domain.clipsBoundTo
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class ClipForSourceRow(
+    val clipId: String,
+    val trackId: String,
+    val assetId: String? = null,
+    val directlyBound: Boolean,
+    val boundVia: List<String> = emptyList(),
+)
 
 /**
  * `select=clips_for_source` — every clip whose `sourceBinding` intersects
- * the transitive-downstream closure of a given source node id. Replaces
- * the pre-consolidation `list_clips_for_source` tool. Requires
+ * the transitive-downstream closure of a given source node id. Requires
  * [ProjectQueryTool.Input.sourceNodeId]; unknown id throws with a
  * `source_query(select=nodes)` hint.
  */
@@ -30,7 +38,7 @@ internal fun runClipsForSourceQuery(
         )
     }
     val reports = project.clipsBoundTo(nodeId).map { r ->
-        ProjectQueryTool.ClipForSourceRow(
+        ClipForSourceRow(
             clipId = r.clipId.value,
             trackId = r.trackId.value,
             assetId = r.assetId?.value,
@@ -39,7 +47,7 @@ internal fun runClipsForSourceQuery(
         )
     }
     val page = reports.drop(offset).take(limit)
-    val jsonRows = encodeRows(ListSerializer(ProjectQueryTool.ClipForSourceRow.serializer()), page)
+    val jsonRows = encodeRows(ListSerializer(ClipForSourceRow.serializer()), page)
     val body = if (reports.isEmpty()) {
         "No clips bind source node $sourceNodeIdString (directly or transitively)."
     } else {

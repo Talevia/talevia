@@ -15,6 +15,7 @@ import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.project.query.SpendSummaryRow
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
@@ -94,7 +95,7 @@ class ProjectQuerySpendTest {
         assertEquals("spend", out.select)
         assertEquals(1, out.total)
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ProjectQueryTool.SpendSummaryRow.serializer()),
+            ListSerializer(SpendSummaryRow.serializer()),
             out.rows,
         )
         val row = rows.single()
@@ -126,7 +127,7 @@ class ProjectQuerySpendTest {
             ctx(),
         ).data
         val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ProjectQueryTool.SpendSummaryRow.serializer()),
+            ListSerializer(SpendSummaryRow.serializer()),
             out.rows,
         ).single()
         assertEquals(0L, row.totalCostCents)
@@ -148,7 +149,7 @@ class ProjectQuerySpendTest {
             ctx(),
         ).data
         val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(ProjectQueryTool.SpendSummaryRow.serializer()),
+            ListSerializer(SpendSummaryRow.serializer()),
             out.rows,
         ).single()
         assertEquals(0L, row.totalCostCents)

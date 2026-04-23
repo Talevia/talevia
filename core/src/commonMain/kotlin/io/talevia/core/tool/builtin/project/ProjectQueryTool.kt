@@ -38,29 +38,17 @@ import kotlinx.serialization.serializer
  * don't apply to the chosen select fail loud — silent empty lists would
  * hide typos.
  *
- * Select lane history:
- *  - `tracks` / `timeline_clips` / `assets` — original consolidation of
- *    `list_tracks` / `list_timeline_clips` / `list_assets`
- *    (`unify-project-query` decision).
- *  - `transitions` / `lockfile_entries` / `clips_for_asset` /
- *    `clips_for_source` — folded in by the
- *    `debt-consolidate-project-list-queries` cycle, absorbing
- *    `list_transitions` / `list_lockfile_entries` /
- *    `list_clips_bound_to_asset` / `list_clips_for_source`.
- *
- * Stale-clip discovery stays in [FindStaleClipsTool] — its DAG traversal
- * is aggregate, not pure projection.
- *
  * Output is uniform: `{projectId, select, total, returned, rows}` where
- * `rows` is a [JsonArray] whose shape depends on `select`. Consumers
- * inspect the echoed `select` and decode with the matching row
- * serializer; wire encoding is the canonical [JsonConfig.default].
+ * `rows` is a [JsonArray] whose shape depends on `select`. The per-select
+ * row data classes are top-level types in
+ * `io.talevia.core.tool.builtin.project.query` (one file per select);
+ * consumers decode with the matching row serializer using the canonical
+ * [JsonConfig.default].
  *
- * Implementation is split per-select across
- * `core/tool/builtin/project/query/`. This class stays a thin dispatcher:
- * schema + validation + select routing. Row data classes are kept here
- * because their serializers are part of the public API (consumers call
- * `ProjectQueryTool.TrackRow.serializer()` etc).
+ * This file stays a thin dispatcher: schema + validation + select routing.
+ * Each select's implementation — including its row data class — lives in
+ * its own sibling file so the dispatcher doesn't grow with every new
+ * select.
  */
 class ProjectQueryTool(
     private val projects: ProjectStore,
@@ -170,305 +158,6 @@ class ProjectQueryTool(
         val rows: JsonArray,
     )
 
-    @Serializable data class TrackRow(
-        val trackId: String,
-        val trackKind: String,
-        val index: Int,
-        val clipCount: Int,
-        val isEmpty: Boolean,
-        val firstClipStartSeconds: Double? = null,
-        val lastClipEndSeconds: Double? = null,
-        val spanSeconds: Double? = null,
-        /** Stamped by [io.talevia.core.domain.FileProjectStore]; null on pre-recency blobs. */
-        val updatedAtEpochMs: Long? = null,
-    )
-
-    @Serializable data class ClipRow(
-        val clipId: String,
-        val trackId: String,
-        val trackKind: String,
-        val clipKind: String,
-        val startSeconds: Double,
-        val durationSeconds: Double,
-        val endSeconds: Double,
-        val assetId: String? = null,
-        val sourceStartSeconds: Double? = null,
-        val sourceDurationSeconds: Double? = null,
-        val filterCount: Int = 0,
-        val volume: Float? = null,
-        val fadeInSeconds: Float? = null,
-        val fadeOutSeconds: Float? = null,
-        val textPreview: String? = null,
-        val sourceBindingNodeIds: List<String> = emptyList(),
-        /** Stamped by [io.talevia.core.domain.FileProjectStore]; null on pre-recency blobs. */
-        val updatedAtEpochMs: Long? = null,
-    )
-
-    @Serializable data class AssetRow(
-        val assetId: String,
-        val kind: String,
-        val durationSeconds: Double,
-        val width: Int? = null,
-        val height: Int? = null,
-        val hasVideoTrack: Boolean,
-        val hasAudioTrack: Boolean,
-        val sourceKind: String,
-        val inUseByClips: Int,
-        /** Stamped by [io.talevia.core.domain.FileProjectStore]; null on pre-recency blobs. */
-        val updatedAtEpochMs: Long? = null,
-    )
-
-    @Serializable data class TransitionRow(
-        val transitionClipId: String,
-        val trackId: String,
-        val transitionName: String,
-        val startSeconds: Double,
-        val durationSeconds: Double,
-        val endSeconds: Double,
-        val fromClipId: String? = null,
-        val toClipId: String? = null,
-        val orphaned: Boolean = false,
-    )
-
-    @Serializable data class LockfileEntryRow(
-        val inputHash: String,
-        val toolId: String,
-        val assetId: String,
-        val providerId: String,
-        val modelId: String,
-        val seed: Long,
-        val createdAtEpochMs: Long,
-        val sourceBindingIds: List<String> = emptyList(),
-        val pinned: Boolean,
-    )
-
-    @Serializable data class ClipForAssetRow(
-        val clipId: String,
-        val trackId: String,
-        /** `"video"` or `"audio"`. Text clips never match (no asset). */
-        val kind: String,
-        val startSeconds: Double,
-        val durationSeconds: Double,
-    )
-
-    @Serializable data class ClipForSourceRow(
-        val clipId: String,
-        val trackId: String,
-        val assetId: String? = null,
-        val directlyBound: Boolean,
-        val boundVia: List<String> = emptyList(),
-    )
-
-    /**
-     * `select=consistency_propagation` — verifies that a consistency-style
-     * source node (character_ref / style_bible / brand_palette / …)
-     * actually reached the prompts of clips bound to it, by substring-
-     * matching the node's body string values against each clip's lockfile
-     * entry `baseInputs.prompt`. Supports VISION §5.5 "did my
-     * character_ref really influence shot-3?" — a provider can nominally
-     * see a binding but still not incorporate it.
-     *
-     * Row per bound clip. `aigcEntryFound=false` → clip is not AIGC-
-     * backed or its lockfile entry is missing (nothing to audit).
-     * `keywordsInBody` is a deterministic slice of string values from
-     * the node's top-level body JSON; `keywordsMatchedInPrompt` is the
-     * subset that appear (case-insensitive substring) in
-     * `baseInputs.prompt`. `promptContainsKeywords` is convenience.
-     */
-    @Serializable data class ConsistencyPropagationRow(
-        val clipId: String,
-        val trackId: String,
-        val assetId: String? = null,
-        val directlyBound: Boolean,
-        val boundVia: List<String> = emptyList(),
-        val aigcEntryFound: Boolean,
-        val lockfileInputHash: String? = null,
-        val aigcToolId: String? = null,
-        val keywordsInBody: List<String> = emptyList(),
-        val keywordsMatchedInPrompt: List<String> = emptyList(),
-        val promptContainsKeywords: Boolean = false,
-    )
-
-    // -----------------------------------------------------------------
-    // Single-row drill-down rows — folded from the deleted describe_*
-    // tools (debt-consolidate-project-describe-queries cycle).
-
-    @Serializable data class ClipDetailTimeRange(
-        val startMs: Long,
-        val durationMs: Long,
-        val endMs: Long,
-    )
-
-    @Serializable data class ClipDetailLockfileRef(
-        val inputHash: String,
-        val toolId: String,
-        val pinned: Boolean,
-        val currentlyStale: Boolean,
-        val driftedSourceNodeIds: List<String> = emptyList(),
-    )
-
-    /**
-     * `select=clip` — single-row drill-down replacing the deleted
-     * `describe_clip` tool. Returns a rich Clip descriptor (timeRange,
-     * sourceRange, transforms, sourceBinding, per-kind fields, derived
-     * lockfile ref).
-     */
-    @Serializable data class ClipDetailRow(
-        val clipId: String,
-        val trackId: String,
-        /** `"video"` | `"audio"` | `"text"`. */
-        val clipType: String,
-        val timeRange: ClipDetailTimeRange,
-        val sourceRange: ClipDetailTimeRange? = null,
-        val sourceBindingIds: List<String> = emptyList(),
-        val transforms: List<io.talevia.core.domain.Transform> = emptyList(),
-        val assetId: String? = null,
-        val filters: List<io.talevia.core.domain.Filter>? = null,
-        val volume: Float? = null,
-        val fadeInSeconds: Float? = null,
-        val fadeOutSeconds: Float? = null,
-        val text: String? = null,
-        val textStyle: io.talevia.core.domain.TextStyle? = null,
-        val lockfile: ClipDetailLockfileRef? = null,
-    )
-
-    @Serializable data class LockfileEntryProvenance(
-        val providerId: String,
-        val modelId: String,
-        val modelVersion: String? = null,
-        val seed: Long,
-        val createdAtEpochMs: Long,
-    )
-
-    @Serializable data class LockfileEntryDriftedNode(
-        val nodeId: String,
-        val snapshotContentHash: String,
-        /** Null when the bound node has since been deleted from the project. */
-        val currentContentHash: String? = null,
-    )
-
-    @Serializable data class LockfileEntryClipRef(
-        val clipId: String,
-        val trackId: String,
-        val clipType: String,
-    )
-
-    /**
-     * `select=lockfile_entry` — single-row drill-down replacing the
-     * deleted `describe_lockfile_entry` tool. Looks up by `inputHash`;
-     * returns full provenance, source-binding snapshot / drift state,
-     * baseInputs, clip references on the current timeline.
-     */
-    @Serializable data class LockfileEntryDetailRow(
-        val inputHash: String,
-        val toolId: String,
-        val assetId: String,
-        val pinned: Boolean,
-        val provenance: LockfileEntryProvenance,
-        val sourceBindingIds: List<String> = emptyList(),
-        val sourceContentHashes: Map<String, String> = emptyMap(),
-        val baseInputs: JsonObject,
-        val baseInputsEmpty: Boolean,
-        val currentlyStale: Boolean,
-        val driftedNodes: List<LockfileEntryDriftedNode> = emptyList(),
-        val clipReferences: List<LockfileEntryClipRef> = emptyList(),
-        /**
-         * The fully-expanded prompt the AIGC tool sent to the provider,
-         * after consistency-fold (character_ref / style_bible etc.
-         * prepended). Null for tools without a prompt concept (upscale,
-         * synthesize_speech) and for pre-cycle-7 legacy entries.
-         */
-        val resolvedPrompt: String? = null,
-        /**
-         * Session message id whose tool call produced this entry. Lets
-         * the audit path trace "which prompt generated this image?"
-         * without grepping session parts. Null for pre-provenance-cycle
-         * legacy entries. VISION §5.2.
-         */
-        val originatingMessageId: String? = null,
-    )
-
-    @Serializable data class ProjectMetadataProfile(
-        val resolutionWidth: Int,
-        val resolutionHeight: Int,
-        val frameRate: Int,
-        val videoCodec: String,
-        val audioCodec: String,
-    )
-
-    @Serializable data class ProjectMetadataSnapshotSummary(
-        val id: String,
-        val label: String,
-        val capturedAtEpochMs: Long,
-    )
-
-    /**
-     * `select=project_metadata` — single-row drill-down replacing the
-     * deleted `describe_project` tool. Compact aggregate across every
-     * axis: timeline, tracks-by-kind, clips-by-kind, source-nodes-by-
-     * kind, lockfile-by-tool, snapshots, plus a pre-rendered
-     * `summaryText` the LLM can quote verbatim.
-     */
-    /**
-     * `select=snapshots` — enumerate saved snapshots on the project,
-     * newest-first (by `capturedAtEpochMs`). Replaces the deleted
-     * `list_project_snapshots` tool (debt-fold-list-project-snapshots
-     * cycle). Filters: [Input.maxAgeDays] + [Input.limit] (default 50,
-     * clamped 1..500 for this select, same as the old tool). Returns
-     * compact summaries — the full captured `Project` payload is not
-     * surfaced here; callers that need the live state still use
-     * `get_project_state` / `restore_project_snapshot`.
-     */
-    @Serializable data class SnapshotRow(
-        val snapshotId: String,
-        val label: String,
-        val capturedAtEpochMs: Long,
-        val clipCount: Int,
-        val trackCount: Int,
-        val assetCount: Int,
-    )
-
-    /**
-     * `select=spend` — single-row aggregate of AIGC spend across the
-     * project's lockfile. [costCents] sums on every entry whose stamped
-     * `costCents` is non-null; entries with `null` cost (no pricing rule)
-     * are counted in [unknownCostEntries] and NOT rolled into
-     * [totalCostCents] — silent zero-coalescing would misrepresent spend
-     * as cheaper than it is. [byTool] / [bySession] break the total down
-     * so dashboards can answer "which tool / session ate the budget".
-     */
-    @Serializable data class SpendSummaryRow(
-        val projectId: String,
-        val totalCostCents: Long,
-        val entryCount: Int,
-        val knownCostEntries: Int,
-        val unknownCostEntries: Int,
-        val byTool: Map<String, Long> = emptyMap(),
-        val bySession: Map<String, Long> = emptyMap(),
-        val unknownByTool: Map<String, Int> = emptyMap(),
-    )
-
-    @Serializable data class ProjectMetadataRow(
-        val title: String,
-        val createdAtEpochMs: Long,
-        val updatedAtEpochMs: Long,
-        val timelineDurationSeconds: Double,
-        val trackCount: Int,
-        val tracksByKind: Map<String, Int>,
-        val clipCount: Int,
-        val clipsByKind: Map<String, Int>,
-        val assetCount: Int,
-        val sourceNodeCount: Int,
-        val sourceNodesByKind: Map<String, Int>,
-        val lockfileEntryCount: Int,
-        val lockfileByTool: Map<String, Int>,
-        val snapshotCount: Int,
-        val recentSnapshots: List<ProjectMetadataSnapshotSummary> = emptyList(),
-        val outputProfile: ProjectMetadataProfile? = null,
-        /** Pre-rendered ~300-char human summary, LLM-quotable verbatim. */
-        val summaryText: String,
-    )
-
     override val id: String = "project_query"
     override val helpText: String = PROJECT_QUERY_HELP_TEXT
     override val inputSerializer: KSerializer<Input> = serializer()
@@ -488,7 +177,7 @@ class ProjectQueryTool(
         if (select !in ALL_SELECTS) {
             error("select must be one of ${ALL_SELECTS.joinToString(", ")} (got '${input.select}')")
         }
-        rejectIncompatibleFilters(select, input)
+        rejectIncompatibleProjectQueryFilters(select, input)
 
         val pid = ctx.resolveProjectId(input.projectId)
         val project = projects.get(pid)
@@ -514,9 +203,6 @@ class ProjectQueryTool(
             else -> error("unreachable — select validated above: '$select'")
         }
     }
-
-    private fun rejectIncompatibleFilters(select: String, input: Input) =
-        rejectIncompatibleProjectQueryFilters(select, input)
 
     companion object {
         const val SELECT_TRACKS = "tracks"

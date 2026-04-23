@@ -10,11 +10,10 @@ import kotlinx.serialization.json.putJsonObject
 /**
  * The LLM-facing JSON Schema for [ProjectQueryTool.Input]. Lives in a sibling
  * file so `ProjectQueryTool.kt` — the dispatcher — doesn't carry ~170 lines of
- * `putJsonObject { ... }` boilerplate alongside its routing logic. Per the
- * `debt-split-project-query-tool` cycle: the row data classes stay nested on
- * `ProjectQueryTool` so external callers keep decoding via
- * `ProjectQueryTool.TrackRow.serializer()` etc.; only the schema prose +
- * helpText body moved.
+ * `putJsonObject { ... }` boilerplate alongside its routing logic. Row data
+ * classes for each select live in their own sibling files under
+ * `io.talevia.core.tool.builtin.project.query` — consumers decode with e.g.
+ * `TrackRow.serializer()` imported from that package.
  *
  * The field descriptions mirror the per-field KDoc on `ProjectQueryTool.Input`
  * — update both in lockstep when you add a new filter.

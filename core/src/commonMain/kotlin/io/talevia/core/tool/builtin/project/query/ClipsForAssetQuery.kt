@@ -5,14 +5,22 @@ import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Project
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class ClipForAssetRow(
+    val clipId: String,
+    val trackId: String,
+    /** `"video"` or `"audio"`. Text clips never match (no asset). */
+    val kind: String,
+    val startSeconds: Double,
+    val durationSeconds: Double,
+)
 
 /**
  * `select=clips_for_asset` — every clip on the timeline that references
- * a given asset id. Replaces the pre-consolidation
- * `list_clips_bound_to_asset` tool. Requires
- * [ProjectQueryTool.Input.assetId] — unknown asset id throws so typos
- * surface instead of silently matching nothing.
+ * a given asset id. Requires [ProjectQueryTool.Input.assetId]; unknown
+ * asset id throws so typos surface instead of silently matching nothing.
  */
 internal fun runClipsForAssetQuery(
     project: Project,
@@ -29,7 +37,7 @@ internal fun runClipsForAssetQuery(
                 "call project_query(select=assets) to discover valid ids.",
         )
     }
-    val matches = mutableListOf<ProjectQueryTool.ClipForAssetRow>()
+    val matches = mutableListOf<ClipForAssetRow>()
     for (track in project.timeline.tracks) {
         for (clip in track.clips.sortedBy { it.timeRange.start }) {
             val (clipAsset, kind) = when (clip) {
@@ -38,7 +46,7 @@ internal fun runClipsForAssetQuery(
                 is Clip.Text -> continue
             }
             if (clipAsset != aid) continue
-            matches += ProjectQueryTool.ClipForAssetRow(
+            matches += ClipForAssetRow(
                 clipId = clip.id.value,
                 trackId = track.id.value,
                 kind = kind,
@@ -48,7 +56,7 @@ internal fun runClipsForAssetQuery(
         }
     }
     val page = matches.drop(offset).take(limit)
-    val jsonRows = encodeRows(ListSerializer(ProjectQueryTool.ClipForAssetRow.serializer()), page)
+    val jsonRows = encodeRows(ListSerializer(ClipForAssetRow.serializer()), page)
 
     val body = if (matches.isEmpty()) {
         "No clips reference asset $assetIdString (unreferenced — safe to delete)."

@@ -5,17 +5,34 @@ import io.talevia.core.domain.Project
 import io.talevia.core.domain.Track
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlin.time.Duration.Companion.seconds
+
+@Serializable data class ClipRow(
+    val clipId: String,
+    val trackId: String,
+    val trackKind: String,
+    val clipKind: String,
+    val startSeconds: Double,
+    val durationSeconds: Double,
+    val endSeconds: Double,
+    val assetId: String? = null,
+    val sourceStartSeconds: Double? = null,
+    val sourceDurationSeconds: Double? = null,
+    val filterCount: Int = 0,
+    val volume: Float? = null,
+    val fadeInSeconds: Float? = null,
+    val fadeOutSeconds: Float? = null,
+    val textPreview: String? = null,
+    val sourceBindingNodeIds: List<String> = emptyList(),
+    /** Stamped by [io.talevia.core.domain.FileProjectStore]; null on pre-recency blobs. */
+    val updatedAtEpochMs: Long? = null,
+)
 
 /**
  * `select=timeline_clips` — one row per clip on the timeline with track,
  * kind, time range, asset binding, audio envelope, source-binding ids.
- *
- * Carved out of `ProjectQueryTool.runTimelineClips` when that file crossed
- * the 500-line long-file threshold (decision
- * `docs/decisions/2026-04-21-debt-split-projectquerytool.md`). Behavior is
- * identical to the old private method.
  */
 internal fun runTimelineClipsQuery(
     project: Project,
@@ -37,7 +54,7 @@ internal fun runTimelineClipsQuery(
     val fromDuration = input.fromSeconds?.coerceAtLeast(0.0)?.seconds
     val toDuration = input.toSeconds?.coerceAtLeast(0.0)?.seconds
 
-    val filtered = mutableListOf<ProjectQueryTool.ClipRow>()
+    val filtered = mutableListOf<ClipRow>()
     for (track in project.timeline.tracks) {
         val trackKind = trackKindOf(track)
         if (kindFilter != null && trackKind != kindFilter) continue
@@ -58,7 +75,7 @@ internal fun runTimelineClipsQuery(
     }
 
     val page = sorted.drop(offset).take(limit)
-    val rows = encodeRows(ListSerializer(ProjectQueryTool.ClipRow.serializer()), page)
+    val rows = encodeRows(ListSerializer(ClipRow.serializer()), page)
     val body = if (page.isEmpty()) {
         "No clips match the given filters."
     } else {
@@ -112,11 +129,11 @@ private fun matchesPinned(clip: Clip, project: Project, onlyPinned: Boolean): Bo
     return isPinned == onlyPinned
 }
 
-private fun buildClipRow(clip: Clip, track: Track, trackKind: String): ProjectQueryTool.ClipRow {
+private fun buildClipRow(clip: Clip, track: Track, trackKind: String): ClipRow {
     val start = clip.timeRange.start.toSecondsDouble()
     val dur = clip.timeRange.duration.toSecondsDouble()
     return when (clip) {
-        is Clip.Video -> ProjectQueryTool.ClipRow(
+        is Clip.Video -> ClipRow(
             clipId = clip.id.value,
             trackId = track.id.value,
             trackKind = trackKind,
@@ -131,7 +148,7 @@ private fun buildClipRow(clip: Clip, track: Track, trackKind: String): ProjectQu
             sourceBindingNodeIds = clip.sourceBinding.map { it.value }.sorted(),
             updatedAtEpochMs = clip.updatedAtEpochMs,
         )
-        is Clip.Audio -> ProjectQueryTool.ClipRow(
+        is Clip.Audio -> ClipRow(
             clipId = clip.id.value,
             trackId = track.id.value,
             trackKind = trackKind,
@@ -148,7 +165,7 @@ private fun buildClipRow(clip: Clip, track: Track, trackKind: String): ProjectQu
             sourceBindingNodeIds = clip.sourceBinding.map { it.value }.sorted(),
             updatedAtEpochMs = clip.updatedAtEpochMs,
         )
-        is Clip.Text -> ProjectQueryTool.ClipRow(
+        is Clip.Text -> ClipRow(
             clipId = clip.id.value,
             trackId = track.id.value,
             trackKind = trackKind,

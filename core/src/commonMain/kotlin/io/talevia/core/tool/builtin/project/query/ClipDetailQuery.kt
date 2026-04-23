@@ -2,23 +2,55 @@ package io.talevia.core.tool.builtin.project.query
 
 import io.talevia.core.ClipId
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.Filter
 import io.talevia.core.domain.Project
+import io.talevia.core.domain.TextStyle
 import io.talevia.core.domain.Track
+import io.talevia.core.domain.Transform
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class ClipDetailTimeRange(
+    val startMs: Long,
+    val durationMs: Long,
+    val endMs: Long,
+)
+
+@Serializable data class ClipDetailLockfileRef(
+    val inputHash: String,
+    val toolId: String,
+    val pinned: Boolean,
+    val currentlyStale: Boolean,
+    val driftedSourceNodeIds: List<String> = emptyList(),
+)
 
 /**
  * `select=clip` — single-row drill-down replacing the deleted
- * `describe_clip` tool. Returns the rich Clip descriptor the old
- * tool produced (timeRange + sourceRange + transforms + per-kind
- * fields + a derived lockfile ref showing pin state + staleness).
- *
- * Consolidated under `project_query` per the
- * `debt-consolidate-project-describe-queries` backlog bullet, mirroring
- * the pattern `2026-04-21-debt-consolidate-session-describe-queries.md`
- * established for session_query.
+ * `describe_clip` tool. Returns a rich Clip descriptor (timeRange,
+ * sourceRange, transforms, sourceBinding, per-kind fields, derived
+ * lockfile ref).
  */
+@Serializable data class ClipDetailRow(
+    val clipId: String,
+    val trackId: String,
+    /** `"video"` | `"audio"` | `"text"`. */
+    val clipType: String,
+    val timeRange: ClipDetailTimeRange,
+    val sourceRange: ClipDetailTimeRange? = null,
+    val sourceBindingIds: List<String> = emptyList(),
+    val transforms: List<Transform> = emptyList(),
+    val assetId: String? = null,
+    val filters: List<Filter>? = null,
+    val volume: Float? = null,
+    val fadeInSeconds: Float? = null,
+    val fadeOutSeconds: Float? = null,
+    val text: String? = null,
+    val textStyle: TextStyle? = null,
+    val lockfile: ClipDetailLockfileRef? = null,
+)
+
 internal fun runClipDetailQuery(
     project: Project,
     input: ProjectQueryTool.Input,
@@ -35,13 +67,13 @@ internal fun runClipDetailQuery(
                 "project_query(select=timeline_clips) to discover valid clip ids.",
         )
 
-    val tr = ProjectQueryTool.ClipDetailTimeRange(
+    val tr = ClipDetailTimeRange(
         startMs = clip.timeRange.start.inWholeMilliseconds,
         durationMs = clip.timeRange.duration.inWholeMilliseconds,
         endMs = clip.timeRange.end.inWholeMilliseconds,
     )
     val sr = clip.sourceRange?.let {
-        ProjectQueryTool.ClipDetailTimeRange(
+        ClipDetailTimeRange(
             startMs = it.start.inWholeMilliseconds,
             durationMs = it.duration.inWholeMilliseconds,
             endMs = it.end.inWholeMilliseconds,
@@ -60,7 +92,7 @@ internal fun runClipDetailQuery(
             val current = currentHashesById[nodeId.value]
             current == null || current != snap
         }.map { it.key.value }.sorted()
-        ProjectQueryTool.ClipDetailLockfileRef(
+        ClipDetailLockfileRef(
             inputHash = entry.inputHash,
             toolId = entry.toolId,
             pinned = entry.pinned,
@@ -74,7 +106,7 @@ internal fun runClipDetailQuery(
         is Clip.Audio -> "audio"
         is Clip.Text -> "text"
     }
-    val row = ProjectQueryTool.ClipDetailRow(
+    val row = ClipDetailRow(
         clipId = cid.value,
         trackId = track.id.value,
         clipType = kind,
@@ -92,7 +124,7 @@ internal fun runClipDetailQuery(
         lockfile = lockfileRef,
     )
     val rows = encodeRows(
-        ListSerializer(ProjectQueryTool.ClipDetailRow.serializer()),
+        ListSerializer(ClipDetailRow.serializer()),
         listOf(row),
     )
 

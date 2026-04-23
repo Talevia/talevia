@@ -4,23 +4,27 @@ import io.talevia.core.domain.Project
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
 import kotlinx.datetime.Clock
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 
 /**
- * `select=snapshots` — enumerate saved snapshots on a project, newest-first.
- * Replaces the deleted `list_project_snapshots` tool
- * (debt-fold-list-project-snapshots cycle). Filters:
- *  - [ProjectQueryTool.Input.maxAgeDays] — drop snapshots captured strictly
- *    earlier than `clock.now() - maxAgeDays` (inclusive cutoff).
- *  - [ProjectQueryTool.Input.limit] — post-filter cap (default 50, clamped
- *    1..500 for this select to mirror the old tool; the outer 1..500 clamp
- *    applies, so this select's effective bounds are identical).
- *
- * Row shape [ProjectQueryTool.SnapshotRow] is a compact summary (id / label /
- * captured-at / clip+track+asset counts) — the full captured Project payload
- * is not surfaced (blows up the LLM output and isn't needed to plan a
- * restore; `restore_project_snapshot` still takes the full payload route).
+ * `select=snapshots` — enumerate saved snapshots on the project,
+ * newest-first (by `capturedAtEpochMs`). Replaces the deleted
+ * `list_project_snapshots` tool. Filters: [ProjectQueryTool.Input.maxAgeDays]
+ * + [ProjectQueryTool.Input.limit] (default 50, clamped 1..500). Returns
+ * compact summaries — the full captured `Project` payload is not surfaced
+ * here; callers that need the live state still use `get_project_state` /
+ * `restore_project_snapshot`.
  */
+@Serializable data class SnapshotRow(
+    val snapshotId: String,
+    val label: String,
+    val capturedAtEpochMs: Long,
+    val clipCount: Int,
+    val trackCount: Int,
+    val assetCount: Int,
+)
+
 internal fun runSnapshotsQuery(
     project: Project,
     input: ProjectQueryTool.Input,
@@ -51,7 +55,7 @@ internal fun runSnapshotsQuery(
 
     val rows = page.map { snap ->
         val captured = snap.project
-        ProjectQueryTool.SnapshotRow(
+        SnapshotRow(
             snapshotId = snap.id.value,
             label = snap.label,
             capturedAtEpochMs = snap.capturedAtEpochMs,
@@ -60,7 +64,7 @@ internal fun runSnapshotsQuery(
             assetCount = captured.assets.size,
         )
     }
-    val jsonRows = encodeRows(ListSerializer(ProjectQueryTool.SnapshotRow.serializer()), rows)
+    val jsonRows = encodeRows(ListSerializer(SnapshotRow.serializer()), rows)
 
     val scopeParts = buildList {
         input.maxAgeDays?.let { add("maxAgeDays=$it") }
