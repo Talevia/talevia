@@ -24,22 +24,48 @@ class MetricsRegistry {
     private val mutex = Mutex()
     private val counters = mutableMapOf<String, Long>()
 
-    // Histograms: store all raw observations (ms) and sort lazily for percentile queries.
-    private val histograms = mutableMapOf<String, MutableList<Long>>()
+    // Histograms: fixed-capacity ring buffer per name. Each `observe()` appends
+    // a raw observation (ms); once [HISTOGRAM_CAP_PER_NAME] entries are in
+    // flight, the oldest drops to make room for the newest. `histogramSnapshot()`
+    // computes P50/P95/P99 over the current window — since oldest observations
+    // evict first, percentile estimates track recent behaviour rather than
+    // lifetime behaviour, which is what ops actually wants (a 3-hour-old P99
+    // spike is paged; a week-old one is history). The cap is deliberately one
+    // cheap array per named histogram: a long-lived server process that
+    // observes one latency per tool dispatch can run for days without
+    // unbounded memory growth, while 1024 samples is comfortably above the
+    // ~30-50 samples you need for stable high-percentile estimates.
+    private val histograms = mutableMapOf<String, ArrayDeque<Long>>()
 
     suspend fun increment(name: String, by: Long = 1L) {
         mutex.withLock { counters[name] = (counters[name] ?: 0L) + by }
     }
 
-    /** Record a latency observation (in milliseconds) for the named histogram. */
+    /**
+     * Record a latency observation (in milliseconds) for the named histogram.
+     * The name's ring buffer retains the most recent [HISTOGRAM_CAP_PER_NAME]
+     * observations; overflow evicts the oldest.
+     */
     suspend fun observe(name: String, ms: Long) {
-        mutex.withLock { histograms.getOrPut(name) { mutableListOf() }.add(ms) }
+        mutex.withLock {
+            val buf = histograms.getOrPut(name) { ArrayDeque(HISTOGRAM_CAP_PER_NAME) }
+            if (buf.size >= HISTOGRAM_CAP_PER_NAME) buf.removeFirst()
+            buf.addLast(ms)
+        }
     }
 
     suspend fun snapshot(): Map<String, Long> =
         mutex.withLock { counters.toMap() }
 
-    /** Return P50/P95/P99 for every histogram that has at least one observation. */
+    /**
+     * P50/P95/P99 for every histogram that has at least one observation.
+     * `count` is the window size (≤ [HISTOGRAM_CAP_PER_NAME]), not the
+     * lifetime observation count — there's no drift-safe way to report
+     * lifetime count without also exposing the ring-buffer eviction
+     * behaviour, and the scrape consumer cares about "what are recent
+     * latencies?" more than "how many have you seen total?" (the matching
+     * counter `area.event` already tallies lifetime counts).
+     */
     suspend fun histogramSnapshot(): Map<String, HistogramStats> = mutex.withLock {
         histograms.mapValues { (_, obs) ->
             val sorted = obs.sorted()
@@ -63,6 +89,17 @@ class MetricsRegistry {
         if (isEmpty()) return 0L
         val idx = ((pct / 100.0) * (size - 1)).toInt().coerceIn(0, size - 1)
         return this[idx]
+    }
+
+    companion object {
+        /**
+         * Maximum observations retained per histogram name. Chosen so a single
+         * `ArrayDeque<Long>` costs ~16 KB (1024 × 16 B boxed Long) per named
+         * histogram — cheap even with hundreds of named histograms — while
+         * giving comfortably more samples than the ~30-50 needed for stable
+         * P95/P99 estimates.
+         */
+        const val HISTOGRAM_CAP_PER_NAME: Int = 1024
     }
 }
 
