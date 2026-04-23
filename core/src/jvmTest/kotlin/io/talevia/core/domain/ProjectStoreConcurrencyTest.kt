@@ -18,7 +18,7 @@ import kotlin.test.assertEquals
 /**
  * `ProjectStore.mutate` promises that concurrent tool dispatches within the
  * same Agent turn cannot interleave on the same project. If that guarantee
- * regresses, tools like SplitClipTool + AddTransitionTool firing in parallel
+ * regresses, tools like SplitClipTool + TransitionActionTool firing in parallel
  * would produce lost updates (one tool's write clobbering the other's view
  * of the Project). These tests force a real parallel contention through the
  * JdbcSqliteDriver + mutex and assert no updates are lost.

@@ -378,7 +378,7 @@ private func runExport(
     }
 
     // Filter + transition pass. If any clip carries filters OR a non-zero
-    // head/tail fade (from AddTransitionTool's synthetic Effect-track clip),
+    // head/tail fade (from TransitionActionTool's synthetic Effect-track clip),
     // build an AVMutableVideoComposition with a CIFilter-chain handler keyed
     // on composition time → owning clip. Fades render as a dip-to-black:
     // after all filters run on the frame, a `CIColorMatrix` scales RGB by the

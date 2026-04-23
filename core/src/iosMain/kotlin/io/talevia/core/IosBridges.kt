@@ -155,7 +155,7 @@ data class IosVideoClipPlan(
     val filters: List<IosFilterSpec> = emptyList(),
     /**
      * Dip-to-black fade durations derived from adjacent
-     * [io.talevia.core.tool.builtin.video.AddTransitionTool] transitions. `0.0`
+     * [io.talevia.core.tool.builtin.video.TransitionActionTool] transitions. `0.0`
      * means no fade. The head fade runs from the clip's timeline start over
      * [headFadeSeconds]; the tail fade runs up to the clip's timeline end over
      * [tailFadeSeconds]. Both together give the cross-engine parity floor for
@@ -196,7 +196,7 @@ data class IosFilterSpec(
  */
 fun Timeline.toIosVideoPlan(): List<IosVideoClipPlan> {
     // Transition fades derive from synthetic Effect-track clips emitted by
-    // AddTransitionTool. Compute a map<clipIdValue, (head, tail)> in seconds
+    // TransitionActionTool. Compute a map<clipIdValue, (head, tail)> in seconds
     // here so the Swift engine doesn't re-implement the boundary math. Every
     // transitionName collapses to a dip-to-black fade on both neighbours —
     // the same cross-engine parity floor the FFmpeg engine enforces.

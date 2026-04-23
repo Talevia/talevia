@@ -23,9 +23,9 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
-import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
+import io.talevia.core.tool.builtin.video.TransitionActionTool
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -136,10 +136,11 @@ class M6FeaturesTest {
             timeline = Timeline(tracks = listOf(Track.Video(TrackId("vtrack"), listOf(v1, v2))), duration = 10.seconds),
         ))
 
-        val r = ToolRegistry().apply { register(AddTransitionTool(projects)) }
-        r["add_transitions"]!!.dispatch(
+        val r = ToolRegistry().apply { register(TransitionActionTool(projects)) }
+        r["transition_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
+                put("action", "add")
                 putJsonArray("items") {
                     addJsonObject {
                         put("fromClipId", "v1")
@@ -225,7 +226,7 @@ class M6FeaturesTest {
             register(AddClipTool(projects))
             register(ApplyFilterTool(projects))
             register(AddSubtitlesTool(projects))
-            register(AddTransitionTool(projects))
+            register(TransitionActionTool(projects))
         }
         val ctx = ToolContext(
             sessionId = SessionId("s"),

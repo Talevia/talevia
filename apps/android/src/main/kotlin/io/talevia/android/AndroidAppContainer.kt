@@ -79,7 +79,6 @@ import io.talevia.core.tool.builtin.source.UpdateSourceNodeBodyTool
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.AddTrackTool
-import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.ClearTimelineTool
@@ -97,7 +96,6 @@ import io.talevia.core.tool.builtin.video.RelinkAssetTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveFilterTool
 import io.talevia.core.tool.builtin.video.RemoveTrackTool
-import io.talevia.core.tool.builtin.video.RemoveTransitionTool
 import io.talevia.core.tool.builtin.video.ReorderTracksTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
@@ -105,6 +103,7 @@ import io.talevia.core.tool.builtin.video.SetClipSourceBindingTool
 import io.talevia.core.tool.builtin.video.SetClipTransformTool
 import io.talevia.core.tool.builtin.video.SetClipVolumeTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
+import io.talevia.core.tool.builtin.video.TransitionActionTool
 import io.talevia.core.tool.builtin.video.TrimClipTool
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -224,8 +223,7 @@ class AndroidAppContainer(context: Context) {
         register(ApplyLutTool(projects))
         register(AddSubtitlesTool(projects))
         register(EditTextClipTool(projects))
-        register(AddTransitionTool(projects))
-        register(RemoveTransitionTool(projects))
+        register(TransitionActionTool(projects))
         register(AddTrackTool(projects))
         register(DuplicateTrackTool(projects))
         register(RemoveTrackTool(projects))
