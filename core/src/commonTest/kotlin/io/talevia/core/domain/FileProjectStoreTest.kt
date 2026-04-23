@@ -308,4 +308,58 @@ class FileProjectStoreTest {
         assertEquals(Lockfile.EMPTY, created.lockfile)
         assertEquals(0, store.get(created.id)!!.lockfile.entries.size)
     }
+
+    // --- `.talevia` bundle-extension convention (bundle-mac-launch-services cycle) ---
+
+    @Test fun openAtAcceptsPathWithTaleviaExtension() = runTest {
+        val (store, _, _) = setup()
+        val created = store.createAt("/projects/demo.talevia".toPath(), "Demo")
+        val reopened = store.openAt("/projects/demo.talevia".toPath())
+        assertEquals(created.id, reopened.id)
+    }
+
+    @Test fun openAtAcceptsBarePathWhenBundleDirIsBare() = runTest {
+        val (store, _, _) = setup()
+        val created = store.createAt("/projects/plain".toPath(), "Plain")
+        val reopened = store.openAt("/projects/plain".toPath())
+        assertEquals(created.id, reopened.id)
+    }
+
+    @Test fun openAtAutoPromotesBarePathWhenDotTaleviaVariantExists() = runTest {
+        val (store, _, _) = setup()
+        val created = store.createAt("/projects/demo.talevia".toPath(), "Demo")
+        // Caller passes the bare name; the on-disk directory has the .talevia suffix.
+        val reopened = store.openAt("/projects/demo".toPath())
+        assertEquals(created.id, reopened.id, "openAt should auto-promote /projects/demo → /projects/demo.talevia")
+    }
+
+    @Test fun openAtPrefersBareWhenBothVariantsExist() = runTest {
+        val (store, _, _) = setup()
+        val bare = store.createAt("/projects/demo".toPath(), "Bare")
+        val suffixed = store.createAt("/projects/demo.talevia".toPath(), "Suffixed")
+        // Caller asked for the bare path; bare exists, so use it verbatim.
+        val reopened = store.openAt("/projects/demo".toPath())
+        assertEquals(bare.id, reopened.id)
+        // And the suffixed one is still reachable by its own exact path.
+        assertEquals(suffixed.id, store.openAt("/projects/demo.talevia".toPath()).id)
+    }
+
+    @Test fun openAtDoesNotStripExtensionWhenBarePathExists() = runTest {
+        // Reverse: only /projects/demo exists on disk; caller asks for demo.talevia
+        // which doesn't exist. Store must NOT silently fall back to /projects/demo —
+        // the extension is a distinct directory the caller explicitly named.
+        val (store, _, _) = setup()
+        store.createAt("/projects/demo".toPath(), "Bare")
+        // Any exception type is fine — the point is it MUST fail, not silently
+        // fall back to the bare directory. okio / Json throw different concrete
+        // types across platforms; assertFails swallows the specific class.
+        try {
+            store.openAt("/projects/demo.talevia".toPath())
+            throw AssertionError("openAt on /projects/demo.talevia should have failed (no such bundle)")
+        } catch (e: AssertionError) {
+            throw e
+        } catch (_: Throwable) {
+            // Expected — store refused, did not silently fall back.
+        }
+    }
 }

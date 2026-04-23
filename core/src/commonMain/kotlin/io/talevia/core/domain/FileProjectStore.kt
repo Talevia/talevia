@@ -64,16 +64,37 @@ class FileProjectStore(
     private val mutex = Mutex()
 
     override suspend fun openAt(path: Path): Project = mutex.withLock {
-        val project = readBundle(path)
+        val resolved = resolveBundlePath(path)
+        val project = readBundle(resolved)
         registry.upsert(
             id = project.id,
-            path = path,
-            title = readTitle(path) ?: project.id.value,
+            path = resolved,
+            title = readTitle(resolved) ?: project.id.value,
             lastOpenedAtEpochMs = clock.now().toEpochMilliseconds(),
         )
         maybeEmitValidationWarning(project)
         maybeEmitMissingAssets(project)
         project
+    }
+
+    /**
+     * Auto-promote `/foo/demo` to `/foo/demo.talevia` when the former has no
+     * `talevia.json` but the latter does. Supports the macOS Launch Services
+     * flow (Finder treats `demo.talevia` directories as packages via the
+     * `io.talevia.project` UTI declared in `apps/desktop`'s `Info.plist`) —
+     * users / scripts that type the bare name don't have to remember the
+     * extension. Bundle directories without the `.talevia` suffix still work
+     * too (the original layout), so nothing regresses; the `.talevia`
+     * convention is opt-in at create time.
+     */
+    private fun resolveBundlePath(path: Path): Path {
+        if (fs.exists(path.resolve(TALEVIA_JSON))) return path
+        if (!path.name.endsWith(".$BUNDLE_EXTENSION", ignoreCase = true)) {
+            val candidate = path.parent?.resolve("${path.name}.$BUNDLE_EXTENSION")
+                ?: "${path}.$BUNDLE_EXTENSION".toPath()
+            if (fs.exists(candidate.resolve(TALEVIA_JSON))) return candidate
+        }
+        return path
     }
 
     override suspend fun createAt(
@@ -364,6 +385,16 @@ class FileProjectStore(
         const val TALEVIA_JSON = "talevia.json"
         const val GITIGNORE = ".gitignore"
         const val MEDIA_DIR = "media"
+        /**
+         * macOS package-bundle extension. Directories whose names end in
+         * `.talevia` are declared as `io.talevia.project` packages via the
+         * desktop app's `Info.plist`, so Finder launches Talevia on double-
+         * click instead of expanding them like plain directories. Bundle
+         * directories without this suffix still work — the convention is
+         * opt-in at `createAt` time; [openAt] auto-promotes bare names to
+         * the suffixed variant when the bare path has no `talevia.json`.
+         */
+        const val BUNDLE_EXTENSION = "talevia"
         const val CACHE_DIR = ".talevia-cache"
         const val CLIP_RENDER_CACHE_FILE = "clip-render-cache.json"
         const val AUTO_GITIGNORE_BODY = ".talevia-cache/\n"

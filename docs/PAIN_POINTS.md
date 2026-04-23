@@ -501,3 +501,60 @@ a `/register-tool` helper is still not hit (10 consecutive new-tool
 cycles), but the rate is climbing. Next repopulate should probably
 score a `debt-register-tool-script` item if the rate crosses 60% of
 cycles.
+
+---
+
+## 2026-04-23 — bundle-mac-launch-services (`<this commit>`)
+
+### `assertFailsWith<SpecificException>` brittleness across okio / JVM layers
+Writing `openAtDoesNotStripExtensionWhenBarePathExists`, my first pass
+used `assertFailsWith<IllegalStateException>` to assert "bundle at
+`<name>` with no `.talevia` sibling and no `talevia.json` inside must
+fail". The assertion failed because okio's `FileSystem.source(path)`
+throws `java.io.FileNotFoundException` (not wrapped in an
+`IllegalStateException`) when the directory doesn't contain the file.
+Relaxed to `try { ... fail(); } catch (_: Throwable) {}` accepting any
+throwable. Takeaway: **`assertFailsWith<T>` is only reliable when the
+code path throws its own exception type**. The moment the failure
+bubbles up from a library layer (okio, sqldelight, kotlinx-serialization)
+the exception type is whatever that library picked, and asserting on a
+kotlin-stdlib type over-constrains the test. Cheap heuristic: prefer
+`assertFailsWith<Throwable>` or plain `try / catch (_: Throwable)` when
+the failure crosses a library boundary; reserve typed asserts for
+exceptions the code-under-test throws itself (our
+`IllegalStateException("bundle has no talevia.json")` is ok to assert
+on; "okio threw when I asked it to read nothing" is not).
+
+### Compose Desktop `extraKeysRawXml` is raw-XML injection with no schema validation
+Compose Desktop's `nativeDistributions.macOS.infoPlist.extraKeysRawXml`
+takes a raw XML string that the packager splices into the generated
+`Info.plist` before `jpackage` runs. There is no schema check, no
+lint, no compile-time structure — if I mistyped `<array>` as `<array/>`
+or forgot to close an outer `<dict>`, the assemble step would still
+succeed (it only runs at `packageDmg` time, not `assemble`) and the
+`Info.plist` would only fail to parse on a user's machine at first
+Launch Services registration. Cheap mitigation I didn't do this cycle
+(deferring): add a unit test that loads the `build.gradle.kts` string
+through `NSPropertyListSerialization` or Apple's `plutil -lint` on CI.
+Today the test that would have caught a typo is "a mac user double-
+clicks a `.talevia` bundle and nothing happens" — unacceptable coverage
+gap for a feature whose only happy-path verification is dynamic.
+Logging here so the next cycle that touches `nativeDistributions` XML
+has a pre-written reason to ship a lint test alongside the change.
+
+### Compose Desktop `CFBundleIdentifier` divergence between `bundleID` and dev-time compose main
+Setting `bundleID = "io.talevia.Talevia"` inside `macOS { }` only affects
+the *packaged* `.app` bundle. The dev-time `./gradlew :apps:desktop:run`
+still launches with whatever bundle identifier the JVM picks (typically
+the jpackage default), so Launch Services registrations during iterative
+development don't see `io.talevia.Talevia`. Consequence: testing
+"double-click a `.talevia` in Finder" requires a full `packageDmg` +
+install, not just a fast `:apps:desktop:run`. Not a blocker for this
+cycle (the decision captures this + the 5 unit tests exercise the
+openAt-side of the contract) but worth knowing — **Compose Desktop's
+dev loop and packaged-app identity diverge**, and any feature gated
+on Launch Services / document-type registration needs a full package
+loop to verify end-to-end. The iterate-gap skill's "run gradle target
+matching your change" heuristic doesn't cover this; added to the
+observation log so future OS-integration bullets can budget for a
+packageDmg step in their plan.

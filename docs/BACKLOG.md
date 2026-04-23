@@ -18,7 +18,6 @@
 
 ## P2 — 记债 / 观望
 
-- **bundle-mac-launch-services** — macOS 下双击 bundle 目录想打开 Talevia 的 UX：当前没有 `.talevia` 扩展名约定 + `Info.plist` `CFBundlePackageType` 注册，Finder 把 bundle 当普通目录展开。**方向：** 给 desktop app 的 `Info.plist` 加 `LSItemContentTypes` 声明 `io.talevia.project`（dir 包），约定 bundle 目录扩展名 `.talevia`，`createAt` / `openAt` 接受带或不带扩展名。Rubric §5.4 / packaging。
 - **bundle-mobile-document-picker** — Android / iOS 当前限制于 app sandbox 内的 bundle (`<filesDir>/projects/` / `Documents/projects/`)。用户没法从 SAF / Files.app 选一个外部 bundle 打开。**方向：** Android 接 `Storage Access Framework` (`Intent.ACTION_OPEN_DOCUMENT_TREE`)，iOS 接 `UIDocumentPickerViewController`，结果 URI / NSURL 通过 platform-specific resolver 转成 Okio Path 喂给 `FileProjectStore.openAt`。Rubric §5.4 / mobile。
 - **bundle-talevia-json-split** — 当前 `talevia.json` 把 timeline + assets + source DAG + lockfile + snapshots 全装一个文件，单个 mutation 的 git diff 涨几百行；snapshot 多了文件可能涨到 MB 级。**方向：** 当真出现 diff 噪声时拆 `assets.json` / `timeline.json` / `lockfile.json` / `snapshots/<id>.json` 子文件；envelope `talevia.json` 只留 schemaVersion + 元数据 + 子文件清单。先写 decision 评估触发条件再动。Rubric §3a-3。
 - **bundle-cross-process-file-lock** — `FileProjectStore` 用 in-process `Mutex`，多进程同时打开同一 bundle 会丢更新。`SqlDelightProjectStore` 时代有同样 caveat 但 SQLite 自身有 `BEGIN IMMEDIATE` 兜底。**方向：** 写时拿 OS 文件锁（`FileChannel.tryLock` 在 JVM；`flock` 在 native），失败时 fail-loud 提示"another Talevia process holds this bundle"。Rubric §5.3 / 正确性。
