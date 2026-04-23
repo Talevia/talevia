@@ -32,6 +32,12 @@ dependencies {
 
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
+
+    testImplementation(kotlin("test"))
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 compose.desktop {
@@ -46,46 +52,12 @@ compose.desktop {
             macOS {
                 bundleID = "io.talevia.Talevia"
                 infoPlist {
-                    extraKeysRawXml = """
-                        <key>UTExportedTypeDeclarations</key>
-                        <array>
-                            <dict>
-                                <key>UTTypeIdentifier</key>
-                                <string>io.talevia.project</string>
-                                <key>UTTypeDescription</key>
-                                <string>Talevia Project</string>
-                                <key>UTTypeConformsTo</key>
-                                <array>
-                                    <string>com.apple.package</string>
-                                    <string>public.composite-content</string>
-                                </array>
-                                <key>UTTypeTagSpecification</key>
-                                <dict>
-                                    <key>public.filename-extension</key>
-                                    <array>
-                                        <string>talevia</string>
-                                    </array>
-                                </dict>
-                            </dict>
-                        </array>
-                        <key>CFBundleDocumentTypes</key>
-                        <array>
-                            <dict>
-                                <key>CFBundleTypeName</key>
-                                <string>Talevia Project</string>
-                                <key>CFBundleTypeRole</key>
-                                <string>Editor</string>
-                                <key>LSHandlerRank</key>
-                                <string>Owner</string>
-                                <key>LSTypeIsPackage</key>
-                                <true/>
-                                <key>LSItemContentTypes</key>
-                                <array>
-                                    <string>io.talevia.project</string>
-                                </array>
-                            </dict>
-                        </array>
-                    """.trimIndent()
+                    // Raw-XML plist fragment; parsed for well-formedness +
+                    // required keys by `MacOsInfoPlistExtraXmlTest` so a typo
+                    // fails unit tests instead of silently shipping a Finder
+                    // double-click that does nothing.
+                    extraKeysRawXml =
+                        file("src/main/resources/macos-info-plist-extra.xml").readText()
                 }
             }
         }
