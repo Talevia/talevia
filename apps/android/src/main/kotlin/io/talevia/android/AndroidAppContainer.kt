@@ -93,6 +93,7 @@ import io.talevia.core.tool.builtin.video.ExtractFrameTool
 import io.talevia.core.tool.builtin.video.FadeAudioClipTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.MoveClipTool
+import io.talevia.core.tool.builtin.video.RelinkAssetTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
 import io.talevia.core.tool.builtin.video.RemoveFilterTool
 import io.talevia.core.tool.builtin.video.RemoveTrackTool
@@ -204,6 +205,7 @@ class AndroidAppContainer(context: Context) {
         register(ImportMediaTool(engine, projects, proxyGenerator = proxyGenerator))
         register(ExtractFrameTool(engine, projects, bundleBlobWriter))
         register(ConsolidateMediaIntoBundleTool(projects))
+        register(RelinkAssetTool(projects))
         register(AddClipTool(projects))
         register(ReplaceClipTool(projects))
         register(SplitClipTool(projects))

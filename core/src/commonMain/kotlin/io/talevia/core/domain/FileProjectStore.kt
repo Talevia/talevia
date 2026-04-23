@@ -72,6 +72,7 @@ class FileProjectStore(
             lastOpenedAtEpochMs = clock.now().toEpochMilliseconds(),
         )
         maybeEmitValidationWarning(project)
+        maybeEmitMissingAssets(project)
         project
     }
 
@@ -106,6 +107,7 @@ class FileProjectStore(
         }
         val project = readBundle(path)
         maybeEmitValidationWarning(project)
+        maybeEmitMissingAssets(project)
         project
     }
 
@@ -312,6 +314,38 @@ class FileProjectStore(
             "firstIssue" to issues.first(),
         )
         bus?.publish(BusEvent.ProjectValidationWarning(project.id, issues))
+    }
+
+    /**
+     * Scan `project.assets` for `MediaSource.File` paths that don't exist
+     * on the current machine. Every cross-machine bundle open flows through
+     * `openAt` / `get`; this is where alice's `/Users/alice/raw.mp4` fails
+     * to resolve on bob's machine. Publishes one `BusEvent.AssetsMissing`
+     * carrying every missing asset so UI / CLI can show a single "relink
+     * these before export" panel instead of N independent events.
+     *
+     * Scope: only `MediaSource.File` (absolute host paths) is checked.
+     * `BundleFile` paths resolve inside the bundle (a missing bundle-file
+     * is a different failure — bundle corruption). `Http` / `Platform`
+     * sources aren't filesystem-checkable. `bus == null` short-circuits
+     * so pure-store tests don't pay for the scan.
+     */
+    private suspend fun maybeEmitMissingAssets(project: Project) {
+        val publisher = bus ?: return
+        val missing = project.assets.mapNotNull { asset ->
+            val src = asset.source
+            if (src !is MediaSource.File) return@mapNotNull null
+            if (fs.exists(src.path.toPath())) return@mapNotNull null
+            BusEvent.MissingAsset(assetId = asset.id.value, originalPath = src.path)
+        }
+        if (missing.isEmpty()) return
+        logger.warn(
+            "project ${project.id.value} has ${missing.size} missing file-asset(s) on open",
+            "projectId" to project.id.value,
+            "missingCount" to missing.size.toString(),
+            "firstAsset" to missing.first().assetId,
+        )
+        publisher.publish(BusEvent.AssetsMissing(project.id, missing))
     }
 
     private fun randomSuffix(): String =

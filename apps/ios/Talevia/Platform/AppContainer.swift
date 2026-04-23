@@ -125,6 +125,7 @@ final class AppContainer {
         ))
         registry.register(tool: ExtractFrameTool(engine: self.engine, projects: self.projects, bundleBlobWriter: self.bundleBlobWriter))
         registry.register(tool: ConsolidateMediaIntoBundleTool(projects: self.projects))
+        registry.register(tool: RelinkAssetTool(projects: self.projects))
         registry.register(tool: AddClipTool(store: self.projects))
         registry.register(tool: ReplaceClipTool(store: self.projects))
         registry.register(tool: SplitClipTool(store: self.projects))

@@ -272,4 +272,33 @@ sealed interface BusEvent {
         val projectId: ProjectId,
         val issues: List<String>,
     ) : BusEvent
+
+    /**
+     * Emitted by [io.talevia.core.domain.FileProjectStore.openAt] and
+     * [io.talevia.core.domain.FileProjectStore.get] when one or more assets
+     * on the project reference a `MediaSource.File` absolute path that does
+     * not exist on the current machine — the canonical cross-machine
+     * bundle-open failure mode. UI surfaces this as a "relink your source
+     * footage" panel; CLI can block / warn before `export`. Only fires
+     * when at least one asset is missing (empty payload would be noise).
+     *
+     * Consumers wire `relink_asset(assetId, newPath)` to flip the asset's
+     * source to the new location — and the tool cascades to every other
+     * asset sharing the same original path, so the user only relinks once
+     * per source file.
+     *
+     * Not fired for `BundleFile` / `Http` / `Platform` sources — those
+     * either travel with the bundle (bundle-corrupt is a different
+     * failure) or aren't path-based in the first place.
+     */
+    data class AssetsMissing(
+        val projectId: ProjectId,
+        /** Each entry: (assetId, absolute path the asset referenced on alice's machine). */
+        val missing: List<MissingAsset>,
+    ) : BusEvent
+
+    data class MissingAsset(
+        val assetId: String,
+        val originalPath: String,
+    )
 }

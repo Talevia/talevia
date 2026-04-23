@@ -466,3 +466,38 @@ registration, but the frequency (7/13 cycles ≈ 54%) isn't high
 enough yet to justify tooling. Threshold worth watching: if new-tool
 cycles hit 10 in a row without a break, that's the moment to build
 the helper.
+
+---
+
+## 2026-04-23 — bundle-asset-relink-ux (`<this commit>`)
+
+### `runTest` + `MutableSharedFlow` collector: subscribe-before-publish or it hangs
+Writing `openAtEmitsAssetsMissingForNonExistentFilePaths` surfaced a
+classic trap: using `CoroutineScope(SupervisorJob() + Dispatchers.Default)
++ flow.take(1).toList()` under `runTest` blew up with
+`UncompletedCoroutinesError` (the test scheduler waits for all child
+coroutines; `toList` on a never-terminating SharedFlow never returns).
+Fix that works reliably: `backgroundScope.launch { captured.complete(
+flow.first()) }` + `yield()` so the collector registers its subscription
+before `openAt` publishes. `backgroundScope` is auto-cancelled by
+`runTest`, and `first()` terminates on first match. Worth remembering:
+`MutableSharedFlow` (what `EventBus` uses) has no replay by default —
+publishing before the subscriber launches drops to zero listeners.
+
+### Exhaustive `when` on `BusEvent` caught the metrics routing I'd have forgotten
+Adding `BusEvent.AssetsMissing` triggered a compile error in
+`Metrics.kt:128` because its `when (event)` on the sealed interface
+wasn't exhaustive. Best-case §3a signal — compile-time enforcement
+that every new event type has an explicit metrics routing (even if
+the routing is "ignore"). Mental note: when adding a `BusEvent`
+variant, `Metrics.kt` is guaranteed to break the build and force the
+author to make the metrics-naming decision. Keeps the Prometheus
+scrape complete by construction.
+
+### 8th cycle touching all 5 `AppContainer`s — ktlint re-sort again
+Cycle 13 flagged 7/13 cycles hitting the 5-container tax; now 8/14.
+Same ktlint `ordering` import-sort fix every time. Threshold to build
+a `/register-tool` helper is still not hit (10 consecutive new-tool
+cycles), but the rate is climbing. Next repopulate should probably
+score a `debt-register-tool-script` item if the rate crosses 60% of
+cycles.

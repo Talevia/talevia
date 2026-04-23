@@ -146,6 +146,7 @@ class EventBusMetricsSink(
         is BusEvent.AgentRunStateChanged -> "agent.run.state.${stateTag(event.state)}"
         is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
         is BusEvent.ProjectValidationWarning -> "project.validation.warning"
+        is BusEvent.AssetsMissing -> "project.assets.missing"
         is BusEvent.AigcCostRecorded -> "aigc.cost.recorded"
         is BusEvent.AigcCacheProbe ->
             if (event.hit) "aigc.cache.hits.total" else "aigc.cache.misses.total"
