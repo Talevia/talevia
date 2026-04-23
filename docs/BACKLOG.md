@@ -19,7 +19,6 @@
 
 - **debt-resplit-project-query-tool** — `ProjectQueryTool.kt` 在 `6e7bd8f` 首次拆分至 540 行后又长回 547 行，说明上次拆分不彻底 / 漏了一个肥 select 分支。**方向：** 扫一遍各 `handle<Select>` 分支，把任何 > 40 行的单独挪到 `project/query/<select>.kt` 同级；主文件保留 dispatch + schema。Rubric §3a-3。
 - **debt-resplit-session-query-tool** — `SessionQueryTool.kt` 534 行，同类症状；同一轮 repopulate 一并 split。**方向：** 和 ProjectQueryTool 同一个套路。Rubric §3a-3。
-- **auto-revert-on-failed-export** — `ExportTool` 中途 ffmpeg 崩溃 / 被 cancel 时 mezzanine 文件在磁盘留存，没人清。`deleteMezzanine` 存在但只在 gc 路径调用。**方向：** 在 `ExportTool.execute` try-finally 里对失败路径调 `engine.deleteMezzanine(tmpPath)`；正常成功路径不动。Rubric §5.2。
 - **aigc-cache-hit-ratio-metric** — `AigcPipeline.findCached` 命中 / 未命中对外不可见；用户 / agent 都无法证明「seed 锁住、cache 真的 hit 了」。**方向：** 每次 findCached 命中 / 未命中时 publish `BusEvent.AigcCacheProbe(toolId, hit)` 并让 `CounterRegistry` 落到 `/metrics` 的 `talevia_aigc_cache_hits_total` / `talevia_aigc_cache_misses_total`。Rubric §5.3 / Observability。
 - **session-tool-disabled-registry** — agent 目前没法在一个 session 内部把某个工具暂时禁掉（比如「别再用 generate_video 了，太贵」）。**方向：** `SessionStore` 加 `disabledToolIds: Set<String>`，`AgentTurnExecutor` 过滤；新增 `disable_tool` / `enable_tool` 两个 session 域工具或把它接到 `session_query` 的 mutation path。Rubric §5.4。
 - **cli-resume-last-session** — `apps/cli` 退出再启动就是全新 session，上下文丢光。`TaleviaDbFactory` 已经把 session 存 DB，但 CLI Repl 启动时不会恢复。**方向：** 给 CLI 加 `--resume` / `--resume=<id>` 旗；无参时从 `SqlDelightSessionStore` 取最近一次活跃 session。Rubric §5.4 / CLI。

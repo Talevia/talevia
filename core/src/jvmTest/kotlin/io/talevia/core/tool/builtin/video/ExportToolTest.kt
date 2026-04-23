@@ -644,4 +644,120 @@ class ExportToolTest {
 
         assertEquals(first, second, "re-export of the same project must mint the same manifest")
     }
+
+    /**
+     * Per-clip engine variant that succeeds for the first [failOnRenderCall] - 1
+     * calls and throws on the failOnRenderCall-th `renderClip`. Also records
+     * every path passed to `deleteMezzanine` so the cleanup assertion can walk
+     * them.
+     */
+    private class FailingPerClipEngine(private val failOnRenderCall: Int) : VideoEngine {
+        var renderClipCalls: Int = 0
+            private set
+        val rendered: MutableList<String> = mutableListOf()
+        val deleted: MutableList<String> = mutableListOf()
+
+        override val supportsPerClipCache: Boolean = true
+
+        override suspend fun probe(source: MediaSource): MediaMetadata =
+            MediaMetadata(duration = Duration.ZERO, resolution = Resolution(0, 0), frameRate = null)
+
+        override fun render(timeline: Timeline, output: OutputSpec, resolver: io.talevia.core.platform.MediaPathResolver?): Flow<RenderProgress> =
+            flow { emit(RenderProgress.Completed("job", output.targetPath)) }
+
+        override suspend fun mezzaninePresent(path: String): Boolean = false
+
+        override suspend fun renderClip(
+            clip: Clip.Video,
+            fades: TransitionFades?,
+            output: OutputSpec,
+            mezzaninePath: String,
+            resolver: io.talevia.core.platform.MediaPathResolver?,
+        ) {
+            renderClipCalls += 1
+            if (renderClipCalls == failOnRenderCall) {
+                error("simulated ffmpeg crash on clip $failOnRenderCall")
+            }
+            rendered += mezzaninePath
+        }
+
+        override suspend fun concatMezzanines(
+            mezzaninePaths: List<String>,
+            subtitles: List<Clip.Text>,
+            output: OutputSpec,
+        ) {
+            // Reached only on the success path — never in the failure case
+            // exercised by the cleanup test.
+        }
+
+        override suspend fun deleteMezzanine(path: String): Boolean {
+            deleted += path
+            return true
+        }
+
+        override suspend fun thumbnail(asset: AssetId, source: MediaSource, time: Duration): ByteArray = ByteArray(0)
+    }
+
+    @Test fun perClipRenderFailureCleansUpFreshMezzanines() = runTest {
+        // 3 clips, engine crashes on the 3rd renderClip → the first two mezzanines
+        // were written to disk but neither has been persisted to Project.clipRenderCache
+        // yet (cache.mutate runs only after concat completes). Without cleanup they'd
+        // leak. The try/catch in runPerClipRender must invoke deleteMezzanine on each.
+        val store = ProjectStoreTestKit.create()
+        val engine = FailingPerClipEngine(failOnRenderCall = 3)
+        val projectId = ProjectId("p-perclip-fail")
+        val timeline = Timeline(
+            tracks = listOf(
+                Track.Video(
+                    id = TrackId("v"),
+                    clips = listOf(
+                        Clip.Video(
+                            id = ClipId("c1"),
+                            timeRange = TimeRange(0.seconds, 2.seconds),
+                            sourceRange = TimeRange(0.seconds, 2.seconds),
+                            assetId = AssetId("a1"),
+                        ),
+                        Clip.Video(
+                            id = ClipId("c2"),
+                            timeRange = TimeRange(2.seconds, 2.seconds),
+                            sourceRange = TimeRange(0.seconds, 2.seconds),
+                            assetId = AssetId("a2"),
+                        ),
+                        Clip.Video(
+                            id = ClipId("c3"),
+                            timeRange = TimeRange(4.seconds, 2.seconds),
+                            sourceRange = TimeRange(0.seconds, 2.seconds),
+                            assetId = AssetId("a3"),
+                        ),
+                    ),
+                ),
+            ),
+            duration = 6.seconds,
+        )
+        store.upsert("perclip-fail", Project(id = projectId, timeline = timeline))
+        val tool = ExportTool(store, engine)
+
+        val ex = assertFailsWith<IllegalStateException> {
+            tool.execute(
+                ExportTool.Input(projectId = projectId.value, outputPath = "/tmp/out.mp4"),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("simulated"), "original failure must propagate: ${ex.message}")
+
+        // The two pre-failure mezzanines should have been scheduled for deletion
+        // (the 3rd crashed before writing, so it's not in the cleanup list).
+        assertEquals(
+            engine.rendered.toSet(),
+            engine.deleted.toSet(),
+            "every freshly rendered mezzanine must be deleted on cleanup",
+        )
+        assertEquals(2, engine.deleted.size, "2 mezzanines written before crash, both deleted")
+
+        // No cache entries should have been persisted — the append happens only
+        // after concat. The post-crash project state must show an empty
+        // clipRenderCache.
+        val cacheAfter = store.get(projectId)!!.clipRenderCache
+        assertEquals(0, cacheAfter.entries.size, "no cache entry should survive the crash")
+    }
 }

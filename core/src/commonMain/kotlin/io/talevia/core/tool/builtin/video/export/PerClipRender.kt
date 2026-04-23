@@ -113,77 +113,96 @@ internal suspend fun runPerClipRender(
     var hits = 0
     var misses = 0
     val mezzaninePaths = mutableListOf<String>()
+    // Mezzanines produced this run but NOT yet persisted to clipRenderCache.
+    // If anything between renderClip() and the final store.mutate() throws
+    // (ffmpeg crash, subtitle overlay failure, coroutine cancel), these files
+    // are orphaned on disk — the cache has no record of them so GC won't
+    // find them and the fingerprint won't recur exactly (source drift is
+    // part of the key). The try/catch below walks this list and deletes each
+    // on failure so a mid-export crash doesn't permanently leak disk space.
     val newCacheEntries = mutableListOf<ClipRenderCacheEntry>()
 
-    for ((idx, clip) in shape.videoClips.withIndex()) {
-        val fades = fadesByClipId[clip.id]
-        val boundHashes = clip.sourceBinding
-            .filter { it in project.source.byId }
-            .associateWith { project.source.deepContentHashOf(it, deepHashCache) }
-        val fingerprint = clipMezzanineFingerprint(
-            clip = clip,
-            fades = fades,
-            boundSourceDeepHashes = boundHashes,
-            output = output,
-        )
-        val cached = project.clipRenderCache.findByFingerprint(fingerprint)
-        val cachedPath = cached?.mezzaninePath
-        val cacheHitValid = cachedPath != null && engine.mezzaninePresent(cachedPath)
-        val chosenPath: String
-        if (cacheHitValid) {
-            hits += 1
-            chosenPath = cachedPath!!
-        } else {
-            misses += 1
-            val mezzaninePath = "$mezzanineDir/$fingerprint.mp4"
-            engine.renderClip(
+    try {
+        for ((idx, clip) in shape.videoClips.withIndex()) {
+            val fades = fadesByClipId[clip.id]
+            val boundHashes = clip.sourceBinding
+                .filter { it in project.source.byId }
+                .associateWith { project.source.deepContentHashOf(it, deepHashCache) }
+            val fingerprint = clipMezzanineFingerprint(
                 clip = clip,
                 fades = fades,
+                boundSourceDeepHashes = boundHashes,
                 output = output,
-                mezzaninePath = mezzaninePath,
-                resolver = resolver,
             )
-            chosenPath = mezzaninePath
-            newCacheEntries += ClipRenderCacheEntry(
-                fingerprint = fingerprint,
-                mezzaninePath = mezzaninePath,
-                resolutionWidth = output.resolution.width,
-                resolutionHeight = output.resolution.height,
-                durationSeconds = clip.sourceRange.duration.toDouble(DurationUnit.SECONDS),
-                createdAtEpochMs = clock.now().toEpochMilliseconds(),
+            val cached = project.clipRenderCache.findByFingerprint(fingerprint)
+            val cachedPath = cached?.mezzaninePath
+            val cacheHitValid = cachedPath != null && engine.mezzaninePresent(cachedPath)
+            val chosenPath: String
+            if (cacheHitValid) {
+                hits += 1
+                chosenPath = cachedPath!!
+            } else {
+                misses += 1
+                val mezzaninePath = "$mezzanineDir/$fingerprint.mp4"
+                engine.renderClip(
+                    clip = clip,
+                    fades = fades,
+                    output = output,
+                    mezzaninePath = mezzaninePath,
+                    resolver = resolver,
+                )
+                chosenPath = mezzaninePath
+                newCacheEntries += ClipRenderCacheEntry(
+                    fingerprint = fingerprint,
+                    mezzaninePath = mezzaninePath,
+                    resolutionWidth = output.resolution.width,
+                    resolutionHeight = output.resolution.height,
+                    durationSeconds = clip.sourceRange.duration.toDouble(DurationUnit.SECONDS),
+                    createdAtEpochMs = clock.now().toEpochMilliseconds(),
+                )
+            }
+            mezzaninePaths += chosenPath
+            val stageRatio = (idx + 1).toFloat() / (shape.videoClips.size + 1).toFloat()
+            ctx.emitPart(
+                Part.RenderProgress(
+                    PartId(Uuid.random().toString()), ctx.messageId, ctx.sessionId, clock.now(),
+                    jobId = jobId, ratio = stageRatio,
+                    message = "clip ${idx + 1}/${shape.videoClips.size} " +
+                        (if (cacheHitValid) "cached" else "rendered"),
+                ),
             )
         }
-        mezzaninePaths += chosenPath
-        val stageRatio = (idx + 1).toFloat() / (shape.videoClips.size + 1).toFloat()
+
+        engine.concatMezzanines(
+            mezzaninePaths = mezzaninePaths,
+            subtitles = shape.subtitles,
+            output = output,
+        )
         ctx.emitPart(
             Part.RenderProgress(
                 PartId(Uuid.random().toString()), ctx.messageId, ctx.sessionId, clock.now(),
-                jobId = jobId, ratio = stageRatio,
-                message = "clip ${idx + 1}/${shape.videoClips.size} " +
-                    (if (cacheHitValid) "cached" else "rendered"),
+                jobId = jobId, ratio = 1f, message = "completed",
             ),
         )
-    }
 
-    engine.concatMezzanines(
-        mezzaninePaths = mezzaninePaths,
-        subtitles = shape.subtitles,
-        output = output,
-    )
-    ctx.emitPart(
-        Part.RenderProgress(
-            PartId(Uuid.random().toString()), ctx.messageId, ctx.sessionId, clock.now(),
-            jobId = jobId, ratio = 1f, message = "completed",
-        ),
-    )
-
-    if (newCacheEntries.isNotEmpty()) {
-        store.mutate(projectId) { p ->
-            var cache = p.clipRenderCache
-            for (entry in newCacheEntries) cache = cache.append(entry)
-            p.copy(clipRenderCache = cache)
+        if (newCacheEntries.isNotEmpty()) {
+            store.mutate(projectId) { p ->
+                var cache = p.clipRenderCache
+                for (entry in newCacheEntries) cache = cache.append(entry)
+                p.copy(clipRenderCache = cache)
+            }
         }
-    }
 
-    return PerClipStats(hits = hits, misses = misses)
+        return PerClipStats(hits = hits, misses = misses)
+    } catch (t: Throwable) {
+        // Best-effort cleanup — delete every mezzanine we freshly produced
+        // this run. Entries already in the cache (cache hits) are untouched.
+        // Individual deletes go through runCatching so one failed delete
+        // doesn't mask the original exception; CancellationException from
+        // the outer scope still propagates because we re-throw t unchanged.
+        for (entry in newCacheEntries) {
+            runCatching { engine.deleteMezzanine(entry.mezzaninePath) }
+        }
+        throw t
+    }
 }
