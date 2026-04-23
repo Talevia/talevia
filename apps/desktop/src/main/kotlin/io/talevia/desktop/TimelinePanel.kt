@@ -137,9 +137,10 @@ fun TimelinePanel(
         if (selected.isEmpty()) return
         val snapshot = selected.toList()
         dispatch(
-            "apply_filter",
+            "filter_action",
             buildJsonObject {
                 put("projectId", projectId.value)
+                put("action", "apply")
                 put("filterName", name)
                 putJsonObject("params") { params.forEach { (k, v) -> put(k, v) } }
                 putJsonArray("clipIds") { snapshot.forEach { add(it) } }
@@ -266,10 +267,11 @@ fun TimelinePanel(
                         },
                         onApplyFilter = { name, params ->
                             dispatch(
-                                "apply_filter",
+                                "filter_action",
                                 buildJsonObject {
                                     put("projectId", projectId.value)
-                                    put("clipId", clip.id.value)
+                                    put("action", "apply")
+                                    putJsonArray("clipIds") { add(clip.id.value) }
                                     put("filterName", name)
                                     putJsonObject("params") {
                                         params.forEach { (k, v) -> put(k, v) }

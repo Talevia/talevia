@@ -23,7 +23,7 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
-import io.talevia.core.tool.builtin.video.ApplyFilterTool
+import io.talevia.core.tool.builtin.video.FilterActionTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.TransitionActionTool
 import kotlinx.coroutines.flow.Flow
@@ -56,7 +56,7 @@ class M6FeaturesTest {
         projects.mutate(projectId) { it.copy(assets = it.assets + fakeAsset) }
         val r = ToolRegistry().apply {
             register(AddClipTool(projects))
-            register(ApplyFilterTool(projects))
+            register(FilterActionTool(projects))
         }
 
         val addResp = r["add_clips"]!!.dispatch(
@@ -72,9 +72,10 @@ class M6FeaturesTest {
         )
         val clipId = (addResp.data as AddClipTool.Output).results.single().clipId
 
-        r["apply_filter"]!!.dispatch(
+        r["filter_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
+                put("action", "apply")
                 putJsonArray("clipIds") { add(clipId) }
                 put("filterName", "blur")
                 put("params", buildJsonObject { put("radius", 4.0) })
@@ -224,7 +225,7 @@ class M6FeaturesTest {
         val registry = ToolRegistry().apply {
             register(ImportMediaTool(engine, projects))
             register(AddClipTool(projects))
-            register(ApplyFilterTool(projects))
+            register(FilterActionTool(projects))
             register(AddSubtitlesTool(projects))
             register(TransitionActionTool(projects))
         }

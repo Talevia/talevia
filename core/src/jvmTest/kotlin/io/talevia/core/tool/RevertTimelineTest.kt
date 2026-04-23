@@ -20,7 +20,7 @@ import io.talevia.core.permission.AllowAllPermissionService
 import io.talevia.core.session.Part
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.builtin.video.AddClipTool
-import io.talevia.core.tool.builtin.video.ApplyFilterTool
+import io.talevia.core.tool.builtin.video.FilterActionTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
@@ -147,9 +147,14 @@ class RevertTimelineTest {
         val clipId = addResp.data.results.single().clipId
         val midSnapshotId = addResp.data.snapshotId
 
-        val applyFilter = ApplyFilterTool(projects)
+        val applyFilter = FilterActionTool(projects)
         applyFilter.execute(
-            ApplyFilterTool.Input(projectId = projectId.value, clipIds = listOf(clipId), filterName = "blur"),
+            FilterActionTool.Input(
+                projectId = projectId.value,
+                action = "apply",
+                clipIds = listOf(clipId),
+                filterName = "blur",
+            ),
             ctxFor("c2", "m2"),
         )
         // After the filter: one clip with one filter.

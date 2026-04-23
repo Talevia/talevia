@@ -116,7 +116,6 @@ import io.talevia.core.tool.builtin.source.UpdateSourceNodeBodyTool
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.AddTrackTool
-import io.talevia.core.tool.builtin.video.ApplyFilterTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
 import io.talevia.core.tool.builtin.video.ClearTimelineTool
@@ -128,11 +127,11 @@ import io.talevia.core.tool.builtin.video.ExportDryRunTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ExtractFrameTool
 import io.talevia.core.tool.builtin.video.FadeAudioClipTool
+import io.talevia.core.tool.builtin.video.FilterActionTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RelinkAssetTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
-import io.talevia.core.tool.builtin.video.RemoveFilterTool
 import io.talevia.core.tool.builtin.video.RemoveTrackTool
 import io.talevia.core.tool.builtin.video.ReorderTracksTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
@@ -328,8 +327,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(SetClipTransformTool(projects))
         register(ExportTool(projects, engine))
         register(ExportDryRunTool(projects))
-        register(ApplyFilterTool(projects))
-        register(RemoveFilterTool(projects))
+        register(FilterActionTool(projects))
         register(ApplyLutTool(projects))
         register(AddSubtitlesTool(projects))
         register(EditTextClipTool(projects))

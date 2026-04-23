@@ -21,7 +21,7 @@ import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.AllowAllPermissionService
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.builtin.video.AddClipTool
-import io.talevia.core.tool.builtin.video.ApplyFilterTool
+import io.talevia.core.tool.builtin.video.FilterActionTool
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.test.runTest
@@ -38,7 +38,7 @@ import kotlin.time.Duration.Companion.seconds
 /**
  * End-to-end exercise of SessionRevert: seed a session with a user→assistant
  * turn that mutates the timeline via AddClipTool, fire a second mutating turn
- * (ApplyFilterTool), then revert to the anchor at the first user message and
+ * (FilterActionTool), then revert to the anchor at the first user message and
  * verify (a) the second turn's messages are gone, (b) the timeline rolled back
  * to the pre-turn snapshot, (c) the bus emitted `SessionReverted`.
  */
@@ -104,7 +104,7 @@ class SessionRevertTest {
         val clipId = addResp.data.results.single().clipId
         assertEquals(1, projects.get(projectId)!!.timeline.tracks.flatMap { it.clips }.size)
 
-        // Turn 2: user message u2, assistant a2 running apply_filter → second mutation.
+        // Turn 2: user message u2, assistant a2 running filter_action(apply) → second mutation.
         val u2 = MessageId("u2")
         val a2 = MessageId("a2")
         sessions.appendMessage(
@@ -113,8 +113,13 @@ class SessionRevertTest {
         sessions.appendMessage(
             Message.Assistant(a2, sessionId, t0.plus(4.milliseconds), u2, ModelRef("anthropic", "claude-opus-4-7")),
         )
-        ApplyFilterTool(projects).execute(
-            ApplyFilterTool.Input(projectId = projectId.value, clipIds = listOf(clipId), filterName = "blur"),
+        FilterActionTool(projects).execute(
+            FilterActionTool.Input(
+                projectId = projectId.value,
+                action = "apply",
+                clipIds = listOf(clipId),
+                filterName = "blur",
+            ),
             ctxFor("c-filt", a2),
         )
         assertEquals(
