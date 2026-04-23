@@ -15,7 +15,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **extract-frame-tool-bundle-write** — `ExtractFrameTool` 仍构造 `MediaStorage` + `MediaBlobWriter`（旧 API），写帧到全局 `~/.talevia/media/generated/`，绕开了"产物随 bundle"的承诺。**方向：** 切到 `BundleBlobWriter` + `Project.assets` append（与 AIGC 工具对齐）；测试 fixture 复用 `ProjectStoreTestKit.createWithFs()` + `FileBundleBlobWriter`。Rubric §3.1。
 
 ## P2 — 记债 / 观望
 

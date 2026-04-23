@@ -189,3 +189,47 @@ path. Not worth its own cycle yet (no active import failures, no active
 imports large enough to notice), but worth tracking here so the third
 caller (likely `ExtractFrameTool` per an active P1 bullet) can push this
 off the pain point list once it shows up.
+
+---
+
+## 2026-04-23 — extract-frame-tool-bundle-write (`<this commit>`)
+
+### Three stale bullets in six cycles — P1 queue is aging out from under the backlog
+This was the third bullet in a row (after `fork-project-tool-trim-stats-bug`
+cycle 3 and `import-media-tool-bundle-resolver` cycle 5) whose described
+work had silently already landed in a prior refactor. 3/6 ≈ 50% stale
+rate is no longer a blip — the P1 queue is being outrun by the actual
+codebase. Root cause confirmed across all three: a large consolidation
+refactor (`9d0f70f` deleted `MediaStorage`) fixed the underlying
+symptoms for multiple P1 bullets at once, but the refactor commit
+didn't sweep those bullets out of the backlog. They kept riding P1
+until the loop ran through them one by one, paying the "walk the code
+to verify, then close with a decision" tax on each.
+
+**Proposed remediation for the iterate-gap skill itself** (not
+actionable from a cycle, but logging for a future skill-level cycle):
+- Extend the `/iterate-gap` hard rules with: when a commit's message
+  body contains `backlog-sweep:` lines listing slugs, those slugs are
+  deleted from `docs/BACKLOG.md` in the same commit. Refactor authors
+  opt-in by naming the bullets their work invalidates.
+- Alternatively, extend R (repopulate) to start with a "is this bullet
+  still live?" walk over the current backlog before the debt-scan step,
+  auto-closing bullets whose described symptom can't be reproduced in
+  one file grep.
+- Either way, the invariant to enforce is: "P1 queue age ≤ N cycles";
+  right now it's unbounded.
+
+### "cross-commit architectural sweep" observations don't belong in decision files
+Pattern I'm now doing across three cycles: close a stale bullet, use
+the decision file to document that the described work is already done,
+and use PAIN_POINTS to note the backlog-decoupling meta-observation.
+Decision files are single-cycle artifacts — the cross-cycle pattern of
+"three stale bullets in a row, all tied to the same consolidation
+refactor" doesn't fit any one of them. PAIN_POINTS is the right home,
+but finding the trend required manually re-reading three entries.
+Lightweight addition worth considering: a header at the top of
+PAIN_POINTS grouping entries by theme (backlog-hygiene /
+abstraction-gap / test-gate-drift / etc.) once there are 3+ entries in
+a theme. Not doing this yet — N=3 is still below the threshold where
+theming pays for itself — but logging here so the next time a theme
+hits 3+ it's obvious what to do.

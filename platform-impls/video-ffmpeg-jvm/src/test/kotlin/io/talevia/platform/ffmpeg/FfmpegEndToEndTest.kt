@@ -103,8 +103,9 @@ class FfmpegEndToEndTest {
             messages = emptyList(),
         )
 
-        // 3. Drive the chain. AssetIds come back from import_media; MediaPathResolver
-        //    (InMemoryMediaStorage) resolves them to the original file paths at render time.
+        // 3. Drive the chain. AssetIds come back from import_media; the per-project
+        //    BundleMediaPathResolver (constructed by ExportTool from the loaded project)
+        //    resolves asset ids to the original file paths at render time.
         val importA = registry["import_media"]!!.dispatch(
             buildJsonObject {
                 put("path", inputA.absolutePath)
