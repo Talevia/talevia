@@ -132,6 +132,37 @@ class MetricsTest {
         job.cancel()
     }
 
+    @Test fun aigcCacheProbeSplitsHitMissAndTrackPerTool() = runTest {
+        // Base counters aigc.cache.{hits,misses}.total give dashboards the
+        // headline ratio; per-tool aigc.cache.<tool>.{hit,miss}.total lets
+        // operators drill down ("generate_image caches poorly → check seed
+        // plumbing"). Both must fire on every probe.
+        val bus = EventBus()
+        val registry = MetricsRegistry()
+        val job = EventBusMetricsSink(bus, registry).attach(this)
+        runCurrent()
+
+        bus.publish(BusEvent.AigcCacheProbe(toolId = "generate_image", hit = true))
+        bus.publish(BusEvent.AigcCacheProbe(toolId = "generate_image", hit = true))
+        bus.publish(BusEvent.AigcCacheProbe(toolId = "generate_image", hit = false))
+        bus.publish(BusEvent.AigcCacheProbe(toolId = "synthesize_speech", hit = false))
+        advanceUntilIdle()
+
+        // Headline totals across all tools.
+        assertEquals(2L, registry.get("aigc.cache.hits.total"))
+        assertEquals(2L, registry.get("aigc.cache.misses.total"))
+
+        // Per-tool breakdowns — an empty tool must stay zero so scrape consumers
+        // don't confuse unused tools with mis-tagged events.
+        assertEquals(2L, registry.get("aigc.cache.generate_image.hit.total"))
+        assertEquals(1L, registry.get("aigc.cache.generate_image.miss.total"))
+        assertEquals(0L, registry.get("aigc.cache.synthesize_speech.hit.total"))
+        assertEquals(1L, registry.get("aigc.cache.synthesize_speech.miss.total"))
+        assertEquals(0L, registry.get("aigc.cache.generate_video.hit.total"))
+
+        job.cancel()
+    }
+
     @Test fun publishBeforeSubscribeIsDropped() = runTest {
         // Regression guard: if the sink Job hasn't started collecting yet,
         // SharedFlow with replay=0 drops the emission. Callers must wait for

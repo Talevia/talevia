@@ -89,6 +89,13 @@ class EventBusMetricsSink(
         bus.events.filterIsInstance<BusEvent>().collect { event ->
             try {
                 registry.increment(counterName(event))
+                // AigcCacheProbe additionally increments a per-tool counter so
+                // dashboards can answer "which tool is caching well vs
+                // missing?" without re-scraping the base counter by label.
+                if (event is BusEvent.AigcCacheProbe) {
+                    val tag = if (event.hit) "hit" else "miss"
+                    registry.increment("aigc.cache.${event.toolId}.$tag.total")
+                }
                 // AigcCostRecorded additionally feeds a cents gauge so dashboards
                 // can render "spend this session" without re-reading the lockfile.
                 if (event is BusEvent.AigcCostRecorded) {
@@ -140,6 +147,8 @@ class EventBusMetricsSink(
         is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
         is BusEvent.ProjectValidationWarning -> "project.validation.warning"
         is BusEvent.AigcCostRecorded -> "aigc.cost.recorded"
+        is BusEvent.AigcCacheProbe ->
+            if (event.hit) "aigc.cache.hits.total" else "aigc.cache.misses.total"
     }
 
     /**

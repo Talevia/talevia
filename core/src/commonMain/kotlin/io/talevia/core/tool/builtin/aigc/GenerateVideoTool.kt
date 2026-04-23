@@ -205,6 +205,7 @@ class GenerateVideoTool(
 
         if (!ctx.isReplay) {
             val cached = AigcPipeline.findCached(projectStore, pid, inputHash)
+            ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = id, hit = cached != null))
             if (cached != null) {
                 return hit(cached, folded, input)
             }

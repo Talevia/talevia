@@ -235,6 +235,24 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     /**
+     * Cache-lookup outcome from `AigcPipeline.findCached`. Emitted once per
+     * attempted AIGC tool invocation **before** the provider call (so a hit
+     * short-circuits without emitting `AigcCostRecorded`, and a miss pairs
+     * later with `AigcCostRecorded` only on success). Subscribers (metrics
+     * sink, debug UI) use the stream to answer "did my seed lock actually
+     * cache-hit?" without re-walking the lockfile.
+     *
+     * Not a [SessionEvent] — the probe is project-scoped (findCached reads
+     * a single project's lockfile) but doesn't care about session. Per-tool
+     * counters are kept separate in [io.talevia.core.metrics.EventBusMetricsSink]
+     * so dashboards can break down by tool.
+     */
+    data class AigcCacheProbe(
+        val toolId: String,
+        val hit: Boolean,
+    ) : BusEvent
+
+    /**
      * A project load detected structural issues in its source DAG
      * (dangling parent refs, parent cycles). Non-throwing warning — the
      * project is still returned to the caller, but subscribers (UI,
