@@ -6,7 +6,6 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.AllowAllPermissionService
 import io.talevia.core.platform.InMemoryMediaStorage
@@ -16,8 +15,10 @@ import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import java.io.File
 import java.nio.file.Files
 import java.security.MessageDigest
@@ -161,10 +162,12 @@ class ExportDeterminismTest {
             ctx,
         )
         val assetId = (import.data as ImportMediaTool.Output).assetId
-        registry["add_clip"]!!.dispatch(
+        registry["add_clips"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("assetId", assetId)
+                putJsonArray("items") {
+                    addJsonObject { put("assetId", assetId) }
+                }
             },
             ctx,
         )

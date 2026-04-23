@@ -11,7 +11,6 @@ import io.talevia.core.bus.EventBus
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
-import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline

@@ -16,6 +16,10 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.kotlinx.datetime)
     testImplementation(libs.sqldelight.driver.sqlite)
+    // okio + FakeFileSystem needed by our local ProjectStoreTestKit and for the
+    // `ImportMediaTool(fs = FileSystem.SYSTEM)` default parameter.
+    testImplementation(libs.okio)
+    testImplementation(libs.okio.fakefilesystem)
 }
 
 tasks.test {
