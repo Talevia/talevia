@@ -118,3 +118,36 @@ Concrete mitigations worth considering:
    live-or-dead from the source. This is more important than it sounds —
    when backlog descriptions decouple from reality, the `/iterate-gap`
    loop can spend cycles on ghost work.
+
+---
+
+## 2026-04-23 — bundle-cross-machine-export-smoke (`<this commit>`)
+
+### "FakeFileSystem" has no recursive copy; every bundle-level test reinvents it
+Writing this test needed a `cp -r` primitive on Okio's `FakeFileSystem`.
+There isn't one — and grepping the repo shows earlier bundle tests have
+either avoided needing it, or open-coded ad-hoc walks (none currently but
+the pattern is about to repeat). The helper I wrote in this test
+(`copyDirectoryRecursive(fs, src, dst)`) is 12 lines and obviously belongs
+in `ProjectStoreTestKit` or a sibling `BundleFsTestKit`. Mitigation: when
+a second bundle-test needs this, lift it to a test-kit helper at that
+point, not before (don't pre-abstract on N=1). Logging it here so the
+"three bundle tests handrolled the same walker" anti-pattern doesn't
+sneak up later.
+
+### Bullet-to-code location mismatch: `apps/cli or apps/server` intent didn't match the natural test layer
+The backlog bullet asked for the test "in `apps/cli` or `apps/server`" but
+the invariant under test — bundle portability across machines — is a Core
+contract (`FileProjectStore` + `BundleMediaPathResolver`). Implementing
+the bullet literally would have required either driving the CLI REPL from
+a test (heavy fake-LLM scaffolding) or duplicating 200 lines of
+`CliContainer` wiring in the test for zero added coverage. Structural
+signal: **backlog bullets specifying a file location (not just the
+invariant) can steer the work into the wrong layer**. When reading a
+bullet, separate "what invariant must be guarded" from "where the test
+file should sit" — the first is load-bearing, the second is guidance.
+For bullets authored in future repopulates, prefer phrasing like
+"guard the invariant X; place the test wherever its dependencies
+naturally live" over prescribing the path. The current bullet format
+(`**direction:** ...`) already leaves room for this — just be deliberate
+about not over-specifying when writing new bullets.
