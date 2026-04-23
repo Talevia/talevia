@@ -18,7 +18,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **debt-split-desktop-timeline-panel** — `apps/desktop/.../TimelinePanel.kt` 584 行（per R.5 #4）；clip drag / track layout / playhead 全塞一个 Composable。**方向：** 抽 `TrackRow` / `ClipDrag` / `PlayheadScrubber` 到 sibling Composable。Rubric §5.6。
 - **debt-split-server-container** — `apps/server/.../ServerContainer.kt` 555 行（per R.5 #4）。按 tool 注册 block 线性增长，每次新 tool 都往这里加注册行。**方向：** 复刻 Desktop AppContainer 的 "register tools by category" 分组模式；或提取一个小 `registerAigcTools()` / `registerProjectTools()` helper。Rubric §5.6。
 - **debt-split-cli-container** — `apps/cli/.../CliContainer.kt` 524 行（per R.5 #4）。同 server container，tool 注册堆积。**方向：** 同上。Rubric §5.6。
 - **export-incremental-render** — CLAUDE.md "Known incomplete" 首条：`ExportTool` memoize 仅到 whole-timeline 层；长 project 只改一个 clip 仍然重新 render 全 timeline（且 `docs/decisions/2026-04-19-per-clip-incremental-render-deferred-rationale-recorded.md` 明确列为延期）。**方向：** 扩 `ExportTool` memoization key 到 per-clip 级别，利用 `clipRenderCache` 做 "render one stale clip + reuse the rest"。先补一个 benchmark（和 `debt-add-benchmark-core-paths` 合并做），证明 baseline；再扩缓存。决策阶段定义 key 成分（clip spec hash × source binding hash × render profile hash）。Rubric §5.7。
