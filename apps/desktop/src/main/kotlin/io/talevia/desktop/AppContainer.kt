@@ -108,7 +108,6 @@ import io.talevia.core.tool.builtin.source.SourceQueryTool
 import io.talevia.core.tool.builtin.source.UpdateSourceNodeBodyTool
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
-import io.talevia.core.tool.builtin.video.AddTrackTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
 import io.talevia.core.tool.builtin.video.ClearTimelineTool
@@ -125,7 +124,6 @@ import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RelinkAssetTool
 import io.talevia.core.tool.builtin.video.RemoveClipTool
-import io.talevia.core.tool.builtin.video.RemoveTrackTool
 import io.talevia.core.tool.builtin.video.ReorderTracksTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
@@ -133,6 +131,7 @@ import io.talevia.core.tool.builtin.video.SetClipSourceBindingTool
 import io.talevia.core.tool.builtin.video.SetClipTransformTool
 import io.talevia.core.tool.builtin.video.SetClipVolumeTool
 import io.talevia.core.tool.builtin.video.SplitClipTool
+import io.talevia.core.tool.builtin.video.TrackActionTool
 import io.talevia.core.tool.builtin.video.TransitionActionTool
 import io.talevia.core.tool.builtin.video.TrimClipTool
 import io.talevia.core.tool.builtin.web.WebFetchTool
@@ -322,9 +321,8 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(AddSubtitlesTool(projects))
         register(EditTextClipTool(projects))
         register(TransitionActionTool(projects))
-        register(AddTrackTool(projects))
+        register(TrackActionTool(projects))
         register(DuplicateTrackTool(projects))
-        register(RemoveTrackTool(projects))
         register(ReorderTracksTool(projects))
         register(RevertTimelineTool(sessions, projects))
         register(ClearTimelineTool(projects))

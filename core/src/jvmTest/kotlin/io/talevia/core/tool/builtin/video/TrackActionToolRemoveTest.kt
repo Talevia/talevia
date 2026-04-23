@@ -26,11 +26,11 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
-class RemoveTrackToolTest {
+class TrackActionToolRemoveTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: RemoveTrackTool,
+        val tool: TrackActionTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
         val emittedParts: MutableList<Part>,
@@ -38,7 +38,7 @@ class RemoveTrackToolTest {
 
     private fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val tool = RemoveTrackTool(store)
+        val tool = TrackActionTool(store)
         val parts = mutableListOf<Part>()
         val ctx = ToolContext(
             sessionId = SessionId("s"),
@@ -59,11 +59,18 @@ class RemoveTrackToolTest {
         assetId = AssetId("a-$id"),
     )
 
-    private fun single(trackId: String, force: Boolean = false) = RemoveTrackTool.Input(
+    private fun removeInput(
+        trackIds: List<String>,
+        force: Boolean = false,
+    ): TrackActionTool.Input = TrackActionTool.Input(
         projectId = "p",
-        trackIds = listOf(trackId),
+        action = "remove",
+        trackIds = trackIds,
         force = force,
     )
+
+    private fun single(trackId: String, force: Boolean = false) =
+        removeInput(listOf(trackId), force = force)
 
     @Test fun dropsEmptyTrackCleanly() = runTest {
         val rig = newRig(
@@ -79,6 +86,7 @@ class RemoveTrackToolTest {
         )
 
         val out = rig.tool.execute(single("v1"), rig.ctx).data
+        assertEquals("remove", out.action)
         val only = out.results.single()
         assertEquals("v1", only.trackId)
         assertEquals("video", only.trackKind)
@@ -103,7 +111,7 @@ class RemoveTrackToolTest {
             ),
         )
 
-        rig.tool.execute(RemoveTrackTool.Input("p", listOf("v1", "s1")), rig.ctx)
+        rig.tool.execute(removeInput(listOf("v1", "s1")), rig.ctx)
         val refreshed = rig.store.get(rig.projectId)!!
         assertEquals(listOf("a1"), refreshed.timeline.tracks.map { it.id.value })
     }
@@ -122,7 +130,7 @@ class RemoveTrackToolTest {
         )
         val before = rig.store.get(rig.projectId)!!
         assertFailsWith<IllegalStateException> {
-            rig.tool.execute(RemoveTrackTool.Input("p", listOf("v1", "ghost")), rig.ctx)
+            rig.tool.execute(removeInput(listOf("v1", "ghost")), rig.ctx)
         }
         val after = rig.store.get(rig.projectId)!!
         assertEquals(before.timeline, after.timeline)
@@ -178,6 +186,7 @@ class RemoveTrackToolTest {
         val out = rig.tool.execute(single("v1", force = true), rig.ctx).data
         assertEquals(2, out.results.single().droppedClipCount)
         assertEquals("video", out.results.single().trackKind)
+        assertTrue(out.forced)
 
         val refreshed = rig.store.get(rig.projectId)!!
         assertEquals(1, refreshed.timeline.tracks.size)
@@ -234,7 +243,7 @@ class RemoveTrackToolTest {
                 ),
             ),
         )
-        rig.tool.execute(RemoveTrackTool.Input("p", listOf("v1", "s1")), rig.ctx)
+        rig.tool.execute(removeInput(listOf("v1", "s1")), rig.ctx)
         val snaps = rig.emittedParts.filterIsInstance<Part.TimelineSnapshot>()
         assertEquals(1, snaps.size)
         val remainingIds = snaps.single().timeline.tracks.map { it.id.value }
@@ -278,7 +287,7 @@ class RemoveTrackToolTest {
     @Test fun rejectsEmptyList() = runTest {
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline()))
         assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(RemoveTrackTool.Input("p", emptyList()), rig.ctx)
+            rig.tool.execute(removeInput(emptyList()), rig.ctx)
         }
     }
 }
