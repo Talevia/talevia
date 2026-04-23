@@ -212,6 +212,21 @@ data class ToolResult<O>(
     val data: O,
     val attachments: List<MediaAttachment> = emptyList(),
     val metadata: JsonObject? = null,
+    /**
+     * Optional token-count estimate for this result's contribution to the LLM
+     * context (covers `outputForLlm` + serialised `data` — roughly the bytes the
+     * next turn will re-send). When set, [io.talevia.core.compaction.Compactor]
+     * uses it to pick which completed-tool outputs to drop first (biggest
+     * first); when null, the generic `(length + 3) / 4` heuristic in
+     * [io.talevia.core.compaction.TokenEstimator.forPart] is used instead.
+     *
+     * Populate this when you have a cheap, more accurate estimate than byte
+     * length — e.g. `project_query(select=timeline_clips)` counting rows × 50 —
+     * so compaction prioritises the expensive results on large projects. Leave
+     * null for tools whose output size is small / inscrutable (a few KB of
+     * natural text).
+     */
+    val estimatedTokens: Int? = null,
 )
 
 /**

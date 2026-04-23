@@ -300,6 +300,14 @@ sealed class ToolState {
         val input: JsonElement,
         val outputForLlm: String,
         val data: JsonElement,
+        /**
+         * Optional tool-author estimate of this result's LLM-context cost.
+         * Mirrors [io.talevia.core.tool.ToolResult.estimatedTokens]; stamped
+         * here so the value survives round-trips through the session store
+         * and is available to [io.talevia.core.compaction.TokenEstimator.forPart].
+         * Defaults to null so pre-existing serialised blobs still decode.
+         */
+        val estimatedTokens: Int? = null,
     ) : ToolState()
 
     @Serializable @SerialName("error")

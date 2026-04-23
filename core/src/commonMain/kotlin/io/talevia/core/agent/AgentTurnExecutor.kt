@@ -395,7 +395,12 @@ internal class AgentTurnExecutor(
                 val data = tool.encodeOutput(result)
                 store.upsertPart(
                     basePart.copy(
-                        state = ToolState.Completed(event.input, result.outputForLlm, data),
+                        state = ToolState.Completed(
+                            input = event.input,
+                            outputForLlm = result.outputForLlm,
+                            data = data,
+                            estimatedTokens = result.estimatedTokens,
+                        ),
                         title = result.title,
                     ),
                 )

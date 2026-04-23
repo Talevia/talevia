@@ -42,7 +42,11 @@ object TokenEstimator {
         is Part.Tool -> when (val s = part.state) {
             is ToolState.Pending -> 16
             is ToolState.Running -> 24 + forJson(s.input)
-            is ToolState.Completed -> 24 + forJson(s.input) + forText(s.outputForLlm) + forJson(s.data)
+            // Prefer the tool-author's estimate when stamped (e.g. project_query
+            // rows × 50). Falls back to the byte-length heuristic when null —
+            // matches how pre-stamp parts estimate today.
+            is ToolState.Completed -> s.estimatedTokens
+                ?: (24 + forJson(s.input) + forText(s.outputForLlm) + forJson(s.data))
             is ToolState.Failed -> 24 + (s.input?.let(::forJson) ?: 0) + forText(s.message)
         }
         is Part.Media -> forMedia(resolveAsset(part.assetId)?.metadata?.resolution)

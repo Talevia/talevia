@@ -92,12 +92,16 @@ class Compactor(
      * Two-tier algorithm, modelled on OpenCode's `compaction.ts`:
      *  1. **Protect window** — the last [protectUserTurns] user turns (and the
      *     assistant turns after the earliest protected user turn) are kept verbatim.
-     *  2. **Budget envelope** outside the window — walk backwards, accumulating
-     *     token estimates as we go. As long as we're still under
-     *     [pruneProtectTokens], keep everything (so a modest amount of pre-window
-     *     history survives). Once we cross the budget, drop completed tool
-     *     **outputs** only; text / reasoning / tool inputs / timeline snapshots
-     *     are still preserved because they are cheap signals worth keeping.
+     *  2. **Budget envelope** outside the window — gather every completed-tool
+     *     output in the pre-window zone as a drop candidate. Everything else
+     *     (text, reasoning, running/pending/failed tools, timeline snapshots)
+     *     is counted into the fixed envelope that must stay. If fixed + all
+     *     candidates ≤ [pruneProtectTokens], drop nothing. Otherwise sort
+     *     candidates by size descending and drop the biggest first until the
+     *     kept total is under budget — one large drop is preferable to several
+     *     small ones because it preserves more reasoning history for the same
+     *     token budget ([ToolResult.estimatedTokens] lets big tools
+     *     self-identify).
      */
     internal fun prune(history: List<MessageWithParts>): Set<PartId> {
         val userTurnIndices = history.mapIndexedNotNull { i, m ->
@@ -106,26 +110,35 @@ class Compactor(
         if (userTurnIndices.size <= protectUserTurns) return emptySet()
         val protectFromIndex = userTurnIndices[userTurnIndices.size - protectUserTurns]
 
-        val drop = mutableSetOf<PartId>()
-        var tokens = 0
-
-        // Tier 1: everything from protectFromIndex onward is protected; count its tokens
-        // toward the budget so older content must fit under whatever's left.
+        // Protected-window token cost — always kept.
+        var fixedTokens = 0
         for (i in protectFromIndex until history.size) {
-            for (part in history[i].parts) tokens += TokenEstimator.forPart(part)
+            for (part in history[i].parts) fixedTokens += TokenEstimator.forPart(part)
         }
 
-        // Tier 2: walk pre-window messages newest → oldest.
-        for (i in (protectFromIndex - 1) downTo 0) {
-            for (part in history[i].parts.asReversed()) {
+        // Pre-window: split parts into drop-candidates (completed tool outputs)
+        // and fixed (everything else). Non-candidate parts always count toward
+        // the envelope.
+        data class Candidate(val id: PartId, val cost: Int)
+        val candidates = mutableListOf<Candidate>()
+        for (i in 0 until protectFromIndex) {
+            for (part in history[i].parts) {
                 val cost = TokenEstimator.forPart(part)
-                val outOfBudget = tokens + cost > pruneProtectTokens
-                if (outOfBudget && part is Part.Tool && part.state is ToolState.Completed) {
-                    drop += part.id
+                if (part is Part.Tool && part.state is ToolState.Completed) {
+                    candidates += Candidate(part.id, cost)
                 } else {
-                    tokens += cost
+                    fixedTokens += cost
                 }
             }
+        }
+
+        // Drop biggest candidates first until kept fits the budget.
+        val drop = mutableSetOf<PartId>()
+        var kept = candidates.sumOf { it.cost }
+        for (c in candidates.sortedByDescending { it.cost }) {
+            if (fixedTokens + kept <= pruneProtectTokens) break
+            drop += c.id
+            kept -= c.cost
         }
         return drop
     }

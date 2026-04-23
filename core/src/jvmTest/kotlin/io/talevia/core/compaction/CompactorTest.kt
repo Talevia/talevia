@@ -54,6 +54,111 @@ class CompactorTest {
     }
 
     @Test
+    fun pruneDropsBiggestToolOutputFirstWhenBudgetAllowsOneDrop() {
+        // Two pre-window completed-tool outputs: a small one (older, ~20 tokens)
+        // and a big one (newer, ~600 tokens via 2400-char string + estimatedTokens
+        // stamp). Budget of 200 forces exactly one drop. The largest-first policy
+        // must pick `big-tool` regardless of order — dropping the small one would
+        // leave ~600 tokens over budget and miss the goal.
+        val sid = SessionId("s")
+        val now = Instant.fromEpochMilliseconds(0)
+
+        val u1 = Message.User(MessageId("u-1"), sid, now, agent = "default", model = ModelRef("fake", "x"))
+        val a1 = Message.Assistant(
+            id = MessageId("a-1"), sessionId = sid, createdAt = now,
+            parentId = u1.id, model = ModelRef("fake", "x"),
+            finish = FinishReason.TOOL_CALLS,
+        )
+        val smallTool = Part.Tool(
+            id = PartId("small-tool"), messageId = a1.id, sessionId = sid, createdAt = now,
+            callId = CallId("c-1"), toolId = "echo",
+            state = ToolState.Completed(
+                input = JsonObject(mapOf("text" to JsonPrimitive("s"))),
+                outputForLlm = "x",
+                data = JsonObject(emptyMap()),
+            ),
+        )
+        val bigTool = Part.Tool(
+            id = PartId("big-tool"), messageId = a1.id, sessionId = sid, createdAt = now,
+            callId = CallId("c-2"), toolId = "echo",
+            state = ToolState.Completed(
+                input = JsonObject(mapOf("text" to JsonPrimitive("b"))),
+                outputForLlm = "x".repeat(2_400),
+                data = JsonObject(emptyMap()),
+                estimatedTokens = 600,
+            ),
+        )
+        val u2 = Message.User(MessageId("u-2"), sid, now, agent = "default", model = ModelRef("fake", "x"))
+        val u2Text = Part.Text(PartId("u-2-text"), u2.id, sid, now, text = "q")
+        val history = listOf(
+            MessageWithParts(u1, listOf(Part.Text(PartId("u-1-text"), u1.id, sid, now, text = "q"))),
+            MessageWithParts(a1, listOf(smallTool, bigTool)),
+            MessageWithParts(u2, listOf(u2Text)),
+        )
+
+        val compactor = Compactor(
+            provider = FakeProvider(emptyList()),
+            store = noopStore(),
+            bus = EventBus(),
+            clock = Clock.System,
+            protectUserTurns = 1,
+            pruneProtectTokens = 200,
+        )
+
+        val dropped = compactor.prune(history)
+        assertTrue(dropped.contains(PartId("big-tool")), "largest tool output should be dropped first")
+        assertTrue(!dropped.contains(PartId("small-tool")), "small tool output should survive")
+    }
+
+    @Test
+    fun pruneHonoursEstimatedTokensOverrideOverByteHeuristic() {
+        // A tool whose `outputForLlm` is tiny (40 chars → ~10-token byte estimate)
+        // but that stamped estimatedTokens=5000 (e.g. because the `data` JSON it
+        // returned was replayed into a provider-specific balloon). The estimator
+        // MUST trust the stamp over the byte count so budget math reflects reality.
+        val sid = SessionId("s")
+        val now = Instant.fromEpochMilliseconds(0)
+
+        val u1 = Message.User(MessageId("u-1"), sid, now, agent = "default", model = ModelRef("fake", "x"))
+        val a1 = Message.Assistant(
+            id = MessageId("a-1"), sessionId = sid, createdAt = now,
+            parentId = u1.id, model = ModelRef("fake", "x"),
+            finish = FinishReason.TOOL_CALLS,
+        )
+        val stampedTool = Part.Tool(
+            id = PartId("stamped-tool"), messageId = a1.id, sessionId = sid, createdAt = now,
+            callId = CallId("c-1"), toolId = "echo",
+            state = ToolState.Completed(
+                input = JsonObject(mapOf("text" to JsonPrimitive("tiny"))),
+                outputForLlm = "tiny output",
+                data = JsonObject(emptyMap()),
+                estimatedTokens = 5000,
+            ),
+        )
+        val u2 = Message.User(MessageId("u-2"), sid, now, agent = "default", model = ModelRef("fake", "x"))
+        val u2Text = Part.Text(PartId("u-2-text"), u2.id, sid, now, text = "q")
+        val history = listOf(
+            MessageWithParts(u1, listOf(Part.Text(PartId("u-1-text"), u1.id, sid, now, text = "q"))),
+            MessageWithParts(a1, listOf(stampedTool)),
+            MessageWithParts(u2, listOf(u2Text)),
+        )
+
+        val compactor = Compactor(
+            provider = FakeProvider(emptyList()),
+            store = noopStore(),
+            bus = EventBus(),
+            clock = Clock.System,
+            protectUserTurns = 1,
+            pruneProtectTokens = 100,
+        )
+
+        // With the stamp, 5000 >> 100 → must drop. Without the stamp, ~15 tokens
+        // of byte-heuristic would have kept it in.
+        val dropped = compactor.prune(history)
+        assertTrue(dropped.contains(PartId("stamped-tool")), "estimatedTokens stamp must drive drop decision")
+    }
+
+    @Test
     fun summarisesAndPersistsCompactionPart() = runTest {
         val (store, bus) = inMemoryStore()
         val sid = SessionId("s")
