@@ -31,13 +31,19 @@ class ToolRegistry {
     fun specs(): List<ToolSpec> = tools.values.map { it.spec }
 
     /**
-     * Context-filtered spec bundle — drops tools whose [Tool.applicability] is unavailable
-     * under [ctx]. AgentTurnExecutor calls this per turn so an unbound session doesn't
-     * ship ~dozens of project-scoped tool schemas to the provider. Order is preserved.
+     * Context-filtered spec bundle. Drops tools whose [Tool.applicability] is
+     * unavailable under [ctx], **then** drops anything the caller listed in
+     * [ToolAvailabilityContext.disabledToolIds] (session-scoped "stop using
+     * generate_video" controls). Order is preserved.
+     *
+     * AgentTurnExecutor calls this per turn so an unbound session doesn't
+     * ship ~dozens of project-scoped tool schemas to the provider, and a
+     * session that disabled some tools never exposes them to the model.
      */
     fun specs(ctx: ToolAvailabilityContext): List<ToolSpec> =
         tools.values.asSequence()
             .filter { it.applicability.isAvailable(ctx) }
+            .filter { it.id !in ctx.disabledToolIds }
             .map { it.spec }
             .toList()
 }

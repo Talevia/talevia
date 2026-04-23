@@ -104,6 +104,16 @@ data class ToolAvailabilityContext(
      * an injected ProjectStore when one is available.
      */
     val projectHasAssets: Boolean = false,
+    /**
+     * Tool ids the caller has explicitly disabled for this session (VISION
+     * §5.4). Filtered out at `ToolRegistry.specs(ctx)` **after** the per-tool
+     * [ToolApplicability.isAvailable] check, so a disabled tool is invisible
+     * to the LLM regardless of other eligibility. Default empty — pre-feature
+     * call sites and tests see every applicable tool. Flipped by the
+     * session-scoped `set_tool_enabled` tool which writes
+     * `Session.disabledToolIds`.
+     */
+    val disabledToolIds: Set<String> = emptySet(),
 )
 
 class ToolContext(

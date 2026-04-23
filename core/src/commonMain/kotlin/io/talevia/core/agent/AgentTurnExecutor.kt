@@ -146,6 +146,7 @@ internal class AgentTurnExecutor(
         currentProjectId: ProjectId?,
         providerIndex: Int = 0,
         spendCapCents: Long? = null,
+        disabledToolIds: Set<String> = emptySet(),
     ): TurnResult {
         val projectHasAssets = currentProjectId != null &&
             projects?.get(currentProjectId)?.assets?.isNotEmpty() == true
@@ -156,6 +157,7 @@ internal class AgentTurnExecutor(
                 ToolAvailabilityContext(
                     currentProjectId = currentProjectId,
                     projectHasAssets = projectHasAssets,
+                    disabledToolIds = disabledToolIds,
                 ),
             ),
             systemPrompt = buildSystemPrompt(systemPrompt, currentProjectId, input.sessionId),

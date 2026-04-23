@@ -331,6 +331,7 @@ class Agent(
             val sessionSnapshot = store.getSession(input.sessionId)
             val currentProjectId = sessionSnapshot?.currentProjectId
             val spendCapCents = sessionSnapshot?.spendCapCents
+            val disabledToolIds = sessionSnapshot?.disabledToolIds ?: emptySet()
 
             var providerIndex = 0
             var attempt = 0
@@ -349,7 +350,7 @@ class Agent(
                 handle.currentAssistantId = asstMsg.id
 
                 turnResult = executor.streamTurn(
-                    asstMsg, history, input, currentProjectId, providerIndex, spendCapCents,
+                    asstMsg, history, input, currentProjectId, providerIndex, spendCapCents, disabledToolIds,
                 )
 
                 // Only retry when the turn failed and nothing useful was streamed.
