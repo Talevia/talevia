@@ -1,0 +1,17 @@
+-- Schema v3 → v4: drop the four project-related tables that were stranded
+-- after commit `baad43f` switched the canonical [ProjectStore] to
+-- [FileProjectStore] (on-disk `talevia.json` bundles). The TaleviaDb now hosts
+-- only Sessions / Messages / Parts; project state lives entirely in the
+-- file-bundle.
+--
+-- Clean-cut, no data preservation: any rows in these tables are stale
+-- relative to whichever bundles a live app has been writing, and no code
+-- reads them anymore ([SqlDelightProjectStore] is deleted in the same
+-- commit). Downgrades across this migration are refused by
+-- [TaleviaDbFactory] (PRAGMA user_version check), so this is a one-way
+-- door — matches the one-way nature of `baad43f`'s commit.
+
+DROP TABLE IF EXISTS ProjectClipRenderCache;
+DROP TABLE IF EXISTS ProjectLockfileEntries;
+DROP TABLE IF EXISTS ProjectSnapshots;
+DROP TABLE IF EXISTS Projects;

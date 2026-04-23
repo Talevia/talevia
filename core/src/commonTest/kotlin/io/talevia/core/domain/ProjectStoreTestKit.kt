@@ -7,15 +7,10 @@ import okio.fakefilesystem.FakeFileSystem
 
 /**
  * Helper for tests that just need a working [ProjectStore] fixture without
- * having to spin up a SQLite driver or a real filesystem. Returns a
- * [FileProjectStore] wired over an Okio [FakeFileSystem], so tests are
- * sandboxed and don't leak state across runs.
- *
- * Replaces the old `SqlDelightProjectStore(TaleviaDb(driver))` boilerplate.
- * If a test was reaching into `db.projectsQueries.selectAll()` to assert
- * raw row state, it should switch to `store.summary(id)` /
- * `store.listSummaries()` — the file-backed store has no SQL surface to
- * inspect.
+ * having to stand up a real filesystem. Returns a [FileProjectStore] wired
+ * over an Okio [FakeFileSystem], so tests are sandboxed and don't leak state
+ * across runs. Tests asserting raw catalog state should use `store.summary(id)`
+ * / `store.listSummaries()`.
  */
 object ProjectStoreTestKit {
 
