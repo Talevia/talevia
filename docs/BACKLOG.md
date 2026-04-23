@@ -18,7 +18,6 @@
 
 ## P2 — 记债 / 观望
 
-- **gemini-provider-stub** — 只有 Anthropic / OpenAI；provider abstraction 还没被第三个实现压过测试。**方向：** 给 `core/provider/gemini/` 打一个 skeleton，映射 Gemini streaming 事件到 `LlmEvent`，装配点 gated by `GOOGLE_GENAI_API_KEY`。可以只覆盖 text 一轮对话；tool-use 留给后续。Rubric §5.2 + provider 中立红线。
 - **tts-provider-fallback-chain** — `SynthesizeSpeechTool` 目前一个 provider 下去，provider 挂就 tool error。**方向：** 在 Core 容器里接受多个 engine 按优先级注入，`AigcPipeline` 遇到非 cache-hit 失败时切到下一个引擎；lockfile 记录最终用的 provider。Rubric §5.2。
 - **bundle-source-footage-consolidate** — 当前 bundle 自包含 AIGC 产物 + `copy_into_bundle=true` 显式 import 的资产，但用户原始 footage 仍走 `MediaSource.File(absolutePath)`，跨机器不可移植。alice 的 `/Users/alice/raw.mp4` 在 bob 那里 ffmpeg "file not found"。**方向：** 加 `consolidate_media_into_bundle` 工具一次性把项目用到的全部 `MediaSource.File` 复制进 `<bundle>/media/` 并改写为 `BundleFile`；同时在 `import_media` 加智能默认（< 50MB 自动 in-bundle）。注意配套需要 git LFS 文档说明。Rubric §3.1 / §5.4。
 - **bundle-asset-relink-ux** — 跨机器场景：bob 打开 alice 的 bundle，绝对路径资产解析失败时目前 export 直接报错。没有"原素材在哪？"的引导 UX。**方向：** `ProjectStore.openAt` / `get` 时收集所有 `MediaSource.File` 路径不存在的 assetId，emit `BusEvent.AssetMissing(assetId, originalPath)`；新增 `relink_asset(assetId, newPath)` 工具一次性把绑同一原素材的所有 clip 重指。CLI / Desktop 在 export 前显式列出 missing。Rubric §5.4。

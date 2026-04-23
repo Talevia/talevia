@@ -369,3 +369,31 @@ when `project_query` crosses ~20 selects, consider a formal "select
 plugin" shape (one file per select declaring its fragment of each
 site). Current counts: `project_query` 14 selects, `session_query`
 15, `source_query` 5.
+
+---
+
+## 2026-04-23 — gemini-provider-stub (`<this commit>`)
+
+### 4 stale bullets closed in 11 cycles — backlog-sweep discipline still not enforced
+Cycle 11 marks the fourth close-without-code-change in this session
+(after `fork-project-tool-trim-stats-bug`,
+`import-media-tool-bundle-resolver`,
+`extract-frame-tool-bundle-write`, and now `gemini-provider-stub`).
+Each described work a prior "big refactor" cycle had silently already
+landed. 4/11 ≈ 36% stale rate — higher than the 3/6 I flagged in
+cycle 6, not lower.
+
+The cycle-6 proposal ("add `backlog-sweep:` footer to refactor
+commits" or "start repopulate with a liveness check") is still just
+written here in PAIN_POINTS, not implemented. Stale bullets keep
+showing up because nothing enforces their decay. Concrete next step
+worth considering: add the rule to the skill itself — bump
+`iterate-gap/SKILL.md` to require a liveness pre-check in step 2
+before dispatching on the top bullet (walk the bullet's described
+symptom against current source, skip-close if the symptom can't be
+reproduced in < 60s of grep). That turns the pattern into skill
+cost rather than cycle cost. Not landing as this cycle's work (it'd
+be a skill-level change, out of `/iterate-gap` scope), but flagging
+here so whichever future skill-editing cycle picks it up can
+reference the empirical evidence: 4/11 = 36% recovery rate on a
+pattern that's free to detect.
