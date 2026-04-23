@@ -296,6 +296,42 @@ class Renderer(
     }
 
     /**
+     * Warn the operator that the current project has N assets whose
+     * original absolute paths don't resolve on this machine. Typically
+     * fired right after `FileProjectStore.openAt` publishes
+     * `BusEvent.AssetsMissing` — the next `/export` on such a project
+     * would either render a broken clip or fail loud, so we surface the
+     * fact at open time and point at `relink_asset` as the next step.
+     *
+     * [paths] carries up to `previewCap` human-readable `originalPath`
+     * entries verbatim; anything beyond that is summarised as `(+N more)`
+     * so a project with dozens of missing clips doesn't dump a wall of
+     * paths into the transcript.
+     */
+    suspend fun assetsMissingNotice(paths: List<String>) {
+        if (paths.isEmpty()) return
+        mutex.withLock {
+            breakAssistantLineLocked()
+            markAllPartsUnrepaintableLocked()
+            invalidateBottomLocked()
+            val previewCap = 5
+            val preview = paths.take(previewCap)
+            val overflow = paths.size - preview.size
+            val overflowTail = if (overflow > 0) " (+$overflow more)" else ""
+            val head = "⚠ ${paths.size} asset${if (paths.size == 1) "" else "s"} don't resolve on this machine — " +
+                "export will fail or render a broken clip. Call relink_asset to fix."
+            terminal.writer().println("  ${Styles.warn("!")} ${Styles.warn(head)}")
+            for (p in preview) {
+                terminal.writer().println("    ${Styles.meta("· $p")}")
+            }
+            if (overflowTail.isNotEmpty()) {
+                terminal.writer().println("    ${Styles.meta(overflowTail.trim())}")
+            }
+            terminal.writer().flush()
+        }
+    }
+
+    /**
      * Print a one-line notice that the Agent is about to sleep + retry a
      * transient provider error. Breaks any open assistant line first so the
      * notice sits on its own row, then leaves the line buffer unrepaintable

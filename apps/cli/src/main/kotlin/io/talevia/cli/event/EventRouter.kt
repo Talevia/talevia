@@ -42,6 +42,18 @@ class EventRouter(
                 .collect { ev -> renderer.retryNotice(ev.attempt, ev.waitMs, ev.reason) }
         }
         jobs += scope.launch {
+            // AssetsMissing is a project-scope event, not session-scope — every
+            // open in this CLI run surfaces its warning regardless of which
+            // session is active. Fires once per openAt that detects dangling
+            // File sources; downstream `relink_asset` calls don't re-fire it
+            // (by design in FileProjectStore), so the operator sees exactly
+            // one warning per stale load.
+            bus.subscribe<BusEvent.AssetsMissing>()
+                .collect { ev ->
+                    renderer.assetsMissingNotice(ev.missing.map { it.originalPath })
+                }
+        }
+        jobs += scope.launch {
             bus.subscribe<BusEvent.PartUpdated>()
                 .filter { it.sessionId == activeSessionId() }
                 .collect { ev ->
