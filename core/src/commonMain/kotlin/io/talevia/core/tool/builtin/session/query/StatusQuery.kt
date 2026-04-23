@@ -7,7 +7,33 @@ import io.talevia.core.compaction.TokenEstimator
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class StatusRow(
+    val sessionId: String,
+    /** `"idle"` | `"generating"` | `"awaiting_tool"` | `"compacting"` | `"cancelled"` | `"failed"`. */
+    val state: String,
+    /** Non-null only when `state="failed"`. */
+    val cause: String? = null,
+    /**
+     * True when the tracker has never seen any [io.talevia.core.agent.AgentRunState]
+     * transition for this session. `state` still reports `"idle"` in that
+     * case (distinct from "ran and terminated back to idle" only via this flag).
+     */
+    val neverRan: Boolean = false,
+    /**
+     * Estimated token footprint of the session's surviving history
+     * (`includeCompacted=false`) via [io.talevia.core.compaction.TokenEstimator].
+     * Null on rigs that don't have the store wired (not expected in production).
+     * Default null keeps legacy Output JSON forward-compatible.
+     */
+    val estimatedTokens: Int? = null,
+    /** Default auto-compaction threshold the Agent ships with (120_000 tokens). */
+    val compactionThreshold: Int? = null,
+    /** `estimatedTokens / compactionThreshold`, clamped to [0.0, 1.0]. UI progress bar. */
+    val percent: Float? = null,
+)
 
 /**
  * `select=status` — snapshot of the agent's most recent [AgentRunState]
@@ -72,7 +98,7 @@ internal suspend fun runStatusQuery(
     val threshold = DEFAULT_COMPACTION_TOKEN_THRESHOLD
     val percent = (estimatedTokens.toFloat() / threshold.toFloat()).coerceIn(0f, 1f)
 
-    val row = SessionQueryTool.StatusRow(
+    val row = StatusRow(
         sessionId = sid.value,
         state = stateTag(observed),
         cause = (observed as? AgentRunState.Failed)?.cause,
@@ -81,7 +107,7 @@ internal suspend fun runStatusQuery(
         compactionThreshold = threshold,
         percent = percent,
     )
-    val rows = encodeRows(ListSerializer(SessionQueryTool.StatusRow.serializer()), listOf(row))
+    val rows = encodeRows(ListSerializer(StatusRow.serializer()), listOf(row))
     val percentNote = if (estimatedTokens > 0) {
         ", ${(percent * 100).toInt()}% of compaction threshold ($estimatedTokens/$threshold tokens)"
     } else {

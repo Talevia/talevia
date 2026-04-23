@@ -5,7 +5,28 @@ import io.talevia.core.session.Message
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+/**
+ * `select=cache_stats` — single-row prompt-cache utilisation for one session.
+ * Walks the session's assistant messages and sums their [TokenUsage]. Providers
+ * normalise `input` to include both cached and uncached input tokens, so the
+ * hit ratio is `cacheReadTokens / totalInputTokens` regardless of provider.
+ */
+@Serializable data class CacheStatsRow(
+    val sessionId: String,
+    /** Number of assistant messages contributing to the aggregate. Zero → the session has had no assistant turns yet. */
+    val assistantMessageCount: Int,
+    /** Sum of `TokenUsage.input` across assistant messages (cached + uncached). */
+    val totalInputTokens: Long,
+    /** Sum of `TokenUsage.cacheRead` — input tokens served from the provider's cache. */
+    val cacheReadTokens: Long,
+    /** Sum of `TokenUsage.cacheWrite` — input tokens newly written to the cache. */
+    val cacheWriteTokens: Long,
+    /** `cacheReadTokens / totalInputTokens`, clamped to [0.0, 1.0]. Zero when totalInputTokens is zero. */
+    val hitRatio: Double,
+)
 
 /**
  * `select=cache_stats` — single-row prompt-cache utilisation aggregate
@@ -63,7 +84,7 @@ internal suspend fun runCacheStatsQuery(
         0.0
     }
 
-    val row = SessionQueryTool.CacheStatsRow(
+    val row = CacheStatsRow(
         sessionId = sid.value,
         assistantMessageCount = assistantCount,
         totalInputTokens = totalInput,
@@ -72,7 +93,7 @@ internal suspend fun runCacheStatsQuery(
         hitRatio = hitRatio,
     )
     val rows = encodeRows(
-        ListSerializer(SessionQueryTool.CacheStatsRow.serializer()),
+        ListSerializer(CacheStatsRow.serializer()),
         listOf(row),
     )
     val pct = (hitRatio * 100.0).toString().take(5)

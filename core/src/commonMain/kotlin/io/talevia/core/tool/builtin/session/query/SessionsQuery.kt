@@ -4,7 +4,18 @@ import io.talevia.core.ProjectId
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class SessionRow(
+    val id: String,
+    val projectId: String,
+    val title: String,
+    val parentId: String? = null,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+    val archived: Boolean,
+)
 
 /**
  * `select=sessions` — one row per session, most-recent first by updatedAt.
@@ -28,7 +39,7 @@ internal suspend fun runSessionsQuery(
     val page = sorted.drop(offset).take(limit)
 
     val rows = page.map { s ->
-        SessionQueryTool.SessionRow(
+        SessionRow(
             id = s.id.value,
             projectId = s.projectId.value,
             title = s.title,
@@ -38,7 +49,7 @@ internal suspend fun runSessionsQuery(
             archived = s.archived,
         )
     }
-    val jsonRows = encodeRows(ListSerializer(SessionQueryTool.SessionRow.serializer()), rows)
+    val jsonRows = encodeRows(ListSerializer(SessionRow.serializer()), rows)
     val scopeLabel = pid?.let { "project ${it.value}" } ?: "all projects"
     val body = if (rows.isEmpty()) {
         "No sessions on $scopeLabel."

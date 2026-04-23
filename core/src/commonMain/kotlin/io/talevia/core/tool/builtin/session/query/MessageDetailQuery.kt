@@ -7,7 +7,46 @@ import io.talevia.core.session.SessionStore
 import io.talevia.core.session.ToolState
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class MessagePartSummary(
+    val id: String,
+    /** Discriminator matching the `@SerialName` of the `Part` subtype. */
+    val kind: String,
+    val createdAtEpochMs: Long,
+    /** When non-null, this part has been compacted out of the LLM context. */
+    val compactedAtEpochMs: Long? = null,
+    /** Terse human summary, per-kind. */
+    val preview: String,
+)
+
+/**
+ * `select=message` — one row per drilled message with metadata + part
+ * previews. Replaces the deleted `describe_message` tool. Preview
+ * strategy matches the old tool's rendering (text first 80 chars,
+ * tool toolId+state, media assetId, timeline-snapshot clip count,
+ * etc.).
+ */
+@Serializable data class MessageDetailRow(
+    val messageId: String,
+    val sessionId: String,
+    /** `"user"` | `"assistant"`. */
+    val role: String,
+    val createdAtEpochMs: Long,
+    val modelProviderId: String,
+    val modelId: String,
+    /** User-only; null on assistant rows. */
+    val agent: String? = null,
+    /** Assistant-only; null on user rows. */
+    val parentId: String? = null,
+    val tokensInput: Long? = null,
+    val tokensOutput: Long? = null,
+    val finish: String? = null,
+    val error: String? = null,
+    val partCount: Int,
+    val parts: List<MessagePartSummary>,
+)
 
 /**
  * `select=message` — single-row drill-down replacing the deleted
@@ -39,7 +78,7 @@ internal suspend fun runMessageDetailQuery(
     val summaries = parts.map { it.toSummary() }
 
     val row = when (message) {
-        is Message.User -> SessionQueryTool.MessageDetailRow(
+        is Message.User -> MessageDetailRow(
             messageId = message.id.value,
             sessionId = message.sessionId.value,
             role = "user",
@@ -50,7 +89,7 @@ internal suspend fun runMessageDetailQuery(
             partCount = summaries.size,
             parts = summaries,
         )
-        is Message.Assistant -> SessionQueryTool.MessageDetailRow(
+        is Message.Assistant -> MessageDetailRow(
             messageId = message.id.value,
             sessionId = message.sessionId.value,
             role = "assistant",
@@ -67,7 +106,7 @@ internal suspend fun runMessageDetailQuery(
         )
     }
     val rows = encodeRows(
-        ListSerializer(SessionQueryTool.MessageDetailRow.serializer()),
+        ListSerializer(MessageDetailRow.serializer()),
         listOf(row),
     )
 
@@ -88,7 +127,7 @@ internal suspend fun runMessageDetailQuery(
     )
 }
 
-private fun Part.toSummary(): SessionQueryTool.MessagePartSummary {
+private fun Part.toSummary(): MessagePartSummary {
     val kind = when (this) {
         is Part.Text -> "text"
         is Part.Reasoning -> "reasoning"
@@ -138,7 +177,7 @@ private fun Part.toSummary(): SessionQueryTool.MessagePartSummary {
             "${steps.size} step(s) pending=$pending done=$done failed=$failed [$approval]"
         }
     }
-    return SessionQueryTool.MessagePartSummary(
+    return MessagePartSummary(
         id = id.value,
         kind = kind,
         createdAtEpochMs = createdAt.toEpochMilliseconds(),

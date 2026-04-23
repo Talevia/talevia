@@ -20,6 +20,7 @@ import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.session.query.SpendSummaryRow
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import kotlinx.serialization.builtins.ListSerializer
@@ -117,7 +118,7 @@ class SessionQuerySpendTest {
 
         assertEquals("spend", out.select)
         val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.SpendSummaryRow.serializer()),
+            ListSerializer(SpendSummaryRow.serializer()),
             out.rows,
         ).single()
         // Matching entries: a (4), b (15), d (null)
@@ -140,7 +141,7 @@ class SessionQuerySpendTest {
             ctx(),
         ).data
         val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.SpendSummaryRow.serializer()),
+            ListSerializer(SpendSummaryRow.serializer()),
             out.rows,
         ).single()
         assertEquals(0L, row.totalCostCents)
@@ -156,7 +157,7 @@ class SessionQuerySpendTest {
             ctx(),
         ).data
         val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.SpendSummaryRow.serializer()),
+            ListSerializer(SpendSummaryRow.serializer()),
             out.rows,
         ).single()
         assertEquals(0L, row.totalCostCents)

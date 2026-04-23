@@ -4,7 +4,17 @@ import io.talevia.core.SessionId
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class AncestorRow(
+    val id: String,
+    val projectId: String,
+    val title: String,
+    val parentId: String? = null,
+    val createdAtEpochMs: Long,
+    val archived: Boolean,
+)
 
 /**
  * `select=ancestors` — parent chain from the given `sessionId` up to the
@@ -19,7 +29,7 @@ internal suspend fun runAncestorsQuery(
 ): ToolResult<SessionQueryTool.Output> {
     val start = requireSession(sessions, input.sessionId, SessionQueryTool.SELECT_ANCESTORS)
 
-    val chain = mutableListOf<SessionQueryTool.AncestorRow>()
+    val chain = mutableListOf<AncestorRow>()
     val visited = mutableSetOf<SessionId>()
     visited += start.id
 
@@ -27,7 +37,7 @@ internal suspend fun runAncestorsQuery(
     while (cursor != null) {
         if (!visited.add(cursor)) break
         val ancestor = sessions.getSession(cursor) ?: break
-        chain += SessionQueryTool.AncestorRow(
+        chain += AncestorRow(
             id = ancestor.id.value,
             projectId = ancestor.projectId.value,
             title = ancestor.title,
@@ -39,7 +49,7 @@ internal suspend fun runAncestorsQuery(
     }
 
     val page = chain.drop(offset).take(limit)
-    val jsonRows = encodeRows(ListSerializer(SessionQueryTool.AncestorRow.serializer()), page)
+    val jsonRows = encodeRows(ListSerializer(AncestorRow.serializer()), page)
     val body = if (chain.isEmpty()) {
         "Session ${start.id.value} '${start.title}' is a root (no parent)."
     } else {

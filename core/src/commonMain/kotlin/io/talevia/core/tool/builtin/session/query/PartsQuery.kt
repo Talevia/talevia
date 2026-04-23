@@ -3,7 +3,17 @@ package io.talevia.core.tool.builtin.session.query
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class PartRow(
+    val partId: String,
+    val kind: String,
+    val messageId: String,
+    val createdAtEpochMs: Long,
+    val compactedAtEpochMs: Long? = null,
+    val preview: String,
+)
 
 /**
  * `select=parts` — one row per Part in a session, most-recent first.
@@ -29,7 +39,7 @@ internal suspend fun runPartsQuery(
     val page = sorted.drop(offset).take(limit)
 
     val rows = page.map { p ->
-        SessionQueryTool.PartRow(
+        PartRow(
             partId = p.id.value,
             kind = p.kindDiscriminator(),
             messageId = p.messageId.value,
@@ -38,7 +48,7 @@ internal suspend fun runPartsQuery(
             preview = p.preview(),
         )
     }
-    val jsonRows = encodeRows(ListSerializer(SessionQueryTool.PartRow.serializer()), rows)
+    val jsonRows = encodeRows(ListSerializer(PartRow.serializer()), rows)
     val scope = requestedKind?.let { " kind=$it" } ?: ""
     val body = if (rows.isEmpty()) {
         "No parts on session ${session.id.value}$scope."

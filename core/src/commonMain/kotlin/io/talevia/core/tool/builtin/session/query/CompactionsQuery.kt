@@ -4,7 +4,20 @@ import io.talevia.core.session.Part
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class CompactionRow(
+    val partId: String,
+    val messageId: String,
+    /** First message-id in the range the compaction replaced. */
+    val fromMessageId: String,
+    /** Last message-id in the range the compaction replaced (inclusive). */
+    val toMessageId: String,
+    /** Full summary produced by the compactor — not truncated, unlike `select=parts` preview. */
+    val summaryText: String,
+    val compactedAtEpochMs: Long,
+)
 
 /**
  * `select=compactions` — one row per [Part.Compaction] in a session,
@@ -33,7 +46,7 @@ internal suspend fun runCompactionsQuery(
     val page = sorted.drop(offset).take(limit)
 
     val rows = page.map { p ->
-        SessionQueryTool.CompactionRow(
+        CompactionRow(
             partId = p.id.value,
             messageId = p.messageId.value,
             fromMessageId = p.replacedFromMessageId.value,
@@ -42,7 +55,7 @@ internal suspend fun runCompactionsQuery(
             compactedAtEpochMs = p.createdAt.toEpochMilliseconds(),
         )
     }
-    val jsonRows = encodeRows(ListSerializer(SessionQueryTool.CompactionRow.serializer()), rows)
+    val jsonRows = encodeRows(ListSerializer(CompactionRow.serializer()), rows)
     val body = if (rows.isEmpty()) {
         "Session ${session.id.value} '${session.title}' has not been compacted yet."
     } else {

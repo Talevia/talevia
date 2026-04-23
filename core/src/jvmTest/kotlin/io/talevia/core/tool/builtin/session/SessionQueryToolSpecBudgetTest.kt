@@ -11,6 +11,7 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.EchoTool
+import io.talevia.core.tool.builtin.session.query.ToolSpecBudgetRow
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -145,9 +146,9 @@ class SessionQueryToolSpecBudgetTest {
 
     // --- helpers --------------------------------------------------------
 
-    private fun decodeSingle(rows: JsonArray): SessionQueryTool.ToolSpecBudgetRow {
+    private fun decodeSingle(rows: JsonArray): ToolSpecBudgetRow {
         val list = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.ToolSpecBudgetRow.serializer()),
+            ListSerializer(ToolSpecBudgetRow.serializer()),
             rows,
         )
         assertEquals(1, list.size, "tool_spec_budget is single-row")

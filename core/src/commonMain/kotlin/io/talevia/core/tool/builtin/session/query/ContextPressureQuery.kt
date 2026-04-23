@@ -5,7 +5,32 @@ import io.talevia.core.compaction.TokenEstimator
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+/**
+ * `select=context_pressure` — single-row snapshot of how close this session's
+ * surviving history is to the Agent's auto-compaction threshold. Unlike
+ * `select=status` (which requires the run-state tracker), this works off the
+ * session store alone and adds an explicit `marginTokens` field so the LLM
+ * can decide whether to pre-emptively summarise. `ratio` is un-clamped so the
+ * over-threshold case surfaces as `> 1.0`.
+ */
+@Serializable data class ContextPressureRow(
+    val sessionId: String,
+    /** `TokenEstimator.forHistory` on `listMessagesWithParts(includeCompacted=false)` — same slice Compactor evaluates. */
+    val currentEstimate: Int,
+    /** Auto-compaction threshold ([DEFAULT_COMPACTION_TOKEN_THRESHOLD]). */
+    val threshold: Int,
+    /** `currentEstimate / threshold`, **un-clamped**. Over-threshold reads > 1.0. */
+    val ratio: Double,
+    /** `threshold - currentEstimate`. Negative when over threshold. */
+    val marginTokens: Int,
+    /** True when `currentEstimate >= threshold`. Compactor would fire next turn. */
+    val overThreshold: Boolean,
+    /** How many non-compacted messages contributed to the estimate. */
+    val messageCount: Int,
+)
 
 /**
  * `select=context_pressure` — single-row snapshot of how close this session's
@@ -66,7 +91,7 @@ internal suspend fun runContextPressureQuery(
     val marginTokens = threshold - currentEstimate
     val overThreshold = currentEstimate >= threshold
 
-    val row = SessionQueryTool.ContextPressureRow(
+    val row = ContextPressureRow(
         sessionId = sid.value,
         currentEstimate = currentEstimate,
         threshold = threshold,
@@ -76,7 +101,7 @@ internal suspend fun runContextPressureQuery(
         messageCount = history.size,
     )
     val rows = encodeRows(
-        ListSerializer(SessionQueryTool.ContextPressureRow.serializer()),
+        ListSerializer(ContextPressureRow.serializer()),
         listOf(row),
     )
     val pct = (ratio * 100.0).toString().take(5)

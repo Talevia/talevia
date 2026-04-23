@@ -16,6 +16,7 @@ import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.session.query.RunStateTransitionRow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -82,9 +83,9 @@ class SessionQueryRunStateHistoryTest {
         return SessionQueryTool(sessions, tracker, projects)
     }
 
-    private fun rows(out: SessionQueryTool.Output): List<SessionQueryTool.RunStateTransitionRow> =
+    private fun rows(out: SessionQueryTool.Output): List<RunStateTransitionRow> =
         JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.RunStateTransitionRow.serializer()),
+            ListSerializer(RunStateTransitionRow.serializer()),
             out.rows,
         )
 

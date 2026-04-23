@@ -52,3 +52,37 @@ repeated split cycle + a re-bumped entry on the backlog. Takeaway:
 don't defer call-site churn for API-stability arguments when the
 containing file is already at a structural limit. Take the hit once,
 at the natural extraction point, not twice across two cycles.
+
+---
+
+## 2026-04-23 — debt-resplit-session-query-tool (`<this commit>`)
+
+### "Unified query dispatcher" is a recurring shape, not a one-off
+Back-to-back cycles had to apply the exact same refactor recipe — extract
+nested row data classes to sibling files — to `ProjectQueryTool` then
+`SessionQueryTool`. The convention ("rows nested on the dispatcher so callers
+use `Owner.Row.serializer()`") was applied uniformly at design time across
+both tools, and broke down at the same structural limit in both. A third
+unified-query tool (e.g. a future `AgentQueryTool`) would hit the same wall
+by default. Takeaway: when a structural pattern — dispatcher + N
+per-discriminator handlers + per-discriminator rows — ships twice, the
+convention of "rows live on the dispatcher" should be dropped project-wide
+before the third instance lands. Better yet, introduce a `QueryDispatcher<I,
+O>` base abstraction (maybe inside `core.tool.query`) that owns the
+select-to-handler routing and forces rows to be top-level from day 1. Today
+that abstraction is implicit and each dispatcher re-invents it.
+
+### The "row decoding" contract duplicates across 11+ test helpers
+Each session-query test file has a private `rows(out): List<FooRow>` helper
+that unwraps `out.rows: JsonArray` via
+`JsonConfig.default.decodeFromJsonElement(ListSerializer(FooRow.serializer()),
+out.rows)`. That 3-line helper now appears in
+`SessionQueryToolTest`, `SessionQueryCacheStatsTest`,
+`SessionQueryContextPressureTest`, `SessionQueryRunStateHistoryTest`,
+`SessionQuerySpendTest`, `SessionQueryStatusTest`,
+`SessionQueryToolSpecBudgetTest`, plus the analogous versions in every
+project-query test (see 2026-04-22 entry). That's 10+ copies of the same
+"decode the untyped JsonArray into typed rows" operation. A 5-line
+test-kit helper like `Output.decodeRows(ser: KSerializer<T>): List<T>`
+collapses all of them. Evidence that we need a typed-output facade
+(same missing abstraction as the 2026-04-22 first entry).

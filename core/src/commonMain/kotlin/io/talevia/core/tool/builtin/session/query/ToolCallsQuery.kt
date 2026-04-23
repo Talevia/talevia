@@ -5,7 +5,20 @@ import io.talevia.core.session.SessionStore
 import io.talevia.core.session.ToolState
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class ToolCallRow(
+    val partId: String,
+    val messageId: String,
+    val toolId: String,
+    val callId: String,
+    /** `"pending"` | `"running"` | `"completed"` | `"error"`. */
+    val state: String,
+    val title: String? = null,
+    val createdAtEpochMs: Long,
+    val compactedAtEpochMs: Long? = null,
+)
 
 /**
  * `select=tool_calls` — one row per [Part.Tool] in a session, most-recent
@@ -28,7 +41,7 @@ internal suspend fun runToolCallsQuery(
     val page = sorted.drop(offset).take(limit)
 
     val rows = page.map { p ->
-        SessionQueryTool.ToolCallRow(
+        ToolCallRow(
             partId = p.id.value,
             messageId = p.messageId.value,
             toolId = p.toolId,
@@ -44,7 +57,7 @@ internal suspend fun runToolCallsQuery(
             compactedAtEpochMs = p.compactedAt?.toEpochMilliseconds(),
         )
     }
-    val jsonRows = encodeRows(ListSerializer(SessionQueryTool.ToolCallRow.serializer()), rows)
+    val jsonRows = encodeRows(ListSerializer(ToolCallRow.serializer()), rows)
     val scope = input.toolId?.let { " toolId=$it" } ?: ""
     val body = if (rows.isEmpty()) {
         "Session ${session.id.value} '${session.title}' has no tool calls$scope."

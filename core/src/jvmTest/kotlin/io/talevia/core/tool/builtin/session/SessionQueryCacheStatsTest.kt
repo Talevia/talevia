@@ -18,6 +18,7 @@ import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.session.TokenUsage
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.session.query.CacheStatsRow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -98,9 +99,9 @@ class SessionQueryCacheStatsTest {
         return SessionQueryTool(sessions, AgentRunStateTracker(EventBus(), scope), projects)
     }
 
-    private fun rows(out: SessionQueryTool.Output): List<SessionQueryTool.CacheStatsRow> =
+    private fun rows(out: SessionQueryTool.Output): List<CacheStatsRow> =
         JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.CacheStatsRow.serializer()),
+            ListSerializer(CacheStatsRow.serializer()),
             out.rows,
         )
 

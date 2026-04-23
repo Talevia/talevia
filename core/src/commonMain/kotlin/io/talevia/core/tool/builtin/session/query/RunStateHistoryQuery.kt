@@ -6,7 +6,27 @@ import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+/**
+ * `select=run_state_history` — one row per observed [AgentRunState]
+ * transition for this session, oldest first. Reads from the
+ * [AgentRunStateTracker]'s in-memory ring buffer (capped per session), so
+ * history is bounded to the current process's lifetime — no SQLite
+ * persistence. Useful for "how many times did the agent enter Compacting
+ * in the last 5 minutes?" debug questions that `select=status`
+ * (latest-only snapshot) can't answer.
+ */
+@Serializable data class RunStateTransitionRow(
+    val sessionId: String,
+    /** Millis since Unix epoch when the tracker observed the transition. */
+    val epochMs: Long,
+    /** `"idle"` | `"generating"` | `"awaiting_tool"` | `"compacting"` | `"cancelled"` | `"failed"`. */
+    val state: String,
+    /** Non-null only for `state="failed"` transitions. */
+    val cause: String? = null,
+)
 
 /**
  * `select=run_state_history` — the timeline complement to
@@ -61,7 +81,7 @@ internal suspend fun runRunStateHistoryQuery(
     val page = fullHistory.drop(offset).take(limit)
     val rowList = page.map { transition ->
         val (state, cause) = stateTag(transition.state)
-        SessionQueryTool.RunStateTransitionRow(
+        RunStateTransitionRow(
             sessionId = sid.value,
             epochMs = transition.epochMs,
             state = state,
@@ -69,7 +89,7 @@ internal suspend fun runRunStateHistoryQuery(
         )
     }
     val rows = encodeRows(
-        ListSerializer(SessionQueryTool.RunStateTransitionRow.serializer()),
+        ListSerializer(RunStateTransitionRow.serializer()),
         rowList,
     )
     val summary = buildString {

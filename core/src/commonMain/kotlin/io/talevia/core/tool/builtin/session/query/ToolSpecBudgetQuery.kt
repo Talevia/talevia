@@ -5,10 +5,38 @@ import io.talevia.core.tool.RegisteredTool
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.jsonArray
+
+/**
+ * `select=tool_spec_budget` — single-row snapshot of how many tokens the
+ * registered tool specs cost the LLM on every turn (VISION §5.4 +
+ * §3a-10). Registry-wide, session-independent — passing sessionId is
+ * rejected so typos surface. [registryResolved] is false only when the
+ * session-query is wired without a registry (non-Agent rigs), in which
+ * case every count reports zero.
+ */
+@Serializable data class ToolSpecBudgetRow(
+    val toolCount: Int,
+    /** Sum across all tools of `(id + helpText + JsonSchema).length / 4`. Order-of-magnitude estimate. */
+    val estimatedTokens: Int,
+    /** Sum of raw spec byte lengths — useful when the caller wants to apply its own tokenizer ratio. */
+    val specBytes: Int,
+    /** True when a registry was injected; false on test rigs that skip registry wiring. */
+    val registryResolved: Boolean,
+    /** Top [ToolSpecBudgetEntry]s by [ToolSpecBudgetEntry.estimatedTokens] descending. Capped so the response stays cheap. */
+    val topByTokens: List<ToolSpecBudgetEntry> = emptyList(),
+)
+
+@Serializable data class ToolSpecBudgetEntry(
+    val toolId: String,
+    /** `(id + helpText + schema).length / 4`, rounded half-up. */
+    val estimatedTokens: Int,
+    val specBytes: Int,
+)
 
 /**
  * `select=tool_spec_budget` — registry-wide snapshot of the tool-spec
@@ -53,7 +81,7 @@ internal fun runToolSpecBudgetQuery(
     val entries = tools.map { rt ->
         val schemaJson = JsonConfig.default.encodeToString(JsonElement.serializer(), rt.spec.inputSchema)
         val bytes = rt.id.length + rt.helpText.length + schemaJson.length
-        SessionQueryTool.ToolSpecBudgetEntry(
+        ToolSpecBudgetEntry(
             toolId = rt.id,
             estimatedTokens = bytesToTokens(bytes),
             specBytes = bytes,
@@ -63,7 +91,7 @@ internal fun runToolSpecBudgetQuery(
     val totalTokens = entries.sumOf { it.estimatedTokens }
     val top = entries.sortedByDescending { it.estimatedTokens }.take(TOP_N)
 
-    val row = SessionQueryTool.ToolSpecBudgetRow(
+    val row = ToolSpecBudgetRow(
         toolCount = tools.size,
         estimatedTokens = totalTokens,
         specBytes = totalBytes,
@@ -71,7 +99,7 @@ internal fun runToolSpecBudgetQuery(
         topByTokens = top,
     )
     val rows: JsonArray = JsonConfig.default.encodeToJsonElement(
-        ListSerializer(SessionQueryTool.ToolSpecBudgetRow.serializer()),
+        ListSerializer(ToolSpecBudgetRow.serializer()),
         listOf(row),
     ).jsonArray
     val pretty = if (toolRegistry == null) {

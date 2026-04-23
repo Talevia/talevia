@@ -4,7 +4,22 @@ import io.talevia.core.session.Message
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class MessageRow(
+    val id: String,
+    val role: String,
+    val createdAtEpochMs: Long,
+    val modelProviderId: String,
+    val modelId: String,
+    val agent: String? = null,
+    val parentId: String? = null,
+    val tokensInput: Long? = null,
+    val tokensOutput: Long? = null,
+    val finish: String? = null,
+    val error: String? = null,
+)
 
 /**
  * `select=messages` — one row per message in a session, most-recent first.
@@ -33,7 +48,7 @@ internal suspend fun runMessagesQuery(
 
     val rows = page.map { m ->
         when (m) {
-            is Message.User -> SessionQueryTool.MessageRow(
+            is Message.User -> MessageRow(
                 id = m.id.value,
                 role = "user",
                 createdAtEpochMs = m.createdAt.toEpochMilliseconds(),
@@ -41,7 +56,7 @@ internal suspend fun runMessagesQuery(
                 modelId = m.model.modelId,
                 agent = m.agent,
             )
-            is Message.Assistant -> SessionQueryTool.MessageRow(
+            is Message.Assistant -> MessageRow(
                 id = m.id.value,
                 role = "assistant",
                 createdAtEpochMs = m.createdAt.toEpochMilliseconds(),
@@ -55,7 +70,7 @@ internal suspend fun runMessagesQuery(
             )
         }
     }
-    val jsonRows = encodeRows(ListSerializer(SessionQueryTool.MessageRow.serializer()), rows)
+    val jsonRows = encodeRows(ListSerializer(MessageRow.serializer()), rows)
     val scope = normalisedRole?.let { " role=$it" } ?: ""
     val body = if (rows.isEmpty()) {
         "Session ${session.id.value} '${session.title}' has no messages$scope."

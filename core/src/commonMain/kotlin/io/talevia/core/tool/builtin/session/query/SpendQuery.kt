@@ -5,7 +5,28 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+/**
+ * `select=spend` — single-row AIGC cost aggregate attributed to one session.
+ * Walks the session's bound project's lockfile and sums `costCents` for entries
+ * whose stamped sessionId matches. Unknown-cost entries (no pricing rule) are
+ * counted in [unknownCostEntries] and do not contribute to [totalCostCents].
+ * [projectResolved] surfaces "the session's project no longer exists" — the
+ * session record is still valid but spend is un-computable.
+ */
+@Serializable data class SpendSummaryRow(
+    val sessionId: String,
+    val projectId: String,
+    val totalCostCents: Long,
+    val entryCount: Int,
+    val knownCostEntries: Int,
+    val unknownCostEntries: Int,
+    val byTool: Map<String, Long> = emptyMap(),
+    val unknownByTool: Map<String, Int> = emptyMap(),
+    val projectResolved: Boolean,
+)
 
 /**
  * `select=spend` — aggregate AIGC spend attributed to one session by walking
@@ -62,7 +83,7 @@ internal suspend fun runSpendQuery(
         byTool[entry.toolId] = (byTool[entry.toolId] ?: 0L) + cents
     }
 
-    val row = SessionQueryTool.SpendSummaryRow(
+    val row = SpendSummaryRow(
         sessionId = session.id.value,
         projectId = session.projectId.value,
         totalCostCents = totalCents,
@@ -74,7 +95,7 @@ internal suspend fun runSpendQuery(
         projectResolved = project != null,
     )
     val rows = encodeRows(
-        ListSerializer(SessionQueryTool.SpendSummaryRow.serializer()),
+        ListSerializer(SpendSummaryRow.serializer()),
         listOf(row),
     )
     val dollars = (totalCents / 100.0).toString().take(10)

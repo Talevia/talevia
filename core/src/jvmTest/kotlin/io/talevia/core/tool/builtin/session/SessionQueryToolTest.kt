@@ -19,6 +19,15 @@ import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.session.TokenUsage
 import io.talevia.core.session.ToolState
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.session.query.AncestorRow
+import io.talevia.core.tool.builtin.session.query.CompactionRow
+import io.talevia.core.tool.builtin.session.query.ForkRow
+import io.talevia.core.tool.builtin.session.query.MessageDetailRow
+import io.talevia.core.tool.builtin.session.query.MessageRow
+import io.talevia.core.tool.builtin.session.query.PartRow
+import io.talevia.core.tool.builtin.session.query.SessionMetadataRow
+import io.talevia.core.tool.builtin.session.query.SessionRow
+import io.talevia.core.tool.builtin.session.query.ToolCallRow
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import kotlinx.serialization.builtins.ListSerializer
@@ -130,7 +139,7 @@ class SessionQueryToolTest {
         assertEquals(2, out.total)
         assertEquals(2, out.returned)
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.SessionRow.serializer()),
+            ListSerializer(SessionRow.serializer()),
             out.rows,
         )
         // Most recent (updatedAt desc) first.
@@ -188,7 +197,7 @@ class SessionQueryToolTest {
         ).data
         assertEquals(2, users.total)
         val userRows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.MessageRow.serializer()),
+            ListSerializer(MessageRow.serializer()),
             users.rows,
         )
         assertTrue(userRows.all { it.role == "user" })
@@ -268,7 +277,7 @@ class SessionQueryToolTest {
         ).data
         assertEquals(1, onlyText.total)
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.PartRow.serializer()),
+            ListSerializer(PartRow.serializer()),
             onlyText.rows,
         )
         assertEquals("text", rows[0].kind)
@@ -302,7 +311,7 @@ class SessionQueryToolTest {
         ).data
         assertEquals(2, out.total)
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.ForkRow.serializer()),
+            ListSerializer(ForkRow.serializer()),
             out.rows,
         )
         assertEquals(setOf("s-child-1", "s-child-2"), rows.map { it.id }.toSet())
@@ -332,7 +341,7 @@ class SessionQueryToolTest {
         ).data
         assertEquals(2, out.total)
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.AncestorRow.serializer()),
+            ListSerializer(AncestorRow.serializer()),
             out.rows,
         )
         assertEquals(listOf("s-mid", "s-root"), rows.map { it.id })
@@ -389,7 +398,7 @@ class SessionQueryToolTest {
         ).data
         assertEquals(1, onlyImage.total)
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.ToolCallRow.serializer()),
+            ListSerializer(ToolCallRow.serializer()),
             onlyImage.rows,
         )
         assertEquals("generate_image", rows[0].toolId)
@@ -486,7 +495,7 @@ class SessionQueryToolTest {
         assertEquals(2, out.total)
         assertEquals(2, out.returned)
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.CompactionRow.serializer()),
+            ListSerializer(CompactionRow.serializer()),
             out.rows,
         )
         // Most recent first.
@@ -555,7 +564,7 @@ class SessionQueryToolTest {
         assertEquals("session_metadata", out.select)
         assertEquals(1, out.total)
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.SessionMetadataRow.serializer()),
+            ListSerializer(SessionMetadataRow.serializer()),
             out.rows,
         )
         val r = rows.single()
@@ -579,7 +588,7 @@ class SessionQueryToolTest {
             rig.ctx,
         ).data
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.SessionMetadataRow.serializer()),
+            ListSerializer(SessionMetadataRow.serializer()),
             out.rows,
         )
         val r = rows.single()
@@ -661,7 +670,7 @@ class SessionQueryToolTest {
         ).data
         assertEquals("message", out.select)
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.MessageDetailRow.serializer()),
+            ListSerializer(MessageDetailRow.serializer()),
             out.rows,
         )
         val r = rows.single()

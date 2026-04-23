@@ -3,7 +3,17 @@ package io.talevia.core.tool.builtin.session.query
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+@Serializable data class ForkRow(
+    val id: String,
+    val projectId: String,
+    val title: String,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+    val archived: Boolean,
+)
 
 /**
  * `select=forks` — immediate child sessions of the given `sessionId`,
@@ -21,7 +31,7 @@ internal suspend fun runForksQuery(
     val page = children.drop(offset).take(limit)
 
     val rows = page.map { s ->
-        SessionQueryTool.ForkRow(
+        ForkRow(
             id = s.id.value,
             projectId = s.projectId.value,
             title = s.title,
@@ -30,7 +40,7 @@ internal suspend fun runForksQuery(
             archived = s.archived,
         )
     }
-    val jsonRows = encodeRows(ListSerializer(SessionQueryTool.ForkRow.serializer()), rows)
+    val jsonRows = encodeRows(ListSerializer(ForkRow.serializer()), rows)
     val body = if (rows.isEmpty()) {
         "Session ${parent.id.value} '${parent.title}' has no forks."
     } else {

@@ -13,6 +13,7 @@ import io.talevia.core.db.TaleviaDb
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.session.query.StatusRow
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -72,7 +73,7 @@ class SessionQueryStatusTest {
 
         assertEquals(SessionQueryTool.SELECT_STATUS, out.select)
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.StatusRow.serializer()),
+            ListSerializer(StatusRow.serializer()),
             out.rows,
         )
         assertEquals(1, rows.size)
@@ -93,7 +94,7 @@ class SessionQueryStatusTest {
             rig.ctx,
         ).data
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.StatusRow.serializer()),
+            ListSerializer(StatusRow.serializer()),
             out.rows,
         )
         assertEquals("generating", rows[0].state)
@@ -116,7 +117,7 @@ class SessionQueryStatusTest {
             rig.ctx,
         ).data
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.StatusRow.serializer()),
+            ListSerializer(StatusRow.serializer()),
             out.rows,
         )
         assertEquals("failed", rows[0].state)
@@ -138,7 +139,7 @@ class SessionQueryStatusTest {
             rig.ctx,
         ).data
         val rows = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.StatusRow.serializer()),
+            ListSerializer(StatusRow.serializer()),
             out.rows,
         )
         // Post-run Idle: state=idle, neverRan=false (distinguishable from the never-ran case).
@@ -168,7 +169,7 @@ class SessionQueryStatusTest {
             rig.ctx,
         ).data
         val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.StatusRow.serializer()),
+            ListSerializer(StatusRow.serializer()),
             out.rows,
         ).single()
         assertEquals(0, row.estimatedTokens)
@@ -230,7 +231,7 @@ class SessionQueryStatusTest {
             rig.ctx,
         ).data
         val row = JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.StatusRow.serializer()),
+            ListSerializer(StatusRow.serializer()),
             out.rows,
         ).single()
         // TokenEstimator is a heuristic (~4 chars/token), so we assert shape not exact

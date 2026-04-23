@@ -7,7 +7,35 @@ import io.talevia.core.session.SessionStore
 import io.talevia.core.session.TokenUsage
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.SessionQueryTool
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.builtins.ListSerializer
+
+/**
+ * `select=session_metadata` — one row per session with the aggregate
+ * counts the old `describe_session` tool returned (message counts,
+ * summed token usage, compaction / permission-rule presence, latest
+ * message timestamp).
+ */
+@Serializable data class SessionMetadataRow(
+    val sessionId: String,
+    val projectId: String,
+    val title: String,
+    val parentId: String? = null,
+    val archived: Boolean,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+    val latestMessageAtEpochMs: Long,
+    val messageCount: Int,
+    val userMessageCount: Int,
+    val assistantMessageCount: Int,
+    val totalTokensInput: Long,
+    val totalTokensOutput: Long,
+    val totalTokensCacheRead: Long,
+    val totalTokensCacheWrite: Long,
+    val hasCompactionPart: Boolean,
+    val permissionRuleCount: Int,
+    val compactingFromMessageId: String? = null,
+)
 
 /**
  * `select=session_metadata` — single-row drill-down replacing the
@@ -57,7 +85,7 @@ internal suspend fun runSessionMetadataQuery(
         ?.createdAt?.toEpochMilliseconds()
         ?: session.createdAt.toEpochMilliseconds()
 
-    val row = SessionQueryTool.SessionMetadataRow(
+    val row = SessionMetadataRow(
         sessionId = session.id.value,
         projectId = session.projectId.value,
         title = session.title,
@@ -78,7 +106,7 @@ internal suspend fun runSessionMetadataQuery(
         compactingFromMessageId = session.compactingFrom?.value,
     )
     val rows = encodeRows(
-        ListSerializer(SessionQueryTool.SessionMetadataRow.serializer()),
+        ListSerializer(SessionMetadataRow.serializer()),
         listOf(row),
     )
     val summary = "Session ${session.id.value} '${session.title}' on ${session.projectId.value}: " +

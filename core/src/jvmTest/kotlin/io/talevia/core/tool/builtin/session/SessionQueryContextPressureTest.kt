@@ -18,6 +18,7 @@ import io.talevia.core.session.Part
 import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.session.query.ContextPressureRow
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
 import kotlinx.serialization.builtins.ListSerializer
@@ -112,9 +113,9 @@ class SessionQueryContextPressureTest {
     private fun tool(sessions: SqlDelightSessionStore): SessionQueryTool =
         SessionQueryTool(sessions)
 
-    private fun rows(out: SessionQueryTool.Output): List<SessionQueryTool.ContextPressureRow> =
+    private fun rows(out: SessionQueryTool.Output): List<ContextPressureRow> =
         JsonConfig.default.decodeFromJsonElement(
-            ListSerializer(SessionQueryTool.ContextPressureRow.serializer()),
+            ListSerializer(ContextPressureRow.serializer()),
             out.rows,
         )
 
