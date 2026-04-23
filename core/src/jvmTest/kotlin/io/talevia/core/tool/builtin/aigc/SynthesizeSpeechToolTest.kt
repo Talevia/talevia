@@ -287,4 +287,86 @@ class SynthesizeSpeechToolTest {
         assertEquals(true, unbound.data.cacheHit, "hash is keyed on resolved voice, not the raw input.voice")
         assertEquals(bound.data.assetId, unbound.data.assetId)
     }
+
+    /** Deterministic "throw every time" engine, used to exercise fallback paths. */
+    private class FailingTtsEngine(
+        override val providerId: String,
+        private val message: String = "simulated provider outage",
+    ) : TtsEngine {
+        var callCount: Int = 0
+            private set
+
+        override suspend fun synthesize(request: TtsRequest): TtsResult {
+            callCount += 1
+            error("$providerId: $message")
+        }
+    }
+
+    @Test fun fallbackChainUsesSecondEngineWhenFirstThrows() = runTest {
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/fallback".toPath(), title = "fallback").id
+        val primary = FailingTtsEngine(providerId = "fake-primary")
+        val secondary = FakeTtsEngine(fakeMp3)
+        val tool = SynthesizeSpeechTool(listOf(primary, secondary), FileBundleBlobWriter(store, fs), store)
+
+        val result = tool.execute(
+            SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
+            ctx(),
+        )
+        assertEquals(1, primary.callCount, "primary must be attempted")
+        assertEquals(1, secondary.callCount, "secondary must take over after primary throws")
+        assertEquals("fake-openai", result.data.providerId, "lockfile + output record the engine that actually produced audio")
+    }
+
+    @Test fun fallbackChainExhaustedPropagatesLastFailure() = runTest {
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/fallback-dead".toPath(), title = "dead").id
+        val first = FailingTtsEngine(providerId = "dead-primary", message = "first outage")
+        val second = FailingTtsEngine(providerId = "dead-secondary", message = "second outage")
+        val tool = SynthesizeSpeechTool(listOf(first, second), FileBundleBlobWriter(store, fs), store)
+
+        val ex = assertFailsWith<IllegalStateException> {
+            tool.execute(
+                SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("dead-primary"), "aggregate error names every attempted provider")
+        assertTrue(ex.message!!.contains("dead-secondary"), "aggregate error names every attempted provider")
+        assertEquals(1, first.callCount)
+        assertEquals(1, second.callCount)
+    }
+
+    @Test fun fallbackChainShortCircuitsOnCacheHit() = runTest {
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/fallback-cache".toPath(), title = "cache").id
+        val primary = FakeTtsEngine(fakeMp3)
+        val secondary = FailingTtsEngine(providerId = "should-not-fire")
+        val tool = SynthesizeSpeechTool(listOf(primary, secondary), FileBundleBlobWriter(store, fs), store)
+
+        // First call produces a lockfile entry via the primary.
+        tool.execute(
+            SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
+            ctx(),
+        )
+        // Second call with identical inputs cache-hits — neither engine runs.
+        val second = tool.execute(
+            SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
+            ctx(),
+        )
+        assertEquals(true, second.data.cacheHit)
+        assertEquals(1, primary.callCount, "cache hit must not re-invoke primary")
+        assertEquals(0, secondary.callCount, "cache hit must not even probe the fallback chain")
+    }
+
+    @Test fun emptyEngineListFailsLoudAtConstruction() {
+        val ex = assertFailsWith<IllegalArgumentException> {
+            SynthesizeSpeechTool(
+                engines = emptyList(),
+                bundleBlobWriter = FileBundleBlobWriter(ProjectStoreTestKit.create()),
+                projectStore = ProjectStoreTestKit.create(),
+            )
+        }
+        assertTrue(ex.message!!.contains("at least one"), ex.message)
+    }
 }

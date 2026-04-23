@@ -15,6 +15,7 @@ import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.TtsRequest
+import io.talevia.core.platform.TtsResult
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
@@ -63,11 +64,38 @@ import kotlin.uuid.Uuid
  * Permission: `"aigc.generate"` — same bucket as image gen because both incur
  * external cost + are seed-fragile in spirit (cache invariants, audit trail).
  */
+/**
+ * @param engines Priority-ordered [TtsEngine] list. The tool tries the first
+ *   engine; if that throws (transient network errors, provider outages, 5xx
+ *   that the engine didn't internally recover from), it falls through to the
+ *   next engine in the list. Cache hits short-circuit the chain — they don't
+ *   call any engine at all. The lockfile records the provider that actually
+ *   produced the audio (via `result.provenance.providerId`), so a mixed-
+ *   provider history is auditable after the fact. `require(engines.isNotEmpty())`:
+ *   tool registration is gated on at least one wired engine.
+ */
 class SynthesizeSpeechTool(
-    private val engine: TtsEngine,
+    private val engines: List<TtsEngine>,
     private val bundleBlobWriter: BundleBlobWriter,
     private val projectStore: ProjectStore,
 ) : Tool<SynthesizeSpeechTool.Input, SynthesizeSpeechTool.Output> {
+
+    init {
+        require(engines.isNotEmpty()) {
+            "SynthesizeSpeechTool requires at least one TtsEngine; got empty list."
+        }
+    }
+
+    /**
+     * Single-engine convenience ctor — the common case. Mirrors the pre-fallback
+     * shape so a container wiring just one TTS provider (the majority today)
+     * doesn't need `listOf(...)` boilerplate.
+     */
+    constructor(
+        engine: TtsEngine,
+        bundleBlobWriter: BundleBlobWriter,
+        projectStore: ProjectStore,
+    ) : this(listOf(engine), bundleBlobWriter, projectStore)
 
     @Serializable
     data class Input(
@@ -196,21 +224,20 @@ class SynthesizeSpeechTool(
             }
         }
 
-        val result = AigcPipeline.withProgress(
+        val request = TtsRequest(
+            text = input.text,
+            modelId = input.model,
+            voice = resolvedVoice,
+            format = input.format,
+            speed = input.speed,
+            language = input.language,
+        )
+        val result = AigcPipeline.withProgress<TtsResult>(
             ctx = ctx,
             jobId = "tts-${inputHash.take(8)}",
             startMessage = "synthesising speech (${input.text.length} chars) with ${input.model}",
         ) {
-            engine.synthesize(
-                TtsRequest(
-                    text = input.text,
-                    modelId = input.model,
-                    voice = resolvedVoice,
-                    format = input.format,
-                    speed = input.speed,
-                    language = input.language,
-                ),
-            )
+            synthesizeWithFallback(engines, request)
         }
 
         val newAssetId = AssetId(Uuid.random().toString())
@@ -292,6 +319,37 @@ class SynthesizeSpeechTool(
         } else {
             AigcPipeline.foldVoice(project, bindingIds.map(::SourceNodeId))
         }
+    }
+
+    /**
+     * Try [engines] in priority order, returning the first successful
+     * [TtsResult]. Each engine's failure is remembered so the final exception
+     * enumerates every attempt — a mis-wired "OpenAI then ElevenLabs" chain
+     * shouldn't surface as "ElevenLabs failed" while hiding that OpenAI
+     * failed too. Single-engine lists degenerate cleanly: one try, one
+     * failure propagated verbatim.
+     */
+    private suspend fun synthesizeWithFallback(
+        engines: List<TtsEngine>,
+        request: TtsRequest,
+    ): TtsResult {
+        val failures = mutableListOf<Pair<String, Throwable>>()
+        for (engine in engines) {
+            try {
+                return engine.synthesize(request)
+            } catch (t: Throwable) {
+                // CancellationException should not be swallowed — it's how a
+                // supervising coroutine signals "stop this work". Propagate
+                // immediately so the progress watcher's cancel path fires.
+                if (t is kotlinx.coroutines.CancellationException) throw t
+                failures += engine.providerId to t
+            }
+        }
+        val attempted = failures.joinToString("; ") { (id, t) -> "$id: ${t.message ?: t::class.simpleName}" }
+        error(
+            "All ${engines.size} TTS engine(s) failed for text-to-speech request (model='${request.modelId}', " +
+                "voice='${request.voice}'). Attempts: $attempted",
+        )
     }
 
     private fun hit(entry: LockfileEntry, input: Input, voice: String, appliedBindings: List<String>): ToolResult<Output> {

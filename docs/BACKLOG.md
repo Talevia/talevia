@@ -18,7 +18,6 @@
 
 ## P2 — 记债 / 观望
 
-- **tts-provider-fallback-chain** — `SynthesizeSpeechTool` 目前一个 provider 下去，provider 挂就 tool error。**方向：** 在 Core 容器里接受多个 engine 按优先级注入，`AigcPipeline` 遇到非 cache-hit 失败时切到下一个引擎；lockfile 记录最终用的 provider。Rubric §5.2。
 - **bundle-source-footage-consolidate** — 当前 bundle 自包含 AIGC 产物 + `copy_into_bundle=true` 显式 import 的资产，但用户原始 footage 仍走 `MediaSource.File(absolutePath)`，跨机器不可移植。alice 的 `/Users/alice/raw.mp4` 在 bob 那里 ffmpeg "file not found"。**方向：** 加 `consolidate_media_into_bundle` 工具一次性把项目用到的全部 `MediaSource.File` 复制进 `<bundle>/media/` 并改写为 `BundleFile`；同时在 `import_media` 加智能默认（< 50MB 自动 in-bundle）。注意配套需要 git LFS 文档说明。Rubric §3.1 / §5.4。
 - **bundle-asset-relink-ux** — 跨机器场景：bob 打开 alice 的 bundle，绝对路径资产解析失败时目前 export 直接报错。没有"原素材在哪？"的引导 UX。**方向：** `ProjectStore.openAt` / `get` 时收集所有 `MediaSource.File` 路径不存在的 assetId，emit `BusEvent.AssetMissing(assetId, originalPath)`；新增 `relink_asset(assetId, newPath)` 工具一次性把绑同一原素材的所有 clip 重指。CLI / Desktop 在 export 前显式列出 missing。Rubric §5.4。
 - **bundle-mac-launch-services** — macOS 下双击 bundle 目录想打开 Talevia 的 UX：当前没有 `.talevia` 扩展名约定 + `Info.plist` `CFBundlePackageType` 注册，Finder 把 bundle 当普通目录展开。**方向：** 给 desktop app 的 `Info.plist` 加 `LSItemContentTypes` 声明 `io.talevia.project`（dir 包），约定 bundle 目录扩展名 `.talevia`，`createAt` / `openAt` 接受带或不带扩展名。Rubric §5.4 / packaging。

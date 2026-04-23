@@ -397,3 +397,36 @@ be a skill-level change, out of `/iterate-gap` scope), but flagging
 here so whichever future skill-editing cycle picks it up can
 reference the empirical evidence: 4/11 = 36% recovery rate on a
 pattern that's free to detect.
+
+---
+
+## 2026-04-23 — tts-provider-fallback-chain (`<this commit>`)
+
+### Widening a Tool ctor from single-value to `List<T>` is safe via secondary-ctor delegation
+The fallback-chain change on `SynthesizeSpeechTool` moved the primary
+ctor from `TtsEngine` to `List<TtsEngine>`. Adding a secondary ctor
+`(engine: TtsEngine, bundleBlobWriter, projectStore) : this(listOf(...))`
+kept all 3 live `AppContainer`s' call sites unchanged — no ripple to
+`:core:compileKotlinIosSimulatorArm64` / android / desktop / cli /
+server. Clean recipe for widening a Tool ctor to accept an ordered
+list: primary ctor takes the list + requires non-empty, secondary
+ctor wraps a single value. Future ctor widenings (multi-VideoEngine
+routing, multi-SecretStore chains) can copy this exact shape — the
+LLM-facing Tool contract stays stable, the DI surface grows without
+a container sweep.
+
+### Kotlin type inference fails at `withProgress { synthesizeWithFallback(...) }` without an explicit type argument
+`AigcPipeline.withProgress` is `suspend fun <T> withProgress(..., block:
+suspend () -> T): T`. When the trailing lambda body calls a private
+suspend method whose return type is `TtsResult` (from a separate file
+via missing import), the compiler couldn't infer T — reported
+"Unresolved reference 'audio'" on a downstream `.audio` access rather
+than "can't infer T here", plus a misleading "Cannot infer type for
+this parameter" at the outer call. Fix turned out to be `.withProgress<TtsResult>(...)`
+plus adding the missing `import io.talevia.core.platform.TtsResult`.
+Heuristic worth remembering: when a Kotlin error chain includes "Cannot
+infer type for this parameter" at a generic lambda followed by cascade
+unresolved-reference errors on the returned value's fields, the fix
+is almost always (a) add an import you forgot, and/or (b) an explicit
+type argument on the outer generic call — not anywhere the downstream
+errors point.
