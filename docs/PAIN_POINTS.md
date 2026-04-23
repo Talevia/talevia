@@ -771,3 +771,42 @@ concern. `grep -c '\.cap()' DiffProjectsTool.kt` would have shown me
 5 call sites when I only expected 5 for the timeline section alone
 (the file had 8 total). 30 seconds of grepping would have caught
 this before compile.
+
+---
+
+## 2026-04-23 — debt-import-media-auto-in-bundle-default (`<this commit>`)
+
+### Flipping a tool-Input default silently changes every not-explicit caller
+`ImportMediaTool.Input.copy_into_bundle: Boolean = false` → `Boolean? = null`
+(auto) looked local, but every test that called `Input(path=..., projectId=...)`
+without naming the argument was relying on the old `false` default — and
+auto mode actually changes behaviour for those (tries to copy when the
+file is small + a bundle path is available). `ImportMediaBatchTest` +
+`ImportMediaProxyTest` both used `ProjectStoreTestKit` (FakeFileSystem
+for the project store) against a real-FS `ImportMediaTool` (default
+`fs = FileSystem.SYSTEM`), so auto-mode's copy attempt crossed
+filesystem boundaries and every import failed. 6 tests went red across
+two files that had nothing to do with the storage mode being
+changed. Lesson: **changing a default on a public Input/ctor param is
+a breaking change for every implicit caller, even if none of them
+depend on the old value "semantically"** — the dependency is on the
+*concrete value*, which is what the caller runs against. Grep for all
+call sites of the changed param with and without named-arg form before
+shipping; budget time to update them to be explicit. I did end up
+adding explicit `copy_into_bundle = false` to the 9 pre-existing
+test sites — cheap fix, but the audit would have been free had I done
+it before writing the new code.
+
+### "Conservative auto" = fall back to the safe side on any fs uncertainty
+First draft of auto-mode just called `fs.metadata(path).size` without
+handling stat failure — if metadata wasn't available, the code path
+fell through in undefined ways. Second draft: `runCatching { ... }.getOrNull() ?: return false`,
+i.e. treat unknown size as "don't copy, reference instead". Reasoning:
+auto mode is specifically for the case where the agent didn't decide —
+if we can't measure the file, we should err toward the conservative
+behaviour (reference-by-path, bytes stay in place) rather than the
+potentially-dangerous one (copy gigabytes we can't verify). Pattern
+worth remembering: **when a heuristic has a sane-default fallback, the
+"information missing" branch should always land on the side that
+would have been chosen pre-heuristic**. That preserves backwards
+semantics for edge cases while the heuristic helps the common path.

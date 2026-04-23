@@ -83,7 +83,7 @@ class ImportMediaBatchTest {
         val (_, tool) = rig()
         val path = tempPath(".good")
         val out = tool.execute(
-            ImportMediaTool.Input(path = path, projectId = "p"),
+            ImportMediaTool.Input(path = path, projectId = "p", copy_into_bundle = false),
             ctx(),
         ).data
         // Flat fields populated.
@@ -101,7 +101,7 @@ class ImportMediaBatchTest {
         val (projects, tool) = rig()
         val paths = (0 until 3).map { tempPath(".good") }
         val out = tool.execute(
-            ImportMediaTool.Input(paths = paths, projectId = "p"),
+            ImportMediaTool.Input(paths = paths, projectId = "p", copy_into_bundle = false),
             ctx(),
         ).data
         assertEquals(3, out.imported.size)
@@ -122,7 +122,7 @@ class ImportMediaBatchTest {
         val good3 = tempPath(".good")
 
         val out = tool.execute(
-            ImportMediaTool.Input(paths = listOf(good1, bad1, good2, bad2, good3), projectId = "p"),
+            ImportMediaTool.Input(paths = listOf(good1, bad1, good2, bad2, good3), projectId = "p", copy_into_bundle = false),
             ctx(),
         ).data
 
@@ -139,7 +139,7 @@ class ImportMediaBatchTest {
         val (projects, tool) = rig()
         val bad = (0 until 3).map { tempPath(".bad") }
         val out = tool.execute(
-            ImportMediaTool.Input(paths = bad, projectId = "p"),
+            ImportMediaTool.Input(paths = bad, projectId = "p", copy_into_bundle = false),
             ctx(),
         ).data
         assertEquals(0, out.imported.size)

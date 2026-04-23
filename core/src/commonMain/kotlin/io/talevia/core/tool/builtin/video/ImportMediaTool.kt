@@ -69,6 +69,15 @@ class ImportMediaTool(
      * tests that exercise bundle copy can inject a fake.
      */
     private val fs: FileSystem = FileSystem.SYSTEM,
+    /**
+     * Threshold in bytes for the `copy_into_bundle = null` (auto) mode:
+     * files at or below this size are copied into the bundle (travel with
+     * `git push`); larger files are referenced by absolute path (stay on
+     * the user's NAS / SSD). Default 50 MiB matches the bullet spec.
+     * Injectable so tests can exercise both branches of the auto decision
+     * without constructing a literal 50 MiB file.
+     */
+    private val autoInBundleThresholdBytes: Long = DEFAULT_AUTO_IN_BUNDLE_THRESHOLD_BYTES,
 ) : Tool<ImportMediaTool.Input, ImportMediaTool.Output> {
 
     @Serializable data class Input(
@@ -95,20 +104,23 @@ class ImportMediaTool(
          */
         val projectId: String? = null,
         /**
-         * When true, the bytes at each path are *copied* into the project
-         * bundle's `media/<assetId>.<ext>` directory and the asset is
-         * registered as [MediaSource.BundleFile]. The bundle then carries the
-         * bytes — `git push` / `cp -R` reproduces the asset on another
-         * machine. Use for LUTs, fonts, small reference images, or anything
-         * the agent / user expects to travel with the project.
+         * Tri-state. `true` forces bundle-copy (bytes → `<bundle>/media/<assetId>.<ext>`,
+         * registered as [MediaSource.BundleFile]). `false` forces reference-by-path
+         * (registered as [MediaSource.File]). `null` (default) is **auto**: copy
+         * into the bundle when the file is ≤ [autoInBundleThresholdBytes]
+         * (50 MiB in production), reference otherwise — on-disk bundle tends
+         * to reproduce "small" assets (LUTs, fonts, thumbnails, single-frame
+         * reference images, short AIGC products) across machines without
+         * exploding bundle size on raw 4K rushes.
          *
-         * Default `false`: the asset is registered as [MediaSource.File] at
-         * its original absolute path, no bytes copied. Suitable for big
-         * source footage that should NOT inflate the bundle (gigabyte
-         * 4K rushes stay on the user's NAS / SSD; the bundle just refers
-         * to them).
+         * Why tri-state rather than flipping the boolean default: explicit
+         * `true` / `false` callers (tests, scripts, agent tool-calls that
+         * name their intent) keep their existing semantics; flipping the
+         * default to `true` would silently copy gigabyte imports into
+         * bundles for every existing caller. Null = "decide for me" matches
+         * VISION §3a-4's "no binary state without a third Unknown/Auto term".
          */
-        val copy_into_bundle: Boolean = false,
+        val copy_into_bundle: Boolean? = null,
     )
 
     @Serializable data class ImportedAsset(
@@ -156,11 +168,11 @@ class ImportMediaTool(
         "Import a media file by path: probes its metadata and appends the asset to the current " +
             "project's inventory. Returns the new assetId so you can `add_clip(assetId=…)` " +
             "immediately after. Defaults projectId from the session binding — pass it only when " +
-            "importing into a non-current project. Set copy_into_bundle=true to copy the bytes " +
-            "into the project's media/ directory so they travel with the bundle (use for LUTs, " +
-            "fonts, small reference images that should reproduce on another machine). Default " +
-            "false leaves big source footage at its original path — the asset references the " +
-            "absolute path and bytes do NOT travel with `git push`."
+            "importing into a non-current project. `copy_into_bundle` is tri-state: omit (default) " +
+            "for auto — small files (≤50 MiB) are copied into the bundle so they travel with " +
+            "`git push`; larger files are referenced by absolute path. Pass `true` to force copy " +
+            "regardless of size (LUTs / fonts / reference images where size-based auto is wrong), " +
+            "or `false` to force reference (raw 4K footage that must NOT inflate the bundle)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("media.import")
@@ -201,10 +213,11 @@ class ImportMediaTool(
                 put("type", "boolean")
                 put(
                     "description",
-                    "When true, copy the bytes into the project's bundle media/ directory so the " +
-                        "asset travels with the project (LUTs / fonts / small reference assets). " +
-                        "Default false: register by absolute path; bytes stay where they are. " +
-                        "Set true for anything the user expects to reproduce on another machine.",
+                    "Tri-state (omit for auto). `true` forces bundle-copy (bytes travel with " +
+                        "`git push`). `false` forces reference-by-path (bytes stay in place). " +
+                        "Omit entirely for size-based auto: files ≤50 MiB are copied into the " +
+                        "bundle, larger files are referenced by absolute path. Auto is the " +
+                        "sensible default — explicit values are for overrides.",
                 )
             }
         }
@@ -235,16 +248,26 @@ class ImportMediaTool(
         pathsToImport.forEach { PathGuard.validate(it, requireAbsolute = true) }
         val pid = ctx.resolveProjectId(input.projectId)
 
-        // When copy_into_bundle=true we need the bundle root resolved up front
-        // so each probe knows where to copy bytes into.
-        val bundleRoot = if (input.copy_into_bundle) {
+        // Resolve bundle root whenever a copy might be needed — that's both
+        // explicit `true` and the auto mode (null), since auto decides per-
+        // path inside probeOne and might need it. Explicit `false` is the
+        // only case where the bundle-path lookup can be skipped.
+        val maybeNeedsBundle = input.copy_into_bundle != false
+        val bundleRoot = if (maybeNeedsBundle) {
             projects.pathOf(pid)
-                ?: error(
-                    "import_media: copy_into_bundle=true requires a file-backed ProjectStore " +
-                        "with the project registered at a path. Project ${pid.value} has no " +
-                        "registered bundle path; either drop copy_into_bundle or open the " +
-                        "project at a path first via open_project / create_project(path=…).",
-                )
+                ?: if (input.copy_into_bundle == true) {
+                    error(
+                        "import_media: copy_into_bundle=true requires a file-backed ProjectStore " +
+                            "with the project registered at a path. Project ${pid.value} has no " +
+                            "registered bundle path; either drop copy_into_bundle or open the " +
+                            "project at a path first via open_project / create_project(path=…).",
+                    )
+                } else {
+                    // Auto mode + no bundle path (e.g. in-memory test store) →
+                    // degrade silently to reference-by-path. Explicit `true`
+                    // still fails loud above.
+                    null
+                }
         } else {
             null
         }
@@ -254,7 +277,7 @@ class ImportMediaTool(
         // bad clip doesn't lose the other 39.
         val results: List<ProbeResult> = coroutineScope {
             pathsToImport.map { p ->
-                async { probeOne(p, bundleRoot, pid) }
+                async { probeOne(p, bundleRoot, input.copy_into_bundle, pid) }
             }.awaitAll()
         }
 
@@ -355,24 +378,36 @@ class ImportMediaTool(
      * [ProbeResult.Failure] so the caller's batch aggregation stays in one
      * straight-line code path.
      *
-     * When [bundleRoot] is non-null the bytes are copied into the bundle's
-     * `media/<assetId>.<ext>` directory and the asset's source is registered
-     * as [MediaSource.BundleFile]. Otherwise the asset references the original
-     * absolute path via [MediaSource.File].
+     * Copy-into-bundle decision per [copyChoice]:
+     * - `true` → copy when [bundleRoot] is non-null (explicit-true without a
+     *   bundle path already errored out in execute before reaching here).
+     * - `false` → reference-by-path.
+     * - `null` (auto) → copy when [bundleRoot] is non-null AND the file is ≤
+     *   [autoInBundleThresholdBytes]; else reference.
+     *
+     * When copying, bytes land at `<bundleRoot>/media/<assetId>.<ext>` and the
+     * asset's source is [MediaSource.BundleFile]. Otherwise [MediaSource.File].
      */
     @OptIn(ExperimentalUuidApi::class)
     private suspend fun probeOne(
         path: String,
         bundleRoot: okio.Path?,
+        copyChoice: Boolean?,
         @Suppress("UNUSED_PARAMETER") projectId: ProjectId,
     ): ProbeResult = runCatching {
         val metadata = engine.probe(MediaSource.File(path))
         val newAssetId = AssetId(Uuid.random().toString())
         val sourcePath: String
-        val source: MediaSource = if (bundleRoot == null) {
+        val shouldCopy = when (copyChoice) {
+            true -> bundleRoot != null
+            false -> false
+            null -> bundleRoot != null && shouldAutoCopy(path)
+        }
+        val source: MediaSource = if (!shouldCopy) {
             sourcePath = path
             MediaSource.File(path)
         } else {
+            requireNotNull(bundleRoot) { "bundleRoot must be non-null when shouldCopy is true" }
             val ext = path.substringAfterLast('.', missingDelimiterValue = "bin")
                 .ifBlank { "bin" }
             val mediaDir = bundleRoot.resolve("media")
@@ -406,6 +441,23 @@ class ImportMediaTool(
             path = path,
             message = t.message ?: t::class.simpleName ?: "unknown",
         )
+    }
+
+    /**
+     * Auto-mode size gate. True ⇒ file is small enough to copy into the bundle.
+     * When metadata is unavailable (okio returned null or the stat failed), we
+     * err on the side of "reference" — auto mode is meant to be the
+     * conservative default, and we'd rather leave a 0-byte file untouched
+     * than blow up a bundle with an opaque gigabyte.
+     */
+    private fun shouldAutoCopy(path: String): Boolean {
+        val size = runCatching { fs.metadata(path.toPath()).size }.getOrNull() ?: return false
+        return size <= autoInBundleThresholdBytes
+    }
+
+    companion object {
+        /** Auto-copy threshold — 50 MiB. Matches the bullet spec. */
+        const val DEFAULT_AUTO_IN_BUNDLE_THRESHOLD_BYTES: Long = 50L * 1024L * 1024L
     }
 }
 

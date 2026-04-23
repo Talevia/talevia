@@ -115,7 +115,7 @@ class ImportMediaProxyTest {
         )
         val (projects, tool) = rig(gen)
         val result = tool.execute(
-            ImportMediaTool.Input(path = tempFilePath(), projectId = "p"),
+            ImportMediaTool.Input(path = tempFilePath(), projectId = "p", copy_into_bundle = false),
             ctx(),
         )
 
@@ -131,7 +131,7 @@ class ImportMediaProxyTest {
     @Test fun generatorFailuresAreSwallowedSoImportStillSucceeds() = runTest {
         val (projects, tool) = rig(ThrowingProxyGenerator())
         val result = tool.execute(
-            ImportMediaTool.Input(path = tempFilePath(), projectId = "p"),
+            ImportMediaTool.Input(path = tempFilePath(), projectId = "p", copy_into_bundle = false),
             ctx(),
         )
         assertEquals(0, result.data.proxyCount)
@@ -141,7 +141,7 @@ class ImportMediaProxyTest {
     @Test fun emptyGeneratorYieldsZeroProxies() = runTest {
         val (_, tool) = rig(RecordingProxyGenerator(proxies = emptyList()))
         val result = tool.execute(
-            ImportMediaTool.Input(path = tempFilePath(), projectId = "p"),
+            ImportMediaTool.Input(path = tempFilePath(), projectId = "p", copy_into_bundle = false),
             ctx(),
         )
         assertEquals(0, result.data.proxyCount)
@@ -157,7 +157,7 @@ class ImportMediaProxyTest {
             RecordingProxyGenerator(proxies = listOf(dup, dup.copy())),
         )
         val result = tool.execute(
-            ImportMediaTool.Input(path = tempFilePath(), projectId = "p"),
+            ImportMediaTool.Input(path = tempFilePath(), projectId = "p", copy_into_bundle = false),
             ctx(),
         )
         assertEquals(1, result.data.proxyCount, "identical (purpose, source) proxies must dedupe")
@@ -177,7 +177,7 @@ class ImportMediaProxyTest {
             ),
         )
         val result = tool.execute(
-            ImportMediaTool.Input(path = tempFilePath(), projectId = "p"),
+            ImportMediaTool.Input(path = tempFilePath(), projectId = "p", copy_into_bundle = false),
             ctx(),
         )
         assertTrue(
@@ -194,7 +194,7 @@ class ImportMediaProxyTest {
         projects.upsert("demo", Project(id = ProjectId("p"), timeline = Timeline()))
         val tool = ImportMediaTool(StubVideoEngine(), projects)
         val result = tool.execute(
-            ImportMediaTool.Input(path = tempFilePath(), projectId = "p"),
+            ImportMediaTool.Input(path = tempFilePath(), projectId = "p", copy_into_bundle = false),
             ctx(),
         )
         assertEquals(0, result.data.proxyCount)

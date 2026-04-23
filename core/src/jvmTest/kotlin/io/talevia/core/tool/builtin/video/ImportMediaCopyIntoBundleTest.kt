@@ -124,12 +124,117 @@ class ImportMediaCopyIntoBundleTest {
 
         val tool = ImportMediaTool(StubVideoEngine(), store)
         tool.execute(
-            ImportMediaTool.Input(path = srcAbs, projectId = "p-ref"),
+            ImportMediaTool.Input(path = srcAbs, projectId = "p-ref", copy_into_bundle = false),
             ctx(),
         )
 
         val asset = store.get(io.talevia.core.ProjectId("p-ref"))!!.assets.single()
         val src = asset.source as MediaSource.File
-        assertEquals(srcAbs, src.path, "default copy_into_bundle=false keeps the original absolute path")
+        assertEquals(srcAbs, src.path, "explicit copy_into_bundle=false keeps the original absolute path")
+    }
+
+    @Test fun autoModeCopiesSmallFilesIntoBundle() = runTest {
+        // 2-byte source → under threshold → auto decides to copy.
+        val tmpSrc = createTempDirectory("import-auto-small")
+        val srcFile = Files.createFile(tmpSrc.resolve("tiny.png"))
+        Files.write(srcFile, byteArrayOf(0x01, 0x02))
+        val srcAbs = srcFile.toAbsolutePath().toString()
+
+        val tmpHome = createTempDirectory("import-auto-small-home")
+        val store = io.talevia.core.domain.FileProjectStore(
+            registry = io.talevia.core.domain.RecentsRegistry(
+                tmpHome.resolve("recents.json").toString().toPath(),
+            ),
+            defaultProjectsHome = tmpHome.toString().toPath(),
+        )
+        val bundlePath = tmpHome.resolve("p-auto-small").toString().toPath()
+        val pid = store.createAt(path = bundlePath, title = "auto-small").id
+
+        val tool = ImportMediaTool(StubVideoEngine(), store)
+        tool.execute(
+            // No explicit copy_into_bundle — triggers auto-mode.
+            ImportMediaTool.Input(path = srcAbs, projectId = pid.value),
+            ctx(),
+        )
+
+        val asset = store.get(pid)!!.assets.single()
+        val src = asset.source
+        assertTrue(
+            src is MediaSource.BundleFile,
+            "auto mode on a 2-byte file must choose bundle-copy; got $src",
+        )
+        assertTrue((src as MediaSource.BundleFile).relativePath.startsWith("media/"))
+    }
+
+    @Test fun autoModeReferencesFilesAboveThreshold() = runTest {
+        val tmpSrc = createTempDirectory("import-auto-large")
+        val srcFile = Files.createFile(tmpSrc.resolve("rush.mp4"))
+        Files.write(srcFile, ByteArray(128) { it.toByte() })  // 128 bytes
+        val srcAbs = srcFile.toAbsolutePath().toString()
+
+        val tmpHome = createTempDirectory("import-auto-large-home")
+        val store = io.talevia.core.domain.FileProjectStore(
+            registry = io.talevia.core.domain.RecentsRegistry(
+                tmpHome.resolve("recents.json").toString().toPath(),
+            ),
+            defaultProjectsHome = tmpHome.toString().toPath(),
+        )
+        val bundlePath = tmpHome.resolve("p-auto-large").toString().toPath()
+        val pid = store.createAt(path = bundlePath, title = "auto-large").id
+
+        // Threshold injected at 64 bytes so the 128-byte file trips the "over
+        // threshold" branch without needing a literal 50 MiB fixture.
+        val tool = ImportMediaTool(
+            engine = StubVideoEngine(),
+            projects = store,
+            autoInBundleThresholdBytes = 64L,
+        )
+        tool.execute(
+            ImportMediaTool.Input(path = srcAbs, projectId = pid.value),
+            ctx(),
+        )
+
+        val asset = store.get(pid)!!.assets.single()
+        val src = asset.source
+        assertTrue(
+            src is MediaSource.File,
+            "auto mode on an above-threshold file must reference-by-path; got $src",
+        )
+        assertEquals(srcAbs, (src as MediaSource.File).path)
+    }
+
+    @Test fun explicitTrueForcesBundleCopyEvenAboveThreshold() = runTest {
+        val tmpSrc = createTempDirectory("import-force-true")
+        val srcFile = Files.createFile(tmpSrc.resolve("big.mp4"))
+        Files.write(srcFile, ByteArray(256) { it.toByte() })
+        val srcAbs = srcFile.toAbsolutePath().toString()
+
+        val tmpHome = createTempDirectory("import-force-true-home")
+        val store = io.talevia.core.domain.FileProjectStore(
+            registry = io.talevia.core.domain.RecentsRegistry(
+                tmpHome.resolve("recents.json").toString().toPath(),
+            ),
+            defaultProjectsHome = tmpHome.toString().toPath(),
+        )
+        val bundlePath = tmpHome.resolve("p-force").toString().toPath()
+        val pid = store.createAt(path = bundlePath, title = "force").id
+
+        // Threshold 16 bytes so auto would have picked "reference" — but
+        // explicit=true must override and copy anyway.
+        val tool = ImportMediaTool(
+            engine = StubVideoEngine(),
+            projects = store,
+            autoInBundleThresholdBytes = 16L,
+        )
+        tool.execute(
+            ImportMediaTool.Input(path = srcAbs, projectId = pid.value, copy_into_bundle = true),
+            ctx(),
+        )
+
+        val asset = store.get(pid)!!.assets.single()
+        assertTrue(
+            asset.source is MediaSource.BundleFile,
+            "explicit copy_into_bundle=true must ignore the size threshold; got ${asset.source}",
+        )
     }
 }
