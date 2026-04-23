@@ -457,6 +457,7 @@ private fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.ProjectValidationWarning -> "project.validation.warning"
     is BusEvent.AigcCostRecorded -> "aigc.cost.recorded"
     is BusEvent.AigcCacheProbe -> "aigc.cache.probe"
+    is BusEvent.AssetsMissing -> "project.assets.missing"
 }
 
 @Serializable data class CreateProjectRequest(val title: String)
@@ -655,6 +656,11 @@ data class BusEventDto(
                 "aigc.cache.probe",
                 sessionId = null,
                 toolId = e.toolId,
+            )
+            is BusEvent.AssetsMissing -> BusEventDto(
+                "project.assets.missing",
+                sessionId = null,
+                projectId = e.projectId.value,
             )
         }
     }

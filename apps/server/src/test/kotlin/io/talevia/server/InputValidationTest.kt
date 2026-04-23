@@ -20,7 +20,7 @@ class InputValidationTest {
 
     @Test
     fun rejectsOversizedText() = testApplication {
-        application { serverModule(ServerContainer(env = emptyMap())) }
+        application { serverModule(ServerContainer(rawEnv = emptyMap())) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val created = client.post("/sessions") {
@@ -40,7 +40,7 @@ class InputValidationTest {
 
     @Test
     fun rejectsIllegalProjectIdCharacters() = testApplication {
-        application { serverModule(ServerContainer(env = emptyMap())) }
+        application { serverModule(ServerContainer(rawEnv = emptyMap())) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val resp = client.post("/sessions") {
@@ -52,7 +52,7 @@ class InputValidationTest {
 
     @Test
     fun rejectsOverlongTitle() = testApplication {
-        application { serverModule(ServerContainer(env = emptyMap())) }
+        application { serverModule(ServerContainer(rawEnv = emptyMap())) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val resp = client.post("/sessions") {
@@ -65,7 +65,7 @@ class InputValidationTest {
     @Test
     fun acceptsOrdinaryInput() = testApplication {
         // Sanity check: validation doesn't false-positive on realistic requests.
-        application { serverModule(ServerContainer(env = emptyMap())) }
+        application { serverModule(ServerContainer(rawEnv = emptyMap())) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val resp = client.post("/sessions") {

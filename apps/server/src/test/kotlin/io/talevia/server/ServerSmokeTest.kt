@@ -97,7 +97,7 @@ class ServerSmokeTest {
     @Test
     fun authTokenRequiredWhenEnvSet() = testApplication {
         application {
-            serverModule(ServerContainer(env = mapOf("TALEVIA_SERVER_TOKEN" to "secret-123")))
+            serverModule(ServerContainer(rawEnv = mapOf("TALEVIA_SERVER_TOKEN" to "secret-123")))
         }
         val client = createClient { install(ContentNegotiation) { json() } }
 
@@ -121,7 +121,7 @@ class ServerSmokeTest {
     @Test
     fun submitMessageFailsWithoutProviderKeys() = testApplication {
         // env = empty → ProviderRegistry.default is null → 501 Not Implemented
-        application { serverModule(ServerContainer(env = emptyMap())) }
+        application { serverModule(ServerContainer(rawEnv = emptyMap())) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
         val createResp = client.post("/sessions") {
@@ -145,7 +145,7 @@ class ServerSmokeTest {
             .add(anthropic)
             .add(openai)
             .build()
-        val container = ServerContainer(env = emptyMap(), providerRegistryOverride = providers)
+        val container = ServerContainer(rawEnv = emptyMap(), providerRegistryOverride = providers)
         application { serverModule(container) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
@@ -179,7 +179,7 @@ class ServerSmokeTest {
     fun submitMessageRejectsUnknownProviderWhenOthersExist() = testApplication {
         val anthropic = RecordingProvider("anthropic")
         val providers = ProviderRegistry.Builder().add(anthropic).build()
-        val container = ServerContainer(env = emptyMap(), providerRegistryOverride = providers)
+        val container = ServerContainer(rawEnv = emptyMap(), providerRegistryOverride = providers)
         application { serverModule(container) }
         val client = createClient { install(ContentNegotiation) { json() } }
 

@@ -23,14 +23,14 @@ import kotlin.test.assertEquals
 class MetricsEndpointTest {
 
     @Test fun emptyRegistryReturnsEmptyBody() = testApplication {
-        application { serverModule(ServerContainer(env = emptyMap())) }
+        application { serverModule(ServerContainer(rawEnv = emptyMap())) }
         val resp = client.get("/metrics")
         assertEquals(HttpStatusCode.OK, resp.status)
         assertEquals("", resp.bodyAsText().trim())
     }
 
     @Test fun sessionCreationBumpsCreatedCounter() = testApplication {
-        val container = ServerContainer(env = emptyMap())
+        val container = ServerContainer(rawEnv = emptyMap())
         application { serverModule(container) }
         val client = createClient { install(ContentNegotiation) { json() } }
 
@@ -51,7 +51,7 @@ class MetricsEndpointTest {
     }
 
     @Test fun counterNamesUseUnderscoreNotDot() = testApplication {
-        val container = ServerContainer(env = emptyMap())
+        val container = ServerContainer(rawEnv = emptyMap())
         application { serverModule(container) }
         container.metrics.reset()
         container.metrics.increment("agent.run.failed", by = 3L)

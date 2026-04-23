@@ -612,3 +612,59 @@ mechanical and safe), just wasted iteration. Likely a skill-level
 improvement to land when it justifies a cycle of its own. Cycle-16's
 hit is 9/15 ≈ 60% — crossing the threshold I noted in cycle-13's pain
 point ("if new-tool cycles hit 10 in a row without a break").
+
+---
+
+## 2026-04-23 — debt-server-container-env-defaults (`<this commit>`)
+
+### Kotlin primary-ctor-param with same name as property silently shadows the property inside later initialisers
+First attempt at this cycle: keep the ctor param named `env`, declare
+a `private val env: Map<String, String> = withServerDefaults(env)`
+property to shadow it, and expect downstream `env["..."]!!` lookups to
+hit the normalised property. That's what you'd get in most languages
+with this pattern. In Kotlin it *doesn't* work: primary-constructor
+parameters stay in scope throughout the class body, and when a
+subsequent property initialiser references `env`, the compiler resolves
+to the ctor parameter, not the shadowing property. The NPE at
+`ServerContainer.kt:225` wasn't a build-cache artefact — it was the
+raw `emptyMap()` ctor param being read, with my defaults-filled
+property sitting one line above, unused. Fix was to rename the ctor
+param to `rawEnv`, making the resolution unambiguous. Lesson: when
+normalising a ctor argument into a shadowing property in Kotlin, **don't
+reuse the parameter name** — pick a `raw*` / `initial*` prefix and keep
+the property as the short name. The compiler won't warn about the
+shadow. Costs 13 named-arg call-site renames but buys correctness.
+
+### 7+ cycles of P2 "just ignore the red" is strictly cycle-level externality — the fix was ~30 lines
+This bullet had been P2 for ≥7 cycles per the `debt-server-tests-externality`
+meta-bullet. Cycles 8 through 16 each paid a "stash + re-run
+:apps:server:test + verify the red is pre-existing" tax when the
+change touched anything server-adjacent. The actual fix was ~30 lines
+(move `serverEnvWithDefaults` into ServerContainer, rename ctor param,
+update 13 test call sites, fix one exhaustive-when). 30 lines × 1 cycle
+vs. ~5min × 7+ cycles is a lopsided trade. The mistake was **letting a
+red test suite sit in P2 at all** — a red test suite is cycle-level
+externality regardless of the bullet's own merit, and P2 "观望" doesn't
+price that in. `debt-server-tests-externality` called this out one
+cycle after it started biting, and the bullet still sat for another 6
+cycles. Takeaway for future triage: **a red test suite on main is
+never P2**. It's either P0 (fix it) or the suite should be deleted as
+no-longer-serving-its-purpose. "Wait for it to self-resolve" isn't a
+real option; `main` being broken is a nearly pure tax on everyone
+else's iteration time.
+
+### ServerModule exhaustive-when was stale for 2 cycles because cycle-14 didn't run `:apps:server:test`
+Cycle 14 added `BusEvent.AssetsMissing` and updated `core.metrics.Metrics`'s
+exhaustive `when` — but not `apps/server/src/main/kotlin/io/talevia/server/ServerModule.kt`'s
+two parallel `when` blocks (`eventName` and `BusEventDto.from`). Caught
+only when this cycle tried to compile the server module. Root cause:
+cycle 14 couldn't have caught it — `:apps:server:test` was already red
+per the env-defaults bug, so compile errors in the same module were
+invisible behind the NPE. Structural signal: **a fully-red module's
+compile errors are self-masking** — new errors introduced in the same
+module won't surface because the test runner never gets to the code in
+question. Another argument for "red test suites on main ≠ P2". If
+cycle 14 had a green `:apps:server:test` to re-check against, the
+missing `when` case would have fired on the cycle that introduced it,
+not two cycles later. Generalises: every module that compiles but
+doesn't test-run is a deferred-error accumulator.

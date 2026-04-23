@@ -20,7 +20,7 @@ class LifecycleTest {
         val stopped = AtomicBoolean(false)
         testApplication {
             application {
-                serverModule(ServerContainer(env = emptyMap()))
+                serverModule(ServerContainer(rawEnv = emptyMap()))
                 monitor.subscribe(ApplicationStopped) { stopped.set(true) }
             }
             client.get("/sessions")  // force start so the stopped event will fire on teardown
@@ -30,7 +30,7 @@ class LifecycleTest {
     }
 
     @Test fun closeIsIdempotent() {
-        val container = ServerContainer(env = emptyMap())
+        val container = ServerContainer(rawEnv = emptyMap())
         container.close()
         container.close()  // must not throw
     }

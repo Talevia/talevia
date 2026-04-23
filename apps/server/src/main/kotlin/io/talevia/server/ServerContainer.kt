@@ -189,9 +189,18 @@ import java.io.File
  * a session's `permissionRules` or accept the container's default ruleset.
  */
 class ServerContainer(
-    env: Map<String, String> = System.getenv(),
+    rawEnv: Map<String, String> = System.getenv(),
     providerRegistryOverride: ProviderRegistry? = null,
 ) {
+    /**
+     * Normalised env: caller-supplied keys win, missing bundle-path keys are
+     * filled in via [withServerDefaults] so every downstream `env["..."]!!`
+     * has a non-blank value by construction. Pushing the default-fill *into*
+     * the container (was formerly gated on `Main.kt` calling `serverEnvWithDefaults`)
+     * lets tests pass `env = emptyMap()` without NPE-ing on bundle-path
+     * lookups — they inherit the same `~/.talevia/projects` fallback Main uses.
+     */
+    private val env: Map<String, String> = withServerDefaults(rawEnv)
     private val opened = TaleviaDbFactory.open(env)
     val driver = opened.driver
     val db: TaleviaDb = opened.db
@@ -209,8 +218,8 @@ class ServerContainer(
      * File-bundle [ProjectStore]. `TALEVIA_PROJECTS_HOME` is the default
      * directory for newly-created bundles; `TALEVIA_RECENTS_PATH` is the
      * per-machine catalog of which bundles this server has opened. Both are
-     * filled in by [io.talevia.server.serverEnvWithDefaults] so the fields
-     * are always non-blank by construction.
+     * filled in by [withServerDefaults] (applied in this container's
+     * constructor) so the fields are always non-blank by construction.
      */
     val recentsRegistry: RecentsRegistry = RecentsRegistry(
         path = env["TALEVIA_RECENTS_PATH"]!!.toPath(),
