@@ -1,12 +1,14 @@
 package io.talevia.core.tool.builtin.ml
 
 import io.talevia.core.AssetId
+import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.AsrEngine
 import io.talevia.core.platform.AsrRequest
-import io.talevia.core.platform.MediaPathResolver
+import io.talevia.core.platform.BundleMediaPathResolver
 import io.talevia.core.platform.TranscriptSegment
 import io.talevia.core.tool.Tool
+import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import kotlinx.serialization.KSerializer
@@ -37,13 +39,19 @@ import kotlinx.serialization.serializer
  */
 class TranscribeAssetTool(
     private val engine: AsrEngine,
-    private val resolver: MediaPathResolver,
+    private val projects: ProjectStore,
 ) : Tool<TranscribeAssetTool.Input, TranscribeAssetTool.Output> {
 
     @Serializable data class Input(
         val assetId: String,
         val model: String = "whisper-1",
         val language: String? = null,
+        /**
+         * Optional — omit to default to the session's current project binding
+         * (`ToolContext.currentProjectId`). Required when the session is
+         * unbound; fail loud points the agent at `switch_project`.
+         */
+        val projectId: String? = null,
     )
 
     @Serializable data class Output(
@@ -64,6 +72,7 @@ class TranscribeAssetTool(
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("ml.transcribe")
+    override val applicability: ToolApplicability = ToolApplicability.RequiresProjectBinding
 
     override val inputSchema: JsonObject = buildJsonObject {
         put("type", "object")
@@ -80,6 +89,13 @@ class TranscribeAssetTool(
                 put("type", "string")
                 put("description", "Optional ISO-639-1 language hint (e.g. 'en'). Omit to auto-detect.")
             }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Optional — omit to use the session's current project (set via switch_project).",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("assetId"))))
         put("additionalProperties", false)
@@ -87,7 +103,14 @@ class TranscribeAssetTool(
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         val assetId = AssetId(input.assetId)
-        val path = resolver.resolve(assetId)
+        val pid = ctx.resolveProjectId(input.projectId)
+        val project = projects.get(pid) ?: error("project ${pid.value} not found")
+        val bundleRoot = projects.pathOf(pid)
+            ?: error(
+                "project ${pid.value} has no registered bundle path; transcribe_asset requires a " +
+                    "file-backed ProjectStore — open or create the bundle first.",
+            )
+        val path = BundleMediaPathResolver(project, bundleRoot).resolve(assetId)
         val result = engine.transcribe(
             AsrRequest(
                 audioPath = path,

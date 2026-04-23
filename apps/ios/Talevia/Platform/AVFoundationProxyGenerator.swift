@@ -25,10 +25,10 @@ import UniformTypeIdentifiers
 ///    matches Android's video-only coverage.
 ///
 /// Protocol conformance uses SKIE's callback style, same as
-/// `IosFileBlobWriter` / `AVFoundationVideoEngine`: we implement
-/// `__generate(asset:completionHandler:)` and callers get an `async`
-/// form auto-generated. Work is dispatched off-main via `Task.detached`
-/// to keep the import path non-blocking.
+/// `AVFoundationVideoEngine`: we implement
+/// `__generate(asset:sourcePath:completionHandler:)` and callers get an
+/// `async` form auto-generated. Work is dispatched off-main via
+/// `Task.detached` to keep the import path non-blocking.
 ///
 /// Best-effort per the `ProxyGenerator` contract — every failure mode
 /// (source file missing, codec unreadable, CGImage synth fails, disk
@@ -37,20 +37,17 @@ import UniformTypeIdentifiers
 /// behaviour.
 final class AVFoundationProxyGenerator: NSObject, ProxyGenerator {
 
-    private let pathResolver: any MediaPathResolver
     private let proxyDir: URL
 
-    init(pathResolver: any MediaPathResolver, proxyDir: URL) {
-        self.pathResolver = pathResolver
+    init(proxyDir: URL) {
         self.proxyDir = proxyDir
         super.init()
         try? FileManager.default.createDirectory(at: proxyDir, withIntermediateDirectories: true)
     }
 
-    /// Default location: `<caches>/talevia-proxies`. Matches
-    /// `IosFileBlobWriter.defaultRoot()`'s rationale — caches tier so
-    /// the OS may evict under storage pressure, but proxies are
-    /// regeneratable from the asset's source binding.
+    /// Default location: `<caches>/talevia-proxies`. Caches tier so the OS
+    /// may evict under storage pressure, but proxies are regeneratable
+    /// from the asset's source bytes.
     static func defaultRoot() -> URL {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
         return caches.appendingPathComponent("talevia-proxies", isDirectory: true)
@@ -59,23 +56,12 @@ final class AVFoundationProxyGenerator: NSObject, ProxyGenerator {
     // swiftlint:disable identifier_name
     func __generate(
         asset: MediaAsset,
+        sourcePath: String,
         completionHandler: @escaping @Sendable ([ProxyAsset]?, (any Error)?) -> Void
     ) {
         // Only video gets a mid-frame thumbnail — stills / audio-only fall
         // through to the noop-equivalent empty list, matching Android.
         guard asset.metadata.videoCodec != nil else {
-            completionHandler([], nil)
-            return
-        }
-
-        // AVAsset-level source resolution. File is the only branch that's
-        // thumbnailable on iOS without download / PHAsset resolution, same
-        // constraint AVFoundationVideoEngine.__thumbnail enforces.
-        let sourcePath: String
-        switch onEnum(of: asset.source) {
-        case .file(let file):
-            sourcePath = file.path
-        case .http, .platform:
             completionHandler([], nil)
             return
         }

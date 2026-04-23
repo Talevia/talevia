@@ -68,10 +68,11 @@ data class VideoGenResult(
 
 /**
  * A single video the provider produced. [mp4Bytes] is a standalone mp4
- * container ready to import via [MediaStorage.import]; width / height /
- * duration are echoed on the struct because per-provider APIs vary in what
- * they return, and the engine is expected to backfill from the request when
- * the response is sparse.
+ * container; callers persist it into the project bundle via a
+ * [BundleBlobWriter] and append the resulting [io.talevia.core.domain.MediaAsset]
+ * to `Project.assets`. Width / height / duration are echoed on the struct
+ * because per-provider APIs vary in what they return, and the engine is
+ * expected to backfill from the request when the response is sparse.
  */
 @Serializable
 data class GeneratedVideo(

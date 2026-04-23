@@ -30,9 +30,9 @@ import kotlinx.serialization.serializer
  * removed anyway, leaving dangling clips that [ValidateProjectTool] will
  * surface as errors on next validation pass (Unix `rm -f` semantics).
  *
- * **Does NOT touch MediaStorage bytes.** The same AssetId can be shared across
+ * **Does NOT touch asset bytes.** The same AssetId can be shared across
  * projects, snapshots, and lockfile entries; byte-level GC is a separate
- * concern (future `compact_media_storage` job). This tool only mutates the
+ * concern (future `compact_bundle_media` job). This tool only mutates the
  * project-scoped asset catalog.
  *
  * **Does NOT auto-remove dependent clips.** Cascade-delete is out of scope:
@@ -63,7 +63,7 @@ class RemoveAssetTool(
     override val helpText: String =
         "Remove a media asset from a project's asset catalog. Refuses by default if any clip " +
             "references the asset; pass force=true to remove anyway (leaves dangling clips that " +
-            "validate_project will flag). Does not delete asset bytes from shared MediaStorage. " +
+            "validate_project will flag). Does not delete the underlying asset bytes. " +
             "Use project_query(select=assets, onlyUnused=true) to find safe candidates first."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()

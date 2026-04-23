@@ -7,7 +7,7 @@ package io.talevia.core.platform
  *
  * The Core never loads file bytes through this API — it only receives a
  * [io.talevia.core.domain.MediaSource] token (platform URI or local path) that
- * downstream tools can resolve through [MediaStorage].
+ * `import_media` then persists into the active project bundle.
  */
 interface FilePicker {
     /**

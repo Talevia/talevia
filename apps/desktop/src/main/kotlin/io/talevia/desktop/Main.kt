@@ -354,9 +354,23 @@ private fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) {
                     onClick = {
                         val path = importPath
                         if (path.isBlank()) return@Button
+                        if (projectId.value.isBlank()) {
+                            log += "import failed: no project selected"
+                            return@Button
+                        }
                         scope.launch {
                             runCatching {
-                                val asset = container.media.import(MediaSource.File(path)) { container.engine.probe(it) }
+                                val metadata = container.engine.probe(MediaSource.File(path))
+                                @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+                                val newId = io.talevia.core.AssetId(kotlin.uuid.Uuid.random().toString())
+                                val asset = io.talevia.core.domain.MediaAsset(
+                                    id = newId,
+                                    source = MediaSource.File(path),
+                                    metadata = metadata,
+                                )
+                                container.projects.mutate(projectId) { p ->
+                                    p.copy(assets = p.assets + asset)
+                                }
                                 assets += "${asset.id.value}  ·  ${"%.1f".format(asset.metadata.duration.inWholeMilliseconds / 1000.0)}s"
                                 log += "imported ${asset.id.value}"
                                 importPath = ""
@@ -906,9 +920,9 @@ private fun FpsDropdown(selected: FpsPreset, onSelect: (FpsPreset) -> Unit) {
  * Best-effort extraction of an openable filesystem path from a tool's result
  * JSON. Looks first for `outputPath` (ExportTool produces this), then for
  * asset-id fields (generate_image / _video / _music / extract_frame /
- * upscale_asset / synthesize_speech) and resolves them via MediaStorage.
- * Returns null when the tool output has no natural file artefact (e.g.
- * `apply_filter`, `add_clip`, `add_source_node`).
+ * upscale_asset / synthesize_speech) and resolves them through the project
+ * bundle. Returns null when the tool output has no natural file artefact
+ * (e.g. `apply_filter`, `add_clip`, `add_source_node`).
  */
 private suspend fun resolveOpenablePath(
     container: AppContainer,
@@ -917,11 +931,26 @@ private suspend fun resolveOpenablePath(
     val obj = (data as? kotlinx.serialization.json.JsonObject) ?: return null
     obj["outputPath"]?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull()?.let { p -> return p } }
     val assetKeys = listOf("upscaledAssetId", "frameAssetId", "assetId", "newAssetId")
-    for (key in assetKeys) {
-        val idStr = (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull() ?: continue
-        runCatching {
-            return container.media.resolve(io.talevia.core.AssetId(idStr))
-        }
+    val assetId = assetKeys.firstNotNullOfOrNull { key ->
+        (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull()
+            ?.let { io.talevia.core.AssetId(it) }
+    } ?: return null
+    // Prefer the project referenced in the tool output; fall back to scanning
+    // the recents registry so tools that don't echo their projectId still
+    // resolve (ExtractFrameTool on a cross-project asset, etc.).
+    val hintedPid = (obj["projectId"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull()
+        ?.let { io.talevia.core.ProjectId(it) }
+    val candidates = buildList<io.talevia.core.ProjectId> {
+        if (hintedPid != null) add(hintedPid)
+        addAll(container.projects.listSummaries().map { io.talevia.core.ProjectId(it.id) })
+    }.distinct()
+    for (pid in candidates) {
+        val project = runCatching { container.projects.get(pid) }.getOrNull() ?: continue
+        if (project.assets.none { it.id == assetId }) continue
+        val bundleRoot = container.projects.pathOf(pid) ?: continue
+        return runCatching {
+            io.talevia.core.platform.BundleMediaPathResolver(project, bundleRoot).resolve(assetId)
+        }.getOrNull()
     }
     return null
 }

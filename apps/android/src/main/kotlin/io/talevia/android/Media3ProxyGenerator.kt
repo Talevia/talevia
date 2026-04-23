@@ -7,7 +7,6 @@ import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.ProxyAsset
 import io.talevia.core.domain.ProxyPurpose
 import io.talevia.core.domain.Resolution
-import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.platform.ProxyGenerator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -46,13 +45,10 @@ import kotlin.time.DurationUnit
  * regeneratable from the source asset.
  */
 class Media3ProxyGenerator(
-    private val pathResolver: MediaPathResolver,
     private val proxyDir: File,
 ) : ProxyGenerator {
 
-    override suspend fun generate(asset: MediaAsset): List<ProxyAsset> = withContext(Dispatchers.IO) {
-        val sourcePath = runCatching { pathResolver.resolve(asset.id) }.getOrNull()
-            ?: return@withContext emptyList()
+    override suspend fun generate(asset: MediaAsset, sourcePath: String): List<ProxyAsset> = withContext(Dispatchers.IO) {
         if (!File(sourcePath).exists()) return@withContext emptyList()
 
         // Only video has a mid-frame extraction path on Android.

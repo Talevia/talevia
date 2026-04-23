@@ -10,7 +10,6 @@ import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.PermissionDecision
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
@@ -88,7 +87,7 @@ class ImportMediaCopyIntoBundleTest {
         val bundlePath = tmpHome.resolve("p1").toString().toPath()
         val pid = store.createAt(path = bundlePath, title = "import-bundle").id
 
-        val tool = ImportMediaTool(InMemoryMediaStorage(), StubVideoEngine(), store)
+        val tool = ImportMediaTool(StubVideoEngine(), store)
         val result = tool.execute(
             ImportMediaTool.Input(
                 path = srcAbs,
@@ -123,7 +122,7 @@ class ImportMediaCopyIntoBundleTest {
         val store = ProjectStoreTestKit.create()
         store.upsert("demo", io.talevia.core.domain.Project(id = io.talevia.core.ProjectId("p-ref"), timeline = Timeline()))
 
-        val tool = ImportMediaTool(InMemoryMediaStorage(), StubVideoEngine(), store)
+        val tool = ImportMediaTool(StubVideoEngine(), store)
         tool.execute(
             ImportMediaTool.Input(path = srcAbs, projectId = "p-ref"),
             ctx(),

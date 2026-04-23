@@ -323,8 +323,19 @@ fun TimelinePanel(
                                     log += "LUT picker: unsupported source"
                                     return@launch
                                 }
-                                val asset = runCatching {
-                                    container.media.import(picked) { container.engine.probe(it) }
+                                @OptIn(kotlin.uuid.ExperimentalUuidApi::class)
+                                val assetId = runCatching {
+                                    val metadata = container.engine.probe(picked)
+                                    val newId = io.talevia.core.AssetId(kotlin.uuid.Uuid.random().toString())
+                                    val asset = io.talevia.core.domain.MediaAsset(
+                                        id = newId,
+                                        source = picked,
+                                        metadata = metadata,
+                                    )
+                                    container.projects.mutate(projectId) { p ->
+                                        p.copy(assets = p.assets + asset)
+                                    }
+                                    newId
                                 }.getOrElse {
                                     log += "LUT import failed: ${friendly(it)}"
                                     return@launch
@@ -334,7 +345,7 @@ fun TimelinePanel(
                                     buildJsonObject {
                                         put("projectId", projectId.value)
                                         put("clipId", clip.id.value)
-                                        put("lutAssetId", asset.id.value)
+                                        put("lutAssetId", assetId.value)
                                     },
                                     "apply LUT ${picked.path.substringAfterLast('/')} to ${clip.id.value.take(6)}",
                                 )

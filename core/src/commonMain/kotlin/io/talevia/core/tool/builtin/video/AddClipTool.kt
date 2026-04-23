@@ -1,15 +1,12 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.AssetId
 import io.talevia.core.ClipId
 import io.talevia.core.TrackId
 import io.talevia.core.domain.Clip
-import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionSpec
-import io.talevia.core.platform.MediaStorage
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
@@ -47,7 +44,6 @@ import kotlin.uuid.Uuid
 @OptIn(ExperimentalUuidApi::class)
 class AddClipTool(
     private val store: ProjectStore,
-    private val media: MediaStorage,
 ) : Tool<AddClipTool.Input, AddClipTool.Output> {
 
     @Serializable data class Item(
@@ -153,19 +149,14 @@ class AddClipTool(
             }
         }
 
-        // Resolve all assets outside the mutex so mutate doesn't do I/O.
-        val assets: List<MediaAsset> = input.items.mapIndexed { idx, item ->
-            media.get(AssetId(item.assetId))
-                ?: error("items[$idx]: asset ${item.assetId} not found; import_media first.")
-        }
-
         val pid = ctx.resolveProjectId(input.projectId)
         val results = mutableListOf<ItemResult>()
 
         val updated = store.mutate(pid) { project ->
             var tracks = project.timeline.tracks
             input.items.forEachIndexed { idx, item ->
-                val asset = assets[idx]
+                val asset = project.assets.firstOrNull { it.id.value == item.assetId }
+                    ?: error("items[$idx]: asset ${item.assetId} not found; import_media first.")
                 val sourceStart: Duration = item.sourceStartSeconds.seconds
                 val remaining = asset.metadata.duration - sourceStart
                 require(sourceStart < asset.metadata.duration) {

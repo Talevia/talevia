@@ -9,6 +9,9 @@ import io.talevia.core.SessionId
 import io.talevia.core.TrackId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.FileProjectStore
+import io.talevia.core.domain.MediaAsset
+import io.talevia.core.domain.MediaMetadata
+import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.TimeRange
@@ -19,7 +22,6 @@ import io.talevia.core.platform.AsrEngine
 import io.talevia.core.platform.AsrRequest
 import io.talevia.core.platform.AsrResult
 import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.platform.TranscriptSegment
 import io.talevia.core.session.Part
 import io.talevia.core.tool.ToolContext
@@ -63,11 +65,6 @@ class AutoSubtitleClipToolTest {
         }
     }
 
-    /** Fixed-path resolver so the fake ASR call records something deterministic. */
-    private class FixedResolver(val path: String) : MediaPathResolver {
-        override suspend fun resolve(assetId: AssetId): String = path
-    }
-
     private fun ctx(captured: MutableList<Part>): ToolContext = ToolContext(
         sessionId = SessionId("s"),
         messageId = MessageId("m"),
@@ -84,16 +81,23 @@ class AutoSubtitleClipToolTest {
         val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p-auto")
         val clipId = ClipId("c-1")
+        val assetId = AssetId("a-1")
+        val asset = MediaAsset(
+            id = assetId,
+            source = MediaSource.File("/tmp/a.mp4"),
+            metadata = MediaMetadata(duration = clipDuration),
+        )
         val clip = Clip.Video(
             id = clipId,
             timeRange = TimeRange(clipStart, clipDuration),
             sourceRange = TimeRange(Duration.ZERO, clipDuration),
-            assetId = AssetId("a-1"),
+            assetId = assetId,
         )
         store.upsert(
             "demo",
             Project(
                 id = pid,
+                assets = listOf(asset),
                 timeline = Timeline(
                     tracks = listOf(Track.Video(id = TrackId("v"), clips = listOf(clip))),
                     duration = clipStart + clipDuration,
@@ -109,7 +113,7 @@ class AutoSubtitleClipToolTest {
             TranscriptSegment(startMs = 0, endMs = 1500, text = "hello"),
             TranscriptSegment(startMs = 1500, endMs = 3000, text = "world"),
         )
-        val tool = AutoSubtitleClipTool(FakeAsr(segs), FixedResolver("/tmp/a.mp4"), store)
+        val tool = AutoSubtitleClipTool(FakeAsr(segs), store)
         val parts = mutableListOf<Part>()
         val result = tool.execute(
             AutoSubtitleClipTool.Input(projectId = pid.value, clipId = clipId.value),
@@ -141,7 +145,7 @@ class AutoSubtitleClipToolTest {
         val segs = listOf(
             TranscriptSegment(startMs = 4500, endMs = 7000, text = "trails off"),
         )
-        val tool = AutoSubtitleClipTool(FakeAsr(segs), FixedResolver("/tmp/a.mp4"), store)
+        val tool = AutoSubtitleClipTool(FakeAsr(segs), store)
         val parts = mutableListOf<Part>()
         val result = tool.execute(
             AutoSubtitleClipTool.Input(projectId = pid.value, clipId = clipId.value),
@@ -167,7 +171,7 @@ class AutoSubtitleClipToolTest {
             TranscriptSegment(startMs = 500, endMs = 2000, text = "in"),
             TranscriptSegment(startMs = 6000, endMs = 8000, text = "out"),
         )
-        val tool = AutoSubtitleClipTool(FakeAsr(segs), FixedResolver("/tmp/a.mp4"), store)
+        val tool = AutoSubtitleClipTool(FakeAsr(segs), store)
         val result = tool.execute(
             AutoSubtitleClipTool.Input(projectId = pid.value, clipId = clipId.value),
             ctx(mutableListOf()),
@@ -195,7 +199,7 @@ class AutoSubtitleClipToolTest {
                 ),
             ),
         )
-        val tool = AutoSubtitleClipTool(FakeAsr(emptyList()), FixedResolver("/tmp/a.mp4"), store)
+        val tool = AutoSubtitleClipTool(FakeAsr(emptyList()), store)
         val ex = runCatching {
             tool.execute(
                 AutoSubtitleClipTool.Input(projectId = pid.value, clipId = clipId.value),
@@ -209,7 +213,7 @@ class AutoSubtitleClipToolTest {
     @Test fun forwardsLanguageHintToEngine() = runTest {
         val (store, pid, clipId) = newFixture()
         val engine = FakeAsr(listOf(TranscriptSegment(0, 500, "hi")))
-        val tool = AutoSubtitleClipTool(engine, FixedResolver("/tmp/a.mp4"), store)
+        val tool = AutoSubtitleClipTool(engine, store)
         tool.execute(
             AutoSubtitleClipTool.Input(projectId = pid.value, clipId = clipId.value, language = "zh"),
             ctx(mutableListOf()),

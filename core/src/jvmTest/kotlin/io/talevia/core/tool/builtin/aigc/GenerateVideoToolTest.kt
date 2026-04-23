@@ -5,6 +5,7 @@ import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
+import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.source.consistency.CharacterRefBody
@@ -16,7 +17,6 @@ import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.FileBundleBlobWriter
 import io.talevia.core.platform.GeneratedVideo
 import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.VideoGenEngine
 import io.talevia.core.platform.VideoGenRequest
 import io.talevia.core.platform.VideoGenResult
@@ -86,7 +86,7 @@ class GenerateVideoToolTest {
         val bundleRoot = "/projects/vid".toPath()
         val pid = store.createAt(path = bundleRoot, title = "vid").id
         val engine = FakeVideoGenEngine(tinyMp4, fixedModelVersion = "v1")
-        val tool = GenerateVideoTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             GenerateVideoTool.Input(
@@ -123,7 +123,7 @@ class GenerateVideoToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/seed".toPath(), title = "seed").id
         val engine = FakeVideoGenEngine(tinyMp4)
-        val tool = GenerateVideoTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             GenerateVideoTool.Input(prompt = "no seed", seed = null, projectId = pid.value),
@@ -144,7 +144,7 @@ class GenerateVideoToolTest {
             )
         }
         val engine = FakeVideoGenEngine(tinyMp4)
-        val tool = GenerateVideoTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             GenerateVideoTool.Input(
@@ -168,7 +168,7 @@ class GenerateVideoToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/cache".toPath(), title = "cache").id
         val engine = FakeVideoGenEngine(tinyMp4)
-        val tool = GenerateVideoTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val input = GenerateVideoTool.Input(
             prompt = "a cat on a mat",
@@ -205,7 +205,7 @@ class GenerateVideoToolTest {
         val expectedHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
 
         val engine = FakeVideoGenEngine(tinyMp4)
-        val tool = GenerateVideoTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
         tool.execute(
             GenerateVideoTool.Input(
                 prompt = "portrait pan",
@@ -229,13 +229,18 @@ class GenerateVideoToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/lora".toPath(), title = "lora").id
 
-        // Reference image is outside the bundle.
+        // Reference image is outside the bundle; registered on Project.assets
+        // with an absolute MediaSource.File path so the engine receives it
+        // verbatim via BundleMediaPathResolver.
         val tmpDir = createTempDirectory("gen-video-ref").toFile()
         val refFile = File(tmpDir, "ref.png").also { it.writeBytes(tinyMp4) }
-        val storage = InMemoryMediaStorage()
-        val refAsset = storage.import(MediaSource.File(refFile.absolutePath)) { _ ->
-            io.talevia.core.domain.MediaMetadata(duration = kotlin.time.Duration.ZERO)
-        }
+        val refAssetId = AssetId("ref-mei")
+        val refAsset = MediaAsset(
+            id = refAssetId,
+            source = MediaSource.File(refFile.absolutePath),
+            metadata = io.talevia.core.domain.MediaMetadata(duration = kotlin.time.Duration.ZERO),
+        )
+        store.mutate(pid) { it.copy(assets = it.assets + refAsset) }
 
         store.mutateSource(pid) {
             it.addCharacterRef(
@@ -243,13 +248,13 @@ class GenerateVideoToolTest {
                 CharacterRefBody(
                     name = "Mei",
                     visualDescription = "teal hair",
-                    referenceAssetIds = listOf(refAsset.id),
+                    referenceAssetIds = listOf(refAssetId),
                     loraPin = LoraPin(adapterId = "hf://mei-lora", weight = 0.8f),
                 ),
             )
         }
         val engine = FakeVideoGenEngine(tinyMp4)
-        val tool = GenerateVideoTool(engine, storage, FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             GenerateVideoTool.Input(

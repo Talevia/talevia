@@ -9,6 +9,7 @@ import io.talevia.core.SessionId
 import io.talevia.core.TrackId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.FileProjectStore
+import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
@@ -18,7 +19,6 @@ import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionDecision
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.session.Part
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
@@ -27,22 +27,46 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
+@OptIn(ExperimentalUuidApi::class)
 class TrimClipToolTest {
 
-    private data class Rig(
+    private class Rig(
         val store: FileProjectStore,
-        val media: InMemoryMediaStorage,
         val tool: TrimClipTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
         val emittedParts: MutableList<Part>,
-    )
+    ) {
+        private val assetsById = mutableMapOf<AssetId, MediaAsset>()
+
+        fun importAsset(path: String, durationSeconds: Double): AssetId {
+            val assetId = AssetId(Uuid.random().toString())
+            assetsById[assetId] = MediaAsset(
+                id = assetId,
+                source = MediaSource.File(path),
+                metadata = MediaMetadata(duration = durationSeconds.seconds),
+            )
+            return assetId
+        }
+
+        suspend fun upsertProject(tracks: List<Track>) {
+            store.upsert(
+                "test",
+                Project(
+                    id = projectId,
+                    assets = assetsById.values.toList(),
+                    timeline = Timeline(tracks = tracks),
+                ),
+            )
+        }
+    }
 
     private suspend fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val media = InMemoryMediaStorage()
-        val tool = TrimClipTool(store, media)
+        val tool = TrimClipTool(store)
         val parts = mutableListOf<Part>()
         val ctx = ToolContext(
             sessionId = SessionId("s"),
@@ -53,11 +77,8 @@ class TrimClipToolTest {
             messages = emptyList(),
         )
         store.upsert("test", project)
-        return Rig(store, media, tool, ctx, project.id, parts)
+        return Rig(store, tool, ctx, project.id, parts)
     }
-
-    private suspend fun Rig.importAsset(path: String, durationSeconds: Double): AssetId =
-        media.import(MediaSource.File(path)) { MediaMetadata(duration = durationSeconds.seconds) }.id
 
     private fun single(
         clipId: String,
@@ -77,13 +98,7 @@ class TrimClipToolTest {
             sourceRange = TimeRange(5.seconds, 10.seconds),
             assetId = assetId,
         )
-        rig.store.upsert(
-            "test",
-            Project(
-                id = rig.projectId,
-                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(clip)))),
-            ),
-        )
+        rig.upsertProject(listOf(Track.Video(TrackId("v1"), listOf(clip))))
 
         val out = rig.tool.execute(single("c1", newDurationSeconds = 4.0), rig.ctx).data
         val only = out.results.single()
@@ -110,13 +125,7 @@ class TrimClipToolTest {
             sourceRange = TimeRange(0.seconds, 10.seconds),
             assetId = assetId,
         )
-        rig.store.upsert(
-            "test",
-            Project(
-                id = rig.projectId,
-                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(clip)))),
-            ),
-        )
+        rig.upsertProject(listOf(Track.Video(TrackId("v1"), listOf(clip))))
 
         rig.tool.execute(single("c1", newSourceStartSeconds = 3.0), rig.ctx)
         val refreshed = rig.store.get(rig.projectId)!!
@@ -136,13 +145,7 @@ class TrimClipToolTest {
             sourceRange = TimeRange(0.seconds, 10.seconds),
             assetId = assetId,
         )
-        rig.store.upsert(
-            "test",
-            Project(
-                id = rig.projectId,
-                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(clip)))),
-            ),
-        )
+        rig.upsertProject(listOf(Track.Video(TrackId("v1"), listOf(clip))))
 
         rig.tool.execute(single("c1", newSourceStartSeconds = 4.0, newDurationSeconds = 3.5), rig.ctx)
         val trimmed = rig.store.get(rig.projectId)!!
@@ -168,13 +171,7 @@ class TrimClipToolTest {
             sourceRange = TimeRange(0.seconds, 10.seconds),
             assetId = assetId,
         )
-        rig.store.upsert(
-            "test",
-            Project(
-                id = rig.projectId,
-                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(c1, c2)))),
-            ),
-        )
+        rig.upsertProject(listOf(Track.Video(TrackId("v1"), listOf(c1, c2))))
 
         rig.tool.execute(
             TrimClipTool.Input(
@@ -202,13 +199,7 @@ class TrimClipToolTest {
             sourceRange = TimeRange(0.seconds, 4.seconds),
             assetId = assetId,
         )
-        rig.store.upsert(
-            "test",
-            Project(
-                id = rig.projectId,
-                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(clip)))),
-            ),
-        )
+        rig.upsertProject(listOf(Track.Video(TrackId("v1"), listOf(clip))))
         val before = rig.store.get(rig.projectId)!!
         assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(
@@ -235,13 +226,7 @@ class TrimClipToolTest {
             assetId = assetId,
             volume = 0.8f,
         )
-        rig.store.upsert(
-            "test",
-            Project(
-                id = rig.projectId,
-                timeline = Timeline(tracks = listOf(Track.Audio(TrackId("a1"), listOf(clip)))),
-            ),
-        )
+        rig.upsertProject(listOf(Track.Audio(TrackId("a1"), listOf(clip))))
 
         rig.tool.execute(single("ac1", newDurationSeconds = 2.0), rig.ctx)
         val trimmed = rig.store.get(rig.projectId)!!
@@ -259,13 +244,7 @@ class TrimClipToolTest {
             text = "hello",
             style = TextStyle(),
         )
-        rig.store.upsert(
-            "test",
-            Project(
-                id = rig.projectId,
-                timeline = Timeline(tracks = listOf(Track.Subtitle(TrackId("s1"), listOf(text)))),
-            ),
-        )
+        rig.upsertProject(listOf(Track.Subtitle(TrackId("s1"), listOf(text))))
 
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(single("t1", newDurationSeconds = 2.0), rig.ctx)
@@ -282,13 +261,7 @@ class TrimClipToolTest {
             sourceRange = TimeRange(0.seconds, 5.seconds),
             assetId = assetId,
         )
-        rig.store.upsert(
-            "test",
-            Project(
-                id = rig.projectId,
-                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(clip)))),
-            ),
-        )
+        rig.upsertProject(listOf(Track.Video(TrackId("v1"), listOf(clip))))
 
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(single("c1"), rig.ctx)
@@ -305,13 +278,7 @@ class TrimClipToolTest {
             sourceRange = TimeRange(0.seconds, 4.seconds),
             assetId = assetId,
         )
-        rig.store.upsert(
-            "test",
-            Project(
-                id = rig.projectId,
-                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(clip)))),
-            ),
-        )
+        rig.upsertProject(listOf(Track.Video(TrackId("v1"), listOf(clip))))
 
         val ex = assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(single("c1", newSourceStartSeconds = 3.0, newDurationSeconds = 4.0), rig.ctx)
@@ -332,13 +299,7 @@ class TrimClipToolTest {
             sourceRange = TimeRange(0.seconds, 3.seconds),
             assetId = assetId,
         )
-        rig.store.upsert(
-            "test",
-            Project(
-                id = rig.projectId,
-                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(clip)))),
-            ),
-        )
+        rig.upsertProject(listOf(Track.Video(TrackId("v1"), listOf(clip))))
 
         assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(single("c1", newSourceStartSeconds = -0.5), rig.ctx)
@@ -354,13 +315,7 @@ class TrimClipToolTest {
             sourceRange = TimeRange(0.seconds, 3.seconds),
             assetId = assetId,
         )
-        rig.store.upsert(
-            "test",
-            Project(
-                id = rig.projectId,
-                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(clip)))),
-            ),
-        )
+        rig.upsertProject(listOf(Track.Video(TrackId("v1"), listOf(clip))))
 
         assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(single("c1", newDurationSeconds = 0.0), rig.ctx)
@@ -376,13 +331,7 @@ class TrimClipToolTest {
             sourceRange = TimeRange(0.seconds, 3.seconds),
             assetId = assetId,
         )
-        rig.store.upsert(
-            "test",
-            Project(
-                id = rig.projectId,
-                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(clip)))),
-            ),
-        )
+        rig.upsertProject(listOf(Track.Video(TrackId("v1"), listOf(clip))))
 
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(single("ghost", newDurationSeconds = 2.0), rig.ctx)
@@ -402,13 +351,7 @@ class TrimClipToolTest {
             sourceRange = TimeRange(0.seconds, 5.seconds),
             assetId = assetId,
         )
-        rig.store.upsert(
-            "test",
-            Project(
-                id = rig.projectId,
-                timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(clip)))),
-            ),
-        )
+        rig.upsertProject(listOf(Track.Video(TrackId("v1"), listOf(clip))))
 
         rig.tool.execute(single("c1", newDurationSeconds = 2.5), rig.ctx)
         val snap = rig.emittedParts.filterIsInstance<Part.TimelineSnapshot>().single()

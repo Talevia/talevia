@@ -29,7 +29,6 @@ import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.ImageGenRequest
 import io.talevia.core.platform.ImageGenResult
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
@@ -142,13 +141,12 @@ class RefactorLoopE2ETest {
         val outputFile = File(tmpDir, "final.mp4")
 
         val store = ProjectStoreTestKit.create()
-        val storage = InMemoryMediaStorage()
         val imageEngine = CountingImageEngine()
         val videoEngine = FakeVideoEngine()
         val writer = FakeBlobWriter(tmpDir)
 
         val registry = ToolRegistry()
-        registry.register(GenerateImageTool(imageEngine, storage, writer, store))
+        registry.register(GenerateImageTool(imageEngine, writer, store))
         registry.register(UpdateSourceNodeBodyTool(store))
         registry.register(RegenerateStaleClipsTool(store, registry))
         registry.register(ExportTool(store, videoEngine))

@@ -8,11 +8,11 @@ import kotlinx.serialization.Serializable
  *
  * Captures the **content** of the project at the moment of save (timeline, source,
  * lockfile, render cache, asset catalog ids, output profile) — *not* the underlying
- * media bytes. Asset bytes live in `MediaStorage` and are reference-counted by
- * AssetId; deleting the file out from under a snapshot is the user's problem to
- * notice via a future "snapshot integrity" tool, not a load-bearing invariant we
- * promise here. Same trade-off git makes vs. LFS — saving the manifest is cheap,
- * saving every blob copy is not.
+ * media bytes. Bundle-local assets live under `<bundleRoot>/media/<assetId>.<ext>`;
+ * external assets are absolute-path references. Deleting the bytes out from under
+ * a snapshot is the user's problem to notice via a future "snapshot integrity"
+ * tool, not a load-bearing invariant we promise here. Same trade-off git makes vs.
+ * LFS — saving the manifest is cheap, saving every blob copy is not.
  *
  * Stored inline in the parent [Project.snapshots] list rather than a separate
  * SQL table so that:

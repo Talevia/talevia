@@ -20,7 +20,6 @@ import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.ImageGenRequest
 import io.talevia.core.platform.ImageGenResult
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import kotlinx.coroutines.test.runTest
@@ -111,13 +110,13 @@ class ReplayLockfileToolTest {
     @Test fun replaySkipsCacheAndAppendsNewLockfileEntry() = runTest {
         val tmp = createTempDirectory("replay-lockfile-test").toFile()
         val engine = CountingImageEngine()
-        val storage = InMemoryMediaStorage()
+
         val writer = FakeBlobWriter(tmp)
         val store = freshStore()
         val projectId = ProjectId("p-replay")
         store.upsert("demo", Project(id = projectId, timeline = Timeline()))
 
-        val imageTool = GenerateImageTool(engine, storage, writer, store)
+        val imageTool = GenerateImageTool(engine, writer, store)
         val registry = ToolRegistry().apply { register(imageTool) }
         val replay = ReplayLockfileTool(registry, store)
 
@@ -301,13 +300,13 @@ class ReplayLockfileToolTest {
         // projectId through every Input.
         val tmp = createTempDirectory("replay-lockfile-sessioncontext").toFile()
         val engine = CountingImageEngine()
-        val storage = InMemoryMediaStorage()
+
         val writer = FakeBlobWriter(tmp)
         val store = freshStore()
         val projectId = ProjectId("p-bound")
         store.upsert("demo", Project(id = projectId, timeline = Timeline()))
 
-        val imageTool = GenerateImageTool(engine, storage, writer, store)
+        val imageTool = GenerateImageTool(engine, writer, store)
         val registry = ToolRegistry().apply { register(imageTool) }
         val replay = ReplayLockfileTool(registry, store)
 

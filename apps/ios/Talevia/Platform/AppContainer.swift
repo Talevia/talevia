@@ -24,12 +24,7 @@ final class AppContainer {
     let recentsRegistry: RecentsRegistry
     let projects: FileProjectStore
     let bundleBlobWriter: FileBundleBlobWriter
-    /// TODO(file-bundle-migration): legacy [InMemoryMediaStorage] kept alive
-    /// for tools that still take a `MediaStorage` constructor arg. Their
-    /// migration to `Project.assets` happens in a separate task.
-    let media: InMemoryMediaStorage
     let engine: AVFoundationVideoEngine
-    let blobWriter: IosFileBlobWriter
     let proxyGenerator: AVFoundationProxyGenerator
     let permissions: DefaultPermissionService
     let tools: ToolRegistry
@@ -91,22 +86,13 @@ final class AppContainer {
         )
         self.bundleBlobWriter = newFileBundleBlobWriter(projects: self.projects)
 
-        // TODO(file-bundle-migration): legacy [InMemoryMediaStorage] kept
-        // alive for tools that still take a `MediaStorage` constructor arg
-        // (ImportMediaTool, ExtractFrameTool, AddClipTool, …). Once those
-        // migrate to `Project.assets`, this field — and every `media:`
-        // argument below — can be deleted.
-        self.media = InMemoryMediaStorage()
-        // TODO(file-bundle-migration): the engine + proxy generator both take a
-        // MediaPathResolver, but ExportTool now passes a per-render
-        // BundleMediaPathResolver via render(resolver:). The constructor-time
-        // resolver is unreachable on the happy path; today we still hand it
-        // [media] which won't resolve real bundle assets. ImportMediaTool
-        // migration will swap this for a per-call BundleMediaPathResolver.
-        self.engine = AVFoundationVideoEngine(resolver: self.media)
-        self.blobWriter = IosFileBlobWriter(rootDir: IosFileBlobWriter.defaultRoot())
+        // The engine takes a resolver for source-clip path resolution, but
+        // ExportTool now passes a per-render BundleMediaPathResolver via
+        // render(resolver:). The constructor-time resolver is therefore
+        // unreachable on the happy path; this stub yells if anything ever
+        // falls through to it.
+        self.engine = AVFoundationVideoEngine(resolver: FailingMediaPathResolver())
         self.proxyGenerator = AVFoundationProxyGenerator(
-            pathResolver: self.media,
             proxyDir: AVFoundationProxyGenerator.defaultRoot()
         )
         self.permissions = DefaultPermissionService(bus: self.bus)
@@ -133,20 +119,19 @@ final class AppContainer {
         registry.register(tool: DeleteSessionTool(sessions: self.sessions))
         registry.register(tool: ReadPartTool(sessions: self.sessions))
         registry.register(tool: ImportMediaTool(
-            storage: self.media,
             engine: self.engine,
             projects: self.projects,
             proxyGenerator: self.proxyGenerator
         ))
-        registry.register(tool: ExtractFrameTool(engine: self.engine, storage: self.media, blobWriter: self.blobWriter))
-        registry.register(tool: AddClipTool(store: self.projects, media: self.media))
-        registry.register(tool: ReplaceClipTool(store: self.projects, media: self.media))
+        registry.register(tool: ExtractFrameTool(engine: self.engine, projects: self.projects, bundleBlobWriter: self.bundleBlobWriter))
+        registry.register(tool: AddClipTool(store: self.projects))
+        registry.register(tool: ReplaceClipTool(store: self.projects))
         registry.register(tool: SplitClipTool(store: self.projects))
         registry.register(tool: RemoveClipTool(store: self.projects))
         registry.register(tool: MoveClipTool(store: self.projects))
         registry.register(tool: SetClipSourceBindingTool(store: self.projects))
         registry.register(tool: DuplicateClipTool(store: self.projects))
-        registry.register(tool: TrimClipTool(store: self.projects, media: self.media))
+        registry.register(tool: TrimClipTool(store: self.projects))
         registry.register(tool: SetClipVolumeTool(store: self.projects))
         registry.register(tool: FadeAudioClipTool(store: self.projects))
         registry.register(tool: SetClipTransformTool(store: self.projects))
@@ -154,7 +139,7 @@ final class AppContainer {
         registry.register(tool: ExportDryRunTool(store: self.projects))
         registry.register(tool: ApplyFilterTool(store: self.projects))
         registry.register(tool: RemoveFilterTool(store: self.projects))
-        registry.register(tool: ApplyLutTool(store: self.projects, media: self.media))
+        registry.register(tool: ApplyLutTool(store: self.projects))
         registry.register(tool: AddSubtitlesTool(store: self.projects))
         registry.register(tool: EditTextClipTool(store: self.projects))
         registry.register(tool: AddTransitionTool(store: self.projects))
@@ -208,4 +193,24 @@ final class AppContainer {
         registry.register(tool: ProviderQueryTool(providers: self.providers))
         registry.register(tool: CompactSessionTool(providers: self.providers, sessions: self.sessions, bus: self.bus))
     }
+}
+
+/// Stub resolver that errors if called — the real resolver is built per-render
+/// by ExportTool / the AIGC tools via `BundleMediaPathResolver(project, bundleRoot)`.
+/// This instance exists only to satisfy the engine constructor's non-null
+/// `resolver` parameter.
+private final class FailingMediaPathResolver: NSObject, MediaPathResolver {
+    // swiftlint:disable identifier_name
+    func __resolve(
+        assetId: AssetId,
+        completionHandler: @escaping @Sendable (String?, (any Error)?) -> Void
+    ) {
+        completionHandler(nil, NSError(
+            domain: "io.talevia",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey:
+                "call site must pass per-render BundleMediaPathResolver via render(resolver:)"]
+        ))
+    }
+    // swiftlint:enable identifier_name
 }

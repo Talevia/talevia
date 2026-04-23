@@ -16,7 +16,6 @@ import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.AllowAllPermissionService
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.tool.ToolContext
@@ -79,8 +78,7 @@ class FfmpegEndToEndTest {
 
         // 2. Wire the agent's view of the world.
         val bus = EventBus()
-        val media = InMemoryMediaStorage()
-        val engine = FfmpegVideoEngine(pathResolver = media)
+        val engine = FfmpegVideoEngine(pathResolver = io.talevia.core.platform.MediaPathResolver { error("per-render resolver must be passed via render(resolver=...)") })
         val projects = ProjectStoreTestKit.create()
         val perms = AllowAllPermissionService()
 
@@ -91,8 +89,8 @@ class FfmpegEndToEndTest {
         )
 
         val registry = ToolRegistry().apply {
-            register(ImportMediaTool(media, engine, projects))
-            register(AddClipTool(projects, media))
+            register(ImportMediaTool(engine, projects))
+            register(AddClipTool(projects))
             register(ExportTool(projects, engine))
         }
 
@@ -167,8 +165,7 @@ class FfmpegEndToEndTest {
 
         generateTestSource(inputA, "testsrc")
 
-        val media = InMemoryMediaStorage()
-        val engine = FfmpegVideoEngine(pathResolver = media)
+        val engine = FfmpegVideoEngine(pathResolver = io.talevia.core.platform.MediaPathResolver { error("per-render resolver must be passed via render(resolver=...)") })
         val projects = ProjectStoreTestKit.create()
         val perms = AllowAllPermissionService()
 
@@ -179,8 +176,8 @@ class FfmpegEndToEndTest {
         )
 
         val registry = ToolRegistry().apply {
-            register(ImportMediaTool(media, engine, projects))
-            register(AddClipTool(projects, media))
+            register(ImportMediaTool(engine, projects))
+            register(AddClipTool(projects))
             register(AddSubtitlesTool(projects))
             register(ExportTool(projects, engine))
         }
@@ -258,8 +255,7 @@ class FfmpegEndToEndTest {
         generateTestSource(inputA, "testsrc")
         generateTestSource(inputB, "testsrc2")
 
-        val media = InMemoryMediaStorage()
-        val engine = FfmpegVideoEngine(pathResolver = media)
+        val engine = FfmpegVideoEngine(pathResolver = io.talevia.core.platform.MediaPathResolver { error("per-render resolver must be passed via render(resolver=...)") })
         val projects = ProjectStoreTestKit.create()
         val perms = AllowAllPermissionService()
 
@@ -270,8 +266,8 @@ class FfmpegEndToEndTest {
         )
 
         val registry = ToolRegistry().apply {
-            register(ImportMediaTool(media, engine, projects))
-            register(AddClipTool(projects, media))
+            register(ImportMediaTool(engine, projects))
+            register(AddClipTool(projects))
             register(AddTransitionTool(projects))
             register(ExportTool(projects, engine))
         }
@@ -431,8 +427,7 @@ class FfmpegEndToEndTest {
 
         generateTestSource(inputA, "testsrc")
 
-        val media = InMemoryMediaStorage()
-        val engine = FfmpegVideoEngine(pathResolver = media)
+        val engine = FfmpegVideoEngine(pathResolver = io.talevia.core.platform.MediaPathResolver { error("per-render resolver must be passed via render(resolver=...)") })
         val projects = ProjectStoreTestKit.create()
         val perms = AllowAllPermissionService()
 
@@ -443,8 +438,8 @@ class FfmpegEndToEndTest {
         )
 
         val registry = ToolRegistry().apply {
-            register(ImportMediaTool(media, engine, projects))
-            register(AddClipTool(projects, media))
+            register(ImportMediaTool(engine, projects))
+            register(AddClipTool(projects))
             register(ExportTool(projects, engine))
         }
 

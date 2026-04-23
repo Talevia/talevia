@@ -13,7 +13,6 @@ import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.PermissionDecision
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
@@ -67,12 +66,11 @@ class ImportMediaBatchTest {
         messages = emptyList(),
     )
 
-    private suspend fun rig(): Triple<FileProjectStore, InMemoryMediaStorage, ImportMediaTool> {
+    private suspend fun rig(): Pair<FileProjectStore, ImportMediaTool> {
         val projects = ProjectStoreTestKit.create()
         projects.upsert("demo", Project(id = ProjectId("p"), timeline = Timeline()))
-        val storage = InMemoryMediaStorage()
-        val tool = ImportMediaTool(storage, SelectiveVideoEngine(), projects)
-        return Triple(projects, storage, tool)
+        val tool = ImportMediaTool(SelectiveVideoEngine(), projects)
+        return projects to tool
     }
 
     private fun tempPath(suffix: String): String {
@@ -82,7 +80,7 @@ class ImportMediaBatchTest {
     }
 
     @Test fun singlePathPreservesLegacyShape() = runTest {
-        val (_, _, tool) = rig()
+        val (_, tool) = rig()
         val path = tempPath(".good")
         val out = tool.execute(
             ImportMediaTool.Input(path = path, projectId = "p"),
@@ -100,7 +98,7 @@ class ImportMediaBatchTest {
     }
 
     @Test fun batchImportsMultipleFilesAndPopulatesListed() = runTest {
-        val (projects, _, tool) = rig()
+        val (projects, tool) = rig()
         val paths = (0 until 3).map { tempPath(".good") }
         val out = tool.execute(
             ImportMediaTool.Input(paths = paths, projectId = "p"),
@@ -116,7 +114,7 @@ class ImportMediaBatchTest {
     }
 
     @Test fun batchCapturesPerPathFailuresWithoutAbortingTheRun() = runTest {
-        val (projects, _, tool) = rig()
+        val (projects, tool) = rig()
         val good1 = tempPath(".good")
         val bad1 = tempPath(".bad")
         val good2 = tempPath(".good")
@@ -138,7 +136,7 @@ class ImportMediaBatchTest {
     }
 
     @Test fun allFailedBatchReturnsEmptyFlatAssetId() = runTest {
-        val (projects, _, tool) = rig()
+        val (projects, tool) = rig()
         val bad = (0 until 3).map { tempPath(".bad") }
         val out = tool.execute(
             ImportMediaTool.Input(paths = bad, projectId = "p"),
@@ -152,7 +150,7 @@ class ImportMediaBatchTest {
     }
 
     @Test fun bothPathAndPathsRejected() = runTest {
-        val (_, _, tool) = rig()
+        val (_, tool) = rig()
         val ex = assertFailsWith<IllegalStateException> {
             tool.execute(
                 ImportMediaTool.Input(
@@ -167,7 +165,7 @@ class ImportMediaBatchTest {
     }
 
     @Test fun neitherPathNorPathsRejected() = runTest {
-        val (_, _, tool) = rig()
+        val (_, tool) = rig()
         val ex = assertFailsWith<IllegalStateException> {
             tool.execute(
                 ImportMediaTool.Input(projectId = "p"),
@@ -178,7 +176,7 @@ class ImportMediaBatchTest {
     }
 
     @Test fun emptyPathsListRejected() = runTest {
-        val (_, _, tool) = rig()
+        val (_, tool) = rig()
         assertFailsWith<IllegalArgumentException> {
             tool.execute(
                 ImportMediaTool.Input(paths = emptyList(), projectId = "p"),
@@ -188,7 +186,7 @@ class ImportMediaBatchTest {
     }
 
     @Test fun duplicatePathsRejected() = runTest {
-        val (_, _, tool) = rig()
+        val (_, tool) = rig()
         val p = tempPath(".good")
         assertFailsWith<IllegalArgumentException> {
             tool.execute(

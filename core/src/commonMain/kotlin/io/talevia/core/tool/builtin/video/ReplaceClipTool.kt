@@ -6,7 +6,6 @@ import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionSpec
-import io.talevia.core.platform.MediaStorage
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
@@ -36,7 +35,6 @@ import kotlinx.serialization.serializer
  */
 class ReplaceClipTool(
     private val store: ProjectStore,
-    private val media: MediaStorage,
 ) : Tool<ReplaceClipTool.Input, ReplaceClipTool.Output> {
 
     @Serializable data class Item(
@@ -115,15 +113,18 @@ class ReplaceClipTool(
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         require(input.items.isNotEmpty()) { "items must not be empty" }
-        input.items.forEachIndexed { idx, item ->
-            val newAssetId = AssetId(item.newAssetId)
-            media.get(newAssetId)
-                ?: error("items[$idx] (${item.clipId}): asset ${item.newAssetId} not found; import or generate it first.")
-        }
         val pid = ctx.resolveProjectId(input.projectId)
         val results = mutableListOf<ItemResult>()
 
         val updated = store.mutate(pid) { project ->
+            input.items.forEachIndexed { idx, item ->
+                if (project.assets.none { it.id.value == item.newAssetId }) {
+                    error(
+                        "items[$idx] (${item.clipId}): asset ${item.newAssetId} not found in project " +
+                            "${pid.value}; import or generate it first.",
+                    )
+                }
+            }
             var tracks = project.timeline.tracks
             input.items.forEachIndexed { idx, item ->
                 val newAssetId = AssetId(item.newAssetId)

@@ -5,7 +5,6 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionSpec
-import io.talevia.core.platform.MediaStorage
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
@@ -39,7 +38,6 @@ import kotlin.time.DurationUnit
  */
 class TrimClipTool(
     private val store: ProjectStore,
-    private val media: MediaStorage,
 ) : Tool<TrimClipTool.Input, TrimClipTool.Output> {
 
     @Serializable data class Item(
@@ -154,8 +152,11 @@ class TrimClipTool(
                 }
                 val newSourceStart: Duration = item.newSourceStartSeconds?.seconds ?: currentSourceRange.start
                 val newDuration: Duration = item.newDurationSeconds?.seconds ?: currentSourceRange.duration
-                val assetDuration = media.get(assetId)?.metadata?.duration
-                    ?: error("items[$idx] (${item.clipId}): asset ${assetId.value} bound to clip not found in MediaStorage.")
+                val assetDuration = project.assets.firstOrNull { it.id == assetId }?.metadata?.duration
+                    ?: error(
+                        "items[$idx] (${item.clipId}): asset ${assetId.value} bound to clip not found in project " +
+                            "${pid.value} — import it (or restore the clip's source binding) first.",
+                    )
                 require(newSourceStart < assetDuration) {
                     "items[$idx] (${item.clipId}): newSourceStartSeconds ${newSourceStart.toDouble(DurationUnit.SECONDS)} " +
                         "exceeds asset duration ${assetDuration.toDouble(DurationUnit.SECONDS)}s."

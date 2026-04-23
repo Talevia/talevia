@@ -2,6 +2,7 @@ package io.talevia.core.session
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
 import app.cash.turbine.test
+import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.PartId
@@ -10,13 +11,14 @@ import io.talevia.core.SessionId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.MediaAsset
+import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.AllowAllPermissionService
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.ApplyFilterTool
@@ -49,7 +51,6 @@ class SessionRevertTest {
         val bus = EventBus()
         val sessions = SqlDelightSessionStore(db, bus)
         val projects = ProjectStoreTestKit.create()
-        val media = InMemoryMediaStorage()
         val perms = AllowAllPermissionService()
         val revert = SessionRevert(sessions, projects, bus)
 
@@ -65,10 +66,15 @@ class SessionRevertTest {
                 updatedAt = t0,
             ),
         )
-        projects.upsert("test", Project(projectId, Timeline(), outputProfile = OutputProfile.DEFAULT_1080P))
-        val asset = media.import(MediaSource.File("/tmp/a.mp4")) {
-            io.talevia.core.domain.MediaMetadata(duration = 10.seconds)
-        }
+        val asset = MediaAsset(
+            id = AssetId("fake-a"),
+            source = MediaSource.File("/tmp/a.mp4"),
+            metadata = MediaMetadata(duration = 10.seconds),
+        )
+        projects.upsert(
+            "test",
+            Project(projectId, assets = listOf(asset), timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P),
+        )
 
         // Turn 1: user message u1, assistant a1 running add_clip → mutates timeline.
         val u1 = MessageId("u1")
@@ -87,7 +93,7 @@ class SessionRevertTest {
             emitPart = { sessions.upsertPart(it) },
             messages = emptyList(),
         )
-        val addClip = AddClipTool(projects, media)
+        val addClip = AddClipTool(projects)
         val addResp = addClip.execute(
             AddClipTool.Input(
                 projectId = projectId.value,

@@ -3,13 +3,16 @@ package io.talevia.core.tool.builtin.aigc
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
+import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
+import io.talevia.core.domain.FileProjectStore
+import io.talevia.core.domain.MediaAsset
+import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.FileBundleBlobWriter
 import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.platform.UpscaleEngine
 import io.talevia.core.platform.UpscaleRequest
 import io.talevia.core.platform.UpscaleResult
@@ -23,6 +26,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration
 
 class UpscaleAssetToolTest {
 
@@ -64,10 +68,6 @@ class UpscaleAssetToolTest {
         }
     }
 
-    private class FixedResolver(val path: String) : MediaPathResolver {
-        override suspend fun resolve(assetId: AssetId): String = path
-    }
-
     private fun ctx(): ToolContext = ToolContext(
         sessionId = SessionId("s"),
         messageId = MessageId("m"),
@@ -77,17 +77,29 @@ class UpscaleAssetToolTest {
         messages = emptyList(),
     )
 
+    private suspend fun registerSourceAsset(
+        store: FileProjectStore,
+        pid: ProjectId,
+        assetId: String,
+        path: String = "/tmp/src.png",
+    ): AssetId {
+        val id = AssetId(assetId)
+        val asset = MediaAsset(
+            id = id,
+            source = MediaSource.File(path),
+            metadata = MediaMetadata(duration = Duration.ZERO),
+        )
+        store.mutate(pid) { it.copy(assets = it.assets + asset) }
+        return id
+    }
+
     @Test fun persistsUpscaledAssetIntoBundleAndExposesProvenance() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val bundleRoot = "/projects/up".toPath()
         val pid = store.createAt(path = bundleRoot, title = "up").id
+        registerSourceAsset(store, pid, "a-source")
         val engine = FakeUpscaleEngine(tinyPng)
-        val tool = UpscaleAssetTool(
-            engine,
-            FixedResolver("/tmp/src.png"),
-            FileBundleBlobWriter(store, fs),
-            store,
-        )
+        val tool = UpscaleAssetTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             UpscaleAssetTool.Input(assetId = "a-source", scale = 4, seed = 42L, projectId = pid.value),
@@ -113,13 +125,9 @@ class UpscaleAssetToolTest {
     @Test fun picksSeedClientSideWhenInputOmitsIt() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/seed".toPath(), title = "seed").id
+        registerSourceAsset(store, pid, "a-1")
         val engine = FakeUpscaleEngine(tinyPng)
-        val tool = UpscaleAssetTool(
-            engine,
-            FixedResolver("/tmp/src.png"),
-            FileBundleBlobWriter(store, fs),
-            store,
-        )
+        val tool = UpscaleAssetTool(engine, FileBundleBlobWriter(store, fs), store)
         val result = tool.execute(
             UpscaleAssetTool.Input(assetId = "a-1", projectId = pid.value),
             ctx(),
@@ -131,13 +139,9 @@ class UpscaleAssetToolTest {
     @Test fun secondCallWithIdenticalInputsIsLockfileCacheHit() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/cache".toPath(), title = "cache").id
+        registerSourceAsset(store, pid, "a-src")
         val engine = FakeUpscaleEngine(tinyPng)
-        val tool = UpscaleAssetTool(
-            engine,
-            FixedResolver("/tmp/src.png"),
-            FileBundleBlobWriter(store, fs),
-            store,
-        )
+        val tool = UpscaleAssetTool(engine, FileBundleBlobWriter(store, fs), store)
         val input = UpscaleAssetTool.Input(
             assetId = "a-src",
             scale = 2,
@@ -154,7 +158,6 @@ class UpscaleAssetToolTest {
         assertEquals(1, engine.calls, "engine must not be invoked on cache hit")
         assertEquals(first.data.upscaledAssetId, second.data.upscaledAssetId)
 
-        // Changing scale must bust.
         val third = tool.execute(input.copy(scale = 4), ctx())
         assertEquals(false, third.data.cacheHit)
         assertEquals(2, engine.calls)
@@ -163,12 +166,8 @@ class UpscaleAssetToolTest {
     @Test fun rejectsScaleOutOfRange() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/bad".toPath(), title = "bad").id
-        val tool = UpscaleAssetTool(
-            FakeUpscaleEngine(tinyPng),
-            FixedResolver("/tmp/src.png"),
-            FileBundleBlobWriter(store, fs),
-            store,
-        )
+        registerSourceAsset(store, pid, "a")
+        val tool = UpscaleAssetTool(FakeUpscaleEngine(tinyPng), FileBundleBlobWriter(store, fs), store)
         assertFailsWith<IllegalArgumentException> {
             tool.execute(UpscaleAssetTool.Input(assetId = "a", scale = 1, projectId = pid.value), ctx())
         }

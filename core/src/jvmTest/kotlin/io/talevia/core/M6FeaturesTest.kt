@@ -11,8 +11,6 @@ import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.AllowAllPermissionService
-import io.talevia.core.platform.InMemoryMediaStorage
-import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
@@ -50,12 +48,14 @@ class M6FeaturesTest {
     fun applyFilterAddsFilterToVideoClip() = runTest {
         val (store, projects, registry, ctx, projectId) = newWiring()
         // Register a fake asset directly so add_clip works without ffmpeg.
-        val media = InMemoryMediaStorage()
-        val fakeAsset = media.import(io.talevia.core.domain.MediaSource.File("/tmp/x.mp4")) {
-            io.talevia.core.domain.MediaMetadata(duration = 10.seconds)
-        }
+        val fakeAsset = io.talevia.core.domain.MediaAsset(
+            id = AssetId("fake-x"),
+            source = io.talevia.core.domain.MediaSource.File("/tmp/x.mp4"),
+            metadata = io.talevia.core.domain.MediaMetadata(duration = 10.seconds),
+        )
+        projects.mutate(projectId) { it.copy(assets = it.assets + fakeAsset) }
         val r = ToolRegistry().apply {
-            register(AddClipTool(projects, media))
+            register(AddClipTool(projects))
             register(ApplyFilterTool(projects))
         }
 
@@ -216,14 +216,13 @@ class M6FeaturesTest {
         val bus = EventBus()
         val sessions = SqlDelightSessionStore(db, bus)
         val projects = ProjectStoreTestKit.create()
-        val media: MediaStorage = InMemoryMediaStorage()
         val engine = ProbeOnlyEngine()
         val perms = AllowAllPermissionService()
         val projectId = ProjectId("p-${Clock.System.now().toEpochMilliseconds()}")
         projects.upsert("test", Project(id = projectId, timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P))
         val registry = ToolRegistry().apply {
-            register(ImportMediaTool(media, engine, projects))
-            register(AddClipTool(projects, media))
+            register(ImportMediaTool(engine, projects))
+            register(AddClipTool(projects))
             register(ApplyFilterTool(projects))
             register(AddSubtitlesTool(projects))
             register(AddTransitionTool(projects))

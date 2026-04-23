@@ -12,7 +12,7 @@ import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.AsrEngine
 import io.talevia.core.platform.AsrRequest
-import io.talevia.core.platform.MediaPathResolver
+import io.talevia.core.platform.BundleMediaPathResolver
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
@@ -68,7 +68,6 @@ import kotlin.uuid.Uuid
 @OptIn(ExperimentalUuidApi::class)
 class AutoSubtitleClipTool(
     private val engine: AsrEngine,
-    private val resolver: MediaPathResolver,
     private val store: ProjectStore,
 ) : Tool<AutoSubtitleClipTool.Input, AutoSubtitleClipTool.Output> {
 
@@ -144,7 +143,12 @@ class AutoSubtitleClipTool(
         val clipStart: Duration = sourceClip.timeRange.start
         val clipEnd: Duration = sourceClip.timeRange.end
 
-        val path = resolver.resolve(assetId)
+        val bundleRoot = store.pathOf(projectId)
+            ?: error(
+                "project ${projectId.value} has no registered bundle path; auto_subtitle_clip " +
+                    "requires a file-backed ProjectStore — open or create the bundle first.",
+            )
+        val path = BundleMediaPathResolver(project, bundleRoot).resolve(assetId)
         val asr = engine.transcribe(
             AsrRequest(
                 audioPath = path,

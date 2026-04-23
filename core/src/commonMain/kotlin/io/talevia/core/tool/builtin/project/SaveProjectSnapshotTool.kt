@@ -33,12 +33,13 @@ import kotlinx.serialization.serializer
  * is emptied before storage to avoid quadratic blow-up when the user takes
  * snapshots-of-snapshots-of-snapshots.
  *
- * Asset bytes are *not* copied. Snapshots reference [io.talevia.core.AssetId]s in
- * the shared MediaStorage. This is the same trade-off git makes vs. LFS: keeping
- * the manifest is cheap; copying every blob would balloon storage. If a user
- * deletes the underlying file, restore will succeed but downstream renders may
- * miss the asset — that's a future "snapshot integrity" tool's problem, not a
- * promise we make here.
+ * Asset bytes are *not* copied. Snapshots reference [io.talevia.core.AssetId]s
+ * in the project's bundle (`<bundleRoot>/media/`) or external absolute paths.
+ * This is the same trade-off git makes vs. LFS: keeping the manifest is cheap;
+ * copying every blob would balloon storage. If a user deletes the underlying
+ * file, restore will succeed but downstream renders may miss the asset —
+ * that's a future "snapshot integrity" tool's problem, not a promise we make
+ * here.
  */
 class SaveProjectSnapshotTool(
     private val projects: ProjectStore,

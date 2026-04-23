@@ -8,7 +8,6 @@ import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.AllowAllPermissionService
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.video.AddClipTool
@@ -128,8 +127,7 @@ class ExportDeterminismTest {
     )
 
     private suspend fun buildFixture(): DeterminismFixture {
-        val media = InMemoryMediaStorage()
-        val engine = FfmpegVideoEngine(pathResolver = media)
+        val engine = FfmpegVideoEngine(pathResolver = io.talevia.core.platform.MediaPathResolver { error("per-render resolver must be passed via render(resolver=...)") })
         val projects = ProjectStoreTestKit.create()
         val perms = AllowAllPermissionService()
 
@@ -140,8 +138,8 @@ class ExportDeterminismTest {
         )
 
         val registry = ToolRegistry().apply {
-            register(ImportMediaTool(media, engine, projects))
-            register(AddClipTool(projects, media))
+            register(ImportMediaTool(engine, projects))
+            register(AddClipTool(projects))
             register(ExportTool(projects, engine))
         }
 

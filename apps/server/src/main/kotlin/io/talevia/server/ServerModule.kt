@@ -326,12 +326,33 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
         // ---- Media upload -------------------------------------------------------
 
         /**
-         * POST /media — accept a `multipart/form-data` body with a single file part.
-         * Writes the bytes to a temp file, imports via [MediaStorage.import], and
-         * returns `{ "assetId": "<uuid>" }`. The temp file is deleted immediately after
-         * import regardless of success/failure.
+         * POST /media?projectId=<id> — accept a `multipart/form-data` body with a
+         * single file part, probe its metadata, write the bytes into the target
+         * project bundle's `media/<assetId>.<ext>`, append the
+         * [io.talevia.core.domain.MediaAsset] to `Project.assets`, and return
+         * `{ "assetId": "<uuid>" }`. 400 when `projectId` is missing or the
+         * project is not registered.
          */
         post("/media") {
+            val projectIdParam = call.parameters["projectId"]?.ifBlank { null }
+                ?: call.request.queryParameters["projectId"]?.ifBlank { null }
+            if (projectIdParam == null) {
+                call.respond(
+                    HttpStatusCode.BadRequest,
+                    mapOf("error" to "missing projectId query parameter"),
+                )
+                return@post
+            }
+            val pid = ProjectId(projectIdParam)
+            requireReasonableId(pid.value, "projectId")
+            if (container.projects.get(pid) == null) {
+                call.respond(
+                    HttpStatusCode.NotFound,
+                    mapOf("error" to "project ${pid.value} not found"),
+                )
+                return@post
+            }
+
             val multipart = call.receiveMultipart()
             var assetId: String? = null
             multipart.forEachPart { part ->
@@ -339,13 +360,29 @@ fun Application.serverModule(container: ServerContainer = ServerContainer()) {
                     val fileName = part.originalFileName?.ifBlank { null } ?: "upload"
                     val bytes = part.provider().readRemaining().readByteArray()
                     val tmp = File.createTempFile("talevia-upload-", "-$fileName")
+                    val newAssetId = io.talevia.core.AssetId(
+                        java.util.UUID.randomUUID().toString(),
+                    )
+                    val ext = fileName.substringAfterLast('.', missingDelimiterValue = "bin")
+                        .ifBlank { "bin" }
                     try {
                         tmp.writeBytes(bytes)
-                        val asset = container.media.import(
-                            source = MediaSource.File(tmp.absolutePath),
-                            probe = { src -> container.engine.probe(src) },
+                        val metadata = container.engine.probe(MediaSource.File(tmp.absolutePath))
+                        val bundleSource = container.bundleBlobWriter.writeBlob(
+                            projectId = pid,
+                            assetId = newAssetId,
+                            bytes = bytes,
+                            format = ext,
                         )
-                        assetId = asset.id.value
+                        val asset = io.talevia.core.domain.MediaAsset(
+                            id = newAssetId,
+                            source = bundleSource,
+                            metadata = metadata,
+                        )
+                        container.projects.mutate(pid) { p ->
+                            p.copy(assets = p.assets + asset)
+                        }
+                        assetId = newAssetId.value
                     } finally {
                         tmp.delete()
                     }

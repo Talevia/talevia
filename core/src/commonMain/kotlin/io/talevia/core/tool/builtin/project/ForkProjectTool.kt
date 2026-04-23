@@ -37,11 +37,12 @@ import kotlin.time.Duration.Companion.seconds
  * output profile — from either the *current* state of the source project (when
  * `snapshotId` is null) or from a specific captured snapshot.
  *
- * Asset bytes are not duplicated. Both projects reference the same `AssetId`s in
- * shared MediaStorage — same trade-off as snapshots themselves. If the user later
- * mutates one project's assets in place we'll need refcounting; for now the
- * canonical mutation pattern is "produce a new asset and replace_clip", so the
- * shared-id model is safe.
+ * Asset bytes are not duplicated. The fork's `Project.assets` list carries the
+ * same `AssetId`s and `MediaSource` entries as the source; external paths and
+ * bundle-relative paths stay as-is. If the user later mutates one project's
+ * assets in place we'll need refcounting; for now the canonical mutation
+ * pattern is "produce a new asset and replace_clip", so the shared-id model
+ * is safe.
  *
  * Fails loud on duplicate `newProjectId` so the agent reconciles via
  * `list_projects` rather than silently stomping a project the user already cares

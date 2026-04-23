@@ -398,30 +398,6 @@ class SwiftRenderFlowAdapter {
 }
 
 // =============================================================================
-// Test-oriented import helper
-// =============================================================================
-//
-// `MediaStorage.import(source, probe)` takes a `suspend (MediaSource) ->
-// MediaMetadata` lambda which SKIE exposes as `KotlinSuspendFunction1` — that
-// type is painful to construct from Swift. For tests (and any iOS code path
-// that already has the metadata in hand) this helper avoids the suspend-closure
-// dance: probe first via the engine, then upsert via a pre-known metadata.
-
-/**
- * Import [source] into [storage] using a metadata value you already have. The
- * returned asset is also stored in-place via the standard `import` pathway so
- * subsequent `resolve(assetId)` calls work.
- *
- * This is a convenience for iOS consumers; the canonical flow (agent +
- * ImportMediaTool) still goes through the suspend-probe path.
- */
-suspend fun importWithKnownMetadata(
-    storage: io.talevia.core.platform.MediaStorage,
-    source: io.talevia.core.domain.MediaSource,
-    metadata: io.talevia.core.domain.MediaMetadata,
-): io.talevia.core.domain.MediaAsset = storage.import(source) { metadata }
-
-// =============================================================================
 // SKIE bridging: file-bundle ProjectStore factories
 // =============================================================================
 //

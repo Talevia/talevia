@@ -8,7 +8,6 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Track
 import io.talevia.core.domain.source.consistency.asStyleBible
 import io.talevia.core.permission.PermissionSpec
-import io.talevia.core.platform.MediaStorage
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
@@ -47,7 +46,6 @@ import kotlinx.serialization.serializer
  */
 class ApplyLutTool(
     private val store: ProjectStore,
-    private val media: MediaStorage,
 ) : Tool<ApplyLutTool.Input, ApplyLutTool.Output> {
 
     @Serializable data class Input(
@@ -145,7 +143,9 @@ class ApplyLutTool(
                             "(describe_source_node → set body.lutReference → update_source_node_body) first",
                     )
             }
-            media.get(lutId) ?: error("LUT asset '${lutId.value}' not found in the project's asset catalog")
+            if (project.assets.none { it.id == lutId }) {
+                error("LUT asset '${lutId.value}' not found in the project's asset catalog")
+            }
             resolvedLutId = lutId
 
             var tracks = project.timeline.tracks

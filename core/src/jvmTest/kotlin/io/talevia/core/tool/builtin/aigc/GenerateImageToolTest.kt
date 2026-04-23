@@ -5,6 +5,7 @@ import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
+import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.ProjectStoreTestKit
@@ -22,7 +23,6 @@ import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.ImageGenRequest
 import io.talevia.core.platform.ImageGenResult
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonPrimitive
@@ -95,7 +95,7 @@ class GenerateImageToolTest {
         val bundleRoot = "/projects/img".toPath()
         val pid = store.createAt(path = bundleRoot, title = "img").id
         val engine = FakeImageGenEngine(tinyPng, fixedModelVersion = "v1")
-        val tool = GenerateImageTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             GenerateImageTool.Input(
@@ -131,7 +131,7 @@ class GenerateImageToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/seed".toPath(), title = "seed").id
         val engine = FakeImageGenEngine(tinyPng)
-        val tool = GenerateImageTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             GenerateImageTool.Input(prompt = "no seed", width = 32, height = 32, seed = null, projectId = pid.value),
@@ -146,7 +146,7 @@ class GenerateImageToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/dim".toPath(), title = "dim").id
         val engine = FakeImageGenEngine(tinyPng)
-        val tool = GenerateImageTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             GenerateImageTool.Input(prompt = "sizes", width = 128, height = 256, seed = 1L, projectId = pid.value),
@@ -167,7 +167,7 @@ class GenerateImageToolTest {
             )
         }
         val engine = FakeImageGenEngine(tinyPng)
-        val tool = GenerateImageTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             GenerateImageTool.Input(
@@ -193,7 +193,7 @@ class GenerateImageToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/cache".toPath(), title = "cache").id
         val engine = FakeImageGenEngine(tinyPng, fixedModelVersion = "v1")
-        val tool = GenerateImageTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
         val input = GenerateImageTool.Input(
             prompt = "a cat on a mat",
             width = 64,
@@ -231,7 +231,7 @@ class GenerateImageToolTest {
         val expectedHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
 
         val engine = FakeImageGenEngine(tinyPng)
-        val tool = GenerateImageTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
         tool.execute(
             GenerateImageTool.Input(
                 prompt = "portrait",
@@ -261,7 +261,7 @@ class GenerateImageToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/ghost".toPath(), title = "ghost").id
         val engine = FakeImageGenEngine(tinyPng)
-        val tool = GenerateImageTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             GenerateImageTool.Input(
@@ -281,14 +281,18 @@ class GenerateImageToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/lora".toPath(), title = "lora").id
 
-        // Reference image lives outside the bundle; we still resolve it via
-        // the global storage so the engine receives a real path.
+        // Reference image lives outside the bundle; registered on Project.assets
+        // with an absolute MediaSource.File path so BundleMediaPathResolver
+        // returns it verbatim to the engine.
         val tmpDir = createTempDirectory("gen-image-lora-ref").toFile()
         val refFile = File(tmpDir, "ref.png").also { it.writeBytes(tinyPng) }
-        val storage = InMemoryMediaStorage()
-        val refAsset = storage.import(MediaSource.File(refFile.absolutePath)) { _ ->
-            MediaMetadata(duration = Duration.ZERO, resolution = Resolution(1, 1), frameRate = null)
-        }
+        val refAssetId = AssetId("ref-mei")
+        val refAsset = MediaAsset(
+            id = refAssetId,
+            source = MediaSource.File(refFile.absolutePath),
+            metadata = MediaMetadata(duration = Duration.ZERO, resolution = Resolution(1, 1), frameRate = null),
+        )
+        store.mutate(pid) { it.copy(assets = it.assets + refAsset) }
 
         store.mutateSource(pid) {
             it.addCharacterRef(
@@ -296,13 +300,13 @@ class GenerateImageToolTest {
                 CharacterRefBody(
                     name = "Mei",
                     visualDescription = "teal hair",
-                    referenceAssetIds = listOf(refAsset.id),
+                    referenceAssetIds = listOf(refAssetId),
                     loraPin = LoraPin(adapterId = "hf://mei-lora", weight = 0.8f),
                 ),
             )
         }
         val engine = FakeImageGenEngine(tinyPng)
-        val tool = GenerateImageTool(engine, storage, FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
             GenerateImageTool.Input(
@@ -340,7 +344,7 @@ class GenerateImageToolTest {
             )
         }
         val engine = FakeImageGenEngine(tinyPng)
-        val tool = GenerateImageTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
         val input = GenerateImageTool.Input(
             prompt = "portrait",
             seed = 42L,
@@ -372,7 +376,7 @@ class GenerateImageToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/origin".toPath(), title = "origin").id
         val engine = FakeImageGenEngine(tinyPng)
-        val tool = GenerateImageTool(engine, InMemoryMediaStorage(), FileBundleBlobWriter(store, fs), store)
+        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
         val ctxWithMsg = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("msg-42"),

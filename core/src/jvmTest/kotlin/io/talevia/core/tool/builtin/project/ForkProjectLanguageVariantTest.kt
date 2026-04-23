@@ -19,7 +19,6 @@ import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.SynthesizedAudio
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.TtsRequest
@@ -92,7 +91,6 @@ class ForkProjectLanguageVariantTest {
         val tmpDir = createTempDirectory("fork-lang-test").toFile()
         val store = ProjectStoreTestKit.create()
         val tts = FakeTtsEngine(fakeMp3)
-        val storage = InMemoryMediaStorage()
         val writer = FakeBlobWriter(tmpDir)
         val registry = ToolRegistry()
         registry.register(SynthesizeSpeechTool(tts, writer, store))

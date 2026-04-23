@@ -29,7 +29,6 @@ import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.ImageGenRequest
 import io.talevia.core.platform.ImageGenResult
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
@@ -102,14 +101,13 @@ class RegenerateStaleClipsToolTest {
     @Test fun regeneratesEachStaleClipAndSwapsAssetIdOnTimeline() = runTest {
         val tmpDir = createTempDirectory("regen-test").toFile()
         val store = ProjectStoreTestKit.create()
-        val storage = InMemoryMediaStorage()
         val engine = CountingImageEngine()
         val writer = FakeBlobWriter(tmpDir)
         val pid = ProjectId("p-regen")
         val clipId = ClipId("c-1")
 
         val registry = ToolRegistry()
-        registry.register(GenerateImageTool(engine, storage, writer, store))
+        registry.register(GenerateImageTool(engine, writer, store))
         registry.register(RegenerateStaleClipsTool(store, registry))
 
         // Seed: character_ref + a clip bound to it + a lockfile entry with baseInputs.
@@ -214,13 +212,12 @@ class RegenerateStaleClipsToolTest {
     @Test fun clipIdsFilterRegeneratesOnlyListedClips() = runTest {
         val tmpDir = createTempDirectory("regen-filter").toFile()
         val store = ProjectStoreTestKit.create()
-        val storage = InMemoryMediaStorage()
         val engine = CountingImageEngine()
         val writer = FakeBlobWriter(tmpDir)
         val pid = ProjectId("p-filter")
 
         val registry = ToolRegistry()
-        registry.register(GenerateImageTool(engine, storage, writer, store))
+        registry.register(GenerateImageTool(engine, writer, store))
         registry.register(RegenerateStaleClipsTool(store, registry))
 
         // Two clips, both stale, both bound to "mei" via lockfile snapshots.
@@ -323,14 +320,13 @@ class RegenerateStaleClipsToolTest {
     @Test fun skipsLegacyEntriesWithoutBaseInputs() = runTest {
         val tmpDir = createTempDirectory("regen-legacy").toFile()
         val store = ProjectStoreTestKit.create()
-        val storage = InMemoryMediaStorage()
         val engine = CountingImageEngine()
         val writer = FakeBlobWriter(tmpDir)
         val pid = ProjectId("p-legacy")
         val clipId = ClipId("c-1")
 
         val registry = ToolRegistry()
-        registry.register(GenerateImageTool(engine, storage, writer, store))
+        registry.register(GenerateImageTool(engine, writer, store))
         registry.register(RegenerateStaleClipsTool(store, registry))
 
         store.upsert(
@@ -417,14 +413,13 @@ class RegenerateStaleClipsToolTest {
     @Test fun skipsPinnedEntriesWithoutDispatching() = runTest {
         val tmpDir = createTempDirectory("regen-pinned").toFile()
         val store = ProjectStoreTestKit.create()
-        val storage = InMemoryMediaStorage()
         val engine = CountingImageEngine()
         val writer = FakeBlobWriter(tmpDir)
         val pid = ProjectId("p-pinned")
         val clipId = ClipId("c-hero")
 
         val registry = ToolRegistry()
-        registry.register(GenerateImageTool(engine, storage, writer, store))
+        registry.register(GenerateImageTool(engine, writer, store))
         registry.register(RegenerateStaleClipsTool(store, registry))
 
         store.upsert(

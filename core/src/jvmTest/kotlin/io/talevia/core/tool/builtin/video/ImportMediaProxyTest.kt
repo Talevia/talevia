@@ -16,7 +16,6 @@ import io.talevia.core.domain.ProxyPurpose
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.PermissionDecision
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.ProxyGenerator
 import io.talevia.core.platform.RenderProgress
@@ -64,7 +63,7 @@ class ImportMediaProxyTest {
         private var calls = 0
         val lastAssetId: String? get() = lastId
         private var lastId: String? = null
-        override suspend fun generate(asset: MediaAsset): List<ProxyAsset> {
+        override suspend fun generate(asset: MediaAsset, sourcePath: String): List<ProxyAsset> {
             calls += 1
             lastId = asset.id.value
             return proxies
@@ -72,7 +71,7 @@ class ImportMediaProxyTest {
     }
 
     private class ThrowingProxyGenerator : ProxyGenerator {
-        override suspend fun generate(asset: MediaAsset): List<ProxyAsset> {
+        override suspend fun generate(asset: MediaAsset, sourcePath: String): List<ProxyAsset> {
             throw RuntimeException("ffmpeg missing from PATH")
         }
     }
@@ -88,15 +87,14 @@ class ImportMediaProxyTest {
 
     private suspend fun rig(
         generator: ProxyGenerator,
-    ): Triple<FileProjectStore, InMemoryMediaStorage, ImportMediaTool> {
+    ): Pair<FileProjectStore, ImportMediaTool> {
         val projects = ProjectStoreTestKit.create()
         projects.upsert(
             "demo",
             Project(id = ProjectId("p"), timeline = Timeline()),
         )
-        val storage = InMemoryMediaStorage()
-        val tool = ImportMediaTool(storage, StubVideoEngine(), projects, proxyGenerator = generator)
-        return Triple(projects, storage, tool)
+        val tool = ImportMediaTool(StubVideoEngine(), projects, proxyGenerator = generator)
+        return projects to tool
     }
 
     private fun tempFilePath(): String {
@@ -115,7 +113,7 @@ class ImportMediaProxyTest {
                 ),
             ),
         )
-        val (projects, _, tool) = rig(gen)
+        val (projects, tool) = rig(gen)
         val result = tool.execute(
             ImportMediaTool.Input(path = tempFilePath(), projectId = "p"),
             ctx(),
@@ -131,7 +129,7 @@ class ImportMediaProxyTest {
     }
 
     @Test fun generatorFailuresAreSwallowedSoImportStillSucceeds() = runTest {
-        val (projects, _, tool) = rig(ThrowingProxyGenerator())
+        val (projects, tool) = rig(ThrowingProxyGenerator())
         val result = tool.execute(
             ImportMediaTool.Input(path = tempFilePath(), projectId = "p"),
             ctx(),
@@ -141,7 +139,7 @@ class ImportMediaProxyTest {
     }
 
     @Test fun emptyGeneratorYieldsZeroProxies() = runTest {
-        val (_, _, tool) = rig(RecordingProxyGenerator(proxies = emptyList()))
+        val (_, tool) = rig(RecordingProxyGenerator(proxies = emptyList()))
         val result = tool.execute(
             ImportMediaTool.Input(path = tempFilePath(), projectId = "p"),
             ctx(),
@@ -155,7 +153,7 @@ class ImportMediaProxyTest {
             purpose = ProxyPurpose.THUMBNAIL,
             resolution = Resolution(320, 180),
         )
-        val (projects, _, tool) = rig(
+        val (projects, tool) = rig(
             RecordingProxyGenerator(proxies = listOf(dup, dup.copy())),
         )
         val result = tool.execute(
@@ -167,7 +165,7 @@ class ImportMediaProxyTest {
     }
 
     @Test fun outputForLlmSurfacesProxyCount() = runTest {
-        val (_, _, tool) = rig(
+        val (_, tool) = rig(
             RecordingProxyGenerator(
                 proxies = listOf(
                     ProxyAsset(
@@ -194,8 +192,7 @@ class ImportMediaProxyTest {
         // keep import returning zero proxies and no Part side-effects.
         val projects = ProjectStoreTestKit.create()
         projects.upsert("demo", Project(id = ProjectId("p"), timeline = Timeline()))
-        val storage = InMemoryMediaStorage()
-        val tool = ImportMediaTool(storage, StubVideoEngine(), projects)
+        val tool = ImportMediaTool(StubVideoEngine(), projects)
         val result = tool.execute(
             ImportMediaTool.Input(path = tempFilePath(), projectId = "p"),
             ctx(),

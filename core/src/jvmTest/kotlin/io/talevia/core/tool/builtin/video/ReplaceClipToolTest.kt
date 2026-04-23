@@ -11,6 +11,7 @@ import io.talevia.core.TrackId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Filter
+import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
@@ -22,7 +23,6 @@ import io.talevia.core.domain.Transform
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
@@ -31,12 +31,14 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
+@OptIn(ExperimentalUuidApi::class)
 class ReplaceClipToolTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val media: InMemoryMediaStorage,
         val tool: ReplaceClipTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
@@ -44,8 +46,7 @@ class ReplaceClipToolTest {
 
     private suspend fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val media = InMemoryMediaStorage()
-        val tool = ReplaceClipTool(store, media)
+        val tool = ReplaceClipTool(store)
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),
@@ -55,11 +56,19 @@ class ReplaceClipToolTest {
             messages = emptyList(),
         )
         store.upsert("test", project)
-        return Rig(store, media, tool, ctx, project.id)
+        return Rig(store, tool, ctx, project.id)
     }
 
-    private suspend fun Rig.importAsset(path: String, durationSeconds: Double = 3.0): AssetId =
-        media.import(MediaSource.File(path)) { MediaMetadata(duration = durationSeconds.seconds) }.id
+    private suspend fun Rig.importAsset(path: String, durationSeconds: Double = 3.0): AssetId {
+        val assetId = AssetId(Uuid.random().toString())
+        val asset = MediaAsset(
+            id = assetId,
+            source = MediaSource.File(path),
+            metadata = MediaMetadata(duration = durationSeconds.seconds),
+        )
+        store.mutate(projectId) { it.copy(assets = it.assets + asset) }
+        return assetId
+    }
 
     private fun fakeProvenance(): GenerationProvenance = GenerationProvenance(
         providerId = "fake",

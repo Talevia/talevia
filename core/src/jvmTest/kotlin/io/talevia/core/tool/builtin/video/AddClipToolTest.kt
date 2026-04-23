@@ -9,6 +9,7 @@ import io.talevia.core.SessionId
 import io.talevia.core.TrackId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.FileProjectStore
+import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
@@ -17,7 +18,6 @@ import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionDecision
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -26,12 +26,14 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
+@OptIn(ExperimentalUuidApi::class)
 class AddClipToolTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val media: InMemoryMediaStorage,
         val tool: AddClipTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
@@ -39,8 +41,7 @@ class AddClipToolTest {
 
     private suspend fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val media = InMemoryMediaStorage()
-        val tool = AddClipTool(store, media)
+        val tool = AddClipTool(store)
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),
@@ -50,11 +51,19 @@ class AddClipToolTest {
             messages = emptyList(),
         )
         store.upsert("test", project)
-        return Rig(store, media, tool, ctx, project.id)
+        return Rig(store, tool, ctx, project.id)
     }
 
-    private suspend fun Rig.importAsset(path: String, durationSeconds: Double): AssetId =
-        media.import(MediaSource.File(path)) { MediaMetadata(duration = durationSeconds.seconds) }.id
+    private suspend fun Rig.importAsset(path: String, durationSeconds: Double): AssetId {
+        val assetId = AssetId(Uuid.random().toString())
+        val asset = MediaAsset(
+            id = assetId,
+            source = MediaSource.File(path),
+            metadata = MediaMetadata(duration = durationSeconds.seconds),
+        )
+        store.mutate(projectId) { it.copy(assets = it.assets + asset) }
+        return assetId
+    }
 
     private fun single(
         assetId: String,

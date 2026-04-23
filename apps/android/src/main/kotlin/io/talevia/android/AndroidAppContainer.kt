@@ -16,11 +16,8 @@ import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.permission.DefaultPermissionService
 import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.FileBundleBlobWriter
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.platform.InMemorySecretStore
-import io.talevia.core.platform.MediaBlobWriter
 import io.talevia.core.platform.MediaPathResolver
-import io.talevia.core.platform.MediaStorage
 import io.talevia.core.platform.SecretStore
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.provider.EnvProviderAuth
@@ -143,25 +140,15 @@ class AndroidAppContainer(context: Context) {
     )
 
     /**
-     * Bundle-local blob writer for AIGC tools (when wired). On Android only
-     * `import_media` consumes this today — the AIGC tools aren't registered
-     * here yet — but we wire it for parity with desktop / server.
+     * Bundle-local blob writer for AIGC + import tools. Persists generated
+     * bytes under `<bundleRoot>/media/`.
      */
     val bundleBlobWriter: BundleBlobWriter = FileBundleBlobWriter(projects)
 
     /**
-     * TODO(file-bundle-migration): legacy [MediaStorage] kept alive for tools
-     * that still receive it as a constructor arg (`ImportMediaTool`,
-     * `ExtractFrameTool`, `AddClipTool`, `ApplyLutTool`, …). Their migration
-     * to `Project.assets` happens in a separate task; once they're done this
-     * field can be deleted along with the in-memory placeholder.
-     */
-    val media: MediaStorage = InMemoryMediaStorage()
-
-    /**
-     * TODO(file-bundle-migration): the Media3 engine takes a [MediaPathResolver]
-     * for source-clip path resolution, but [io.talevia.core.tool.builtin.video.ExportTool]
-     * now hands a per-render [io.talevia.core.platform.BundleMediaPathResolver]
+     * The Media3 engine takes a [MediaPathResolver] for source-clip path
+     * resolution, but [io.talevia.core.tool.builtin.video.ExportTool] now
+     * hands a per-render [io.talevia.core.platform.BundleMediaPathResolver]
      * through `render(...)`. The constructor-time resolver is therefore
      * unreachable on the happy path; this stub yells if anything ever falls
      * through to it.
@@ -170,14 +157,6 @@ class AndroidAppContainer(context: Context) {
         error("call site must pass per-render BundleMediaPathResolver via render(resolver=...)")
     }
     val engine: VideoEngine = Media3VideoEngine(context, stubResolver)
-    /**
-     * Cache-tier blob writer. Generated frames live under the app cache dir;
-     * Project state holds the canonical asset reference, so OS eviction is
-     * recoverable by re-running the source tool.
-     */
-    val blobWriter: MediaBlobWriter = AndroidFileBlobWriter(
-        java.io.File(context.cacheDir, "talevia-generated"),
-    )
 
     /**
      * Media3-backed proxy generator — pulls a mid-duration thumbnail
@@ -186,12 +165,7 @@ class AndroidAppContainer(context: Context) {
      * `FfmpegProxyGenerator`. Cache-tier output under
      * `<cacheDir>/talevia-proxies/`, recoverable via re-import.
      */
-    // TODO(file-bundle-migration): Media3ProxyGenerator's pathResolver should be
-    // a per-import BundleMediaPathResolver. Today it falls back to the in-memory
-    // [media] which won't resolve any real asset; ImportMediaTool migration will
-    // replace this.
     val proxyGenerator = io.talevia.android.Media3ProxyGenerator(
-        pathResolver = media,
         proxyDir = java.io.File(context.cacheDir, "talevia-proxies"),
     )
     val permissions = DefaultPermissionService(bus)
@@ -225,16 +199,16 @@ class AndroidAppContainer(context: Context) {
         register(UnarchiveSessionTool(sessions))
         register(DeleteSessionTool(sessions))
         register(ReadPartTool(sessions))
-        register(ImportMediaTool(media, engine, projects, proxyGenerator = proxyGenerator))
-        register(ExtractFrameTool(engine, media, blobWriter))
-        register(AddClipTool(projects, media))
-        register(ReplaceClipTool(projects, media))
+        register(ImportMediaTool(engine, projects, proxyGenerator = proxyGenerator))
+        register(ExtractFrameTool(engine, projects, bundleBlobWriter))
+        register(AddClipTool(projects))
+        register(ReplaceClipTool(projects))
         register(SplitClipTool(projects))
         register(RemoveClipTool(projects))
         register(MoveClipTool(projects))
         register(SetClipSourceBindingTool(projects))
         register(DuplicateClipTool(projects))
-        register(TrimClipTool(projects, media))
+        register(TrimClipTool(projects))
         register(SetClipVolumeTool(projects))
         register(FadeAudioClipTool(projects))
         register(SetClipTransformTool(projects))
@@ -242,7 +216,7 @@ class AndroidAppContainer(context: Context) {
         register(ExportDryRunTool(projects))
         register(ApplyFilterTool(projects))
         register(RemoveFilterTool(projects))
-        register(ApplyLutTool(projects, media))
+        register(ApplyLutTool(projects))
         register(AddSubtitlesTool(projects))
         register(EditTextClipTool(projects))
         register(AddTransitionTool(projects))

@@ -13,8 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **delete-file-media-storage-interface** — `MediaStorage` / `FileMediaStorage` / `InMemoryMediaStorage` / `FileBlobWriter` 已被 `Project.assets` + `BundleMediaPathResolver` + `BundleBlobWriter` 替代，但仍被 `ExtractFrameTool` + `ApplyLutTool` + `ImportMediaTool` proxy 路径 + Android/iOS proxy generators 引用，导致容器仍要构造 `media: MediaStorage = InMemoryMediaStorage()` 占位。**方向：** 把这几个剩余消费方的 `media.get(assetId)` 切到 `project.assets.find { it.id == assetId }`；写路径切到 `FileBundleBlobWriter`；删 `MediaStorage` 接口 + 3 个实现 + 容器 placeholder。Rubric §3a-3。
-
 ## P1 — 中优，做完 P0 再排
 
 - **debt-resplit-project-query-tool** — `ProjectQueryTool.kt` 在 `6e7bd8f` 首次拆分至 540 行后又长回 547 行，说明上次拆分不彻底 / 漏了一个肥 select 分支。**方向：** 扫一遍各 `handle<Select>` 分支，把任何 > 40 行的单独挪到 `project/query/<select>.kt` 同级；主文件保留 dispatch + schema。Rubric §3a-3。

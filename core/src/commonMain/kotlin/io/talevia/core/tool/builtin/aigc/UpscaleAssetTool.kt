@@ -11,7 +11,7 @@ import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.BundleBlobWriter
-import io.talevia.core.platform.MediaPathResolver
+import io.talevia.core.platform.BundleMediaPathResolver
 import io.talevia.core.platform.UpscaleEngine
 import io.talevia.core.platform.UpscaleRequest
 import io.talevia.core.tool.Tool
@@ -68,12 +68,6 @@ import kotlin.uuid.Uuid
  */
 class UpscaleAssetTool(
     private val engine: UpscaleEngine,
-    /**
-     * Resolves the source asset id to an on-disk path the upscale engine can
-     * read. The newly-generated upscaled bytes are *written* via
-     * [bundleBlobWriter] (bundle-local), not via [resolver].
-     */
-    private val resolver: MediaPathResolver,
     private val bundleBlobWriter: BundleBlobWriter,
     private val projectStore: ProjectStore,
 ) : Tool<UpscaleAssetTool.Input, UpscaleAssetTool.Output> {
@@ -156,7 +150,13 @@ class UpscaleAssetTool(
         AigcBudgetGuard.enforce(id, projectStore, pid, ctx)
         val seed = AigcPipeline.ensureSeed(input.seed)
         val sourceAssetId = AssetId(input.assetId)
-        val sourcePath = resolver.resolve(sourceAssetId)
+        val project = projectStore.get(pid) ?: error("project ${pid.value} not found")
+        val bundleRoot = projectStore.pathOf(pid)
+            ?: error(
+                "project ${pid.value} has no registered bundle path; upscale_asset requires a " +
+                    "file-backed ProjectStore — open or create the bundle first.",
+            )
+        val sourcePath = BundleMediaPathResolver(project, bundleRoot).resolve(sourceAssetId)
 
         val inputHash = AigcPipeline.inputHash(
             listOf(

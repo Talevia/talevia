@@ -1,6 +1,7 @@
 package io.talevia.core.tool
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.PartId
@@ -8,13 +9,14 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
+import io.talevia.core.domain.MediaAsset
+import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.OutputProfile
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.AllowAllPermissionService
-import io.talevia.core.platform.InMemoryMediaStorage
 import io.talevia.core.session.Part
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.builtin.video.AddClipTool
@@ -41,12 +43,20 @@ class RevertTimelineTest {
         val bus = EventBus()
         val sessions = SqlDelightSessionStore(db, bus)
         val projects = ProjectStoreTestKit.create()
-        val media = InMemoryMediaStorage()
         val perms = AllowAllPermissionService()
 
         val sessionId = SessionId("s")
         val projectId = ProjectId("p")
-        projects.upsert("test", Project(projectId, Timeline(), outputProfile = OutputProfile.DEFAULT_1080P))
+        // Seed a fake asset so AddClipTool has something to reference without ffmpeg.
+        val asset = MediaAsset(
+            id = AssetId("fake-source"),
+            source = MediaSource.File("/tmp/fake.mp4"),
+            metadata = MediaMetadata(duration = 10.seconds),
+        )
+        projects.upsert(
+            "test",
+            Project(projectId, assets = listOf(asset), timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P),
+        )
         fun ctxFor(call: String, msg: String) = ToolContext(
             sessionId = sessionId,
             messageId = MessageId(msg),
@@ -56,11 +66,6 @@ class RevertTimelineTest {
             messages = emptyList(),
         )
         val ctx = ctxFor("c-add", "m-mutate")
-
-        // Seed a fake asset so AddClipTool has something to reference without ffmpeg.
-        val asset = media.import(MediaSource.File("/tmp/fake.mp4")) {
-            io.talevia.core.domain.MediaMetadata(duration = 10.seconds)
-        }
 
         // Capture the project baseline (empty) as the snapshot to revert to.
         val baselineSnapshotId = PartId("baseline")
@@ -75,7 +80,7 @@ class RevertTimelineTest {
             ),
         )
 
-        val addClip = AddClipTool(projects, media)
+        val addClip = AddClipTool(projects)
         val addResult = addClip.execute(
             AddClipTool.Input(
                 projectId = projectId.value,
@@ -108,15 +113,19 @@ class RevertTimelineTest {
         val bus = EventBus()
         val sessions = SqlDelightSessionStore(db, bus)
         val projects = ProjectStoreTestKit.create()
-        val media = InMemoryMediaStorage()
         val perms = AllowAllPermissionService()
 
         val sessionId = SessionId("s2")
         val projectId = ProjectId("p2")
-        projects.upsert("test", Project(projectId, Timeline(), outputProfile = OutputProfile.DEFAULT_1080P))
-        val asset = media.import(MediaSource.File("/tmp/a.mp4")) {
-            io.talevia.core.domain.MediaMetadata(duration = 10.seconds)
-        }
+        val asset = MediaAsset(
+            id = AssetId("fake-a"),
+            source = MediaSource.File("/tmp/a.mp4"),
+            metadata = MediaMetadata(duration = 10.seconds),
+        )
+        projects.upsert(
+            "test",
+            Project(projectId, assets = listOf(asset), timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P),
+        )
 
         fun ctxFor(call: String, msg: String) = ToolContext(
             sessionId = sessionId,
@@ -127,7 +136,7 @@ class RevertTimelineTest {
             messages = emptyList(),
         )
 
-        val addClip = AddClipTool(projects, media)
+        val addClip = AddClipTool(projects)
         val addResp = addClip.execute(
             AddClipTool.Input(
                 projectId = projectId.value,
