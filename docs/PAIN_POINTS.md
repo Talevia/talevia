@@ -337,3 +337,35 @@ annotation-driven "which filter belongs to which select" table
 (`@AppliesTo(SELECT_FOO)` on Input field) may amortise the cost. For
 now, the explicit matrix is readable and the bullets this cycle
 touches don't add new filter fields.
+
+---
+
+## 2026-04-23 — timeline-diff-tool (`<this commit>`)
+
+### Diff math duplicates between `diff_projects` and `project_query(select=timeline_diff)`
+`DiffProjectsTool.diffTimeline` + `changedClipFields` + `kindString`
+extension helpers were copied into the new
+`core/tool/builtin/project/query/TimelineDiffQuery.kt` because the
+`diff_projects` tool's `TimelineDiff` output type is part of its public
+`Output.timeline` surface — extracting it to a shared top-level type
+would have been a full row-types resplit the size of cycles 1+2.
+Decided to duplicate this cycle and log a P2 debt bullet
+(`debt-unify-project-diff-math`) so whichever cycle next touches
+`DiffProjectsTool` or adds another diff-style select can fold both
+call sites into a shared `core/tool/builtin/project/diff/` helper. The
+math is ~40 lines, so the immediate cost is bounded; the risk is that
+if the diff logic ever changes (new Clip subtype field in
+`changedClipFields`, etc.), both copies need the same edit.
+
+### Adding a select to `project_query` is now 8 coordinated edit sites
+Cycle 9 noted 7; this one hit 8 because the row type was new (not
+reusing `NodeRow`-style shape). The 8 sites: SELECT_* const +
+ALL_SELECTS set + Input field declarations (×2) + helpText paragraph
++ JSON Schema block (×2 for the two new properties) +
+`rejectIncompatibleFilters` rule + execute dispatch case + the
+sibling query file itself. Cycles 1-2 plus every "add a select" cycle
+since have hit the same shape. Threshold nobody's triggered yet:
+when `project_query` crosses ~20 selects, consider a formal "select
+plugin" shape (one file per select declaring its fragment of each
+site). Current counts: `project_query` 14 selects, `session_query`
+15, `source_query` 5.

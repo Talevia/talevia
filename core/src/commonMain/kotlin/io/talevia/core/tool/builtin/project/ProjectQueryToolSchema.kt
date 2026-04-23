@@ -63,6 +63,13 @@ internal val PROJECT_QUERY_HELP_TEXT: String =
         "`costCents` per entry (null = unknown pricing, counted separately), breaks " +
         "down by toolId and sessionId. Use to answer \"how much has this project " +
         "burned\".\n" +
+        "  • timeline_diff — single-row timeline-only diff between two snapshot-or-" +
+        "current states (filter: fromSnapshotId, toSnapshotId; at least one must be " +
+        "a snapshot id — both null is usage error). Returns tracks/clips added / " +
+        "removed / changed, plus identical + totalChanges. Use when you only need " +
+        "the timeline delta and want to save tokens vs diff_projects, which also " +
+        "emits source + lockfile sections. Same-project only — cross-project diff " +
+        "stays on diff_projects.\n" +
         "Common: limit (default 100, clamped 1..500), offset (default 0). Setting a filter " +
         "that doesn't apply to the chosen select fails loud so typos surface instead of silently " +
         "returning an empty list."
@@ -84,7 +91,7 @@ internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
                 "What to query: tracks | timeline_clips | assets | transitions | " +
                     "lockfile_entries | clips_for_asset | clips_for_source | " +
                     "clip | lockfile_entry | project_metadata | consistency_propagation | " +
-                    "spend (case-insensitive).",
+                    "spend | snapshots | timeline_diff (case-insensitive).",
             )
         }
         putJsonObject("trackKind") {
@@ -220,6 +227,23 @@ internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
         putJsonObject("offset") {
             put("type", "integer")
             put("description", "Skip N rows after filter+sort (default 0).")
+        }
+        putJsonObject("fromSnapshotId") {
+            put("type", "string")
+            put(
+                "description",
+                "\"from\" side of a timeline diff. Null = current live state. " +
+                    "select=timeline_diff only; at least one of (fromSnapshotId, toSnapshotId) " +
+                    "must be non-null.",
+            )
+        }
+        putJsonObject("toSnapshotId") {
+            put("type", "string")
+            put(
+                "description",
+                "\"to\" side of a timeline diff. Null = current live state. " +
+                    "select=timeline_diff only.",
+            )
         }
     }
     put("required", JsonArray(listOf(JsonPrimitive("select"))))

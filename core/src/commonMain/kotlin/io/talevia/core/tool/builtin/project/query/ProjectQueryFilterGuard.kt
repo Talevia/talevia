@@ -76,6 +76,10 @@ internal fun rejectIncompatibleProjectQueryFilters(
         if (select != ProjectQueryTool.SELECT_LOCKFILE_ENTRY && input.inputHash != null) {
             add("inputHash (select=lockfile_entry only)")
         }
+        if (select != ProjectQueryTool.SELECT_TIMELINE_DIFF) {
+            if (input.fromSnapshotId != null) add("fromSnapshotId (select=timeline_diff only)")
+            if (input.toSnapshotId != null) add("toSnapshotId (select=timeline_diff only)")
+        }
     }
     if (misapplied.isNotEmpty()) {
         error(

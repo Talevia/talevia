@@ -19,6 +19,7 @@ import io.talevia.core.tool.builtin.project.query.runProjectMetadataQuery
 import io.talevia.core.tool.builtin.project.query.runSnapshotsQuery
 import io.talevia.core.tool.builtin.project.query.runSpendQuery
 import io.talevia.core.tool.builtin.project.query.runTimelineClipsQuery
+import io.talevia.core.tool.builtin.project.query.runTimelineDiffQuery
 import io.talevia.core.tool.builtin.project.query.runTracksQuery
 import io.talevia.core.tool.builtin.project.query.runTransitionsQuery
 import kotlinx.serialization.KSerializer
@@ -137,6 +138,21 @@ class ProjectQueryTool(
         // ---- lockfile_entry drill-down (required for that select) ----
         /** Lockfile entry inputHash. Required for `select=lockfile_entry`; rejected elsewhere. */
         val inputHash: String? = null,
+        // ---- timeline_diff inputs (required for that select) ----
+        /**
+         * Snapshot id for the "from" side of a timeline diff. Null means
+         * "current live state of the project". Required for `select=timeline_diff`;
+         * rejected elsewhere. At least one of [fromSnapshotId] / [toSnapshotId]
+         * must be non-null — diffing current-vs-current would always be
+         * identical and is almost always a usage error.
+         */
+        val fromSnapshotId: String? = null,
+        /**
+         * Snapshot id for the "to" side of a timeline diff. Null means
+         * "current live state of the project". Required for `select=timeline_diff`;
+         * rejected elsewhere.
+         */
+        val toSnapshotId: String? = null,
         // ---- common ----
         /** Sort key — interpretation depends on [select]. See [helpText]. */
         val sortBy: String? = null,
@@ -200,6 +216,7 @@ class ProjectQueryTool(
             SELECT_CONSISTENCY_PROPAGATION -> runConsistencyPropagationQuery(project, input, limit, offset)
             SELECT_SPEND -> runSpendQuery(project)
             SELECT_SNAPSHOTS -> runSnapshotsQuery(project, input, clock)
+            SELECT_TIMELINE_DIFF -> runTimelineDiffQuery(project, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -218,12 +235,14 @@ class ProjectQueryTool(
         const val SELECT_CONSISTENCY_PROPAGATION = "consistency_propagation"
         const val SELECT_SPEND = "spend"
         const val SELECT_SNAPSHOTS = "snapshots"
+        const val SELECT_TIMELINE_DIFF = "timeline_diff"
         private val ALL_SELECTS = setOf(
             SELECT_TRACKS, SELECT_TIMELINE_CLIPS, SELECT_ASSETS,
             SELECT_TRANSITIONS, SELECT_LOCKFILE_ENTRIES,
             SELECT_CLIPS_FOR_ASSET, SELECT_CLIPS_FOR_SOURCE,
             SELECT_CLIP, SELECT_LOCKFILE_ENTRY, SELECT_PROJECT_METADATA,
             SELECT_CONSISTENCY_PROPAGATION, SELECT_SPEND, SELECT_SNAPSHOTS,
+            SELECT_TIMELINE_DIFF,
         )
 
         private const val DEFAULT_LIMIT = 100
