@@ -337,6 +337,26 @@ class Renderer(
      * notice sits on its own row, then leaves the line buffer unrepaintable
      * (the assistant text from the next attempt will stream as a fresh part).
      */
+    /**
+     * Print a one-line notice that a context-compaction pass just committed —
+     * `prunedCount` older tool outputs were marked compacted and replaced by
+     * a summary of `summaryLength` characters. Breaks any open assistant line
+     * first so the notice sits on its own row.
+     */
+    suspend fun compactedNotice(prunedCount: Int, summaryLength: Int) = mutex.withLock {
+        breakAssistantLineLocked()
+        markAllPartsUnrepaintableLocked()
+        invalidateBottomLocked()
+        val head = if (prunedCount == 0) {
+            "compacted session — summary $summaryLength chars"
+        } else {
+            val plural = if (prunedCount == 1) "" else "s"
+            "compacted $prunedCount tool output$plural — summary $summaryLength chars"
+        }
+        terminal.writer().println("  ${Styles.meta("⋯")} ${Styles.meta(head)}")
+        terminal.writer().flush()
+    }
+
     suspend fun retryNotice(attempt: Int, waitMs: Long, reason: String) = mutex.withLock {
         breakAssistantLineLocked()
         markAllPartsUnrepaintableLocked()

@@ -42,6 +42,11 @@ class EventRouter(
                 .collect { ev -> renderer.retryNotice(ev.attempt, ev.waitMs, ev.reason) }
         }
         jobs += scope.launch {
+            bus.subscribe<BusEvent.SessionCompacted>()
+                .filter { it.sessionId == activeSessionId() }
+                .collect { ev -> renderer.compactedNotice(ev.prunedCount, ev.summaryLength) }
+        }
+        jobs += scope.launch {
             // AssetsMissing is a project-scope event, not session-scope — every
             // open in this CLI run surfaces its warning regardless of which
             // session is active. Fires once per openAt that detects dangling

@@ -20,7 +20,6 @@
 
 ## P2 — 记债 / 观望
 
-- **compaction-drop-telemetry** — `Compactor` drop part 时只写 `store.markPartCompacted`，**没有**发 `BusEvent`；CLI / Desktop UI 无法在 compaction 发生时给用户反馈"刚丢掉 N 条旧 tool 输出"。**方向：** `BusEvent.SessionCompacted(sessionId, prunedCount, summaryLength)`；`Compactor.process` 在返回 `Result.Compacted` 前发一次；CLI 的 `EventRouter` 订阅并打印简短 notice。Rubric §5.4。
 - **source-consistency-propagation-runtime-test** — `core/domain/source/consistency/` 有 propagation 规则但缺一个端到端 runtime 测试：当一个 character_ref 节点更新 → 依赖它的下游 style / clip 能看到 stale。现状只有单元级 rule 测试，没有 "父改→子 stale" 的集成测试。**方向：** 在 `core/src/jvmTest` 加一个 source-DAG 集成测试：构造 parent + child 节点，改 parent body，assert 下游 stale-clip 报告出现对应 clipId。Rubric §5.5。
 - **bundle-mobile-document-picker** — Android / iOS 当前限制于 app sandbox 内的 bundle (`<filesDir>/projects/` / `Documents/projects/`)。用户没法从 SAF / Files.app 选一个外部 bundle 打开。**方向：** Android 接 `Storage Access Framework` (`Intent.ACTION_OPEN_DOCUMENT_TREE`)，iOS 接 `UIDocumentPickerViewController`，结果 URI / NSURL 通过 platform-specific resolver 转成 Okio Path 喂给 `FileProjectStore.openAt`。**触发条件：** CLAUDE.md 平台优先级窗口 mobile 从"不退化底线"升级为主动开发。Rubric §5.4 / mobile。
 - **bundle-talevia-json-split** — 当前 `talevia.json` 把 timeline + assets + source DAG + lockfile + snapshots 全装一个文件，单个 mutation 的 git diff 涨几百行；snapshot 多了文件可能涨到 MB 级。**方向：** 拆 `assets.json` / `timeline.json` / `lockfile.json` / `snapshots/<id>.json` 子文件；envelope `talevia.json` 只留 schemaVersion + 元数据 + 子文件清单。**触发条件：** 出现实际用户项目超限 diff 噪声 / snapshot 文件 ≥ 1 MB 的报告。Rubric §3a-3。

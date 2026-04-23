@@ -173,6 +173,39 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     /**
+     * A compaction pass **finished** and produced a summary part: [prunedCount]
+     * older tool outputs were marked compacted and a new `Part.Compaction` of
+     * [summaryLength] characters was attached to the latest assistant message.
+     * Emitted exactly once per successful `Compactor.process()` return-of-
+     * [Compactor.Result.Compacted], immediately after the compaction part is
+     * persisted.
+     *
+     * Pairs with [SessionCompactionAuto] (which fires *before* the pass starts,
+     * reporting the overflow that triggered it): auto-trigger → Compactor
+     * runs → [SessionCompacted] closes the pair. Manual `/compact` runs that
+     * also hit the `Compactor` emit this event too — it's the post-pass
+     * result signal, not the trigger signal.
+     *
+     * CLI / Desktop UIs subscribe to render a "compacted N tool outputs,
+     * summary NNN chars" notice in the transcript so the user sees what
+     * happened to the lost context. If [prunedCount] is 0 but a summary was
+     * still written, it means the pre-window envelope already fit but the
+     * summary path was exercised anyway — the notice should still fire
+     * (the summary replaces nothing but records session state).
+     *
+     * @property prunedCount Number of [Part.Tool] parts moved to compacted
+     *   state in this pass.
+     * @property summaryLength Character count of the summary body written
+     *   into the [Part.Compaction]. Characters, not tokens, so UIs can
+     *   render a human count without depending on a tokenizer.
+     */
+    data class SessionCompacted(
+        override val sessionId: SessionId,
+        val prunedCount: Int,
+        val summaryLength: Int,
+    ) : SessionEvent
+
+    /**
      * Explicit `Agent.run` state transition. See [AgentRunState] for the state
      * diagram and invariants. Emitted on every transition (including
      * `Idle → Generating` at run entry and the terminal transition to

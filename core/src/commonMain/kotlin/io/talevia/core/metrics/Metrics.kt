@@ -143,6 +143,7 @@ class EventBusMetricsSink(
         is BusEvent.AgentRetryScheduled -> "agent.retry.${retryReasonSlug(event.reason)}"
         is BusEvent.AgentProviderFallback -> "agent.provider.fallback"
         is BusEvent.SessionCompactionAuto -> "session.compaction.auto"
+        is BusEvent.SessionCompacted -> "session.compacted"
         is BusEvent.AgentRunStateChanged -> "agent.run.state.${stateTag(event.state)}"
         is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
         is BusEvent.ProjectValidationWarning -> "project.validation.warning"

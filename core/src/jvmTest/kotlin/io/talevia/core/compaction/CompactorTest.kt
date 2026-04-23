@@ -7,6 +7,7 @@ import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.agent.FakeProvider
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.provider.LlmEvent
@@ -19,7 +20,13 @@ import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.session.TokenUsage
 import io.talevia.core.session.ToolState
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.yield
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.json.JsonObject
@@ -230,6 +237,65 @@ class CompactorTest {
                 "when history carries a 55_000-token tool output in the pre-window " +
                 "(prunedCount=${compacted.prunedCount})",
         )
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun publishesSessionCompactedEventOnSuccessfulCompaction() = runTest {
+        // compaction-drop-telemetry bullet (Rubric §5.4): when `Compactor.process`
+        // returns `Result.Compacted`, it must emit exactly one
+        // `BusEvent.SessionCompacted` carrying the prunedCount + summaryLength
+        // so CLI / Desktop UIs can surface a "just compacted N outputs" notice.
+        // Without this event, the user sees a long pause + a shrunk context with
+        // no explanation of what happened. Skipped passes (`Result.Skipped`) must
+        // NOT emit — this test uses a forced-drop budget to guarantee the
+        // Compacted branch.
+        val (store, bus) = inMemoryStore()
+        val sid = SessionId("s-compacted")
+        val now = Clock.System.now()
+        store.createSession(Session(sid, ProjectId("p"), title = "x", createdAt = now, updatedAt = now))
+        val history = buildHistory(sid, now)
+        history.forEach { mwp ->
+            store.appendMessage(mwp.message)
+            mwp.parts.forEach { store.upsertPart(it) }
+        }
+
+        // Subscribe BEFORE process() runs — SharedFlow w/o replay drops events
+        // emitted before the collector resumes (same idiom as AgentCompactionTest).
+        val captured = mutableListOf<BusEvent.SessionCompacted>()
+        val job = bus.events
+            .filterIsInstance<BusEvent.SessionCompacted>()
+            .onEach { captured += it }
+            .launchIn(this)
+        yield()
+
+        val summaryBody = "Goal: cut a 30s clip.\nDiscoveries: fake details for test."
+        val summaryTurn = listOf(
+            LlmEvent.TextStart(PartId("summary-text")),
+            LlmEvent.TextEnd(PartId("summary-text"), summaryBody),
+            LlmEvent.StepFinish(FinishReason.END_TURN, TokenUsage(input = 50, output = 20)),
+        )
+        val compactor = Compactor(
+            provider = FakeProvider(listOf(summaryTurn)),
+            store = store,
+            bus = bus,
+            protectUserTurns = 1,
+            pruneProtectTokens = 100,
+        )
+
+        val result = compactor.process(sid, history, ModelRef("fake", "test"))
+        advanceUntilIdle()
+        job.cancel()
+
+        assertTrue(result is Compactor.Result.Compacted, "expected Compacted, got $result")
+        val r = result as Compactor.Result.Compacted
+
+        assertEquals(1, captured.size, "expected exactly one SessionCompacted event, got ${captured.size}")
+        val ev = captured.single()
+        assertEquals(sid, ev.sessionId)
+        assertEquals(r.prunedCount, ev.prunedCount, "event prunedCount must match Result.Compacted.prunedCount")
+        assertEquals(summaryBody.length, ev.summaryLength, "event summaryLength must match summary body character count")
+        assertTrue(ev.prunedCount > 0, "this fixture forces a drop — prunedCount must be > 0")
     }
 
     @Test

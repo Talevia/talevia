@@ -88,6 +88,7 @@ internal fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.AgentRetryScheduled -> "agent.retry.scheduled"
     is BusEvent.AgentProviderFallback -> "agent.provider.fallback"
     is BusEvent.SessionCompactionAuto -> "session.compaction.auto"
+    is BusEvent.SessionCompacted -> "session.compacted"
     is BusEvent.AgentRunStateChanged -> "agent.run.state.changed"
     is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
     is BusEvent.ProjectValidationWarning -> "project.validation.warning"
@@ -132,6 +133,10 @@ data class BusEventDto(
     val reason: String? = null,
     val historyTokensBefore: Int? = null,
     val thresholdTokens: Int? = null,
+    /** Set for `session.compacted` — number of parts marked compacted. */
+    val prunedCount: Int? = null,
+    /** Set for `session.compacted` — character count of the summary body. */
+    val summaryLength: Int? = null,
     /** `idle | generating | awaiting_tool | compacting | cancelled | failed` for `agent.run.state.changed`. */
     val runState: String? = null,
     /** Message-ish cause; set when `runState == "failed"`. */
@@ -198,6 +203,10 @@ data class BusEventDto(
             is BusEvent.SessionCompactionAuto -> BusEventDto(
                 "session.compaction.auto", e.sessionId.value,
                 historyTokensBefore = e.historyTokensBefore, thresholdTokens = e.thresholdTokens,
+            )
+            is BusEvent.SessionCompacted -> BusEventDto(
+                "session.compacted", e.sessionId.value,
+                prunedCount = e.prunedCount, summaryLength = e.summaryLength,
             )
             is BusEvent.AgentRunStateChanged -> {
                 val tag = when (val s = e.state) {

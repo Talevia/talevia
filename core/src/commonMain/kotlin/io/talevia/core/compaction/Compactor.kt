@@ -2,6 +2,7 @@ package io.talevia.core.compaction
 
 import io.talevia.core.PartId
 import io.talevia.core.SessionId
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.provider.LlmEvent
 import io.talevia.core.provider.LlmProvider
@@ -82,6 +83,14 @@ class Compactor(
             summary = summary,
         )
         store.upsertPart(compactionPart)
+
+        bus.publish(
+            BusEvent.SessionCompacted(
+                sessionId = sessionId,
+                prunedCount = prunedIds.size,
+                summaryLength = summary.length,
+            ),
+        )
 
         return Result.Compacted(prunedIds.size, summary, compactionPart.id)
     }
