@@ -49,7 +49,7 @@ class Repl(
     private val container: CliContainer,
     private val terminal: Terminal,
     private val reader: LineReader,
-    private val resume: Boolean,
+    private val bootstrapMode: BootstrapMode = BootstrapMode.Auto,
 ) {
     private enum class Outcome { CONTINUE, EXIT }
 
@@ -78,11 +78,13 @@ class Repl(
         println("${Styles.banner("talevia cli")} ${Styles.meta("· db=${container.dbPath} · provider=${provider.id}")}")
 
         val projectId = bootstrapProject()
-        var sessionId = bootstrapSession(projectId)
+        val bootstrapResult = bootstrapSession(container.sessions, projectId, bootstrapMode)
+        var sessionId = bootstrapResult.sessionId
         var modelId = defaultModelFor(provider.id)
         println(
             Styles.meta(
-                "project=${projectId.value.take(8)} · session=${sessionId.value.take(8)} · model=$modelId",
+                "project=${projectId.value.take(8)} · session=${sessionId.value.take(8)} " +
+                    "(${bootstrapResult.reason}) · model=$modelId",
             ),
         )
         println(Styles.meta("type /help for commands, /exit to quit (Ctrl+D also works)"))
@@ -575,28 +577,6 @@ class Repl(
         container.projects.upsert(
             "Untitled",
             Project(id = fresh, timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P),
-        )
-        return fresh
-    }
-
-    @OptIn(ExperimentalUuidApi::class)
-    private suspend fun bootstrapSession(projectId: ProjectId): SessionId {
-        if (resume) {
-            val existing = container.sessions.listSessions(projectId)
-                .filter { !it.archived }
-                .maxByOrNull { it.updatedAt }
-            if (existing != null) return existing.id
-        }
-        val fresh = SessionId(Uuid.random().toString())
-        val now = Clock.System.now()
-        container.sessions.createSession(
-            Session(
-                id = fresh,
-                projectId = projectId,
-                title = "Chat",
-                createdAt = now,
-                updatedAt = now,
-            ),
         )
         return fresh
     }

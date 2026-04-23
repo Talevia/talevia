@@ -1,10 +1,12 @@
 package io.talevia.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import io.talevia.cli.bootstrap.SecretBootstrapResult
 import io.talevia.cli.bootstrap.ensureProviderKey
+import io.talevia.cli.repl.BootstrapMode
 import io.talevia.cli.repl.Repl
 import io.talevia.cli.repl.buildInteractiveLineReader
 import io.talevia.core.logging.LogLevel
@@ -17,7 +19,27 @@ import kotlin.system.exitProcess
 private class TaleviaCli : CliktCommand(name = "talevia") {
     private val resume by option(
         "--resume",
-        help = "Resume the most recently updated session in the active project",
+        help = "Resume the most recently updated session (alias for the default auto-resume behavior; kept for backward compat).",
+    ).flag()
+
+    /**
+     * Resume a specific session whose id begins with this prefix — mirrors the
+     * `/resume <id-prefix>` slash command. Ambiguous or missing prefixes fall
+     * back to a fresh session with a reason string in the banner.
+     */
+    private val sessionPrefix by option(
+        "--session",
+        help = "Resume a session whose id starts with the given prefix (e.g. --session=a7f3).",
+    ).default("")
+
+    /**
+     * Force a brand-new session regardless of project history. The opposite of
+     * the default auto-resume; useful when the user explicitly wants a clean
+     * slate without archiving the previous session.
+     */
+    private val forceNew by option(
+        "--new",
+        help = "Start a fresh session even if the project has prior non-archived sessions.",
     ).flag()
 
     override fun run() {
@@ -44,7 +66,12 @@ private class TaleviaCli : CliktCommand(name = "talevia") {
 
             val container = CliContainer(env)
             try {
-                Repl(container, terminal, reader, resume = resume).run()
+                val mode = resolveBootstrapMode(
+                    resume = resume,
+                    sessionPrefix = sessionPrefix,
+                    forceNew = forceNew,
+                )
+                Repl(container, terminal, reader, bootstrapMode = mode).run()
             } finally {
                 container.close()
             }
@@ -131,6 +158,41 @@ private fun parseTitleOption(rest: List<String>): String? {
 }
 
 /**
+ * `--session=<prefix>` or `--session <prefix>`. Returns "" when not supplied —
+ * matches the Clikt default so both entry paths feed [resolveBootstrapMode]
+ * the same shape. Unknown tokens fall through untouched; Clikt / the project
+ * subcommand surface doesn't see this as an error path.
+ */
+private fun parseSessionOption(rest: List<String>): String {
+    val idx = rest.indexOfFirst { it == "--session" || it.startsWith("--session=") }
+    if (idx < 0) return ""
+    val tok = rest[idx]
+    if (tok.startsWith("--session=")) return tok.removePrefix("--session=")
+    return rest.getOrNull(idx + 1).orEmpty()
+}
+
+/**
+ * Collapse the three CLI boot flags into a single [BootstrapMode]. Precedence
+ * (strongest first): `--new` > `--session=<prefix>` > `--resume` > default
+ * auto-resume. `--resume` is back-compat (the default already auto-resumes),
+ * but we still honor it — users who scripted `talevia --resume` see no
+ * regression. When someone passes two flags that disagree (e.g. `--new` +
+ * `--session=...`) the "stronger" one wins rather than erroring — easier to
+ * reason about in shell pipelines than a Clikt-level conflict.
+ */
+internal fun resolveBootstrapMode(
+    resume: Boolean,
+    sessionPrefix: String,
+    forceNew: Boolean,
+): BootstrapMode = when {
+    forceNew -> BootstrapMode.ForceNew
+    sessionPrefix.isNotBlank() -> BootstrapMode.ByPrefix(sessionPrefix)
+    // `--resume` and "no flag" both map to Auto — by design (see KDoc on
+    // [TaleviaCli.resume]).
+    else -> BootstrapMode.Auto
+}
+
+/**
  * Boot the container, ensure the bundle exists / is open, and drop into the
  * REPL bound to that project. Mirrors [TaleviaCli.run] minus the resume
  * option (the user picked an explicit project; we don't auto-resume across
@@ -168,9 +230,14 @@ private fun runProjectFlow(path: String, mode: ProjectMode, title: String?, rest
             )
         }
         reader.printAbove("Project ${resolved.id.value} ready at $absolute")
-        // Honor a stray `--resume` token in restArgs (only meaningful for `open`).
-        val resume = restArgs.contains("--resume")
-        Repl(container, terminal, reader, resume = resume).run()
+        // Honor stray flags in restArgs (meaningful for `open` + bare path). Precedence
+        // mirrors the Clikt path: --new beats --session beats --resume beats default.
+        val mode = resolveBootstrapMode(
+            resume = restArgs.contains("--resume"),
+            sessionPrefix = parseSessionOption(restArgs),
+            forceNew = restArgs.contains("--new"),
+        )
+        Repl(container, terminal, reader, bootstrapMode = mode).run()
     } finally {
         container.close()
     }
