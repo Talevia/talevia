@@ -2,14 +2,14 @@ package io.talevia.core.tool.builtin.project
 
 import io.talevia.core.ProjectId
 import io.talevia.core.ProjectSnapshotId
-import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStore
-import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.project.diff.capTimelineDiff
+import io.talevia.core.tool.builtin.project.diff.computeTimelineDiffRaw
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -202,80 +202,14 @@ class DiffProjectsTool(
     }
 
     private fun diffTimeline(from: Project, to: Project): TimelineDiff {
-        val fromTracks = from.timeline.tracks.associateBy { it.id.value }
-        val toTracks = to.timeline.tracks.associateBy { it.id.value }
-
-        val tracksAdded = (toTracks.keys - fromTracks.keys).map { id ->
-            TrackRef(id, toTracks.getValue(id).kindString())
-        }
-        val tracksRemoved = (fromTracks.keys - toTracks.keys).map { id ->
-            TrackRef(id, fromTracks.getValue(id).kindString())
-        }
-
-        val fromClips = mutableMapOf<String, Pair<String, Clip>>()
-        from.timeline.tracks.forEach { t ->
-            t.clips.forEach { c -> fromClips[c.id.value] = t.id.value to c }
-        }
-        val toClips = mutableMapOf<String, Pair<String, Clip>>()
-        to.timeline.tracks.forEach { t ->
-            t.clips.forEach { c -> toClips[c.id.value] = t.id.value to c }
-        }
-
-        val clipsAdded = (toClips.keys - fromClips.keys).map { id ->
-            val (trackId, clip) = toClips.getValue(id)
-            ClipRef(id, trackId, clip.kindString())
-        }
-        val clipsRemoved = (fromClips.keys - toClips.keys).map { id ->
-            val (trackId, clip) = fromClips.getValue(id)
-            ClipRef(id, trackId, clip.kindString())
-        }
-        val clipsChanged = (fromClips.keys intersect toClips.keys).mapNotNull { id ->
-            val (fromTrackId, fromClip) = fromClips.getValue(id)
-            val (toTrackId, toClip) = toClips.getValue(id)
-            val fields = changedClipFields(fromTrackId, fromClip, toTrackId, toClip)
-            if (fields.isEmpty()) null else ClipChange(id, toTrackId, fields)
-        }
-
+        val raw = computeTimelineDiffRaw(from, to)
         return TimelineDiff(
-            tracksAdded = tracksAdded.cap(),
-            tracksRemoved = tracksRemoved.cap(),
-            clipsAdded = clipsAdded.cap(),
-            clipsRemoved = clipsRemoved.cap(),
-            clipsChanged = clipsChanged.cap(),
+            tracksAdded = raw.tracksAdded.map { TrackRef(it.trackId, it.kind) }.capTimelineDiff(MAX_DETAIL),
+            tracksRemoved = raw.tracksRemoved.map { TrackRef(it.trackId, it.kind) }.capTimelineDiff(MAX_DETAIL),
+            clipsAdded = raw.clipsAdded.map { ClipRef(it.clipId, it.trackId, it.kind) }.capTimelineDiff(MAX_DETAIL),
+            clipsRemoved = raw.clipsRemoved.map { ClipRef(it.clipId, it.trackId, it.kind) }.capTimelineDiff(MAX_DETAIL),
+            clipsChanged = raw.clipsChanged.map { ClipChange(it.clipId, it.trackId, it.changedFields) }.capTimelineDiff(MAX_DETAIL),
         )
-    }
-
-    private fun changedClipFields(fromTrack: String, from: Clip, toTrack: String, to: Clip): List<String> {
-        val fields = mutableListOf<String>()
-        if (fromTrack != toTrack) fields += "track"
-        if (from::class != to::class) {
-            // Different concrete clip subtype (e.g. video → text). Treat as a single
-            // catch-all "kind" change rather than enumerating every subtype-specific field.
-            fields += "kind"
-            return fields
-        }
-        if (from.timeRange != to.timeRange) fields += "timeRange"
-        if (from.sourceRange != to.sourceRange) fields += "sourceRange"
-        if (from.transforms != to.transforms) fields += "transforms"
-        if (from.sourceBinding != to.sourceBinding) fields += "sourceBinding"
-        when (from) {
-            is Clip.Video -> {
-                val t = to as Clip.Video
-                if (from.assetId != t.assetId) fields += "assetId"
-                if (from.filters != t.filters) fields += "filters"
-            }
-            is Clip.Audio -> {
-                val t = to as Clip.Audio
-                if (from.assetId != t.assetId) fields += "assetId"
-                if (from.volume != t.volume) fields += "volume"
-            }
-            is Clip.Text -> {
-                val t = to as Clip.Text
-                if (from.text != t.text) fields += "text"
-                if (from.style != t.style) fields += "style"
-            }
-        }
-        return fields
     }
 
     private fun diffSource(from: Project, to: Project): SourceDiff {
@@ -295,9 +229,9 @@ class DiffProjectsTool(
             else SourceNodeRef(id, t.kind)
         }
         return SourceDiff(
-            nodesAdded = added.cap(),
-            nodesRemoved = removed.cap(),
-            nodesChanged = changed.cap(),
+            nodesAdded = added.capTimelineDiff(MAX_DETAIL),
+            nodesRemoved = removed.capTimelineDiff(MAX_DETAIL),
+            nodesChanged = changed.capTimelineDiff(MAX_DETAIL),
         )
     }
 
@@ -314,21 +248,6 @@ class DiffProjectsTool(
             addedToolIds = byTool,
         )
     }
-
-    private fun Track.kindString(): String = when (this) {
-        is Track.Video -> "video"
-        is Track.Audio -> "audio"
-        is Track.Subtitle -> "subtitle"
-        is Track.Effect -> "effect"
-    }
-
-    private fun Clip.kindString(): String = when (this) {
-        is Clip.Video -> "video"
-        is Clip.Audio -> "audio"
-        is Clip.Text -> "text"
-    }
-
-    private fun <T> List<T>.cap(): List<T> = if (size <= MAX_DETAIL) this else take(MAX_DETAIL)
 
     companion object {
         /** Per-list cap on detail items. Counts in [Summary] remain exact. */

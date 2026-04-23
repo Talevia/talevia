@@ -1,0 +1,21 @@
+## 2026-04-23 — debt-unify-project-diff-math (VISION §3a / 重复代码)
+
+**Context.** `DiffProjectsTool.diffTimeline` and `project_query(select=timeline_diff)` (in `TimelineDiffQuery.kt`) carried two byte-identical copies of the timeline-diff math: ~40 lines of set arithmetic (tracks added/removed/changed via id, clips matched by id cross-tracks), the `changedClipFields` helper (~30 lines of per-subtype field comparison), and the `Track.kindString()` / `Clip.kindString()` stringifiers. When cycle 10 introduced `select=timeline_diff`, it duplicated rather than unified because `DiffProjectsTool`'s public `TimelineDiff` shape is part of its serialized `Output` surface — extracting would have been a row-types resplit the size of cycles 1+2. The PAIN_POINTS entry from that cycle explicitly flagged the risk: if either side's math ever changes (new `Clip` subtype field, new `Track` variant), both copies need the identical edit. Rubric delta §3a / DRY: 2 copies → 1 copy, without touching either tool's LLM-facing output shape.
+
+**Decision.** Added `core/src/commonMain/kotlin/io/talevia/core/tool/builtin/project/diff/TimelineDiffCompute.kt` containing:
+- `TimelineDiffRaw` with `RawTrackRef` / `RawClipRef` / `RawClipChange` — neutral, internal (module-visibility) data classes that neither tool's public surface knows about.
+- `computeTimelineDiffRaw(from, to)` — the single live copy of the set-diff + `changedClipFields` math + private `kindString` helpers.
+- `capTimelineDiff(max)` + `TIMELINE_DIFF_MAX_DETAIL` — shared cap primitive.
+
+Both `DiffProjectsTool` and `TimelineDiffQuery` now call `computeTimelineDiffRaw` and `.map {}` into their own `@Serializable` row types (`TrackRef`/`ClipRef`/`ClipChange` + `TimelineDiff` on the former, `TimelineDiffTrackRef`/…/`TimelineDiffRow` on the latter). The tools' serialized output shapes are byte-for-byte identical to before — no JSON surface change, no caller impact.
+
+Kept the row types separate (not lifted onto the shared helper): `DiffProjectsTool.TimelineDiff` is nested on the tool's Output alongside `SourceDiff` + `LockfileDiff`, and `TimelineDiffRow` carries `fromLabel` / `toLabel` / `identical` / `totalChanges` fields that only the query variant exposes. Merging the row types would either bloat `DiffProjectsTool.Output` with query-only fields or shrink `TimelineDiffRow`'s stable query surface — both regress the public contract. The neutral raw type is the right cut line.
+
+**Alternatives considered.**
+- *Make `computeTimelineDiff<T, C, Chg, R>(…, trackRefCtor: (String, String) -> T, …): R` a fully-generic builder with 5+ type parameters + lambda constructors.* Rejected as over-engineering. Kotlin's `.map { }` after the fact is one line per row type and strictly clearer than a 5-parameter generic. The generic version also buys nothing if a future third consumer emerges — they'd call `computeTimelineDiffRaw` and write their own mapping, same cost.
+- *Lift the `@Serializable` row types to the shared module and have both tools re-export.* Rejected because it forces one site to change its public type names (and callers to update) to satisfy the other's naming. `@Serializable` row types are output-surface; shared helpers should consume raw inputs and emit raw outputs, not mix serialization contracts.
+- *Put the helper on `DiffProjectsTool`'s companion and have `TimelineDiffQuery` import it.* Rejected because it makes `DiffProjectsTool` the de-facto owner of math that's equally used by a query select 10x lighter weight. The `project/diff/` package is the neutral home — future `branch_diff` / `snapshot_diff` tools would also live there.
+
+**Coverage.** Both tools' existing jvmTest suites stay green (`DiffProjectsToolTest` + `ProjectQueryToolTimelineDiffTest`). Since the extraction preserves byte-identical serialized output, no new tests needed — the behavioural guard is that cycle-10's assertions on `timeline_diff` output and cycle-pre-10's on `diff_projects` output continue to pass against the unified implementation.
+
+**Registration.** No `Tool<I, O>` touched, no `AppContainer` sweep — this is pure internal refactor. The new `diff/` package is module-internal (visibility = `internal`), so no external registration is possible.

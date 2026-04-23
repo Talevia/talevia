@@ -709,3 +709,65 @@ extend the R.5 scan with a heuristic that greps for
 `Schema.migrate` call but `*Test` doesn't exercise it, that's a
 runtime-untested critical path. Wouldn't have been hard to spot
 this gap earlier with a 3-line scan command.
+
+---
+
+## 2026-04-23 — debt-unify-project-diff-math (`<this commit>`)
+
+### "Neutral raw type + per-site row mapping" is a cleaner DRY cut than generic dispatch
+When a cycle decides two sites duplicate ~40 lines of math, the
+reflexive pattern is "parameterise over the row type and share everything."
+That's what I almost did here: `computeTimelineDiff<T, C, Chg, R>(…,
+trackRefCtor, clipRefCtor, clipChangeCtor, buildResult): R`. Five type
+parameters plus four lambda constructors. Every call site pays the
+cost of understanding the generic signature for zero generality gain —
+there are literally two sites. Switched pattern: extract the math to
+a neutral intermediate (`TimelineDiffRaw` with `RawTrackRef` etc. —
+plain data classes, module-internal), have each site call it then
+`.map { }` into its own `@Serializable` row types. Each call site
+picks up 5 lines of mapping; the shared helper has zero type
+parameters; both tools' public surfaces are byte-identical to before.
+Lesson: **when DRYing up duplicate math, start with "neutral raw type
++ call-site `.map` adapter" as the default shape** — reach for
+generics only when three sites need the same pattern AND the
+constructors meaningfully differ (not just "the two @Serializable
+types are named differently"). Generics-first is how most abstractions
+become harder to use than the duplication they replace.
+
+### Keeping `@Serializable` row types per-site is the rule, not the exception
+The anti-pattern this cycle almost fell into: lifting
+`DiffProjectsTool.TimelineDiff` / `ClipRef` etc. to `diff/` as the
+"shared public type", and having both tools re-export. That would
+have either (a) forced one side to change its public type name
+(`TrackRef` → `TimelineDiffTrackRef` or vice-versa — caller churn for
+no behavioural benefit) OR (b) added query-only fields like
+`fromLabel` / `toLabel` / `identical` / `totalChanges` to the
+`DiffProjectsTool` variant, since `TimelineDiffRow` carries those.
+Neither wins. Structural signal: **`@Serializable` row types that
+appear in a tool's `Output` surface are output contracts, not
+implementation details** — sharing them across tools couples the
+output surfaces in a way that neither tool wanted. This was the
+right call to land per-site row types when `timeline_diff` was
+introduced in cycle 10; what was wrong then was copying the *math*,
+not the *row types*. Rule of thumb worth remembering for the next
+time two tools' `Output` shapes look almost-but-not-quite the same:
+if the diff is "names + some extra fields on one side", share the
+math / computation, keep the row types separate.
+
+### `cap()` was private to DiffProjectsTool and got caught in the refactor net
+Initial refactor deleted `List<T>.cap()` extension + `MAX_DETAIL`
+const from `DiffProjectsTool.kt` as part of sweeping out the timeline
+math. But `DiffProjectsTool.diffSource` and `.diffLockfile` still
+called `.cap()` — three trailing call sites I didn't notice until
+compile. Fix: use `capTimelineDiff(MAX_DETAIL)` from the new shared
+module. The fact that `cap()` was private inside one tool but
+effectively meant the same thing across both tools' detail lists is
+why extraction was easy; the fact that it also guarded non-timeline
+sections (source + lockfile) inside the same tool is why the grep
+on "which site uses this helper?" wasn't enough. Lesson: when
+removing a private helper, also grep for *all* call sites inside the
+same file — not just the ones matching the refactor's primary
+concern. `grep -c '\.cap()' DiffProjectsTool.kt` would have shown me
+5 call sites when I only expected 5 for the timeline section alone
+(the file had 8 total). 30 seconds of grepping would have caught
+this before compile.
