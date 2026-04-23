@@ -22,7 +22,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-class DeleteSessionToolTest {
+class SessionActionToolDeleteTest {
 
     private data class Rig(
         val store: SqlDelightSessionStore,
@@ -81,8 +81,8 @@ class DeleteSessionToolTest {
         appendUser(rig.store, "s-1", "u-1")
         appendUser(rig.store, "s-1", "u-2")
 
-        val out = DeleteSessionTool(rig.store).execute(
-            DeleteSessionTool.Input(sessionId = "s-1"),
+        val out = SessionActionTool(rig.store).execute(
+            SessionActionTool.Input(action = "delete", sessionId = "s-1"),
             rig.ctx,
         ).data
 
@@ -98,8 +98,8 @@ class DeleteSessionToolTest {
     @Test fun missingSessionFailsLoud() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            DeleteSessionTool(rig.store).execute(
-                DeleteSessionTool.Input(sessionId = "ghost"),
+            SessionActionTool(rig.store).execute(
+                SessionActionTool.Input(action = "delete", sessionId = "ghost"),
                 rig.ctx,
             )
         }
@@ -111,8 +111,8 @@ class DeleteSessionToolTest {
         val rig = rig()
         seedSession(rig.store, archived = true)
 
-        val out = DeleteSessionTool(rig.store).execute(
-            DeleteSessionTool.Input(sessionId = "s-1"),
+        val out = SessionActionTool(rig.store).execute(
+            SessionActionTool.Input(action = "delete", sessionId = "s-1"),
             rig.ctx,
         ).data
         assertTrue(out.archived)
@@ -124,8 +124,8 @@ class DeleteSessionToolTest {
         seedSession(rig.store, id = "s-victim")
         seedSession(rig.store, id = "s-keeper", title = "keeper")
 
-        DeleteSessionTool(rig.store).execute(
-            DeleteSessionTool.Input(sessionId = "s-victim"),
+        SessionActionTool(rig.store).execute(
+            SessionActionTool.Input(action = "delete", sessionId = "s-victim"),
             rig.ctx,
         )
 

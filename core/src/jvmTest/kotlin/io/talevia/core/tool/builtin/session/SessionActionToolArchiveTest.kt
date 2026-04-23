@@ -20,7 +20,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class ArchiveSessionToolTest {
+class SessionActionToolArchiveTest {
 
     private val fixedClock: Clock = object : Clock {
         override fun now(): Instant = Instant.fromEpochMilliseconds(NOW_MS)
@@ -67,12 +67,12 @@ class ArchiveSessionToolTest {
         val rig = rig()
         seed(rig.store)
 
-        val out = ArchiveSessionTool(rig.store, fixedClock).execute(
-            ArchiveSessionTool.Input(sessionId = "s-1"),
+        val out = SessionActionTool(rig.store, fixedClock).execute(
+            SessionActionTool.Input(action = "archive", sessionId = "s-1"),
             rig.ctx,
         ).data
 
-        assertFalse(out.wasArchived)
+        assertFalse(out.wasAlreadyInTargetState)
         // Store's listSessions filters archived → session vanishes from the list view.
         val visible = rig.store.listSessions(null).map { it.id }
         assertTrue(SessionId("s-1") !in visible)
@@ -85,12 +85,12 @@ class ArchiveSessionToolTest {
         val rig = rig()
         seed(rig.store, archived = true)
 
-        val out = ArchiveSessionTool(rig.store, fixedClock).execute(
-            ArchiveSessionTool.Input(sessionId = "s-1"),
+        val out = SessionActionTool(rig.store, fixedClock).execute(
+            SessionActionTool.Input(action = "archive", sessionId = "s-1"),
             rig.ctx,
         ).data
 
-        assertTrue(out.wasArchived)
+        assertTrue(out.wasAlreadyInTargetState)
         val refreshed = rig.store.getSession(SessionId("s-1"))!!
         assertTrue(refreshed.archived)
     }
@@ -99,12 +99,12 @@ class ArchiveSessionToolTest {
         val rig = rig()
         seed(rig.store, archived = true)
 
-        val out = UnarchiveSessionTool(rig.store, fixedClock).execute(
-            UnarchiveSessionTool.Input(sessionId = "s-1"),
+        val out = SessionActionTool(rig.store, fixedClock).execute(
+            SessionActionTool.Input(action = "unarchive", sessionId = "s-1"),
             rig.ctx,
         ).data
 
-        assertFalse(out.wasUnarchived)
+        assertFalse(out.wasAlreadyInTargetState)
         val visible = rig.store.listSessions(null).map { it.id }
         assertTrue(SessionId("s-1") in visible)
     }
@@ -113,19 +113,19 @@ class ArchiveSessionToolTest {
         val rig = rig()
         seed(rig.store, archived = false)
 
-        val out = UnarchiveSessionTool(rig.store, fixedClock).execute(
-            UnarchiveSessionTool.Input(sessionId = "s-1"),
+        val out = SessionActionTool(rig.store, fixedClock).execute(
+            SessionActionTool.Input(action = "unarchive", sessionId = "s-1"),
             rig.ctx,
         ).data
 
-        assertTrue(out.wasUnarchived)
+        assertTrue(out.wasAlreadyInTargetState)
     }
 
     @Test fun archiveMissingSessionFailsLoud() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            ArchiveSessionTool(rig.store, fixedClock).execute(
-                ArchiveSessionTool.Input(sessionId = "ghost"),
+            SessionActionTool(rig.store, fixedClock).execute(
+                SessionActionTool.Input(action = "archive", sessionId = "ghost"),
                 rig.ctx,
             )
         }
@@ -135,8 +135,8 @@ class ArchiveSessionToolTest {
     @Test fun unarchiveMissingSessionFailsLoud() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            UnarchiveSessionTool(rig.store, fixedClock).execute(
-                UnarchiveSessionTool.Input(sessionId = "ghost"),
+            SessionActionTool(rig.store, fixedClock).execute(
+                SessionActionTool.Input(action = "unarchive", sessionId = "ghost"),
                 rig.ctx,
             )
         }
@@ -146,8 +146,8 @@ class ArchiveSessionToolTest {
     @Test fun archiveBumpsUpdatedAt() = runTest {
         val rig = rig()
         seed(rig.store)
-        ArchiveSessionTool(rig.store, fixedClock).execute(
-            ArchiveSessionTool.Input(sessionId = "s-1"),
+        SessionActionTool(rig.store, fixedClock).execute(
+            SessionActionTool.Input(action = "archive", sessionId = "s-1"),
             rig.ctx,
         )
         val refreshed = rig.store.getSession(SessionId("s-1"))!!

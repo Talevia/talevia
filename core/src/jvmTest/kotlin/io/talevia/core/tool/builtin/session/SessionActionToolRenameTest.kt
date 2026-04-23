@@ -19,7 +19,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
-class RenameSessionToolTest {
+class SessionActionToolRenameTest {
 
     private val fixedClock: Clock = object : Clock {
         override fun now(): Instant = Instant.fromEpochMilliseconds(NOW_MS)
@@ -62,8 +62,8 @@ class RenameSessionToolTest {
         val rig = rig()
         seed(rig.store)
 
-        val out = RenameSessionTool(rig.store, fixedClock).execute(
-            RenameSessionTool.Input(sessionId = "s-1", newTitle = "Mei arc"),
+        val out = SessionActionTool(rig.store, fixedClock).execute(
+            SessionActionTool.Input(action = "rename", sessionId = "s-1", newTitle = "Mei arc"),
             rig.ctx,
         ).data
 
@@ -79,8 +79,8 @@ class RenameSessionToolTest {
         seed(rig.store, title = "Same")
 
         val before = rig.store.getSession(SessionId("s-1"))!!.updatedAt
-        val out = RenameSessionTool(rig.store, fixedClock).execute(
-            RenameSessionTool.Input(sessionId = "s-1", newTitle = "Same"),
+        val out = SessionActionTool(rig.store, fixedClock).execute(
+            SessionActionTool.Input(action = "rename", sessionId = "s-1", newTitle = "Same"),
             rig.ctx,
         ).data
 
@@ -95,8 +95,8 @@ class RenameSessionToolTest {
         val rig = rig()
         seed(rig.store)
         assertFailsWith<IllegalArgumentException> {
-            RenameSessionTool(rig.store, fixedClock).execute(
-                RenameSessionTool.Input(sessionId = "s-1", newTitle = "   "),
+            SessionActionTool(rig.store, fixedClock).execute(
+                SessionActionTool.Input(action = "rename", sessionId = "s-1", newTitle = "   "),
                 rig.ctx,
             )
         }
@@ -105,8 +105,8 @@ class RenameSessionToolTest {
     @Test fun missingSessionFailsLoud() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            RenameSessionTool(rig.store, fixedClock).execute(
-                RenameSessionTool.Input(sessionId = "ghost", newTitle = "x"),
+            SessionActionTool(rig.store, fixedClock).execute(
+                SessionActionTool.Input(action = "rename", sessionId = "ghost", newTitle = "x"),
                 rig.ctx,
             )
         }

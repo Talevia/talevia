@@ -48,19 +48,16 @@ import io.talevia.core.tool.builtin.project.SetClipAssetPinnedTool
 import io.talevia.core.tool.builtin.project.SetLockfileEntryPinnedTool
 import io.talevia.core.tool.builtin.project.SetOutputProfileTool
 import io.talevia.core.tool.builtin.project.ValidateProjectTool
-import io.talevia.core.tool.builtin.session.ArchiveSessionTool
-import io.talevia.core.tool.builtin.session.DeleteSessionTool
 import io.talevia.core.tool.builtin.session.EstimateSessionTokensTool
 import io.talevia.core.tool.builtin.session.ExportSessionTool
 import io.talevia.core.tool.builtin.session.ForkSessionTool
 import io.talevia.core.tool.builtin.session.ReadPartTool
-import io.talevia.core.tool.builtin.session.RenameSessionTool
 import io.talevia.core.tool.builtin.session.RevertSessionTool
+import io.talevia.core.tool.builtin.session.SessionActionTool
 import io.talevia.core.tool.builtin.session.SessionQueryTool
 import io.talevia.core.tool.builtin.session.SetSessionSpendCapTool
 import io.talevia.core.tool.builtin.session.SetToolEnabledTool
 import io.talevia.core.tool.builtin.session.SwitchProjectTool
-import io.talevia.core.tool.builtin.session.UnarchiveSessionTool
 import io.talevia.core.tool.builtin.source.AddSourceNodeTool
 import io.talevia.core.tool.builtin.source.DescribeSourceNodeTool
 import io.talevia.core.tool.builtin.source.DiffSourceNodesTool
@@ -187,14 +184,11 @@ class AndroidAppContainer(context: Context) {
         register(ExportSessionTool(sessions))
         register(EstimateSessionTokensTool(sessions))
         register(ForkSessionTool(sessions))
-        register(RenameSessionTool(sessions))
         register(SetSessionSpendCapTool(sessions))
         register(SetToolEnabledTool(sessions))
         register(SwitchProjectTool(sessions, projects, bus = bus))
         register(RevertSessionTool(sessions, projects, bus))
-        register(ArchiveSessionTool(sessions))
-        register(UnarchiveSessionTool(sessions))
-        register(DeleteSessionTool(sessions))
+        register(SessionActionTool(sessions))
         register(ReadPartTool(sessions))
         register(ImportMediaTool(engine, projects, proxyGenerator = proxyGenerator))
         register(ExtractFrameTool(engine, projects, bundleBlobWriter))
