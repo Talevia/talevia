@@ -9,6 +9,8 @@ plugins {
     alias(libs.plugins.android.application) apply false
     alias(libs.plugins.android.library) apply false
     alias(libs.plugins.ktlint) apply false
+    alias(libs.plugins.kotlinx.benchmark) apply false
+    alias(libs.plugins.kotlin.allopen) apply false
 }
 
 allprojects {
