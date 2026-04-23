@@ -2,7 +2,6 @@ package io.talevia.core
 
 import app.cash.sqldelight.driver.native.NativeSqliteDriver
 import io.ktor.client.HttpClient
-import okio.Path.Companion.toPath
 import io.ktor.client.engine.darwin.Darwin
 import io.talevia.core.agent.Agent
 import io.talevia.core.agent.RunInput
@@ -38,6 +37,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.takeWhile
+import okio.Path.Companion.toPath
 import platform.Foundation.NSData
 import platform.Foundation.NSProcessInfo
 import platform.Foundation.create

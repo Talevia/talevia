@@ -25,8 +25,7 @@ import kotlinx.serialization.serializer
  *
  * Replaces the pre-split `pin_clip_asset` + `unpin_clip_asset` tool pair with
  * a single upsert. For the LLM, two mutually-exclusive branches were pure spec
- * cost — `set_<concept>_pinned` mirrors the `set_character_ref` shape we use
- * for source-node upserts. See `docs/decisions/2026-04-21-debt-merge-pin-unpin-tool-pairs.md`.
+ * cost. See `docs/decisions/2026-04-21-debt-merge-pin-unpin-tool-pairs.md`.
  *
  * Resolution path: `ClipId` → `Clip.Video|Audio.assetId` →
  * `Lockfile.findByAssetId` (most-recent match) → `Lockfile.withEntryPinned`.

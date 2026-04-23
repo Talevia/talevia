@@ -5,7 +5,6 @@ import io.talevia.core.ProjectId
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.ProjectStore
 import okio.FileSystem
-import okio.Path.Companion.toPath
 
 /**
  * Writes opaque byte blobs into a project bundle's `media/` directory and

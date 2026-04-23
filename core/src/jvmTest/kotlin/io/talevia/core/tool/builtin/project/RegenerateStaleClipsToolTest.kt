@@ -23,13 +23,13 @@ import io.talevia.core.domain.source.deepContentHashOf
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.domain.source.replaceNode
 import io.talevia.core.permission.PermissionDecision
+import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.GeneratedImage
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.ImageGenRequest
 import io.talevia.core.platform.ImageGenResult
 import io.talevia.core.platform.InMemoryMediaStorage
-import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
@@ -38,7 +38,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
-import java.nio.file.Files
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -80,15 +79,15 @@ class RegenerateStaleClipsToolTest {
 
     private class FakeBlobWriter(private val rootDir: File) : BundleBlobWriter {
         override suspend fun writeBlob(
-                projectId: io.talevia.core.ProjectId,
-                assetId: io.talevia.core.AssetId,
-                bytes: ByteArray,
-                format: String,
-            ): MediaSource.BundleFile {
+            projectId: io.talevia.core.ProjectId,
+            assetId: io.talevia.core.AssetId,
+            bytes: ByteArray,
+            format: String,
+        ): MediaSource.BundleFile {
             val file = File(rootDir, "${assetId.value}.$format")
             file.writeBytes(bytes)
             return MediaSource.BundleFile("media/${file.name}")
-}
+        }
     }
 
     private fun ctx(): ToolContext = ToolContext(

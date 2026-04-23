@@ -32,10 +32,10 @@ import okio.Path.Companion.toPath
 /**
  * Bootstrap a project *pre-populated* with a genre skeleton (VISION §5.4
  * novice path). `create_project` alone leaves a blank source DAG — the
- * agent then has to `set_character_ref` + `set_style_bible` + …
- * before it can do anything useful with AIGC. This tool inverts the order:
- * pick a genre template, get a working source graph with placeholder
- * character / style / scene stubs, then refine.
+ * agent then has to call `add_source_node` for a character_ref, a
+ * style_bible, and so on before it can do anything useful with AIGC. This
+ * tool inverts the order: pick a genre template, get a working source graph
+ * with placeholder character / style / scene stubs, then refine.
  *
  * Five templates, one per genre schema that ships in
  * `core/domain/source/genre/`. Each genre's seed body is extracted into its
@@ -110,11 +110,10 @@ class CreateProjectFromTemplateTool(
             "agent doesn't start from zero nodes. Templates: narrative / vlog / ad / " +
             "musicmv / tutorial. Pass template='auto' plus an `intent` string to let " +
             "the tool classify the genre from keywords (novice path — one call, " +
-            "source DAG pre-populated). All seeded nodes use TODO placeholders — replace " +
-            "them via update_source_node_body / set_character_ref / set_style_bible / " +
-            "set_brand_palette before the first AIGC call. The musicmv template does " +
-            "not seed a musicmv.track node (needs an imported music asset first). " +
-            "Resolution + fps options same as create_project."
+            "source DAG pre-populated). All seeded nodes use TODO placeholders — fill " +
+            "them in via update_source_node_body before the first AIGC call. The " +
+            "musicmv template does not seed a musicmv.track node (needs an imported " +
+            "music asset first). Resolution + fps options same as create_project."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.write")

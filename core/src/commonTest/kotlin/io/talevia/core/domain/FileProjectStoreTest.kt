@@ -2,7 +2,6 @@ package io.talevia.core.domain
 
 import io.talevia.core.AssetId
 import io.talevia.core.ClipId
-import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.TrackId
 import io.talevia.core.domain.lockfile.Lockfile
@@ -15,8 +14,8 @@ import okio.Path.Companion.toPath
 import okio.fakefilesystem.FakeFileSystem
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
@@ -309,5 +308,4 @@ class FileProjectStoreTest {
         assertEquals(Lockfile.EMPTY, created.lockfile)
         assertEquals(0, store.get(created.id)!!.lockfile.entries.size)
     }
-
 }

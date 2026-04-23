@@ -27,27 +27,18 @@ import kotlinx.serialization.serializer
 
 /**
  * Replace a source node's [io.talevia.core.domain.source.SourceNode.body] wholesale —
- * the generic, kind-agnostic body editor the update_* trio deliberately does not cover.
+ * the single body editor for every kind, consistency or otherwise.
  *
- * The three `set_character_ref` / `set_style_bible` / `set_brand_palette` tools
- * exist for the consistency kinds because those have typed bodies, field-level
- * semantics (which field to clear vs patch), and a small enough surface that a
- * partial-patch ergonomic is worth the extra code. Every other kind — narrative.shot,
- * vlog.raw_footage, musicmv.*, tutorial.*, ad.*, or anything the agent created via
- * `import_source_node` — has no body-editing path. The workaround was
- * `remove_source_node` + re-`import_source_node` which:
- *
- *   1. Loses the id (every clip `sourceBinding`, every `parents` ref, every
- *      lockfile `sourceBinding` entry is dropped),
- *   2. Forces the agent to re-specify the whole body plus re-bind every descendant,
- *   3. Is one of the most error-prone multi-step flows we ask the model to execute.
- *
- * This tool closes that gap with full-replacement semantics. Partial-patch is
- * deliberately out of scope — the caller is expected to round-trip via
- * `describe_source_node` (read current body), mutate client-side, and write back.
- * A generic JSON merge has too many ambiguities (null = clear or keep? arrays =
- * replace or concat?) for a generic tool to make one choice the agent will
- * always read as intended; whole-body replace is unambiguous.
+ * The consistency kinds (character_ref / style_bible / brand_palette) once had
+ * bespoke `set_*` tools with partial-patch semantics; they were removed in
+ * favour of the kind-agnostic pair `add_source_node` + `update_source_node_body`
+ * (see docs/decisions/2026-04-22-debt-fold-set-source-node-body-helpers.md).
+ * Partial-patch is deliberately out of scope — the caller is expected to
+ * round-trip via `describe_source_node` (read current body), mutate
+ * client-side, and write back. A generic JSON merge has too many ambiguities
+ * (null = clear or keep? arrays = replace or concat?) for a generic tool to
+ * make one choice the agent will always read as intended; whole-body replace
+ * is unambiguous.
  *
  * **Scope — body only.**
  *  - `kind` is not editable here. Changing a node's kind is a type change, not an
@@ -68,13 +59,11 @@ import kotlinx.serialization.serializer
  *
  * **No TimelineSnapshot.** Body edits touch zero [io.talevia.core.domain.Clip]
  * fields (`sourceBinding` is by id, not by hash), so `revert_timeline` would be a
- * no-op anyway. Following the pattern of `set_character_ref` /
- * `set_source_node_parents`, which also don't emit snapshots for pure-source
- * mutations. Project-level undo for source edits lives in
- * `save_project_snapshot` / `restore_project_snapshot`.
+ * no-op anyway. Following the same pattern as `set_source_node_parents`, which
+ * also doesn't emit snapshots for pure-source mutations. Project-level undo
+ * for source edits lives in `save_project_snapshot` / `restore_project_snapshot`.
  *
- * **Permission.** `source.write` — same tier as `set_character_ref` /
- * `set_source_node_parents`.
+ * **Permission.** `source.write` — same tier as the rest of the source-write family.
  */
 class UpdateSourceNodeBodyTool(
     private val projects: ProjectStore,
@@ -145,13 +134,12 @@ class UpdateSourceNodeBodyTool(
     override val id: String = "update_source_node_body"
     override val helpText: String =
         "Replace a source node's body wholesale (full replacement — no partial-patch). Kind-agnostic: " +
-            "works on any node kind (narrative.shot, vlog.raw_footage, musicmv.*, tutorial.*, ad.*, " +
-            "or any imported/hand-authored node). Use set_character_ref / set_style_bible / " +
-            "set_brand_palette instead for those three consistency kinds when you want partial-patch " +
-            "ergonomics. Does NOT touch kind (rebuild the node if the kind must change), parents " +
-            "(use set_source_node_parents), or id (use rename_source_node). Bumps contentHash so " +
-            "bound clips go stale — run find_stale_clips after editing to surface them. " +
-            "Required workflow: call describe_source_node first to read the current body, " +
+            "works on any node kind (core.consistency.character_ref / style_bible / brand_palette, " +
+            "narrative.shot, vlog.raw_footage, musicmv.*, tutorial.*, ad.*, or any imported / " +
+            "hand-authored node). Does NOT touch kind (rebuild the node if the kind must change), " +
+            "parents (use set_source_node_parents), or id (use rename_source_node). Bumps " +
+            "contentHash so bound clips go stale — run find_stale_clips after editing to surface " +
+            "them. Required workflow: call describe_source_node first to read the current body, " +
             "mutate the JsonObject client-side (keep every field you want to retain — this is " +
             "NOT a patch), then pass the complete new object as `body`. Never call with `body` " +
             "missing or empty; there is no partial-update fallback."

@@ -23,13 +23,13 @@ import io.talevia.core.domain.source.consistency.addCharacterRef
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.domain.staleClipsFromLockfile
 import io.talevia.core.permission.PermissionDecision
+import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.GeneratedImage
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.ImageGenRequest
 import io.talevia.core.platform.ImageGenResult
 import io.talevia.core.platform.InMemoryMediaStorage
-import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
@@ -37,7 +37,7 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
-import io.talevia.core.tool.builtin.source.SetCharacterRefTool
+import io.talevia.core.tool.builtin.source.UpdateSourceNodeBodyTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -46,7 +46,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import java.io.File
-import java.nio.file.Files
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -100,15 +99,15 @@ class RefactorLoopE2ETest {
 
     private class FakeBlobWriter(private val rootDir: File) : BundleBlobWriter {
         override suspend fun writeBlob(
-                projectId: io.talevia.core.ProjectId,
-                assetId: io.talevia.core.AssetId,
-                bytes: ByteArray,
-                format: String,
-            ): MediaSource.BundleFile {
+            projectId: io.talevia.core.ProjectId,
+            assetId: io.talevia.core.AssetId,
+            bytes: ByteArray,
+            format: String,
+        ): MediaSource.BundleFile {
             val file = File(rootDir, "${assetId.value}.$format")
             file.writeBytes(bytes)
             return MediaSource.BundleFile("media/${file.name}")
-}
+        }
     }
 
     private class FakeVideoEngine : VideoEngine {
@@ -150,7 +149,7 @@ class RefactorLoopE2ETest {
 
         val registry = ToolRegistry()
         registry.register(GenerateImageTool(imageEngine, storage, writer, store))
-        registry.register(SetCharacterRefTool(store))
+        registry.register(UpdateSourceNodeBodyTool(store))
         registry.register(RegenerateStaleClipsTool(store, registry))
         registry.register(ExportTool(store, videoEngine))
 
@@ -220,12 +219,20 @@ class RefactorLoopE2ETest {
         )
         assertEquals(1, videoEngine.renderCalls)
 
-        // --- 2. edit the character — this is the §6 "rename Mei's hair" step
-        registry["set_character_ref"]!!.dispatch(
+        // --- 2. edit the character — this is the §6 "rename Mei's hair" step.
+        // update_source_node_body is full-replacement; re-supply every character_ref
+        // field we want to keep (name) alongside the mutated visualDescription.
+        registry["update_source_node_body"]!!.dispatch(
             buildJsonObject {
                 put("projectId", pid.value)
                 put("nodeId", "mei")
-                put("visualDescription", "red hair")
+                put(
+                    "body",
+                    buildJsonObject {
+                        put("name", "Mei")
+                        put("visualDescription", "red hair")
+                    },
+                )
             },
             ctx(),
         )

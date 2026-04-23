@@ -116,7 +116,10 @@ class ApplyLutTool(
                 val style = node.asStyleBible()
                     ?: error("node '${sid.value}' exists but is not a style_bible (kind=${node.kind})")
                 style.lutReference
-                    ?: error("style_bible '${sid.value}' has no lutReference; set one via set_style_bible first")
+                    ?: error(
+                        "style_bible '${sid.value}' has no lutReference; set one by updating the node's body " +
+                            "(describe_source_node → set body.lutReference → update_source_node_body) first",
+                    )
             }
             media.get(lutId) ?: error("LUT asset '${lutId.value}' not found in the project's asset catalog")
             resolvedLutId = lutId

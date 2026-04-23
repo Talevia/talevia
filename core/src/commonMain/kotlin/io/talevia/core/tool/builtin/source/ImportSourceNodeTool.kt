@@ -58,9 +58,9 @@ import kotlinx.serialization.serializer
  *  - different contentHash → fail loudly with rename hint
  *
  * **Self-import is rejected** on the live path (`fromProjectId == toProjectId`);
- * within-project copies belong to `set_character_ref` / `set_style_bible` etc
- * with a fresh id. The envelope path doesn't need this check — by construction
- * the envelope was produced outside the target project.
+ * within-project copies belong to `add_source_node` with a fresh id. The
+ * envelope path doesn't need this check — by construction the envelope was
+ * produced outside the target project.
  *
  * **Envelope version check.** The envelope path rejects payloads whose
  * `formatVersion` ≠ [ExportSourceNodeTool.FORMAT_VERSION]; version drift is a
@@ -191,8 +191,7 @@ class ImportSourceNodeTool(
         val fromNodeIdStr = input.fromNodeId!!
         require(fromProjectIdStr != toPid.value) {
             "fromProjectId and toProjectId are the same ($fromProjectIdStr); " +
-                "use set_character_ref / set_style_bible / set_brand_palette with a fresh nodeId " +
-                "for within-project copies."
+                "use add_source_node with a fresh nodeId for within-project copies."
         }
         val fromPid = ProjectId(fromProjectIdStr)
         val fromProject = projects.get(fromPid)

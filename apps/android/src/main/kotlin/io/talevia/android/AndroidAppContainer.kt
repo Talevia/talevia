@@ -74,10 +74,7 @@ import io.talevia.core.tool.builtin.source.ForkSourceNodeTool
 import io.talevia.core.tool.builtin.source.ImportSourceNodeTool
 import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
 import io.talevia.core.tool.builtin.source.RenameSourceNodeTool
-import io.talevia.core.tool.builtin.source.SetBrandPaletteTool
-import io.talevia.core.tool.builtin.source.SetCharacterRefTool
 import io.talevia.core.tool.builtin.source.SetSourceNodeParentsTool
-import io.talevia.core.tool.builtin.source.SetStyleBibleTool
 import io.talevia.core.tool.builtin.source.SourceQueryTool
 import io.talevia.core.tool.builtin.source.UpdateSourceNodeBodyTool
 import io.talevia.core.tool.builtin.video.AddClipTool
@@ -277,9 +274,6 @@ class AndroidAppContainer(context: Context) {
         register(DiffProjectsTool(projects))
         register(ExportProjectTool(projects))
         register(ImportProjectFromJsonTool(projects))
-        register(SetCharacterRefTool(projects))
-        register(SetStyleBibleTool(projects))
-        register(SetBrandPaletteTool(projects))
         register(SourceQueryTool(projects))
         register(DescribeSourceNodeTool(projects))
         register(DiffSourceNodesTool(projects))

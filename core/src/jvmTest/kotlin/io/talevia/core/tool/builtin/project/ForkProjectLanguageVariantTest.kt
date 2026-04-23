@@ -17,9 +17,9 @@ import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionDecision
+import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.platform.InMemoryMediaStorage
-import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.SynthesizedAudio
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.TtsRequest
@@ -70,15 +70,15 @@ class ForkProjectLanguageVariantTest {
 
     private class FakeBlobWriter(private val rootDir: File) : BundleBlobWriter {
         override suspend fun writeBlob(
-                projectId: io.talevia.core.ProjectId,
-                assetId: io.talevia.core.AssetId,
-                bytes: ByteArray,
-                format: String,
-            ): MediaSource.BundleFile {
+            projectId: io.talevia.core.ProjectId,
+            assetId: io.talevia.core.AssetId,
+            bytes: ByteArray,
+            format: String,
+        ): MediaSource.BundleFile {
             val file = File(rootDir, "${assetId.value}.$format")
             file.writeBytes(bytes)
             return MediaSource.BundleFile("media/${file.name}")
-}
+        }
     }
 
     private data class Rig(

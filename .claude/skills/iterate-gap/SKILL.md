@@ -25,7 +25,7 @@ description: 从 docs/BACKLOG.md 挑最高优先级任务，plan → 实现 → 
 - **提问**：零次。遇到决策点按 VISION + 业界共识自行决定，理由写成一份 `docs/decisions/<yyyy-mm-dd>-<slug>.md` 新文件。如果真的卡在只有用户能回答的问题（专有 key、产品抉择、品牌偏好），**换一个 gap**（从 backlog 的下一条取），不要干等，也不要问。
 - **Backlog 是唯一任务源**：所有候选 gap 都来自 `docs/BACKLOG.md`。空 backlog → 先 rubric-repopulate（见下文 R 小节），再继续。不要凭空脑补"临时 gap"绕过 backlog。
 - **先 plan 再实现**：每个 gap 必须有独立的 plan 步骤之后再动代码。
-- **决策强制归档**：每次推送的 commit pair 都是 `feat(...)` + `docs(decisions): record choices for <feature> (<feat-hash>)`；后者**新建**一个 `docs/decisions/<yyyy-mm-dd>-<slug>.md` 文件，**不得** append 或编辑已有 decisions 文件。`docs/BACKLOG.md` 里对应 bullet 的删除也合并进这次 docs commit（同属"本轮书面记录"）。
+- **决策强制归档**：每一轮只做**一次 commit**，message 用 `feat(...)` / `fix(...)` / `refactor(...)` / `docs(...)` 之类按内容贴合的前缀，单句 subject 讲清本轮改了什么。这一个 commit 同时包含：① 代码改动；② 新建的 `docs/decisions/<yyyy-mm-dd>-<slug>.md` 决策文件（**新建**，不得 append / 编辑已有 decisions）；③ `docs/BACKLOG.md` 里对应 bullet 的删除；④ 可选的 "顺手记 debt" P2 append。决策文件不需要引用 commit hash —— 决策 + 代码都在同一个 commit 里，`git log --all -S '<slug>'` 天然能对齐。
 
 ---
 
@@ -285,15 +285,13 @@ docs(backlog): repopulate <N> tasks from rubric analysis
 规则：
 - 只能 append 到 P2 末尾，不能插队到 P0 / P1，不能重排既有 bullet。
 - 一次 cycle 最多 append 2 条（发现更多说明跑偏了，用报告提醒用户）。
-- 和本轮处理的 bullet 删除一起进 `docs(decisions)` 那次 commit，不单独 commit。
+- 和本轮的代码改动 + 决策文件 + bullet 删除一起进**同一次 commit**（见 §7）。
 - **只记不修**。把它当成"观察笔记"，下次 repopulate 或专门调度时处理。这是让系统持续自省而不打乱本轮节奏的机制。
 
 文件内容保持既有 decisions 格式（内部 `## YYYY-MM-DD — 短标题` 头一仍要写，便于跨文件 grep / 聚合视图）：
 
 ```markdown
 ## YYYY-MM-DD — 短标题（VISION §X.Y rubric 轴）
-
-Commit: `<shorthash>`
 
 **Context.** 这个 gap 为何是本轮第一。对应的 rubric 轴 + 当前代码里观察到了什么 + 本轮 rubric delta（例："§5.1 source-layer 序列化 无 → 部分"）—— delta 是 VISION §5 "怎么用" 要求的系统演进曲线，必须留。
 如果参考了 OpenCode，引用具体文件。
@@ -312,14 +310,12 @@ Commit: `<shorthash>`
 ### 7. Commit + push
 
 - 按具体文件名 stage（严禁 `git add -A`，CLAUDE.md 红线）。
-- Commit 前缀按 `git log --oneline -20` 的惯例（当前：`feat(core):`、`docs(decisions):`、`fix(...)`、`refactor(...)`）。
-- 两条 commit：
-  1. `feat(...): <内容>`（或 `fix` / `refactor`）—— 代码改动。
-  2. `docs(decisions): record choices for <feature> (<feat-commit-shorthash>)` —— **同一条 commit 同时包含**：新建的 `docs/decisions/<yyyy-mm-dd>-<slug>.md` 文件 **和** `docs/BACKLOG.md` 里那个 bullet 的删除。两个文件一起 stage、一起提交。
+- **一次 commit**，同时包含：① 代码改动；② 新建的 `docs/decisions/<yyyy-mm-dd>-<slug>.md`；③ `docs/BACKLOG.md` 里对应 bullet 的删除；④ 可选的 "顺手记 debt" P2 append。
+- Commit message 前缀按 `git log --oneline -20` 的惯例选最贴合内容的一个（当前：`feat(core):`、`fix(...)`、`refactor(...)`、`docs(...)`）。Subject 一句话讲本轮核心改动；body 可放决策摘要 + 测试结论。决策文件里**不要**写 `Commit: <hash>` —— 决策和代码同 commit，`git log -S '<slug>'` 就能对齐。
 - `git push origin main`。
 - 推送被拒（有人同时推过）→ `git pull --rebase origin main` → 如果 rebase 动了你的文件就再跑一遍验证 → 再推。rebase 冲突解不开 → **停下来报告**。绝不 `--force`、绝不对已推送的 commit `--amend`。
 
-Backlog repopulate 那次的 commit 是独立的 `docs(backlog): …`（见 R 小节），不跟任何 feat/docs(decisions) pair 绑定。
+Backlog repopulate 那次的 commit 是独立的 `docs(backlog): …`（见 R 小节），不跟任何 feat commit 绑定 —— 它只改 `docs/BACKLOG.md` 一个文件，没有对应的决策文件需要归档。
 
 ### 8. 继续或收尾
 

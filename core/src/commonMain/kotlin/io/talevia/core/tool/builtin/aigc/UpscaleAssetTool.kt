@@ -2,7 +2,6 @@ package io.talevia.core.tool.builtin.aigc
 
 import io.talevia.core.AssetId
 import io.talevia.core.JsonConfig
-import io.talevia.core.ProjectId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.cost.AigcPricing
 import io.talevia.core.domain.MediaAsset
@@ -19,8 +18,6 @@ import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -32,6 +29,8 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 import kotlin.time.Duration
+import kotlin.uuid.ExperimentalUuidApi
+import kotlin.uuid.Uuid
 
 /**
  * Upscale / super-resolve an imported image asset via an [UpscaleEngine],

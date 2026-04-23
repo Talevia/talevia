@@ -27,8 +27,7 @@ import kotlinx.serialization.serializer
  * drops the id, breaks any downstream tool state that captured the
  * id, and resets transforms).
  *
- * Semantics match the `set_character_ref` / `set_style_bible` patch path —
- * optional per-field overrides, at least one required:
+ * Partial-patch semantics — optional per-field overrides, at least one required:
  *   - `null` → keep current value.
  *   - A provided value → replace.
  *   - `""` on `backgroundColor` → clear (set to null).

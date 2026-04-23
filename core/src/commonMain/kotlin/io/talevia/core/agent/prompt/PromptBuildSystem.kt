@@ -39,22 +39,29 @@ Every Project is (Source → Compiler → Artifact):
 
 # Consistency bindings (VISION §3.3 — cross-shot identity)
 
-Use the `set_character_ref` / `set_style_bible` / `set_brand_palette` tools to
-scaffold consistency nodes. Each is a single **upsert with patch semantics** —
-one tool handles both "define Mei for the first time" and "change Mei's hair to
-red". On create (node doesn't exist), the essentials are required
-(character_ref: `name` + `visualDescription`; style_bible: `name` +
-`description`; brand_palette: `name` + `hexColors`) and `nodeId` defaults to a
-slugged variant of `name` so the LLM rarely needs to invent ids. On patch
-(node exists), every body field is optional; null = keep current, and at least
-one body field must be supplied or the tool fails. Use `""` on optional string
-fields to clear them (e.g. `voiceId=""`), `[]` on list fields to clear,
-`clearLoraPin=true` on `set_character_ref` to drop a LoRA pin. Kind-collision
-(existing node at the same id is a different kind) fails loud — pick a
-different `nodeId` or remove the existing node. Returns `{nodeId, created,
-updatedFields}` so the caller can verify create-vs-patch. Every call bumps
-`contentHash` so downstream clips go stale and `find_stale_clips` surfaces
-them for regeneration.
+Consistency nodes are created and edited through the same kind-agnostic pair as
+every other source kind: `add_source_node` to create, `update_source_node_body`
+to edit. A lightweight id convention keeps things readable — prefix the
+`nodeId` with the kind stem (`character-mei`, `style-warm`, `brand-acme`) so
+`source_query(select=nodes, kindPrefix=core.consistency.)` gives a clean list.
+
+Create a character_ref:
+  `add_source_node(projectId, nodeId="character-mei", kind="core.consistency.character_ref",
+   body={"name":"Mei","visualDescription":"teal hair, round glasses",
+   "voiceId":"nova"})`.
+Create a style_bible: same shape with `kind="core.consistency.style_bible"` and
+  `body={"name":"warm","description":"warm teal/orange","moodKeywords":["warm","nostalgic"]}`.
+Create a brand_palette: `kind="core.consistency.brand_palette"` and
+  `body={"name":"Acme","hexColors":["#0A84FF","#FF3B30"]}`. Optional fields
+  (`referenceAssetIds`, `loraPin`, `negativePrompt`, `lutReference`,
+  `typographyHints`, …) go alongside the required ones in the same body.
+
+Edit an existing consistency node: call `describe_source_node` to read the
+current body, mutate the returned JSON client-side, pass the complete object
+back via `update_source_node_body(projectId, nodeId, body={...})`. This is
+whole-body replacement — keep every field you want to retain. Every write
+bumps `contentHash` so downstream clips go stale and `find_stale_clips`
+surfaces them for regeneration.
 
 Use `source_query(select=nodes, kindPrefix=core.consistency.)` to recover
 ids when you forget them. Use `remove_source_node` only when the user asks.
@@ -80,28 +87,24 @@ derivation relationship.
 id: the node itself, every descendant's parent-ref, every clip's `sourceBinding`
 set, and every lockfile entry's binding + content-hash keys are rewritten in one
 mutation. Use it when the user wants a better name ("rename `character-mei` to
-`mei`") instead of `remove_source_node` + a fresh `define_*`, which would drop
-all those references. The node's own contentHash survives the rename (it's a
-hash of `(kind, body, parents)`, not `id`); descendant nodes whose parent-ref
+`mei`") instead of `remove_source_node` + a fresh `add_source_node`, which would
+drop all those references. The node's own contentHash survives the rename (it's
+a hash of `(kind, body, parents)`, not `id`); descendant nodes whose parent-ref
 changed do get a new hash, which correctly invalidates any AIGC render that
 consumed the old ref. `newId` must match the slug shape (lowercase letters /
 digits / `-`), must not collide with an existing node, and same-id is a no-op.
 The rename does NOT rewrite string ids embedded inside typed bodies (e.g. a
-`narrative.shot.body.sceneId`) — update those separately via the kind-specific
-`update_*` tool.
+`narrative.shot.body.sceneId`) — update those separately via
+`update_source_node_body`.
 
-`update_source_node_body(projectId, nodeId, body)` replaces a node's body
-wholesale. Kind-agnostic — works on any non-consistency kind (narrative.shot,
-vlog.raw_footage, musicmv.*, tutorial.*, ad.*, or any hand-authored /
-imported node) where the `set_character_ref` / `set_style_bible` /
-`set_brand_palette` trio doesn't apply. The `body` argument is a full
-replacement JSON object: read the current body with `describe_source_node`,
-mutate client-side, write it back. Does NOT touch `kind` (rebuild the node if
-the kind must change), `parents` (use `set_source_node_parents`), or `id`
-(use `rename_source_node`). Bumps `contentHash` so bound clips go stale — run
-`find_stale_clips` after editing. For the three consistency kinds, prefer the
-typed `set_*` tools — they accept partial patches and know how to clear
-optional fields with `""` / `[]`.
+`update_source_node_body(projectId, nodeId, body)` is the single body editor for
+every kind — consistency nodes, narrative.shot, vlog.raw_footage, musicmv.*,
+tutorial.*, ad.*, or any hand-authored / imported node. The `body` argument is a
+full replacement JSON object: read the current body with `describe_source_node`,
+mutate client-side, write it back (keep every field you want to retain). Does
+NOT touch `kind` (rebuild the node if the kind must change), `parents` (use
+`set_source_node_parents`), or `id` (use `rename_source_node`). Bumps
+`contentHash` so bound clips go stale — run `find_stale_clips` after editing.
 
 When the user changes a consistency node and you need to regenerate everything
 that depended on it, call `regenerate_stale_clips` — one tool that handles the
@@ -131,7 +134,7 @@ shapes, exactly one at a time:
   the node's `lutReference` at apply time and also binds the clip to the
   style_bible's nodeId, so future stale-clip detection can propagate
   edits. This is the preferred path when a project has a style_bible that
-  already owns its LUT — pass the style_bible once via `set_style_bible`,
+  already owns its LUT — set the style_bible node once via `add_source_node`,
   then apply it to every clip with `apply_lut(styleBibleId=…)`.
 FFmpeg renders this via `lut3d`; Media3 (Android) bakes it via
 `SingleColorLut`; AVFoundation (iOS) bakes it via `CIColorCube`. All

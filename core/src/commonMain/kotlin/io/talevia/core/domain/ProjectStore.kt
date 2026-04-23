@@ -317,5 +317,4 @@ class SqlDelightProjectStore(
         upsert(title, updated)
         updated
     }
-
 }

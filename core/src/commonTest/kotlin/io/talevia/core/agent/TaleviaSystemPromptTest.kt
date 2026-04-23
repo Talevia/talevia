@@ -37,7 +37,8 @@ class TaleviaSystemPromptTest {
         "ad.variant_request",
         // Source-mutation tooling teaches the model how to *create* the bindings it
         // is told to pass — the prompt-fold logic is dead without these tools.
-        "set_character_ref",
+        "add_source_node",
+        "update_source_node_body",
         "source_query",
         // parentIds — cross-refs in the source DAG (VISION §3.3 / §5.1).
         "parentIds",

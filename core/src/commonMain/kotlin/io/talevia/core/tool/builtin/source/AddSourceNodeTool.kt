@@ -23,22 +23,12 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 
 /**
- * Create a source node of any kind — the kind-agnostic counterpart to the
- * typed `set_character_ref` / `set_style_bible` / `set_brand_palette` trio
- * (which are upsert-with-patch for their three consistency kinds) and to
- * `update_source_node_body` (which only *edits* existing nodes).
- *
- * Motivation. `create_project_from_template` seeds a genre skeleton, and the
- * three `set_*` tools cover consistency nodes. But after bootstrap the
- * agent still cannot add a second `narrative.scene`, a fresh
- * `musicmv.performance_shot`, an extra `ad.variant_request`, etc. — none of
- * those genre kinds have dedicated `set_*` tools, and there's a design
- * choice not to mint 14+ per-kind wrappers (they'd each duplicate the same
- * JSON-schema / permission / commit shape with only the body serializer
- * differing). A single kind-agnostic `add_source_node` matches the shape of
- * `update_source_node_body` (opaque JSON body, kind-agnostic) and lets the
- * agent extend the DAG for any genre, including ones that ship after this
- * release — no Core change required.
+ * Create a source node of any kind — the kind-agnostic sibling of
+ * `update_source_node_body` (which edits existing nodes). Together the pair
+ * covers every source-graph write the agent needs: consistency kinds
+ * (character_ref / style_bible / brand_palette), narrative / musicmv /
+ * tutorial / ad kinds, and anything a future genre ships without requiring a
+ * Core change.
  *
  * Contract with Core's genre layer. `SourceNode.kind` is a dotted-namespace
  * opaque string; Core never validates the body shape (that's the genre
@@ -91,12 +81,13 @@ class AddSourceNodeTool(
     override val id: String = "add_source_node"
     override val helpText: String =
         "Create a source node of any kind with an opaque JSON body and optional parent ids. " +
-            "Kind-agnostic counterpart to set_character_ref / set_style_bible / set_brand_palette " +
-            "(which exist for ergonomic typed-body entry on those three consistency kinds). Use this " +
-            "after create_project_from_template to extend the DAG with additional narrative.scene / " +
-            "musicmv.performance_shot / ad.variant_request / tutorial.* nodes the template doesn't seed. " +
-            "Rejects blank kinds, duplicate ids, and dangling parent ids. Edit the body later via " +
-            "update_source_node_body; change parents via set_source_node_parents; rename via rename_source_node."
+            "Covers every source-graph write — consistency kinds " +
+            "(core.consistency.character_ref / style_bible / brand_palette), narrative.* / " +
+            "musicmv.* / tutorial.* / ad.* genre kinds, and anything a future genre ships. For " +
+            "consistency kinds, conventional nodeIds are character-<slug>, style-<slug>, " +
+            "brand-<slug>. Rejects blank kinds, duplicate ids, and dangling parent ids. Edit the " +
+            "body later via update_source_node_body; change parents via set_source_node_parents; " +
+            "rename via rename_source_node."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.write")

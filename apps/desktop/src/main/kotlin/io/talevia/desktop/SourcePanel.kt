@@ -47,6 +47,7 @@ import io.talevia.core.domain.source.SourceNode
 import io.talevia.core.domain.source.consistency.ConsistencyKinds
 import io.talevia.core.domain.staleClipsFromLockfile
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.source.slugifyId
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -181,43 +182,40 @@ fun SourcePanel(
                         },
                         onSave = when (node.kind) {
                             ConsistencyKinds.CHARACTER_REF -> { name, secondary ->
-                                dispatch(
-                                    "set_character_ref",
-                                    buildJsonObject {
-                                        put("projectId", projectId.value)
-                                        put("nodeId", node.id.value)
-                                        if (name.isNotBlank()) put("name", name)
-                                        if (secondary.isNotBlank()) put("visualDescription", secondary)
-                                    },
-                                    "edit character ${displayName(node)}",
-                                )
+                                dispatchBodyUpdate(
+                                    projectId = projectId,
+                                    node = node,
+                                    label = "edit character ${displayName(node)}",
+                                    dispatch = ::dispatch,
+                                ) {
+                                    if (name.isNotBlank()) put("name", name)
+                                    if (secondary.isNotBlank()) put("visualDescription", secondary)
+                                }
                             }
                             ConsistencyKinds.STYLE_BIBLE -> { name, secondary ->
-                                dispatch(
-                                    "set_style_bible",
-                                    buildJsonObject {
-                                        put("projectId", projectId.value)
-                                        put("nodeId", node.id.value)
-                                        if (name.isNotBlank()) put("name", name)
-                                        if (secondary.isNotBlank()) put("description", secondary)
-                                    },
-                                    "edit style ${displayName(node)}",
-                                )
+                                dispatchBodyUpdate(
+                                    projectId = projectId,
+                                    node = node,
+                                    label = "edit style ${displayName(node)}",
+                                    dispatch = ::dispatch,
+                                ) {
+                                    if (name.isNotBlank()) put("name", name)
+                                    if (secondary.isNotBlank()) put("description", secondary)
+                                }
                             }
                             ConsistencyKinds.BRAND_PALETTE -> { name, secondary ->
                                 val hexList = secondary.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-                                dispatch(
-                                    "set_brand_palette",
-                                    buildJsonObject {
-                                        put("projectId", projectId.value)
-                                        put("nodeId", node.id.value)
-                                        if (name.isNotBlank()) put("name", name)
-                                        if (hexList.isNotEmpty()) {
-                                            put("hexColors", buildJsonArray { hexList.forEach { add(JsonPrimitive(it)) } })
-                                        }
-                                    },
-                                    "edit palette ${displayName(node)}",
-                                )
+                                dispatchBodyUpdate(
+                                    projectId = projectId,
+                                    node = node,
+                                    label = "edit palette ${displayName(node)}",
+                                    dispatch = ::dispatch,
+                                ) {
+                                    if (name.isNotBlank()) put("name", name)
+                                    if (hexList.isNotEmpty()) {
+                                        put("hexColors", buildJsonArray { hexList.forEach { add(JsonPrimitive(it)) } })
+                                    }
+                                }
                             }
                             else -> null
                         },
@@ -254,40 +252,90 @@ fun SourcePanel(
         AddSourceControls(
             onAddCharacter = { name, desc ->
                 dispatch(
-                    "set_character_ref",
+                    "add_source_node",
                     buildJsonObject {
                         put("projectId", projectId.value)
-                        put("name", name)
-                        put("visualDescription", desc)
+                        put("nodeId", slugifyId(name, "character"))
+                        put("kind", ConsistencyKinds.CHARACTER_REF)
+                        put(
+                            "body",
+                            buildJsonObject {
+                                put("name", name)
+                                put("visualDescription", desc)
+                            },
+                        )
                     },
-                    "set character_ref $name",
+                    "add character_ref $name",
                 )
             },
             onAddStyle = { name, desc ->
                 dispatch(
-                    "set_style_bible",
+                    "add_source_node",
                     buildJsonObject {
                         put("projectId", projectId.value)
-                        put("name", name)
-                        put("description", desc)
+                        put("nodeId", slugifyId(name, "style"))
+                        put("kind", ConsistencyKinds.STYLE_BIBLE)
+                        put(
+                            "body",
+                            buildJsonObject {
+                                put("name", name)
+                                put("description", desc)
+                            },
+                        )
                     },
-                    "set style_bible $name",
+                    "add style_bible $name",
                 )
             },
             onAddPalette = { name, hexCsv ->
                 val hexList = hexCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                 dispatch(
-                    "set_brand_palette",
+                    "add_source_node",
                     buildJsonObject {
                         put("projectId", projectId.value)
-                        put("name", name)
-                        put("hexColors", buildJsonArray { hexList.forEach { add(JsonPrimitive(it)) } })
+                        put("nodeId", slugifyId(name, "brand"))
+                        put("kind", ConsistencyKinds.BRAND_PALETTE)
+                        put(
+                            "body",
+                            buildJsonObject {
+                                put("name", name)
+                                put("hexColors", buildJsonArray { hexList.forEach { add(JsonPrimitive(it)) } })
+                            },
+                        )
                     },
-                    "set brand_palette $name",
+                    "add brand_palette $name",
                 )
             },
         )
     }
+}
+
+/**
+ * update_source_node_body is full-replacement, not partial-patch: feed it the node's
+ * current body with the edited fields overlaid. [overlay] runs after every existing
+ * field of [node.body] has been copied into the builder, so callers only have to
+ * describe what changed — everything else round-trips unchanged.
+ */
+private fun dispatchBodyUpdate(
+    projectId: ProjectId,
+    node: SourceNode,
+    label: String,
+    dispatch: (String, JsonObject, String) -> Unit,
+    overlay: kotlinx.serialization.json.JsonObjectBuilder.() -> Unit,
+) {
+    val existing = node.body as? JsonObject ?: JsonObject(emptyMap())
+    val newBody = buildJsonObject {
+        existing.forEach { (k, v) -> put(k, v) }
+        overlay()
+    }
+    dispatch(
+        "update_source_node_body",
+        buildJsonObject {
+            put("projectId", projectId.value)
+            put("nodeId", node.id.value)
+            put("body", newBody)
+        },
+        label,
+    )
 }
 
 private enum class SourceGroup(val label: String) {

@@ -14,13 +14,13 @@ import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.permission.PermissionDecision
+import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.GeneratedImage
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.ImageGenRequest
 import io.talevia.core.platform.ImageGenResult
 import io.talevia.core.platform.InMemoryMediaStorage
-import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import kotlinx.coroutines.test.runTest
@@ -28,7 +28,6 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import java.io.File
-import java.nio.file.Files
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -85,15 +84,15 @@ class ReplayLockfileToolTest {
 
     private class FakeBlobWriter(private val rootDir: File) : BundleBlobWriter {
         override suspend fun writeBlob(
-                projectId: io.talevia.core.ProjectId,
-                assetId: io.talevia.core.AssetId,
-                bytes: ByteArray,
-                format: String,
-            ): MediaSource.BundleFile {
+            projectId: io.talevia.core.ProjectId,
+            assetId: io.talevia.core.AssetId,
+            bytes: ByteArray,
+            format: String,
+        ): MediaSource.BundleFile {
             val file = File(rootDir, "${assetId.value}.$format")
             file.writeBytes(bytes)
             return MediaSource.BundleFile("media/${file.name}")
-}
+        }
     }
 
     private fun ctx(): ToolContext = ToolContext(

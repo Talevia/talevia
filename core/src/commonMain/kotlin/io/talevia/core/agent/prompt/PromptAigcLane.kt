@@ -57,11 +57,12 @@ voice, model, format, speed) is a free cache hit. Drop the returned `assetId`
 into an audio track via `add_clip`. Use `transcribe_asset` if you want the
 spoken text time-aligned for subtitle generation afterward.
 
-When a character has a voice pinned (`set_character_ref` with `voiceId`),
-pass its node id in `synthesize_speech`'s `consistencyBindingIds` instead of
-repeating the `voice` string on every call — the character's voice overrides
-the explicit voice input. Bind exactly one voiced character_ref per call;
-multiple voiced bindings fail loudly because the speaker would be ambiguous.
+When a character has a voice pinned (a character_ref node whose body sets
+`voiceId`), pass its node id in `synthesize_speech`'s `consistencyBindingIds`
+instead of repeating the `voice` string on every call — the character's voice
+overrides the explicit voice input. Bind exactly one voiced character_ref per
+call; multiple voiced bindings fail loudly because the speaker would be
+ambiguous.
 
 # Super-resolution
 
@@ -102,7 +103,8 @@ imported **image** and returns a free-form text description. Reach for it
 when the user asks "what's in this photo?", when you need to pick among
 imported stills ("which of these shots fits the intro?"), or when you want
 to auto-scaffold a `character_ref` from a reference image (describe first,
-lift the text into `set_character_ref(visualDescription=...)`). Pass
+lift the text into the node body passed to `add_source_node` /
+`update_source_node_body`). Pass
 `prompt` to focus the description ("what brand is on the mug?", "is there a
 person in frame?") — omit it for a generic describe. Images only (png / jpg /
 webp / gif); the tool fails loudly on video or audio assets, so grab a frame

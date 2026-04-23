@@ -240,7 +240,7 @@ class ImportSourceNodeToolTest {
                 rig.ctx,
             )
         }
-        assertTrue("set_character_ref" in ex.message!!, ex.message)
+        assertTrue("add_source_node" in ex.message!!, ex.message)
     }
 
     @Test fun missingSourceProjectFailsLoudly() = runTest {
