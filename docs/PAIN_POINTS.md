@@ -558,3 +558,57 @@ loop to verify end-to-end. The iterate-gap skill's "run gradle target
 matching your change" heuristic doesn't cover this; added to the
 observation log so future OS-integration bullets can budget for a
 packageDmg step in their plan.
+
+---
+
+## 2026-04-23 — bundle-cross-process-file-lock (`<this commit>`)
+
+### Two backlog bullets in a row required `/iterate-gap`-level skips before finding a viable gap
+Cycle 16 had to skip `bundle-mobile-document-picker` (violates CLAUDE.md's
+explicit "mobile non-regression only" platform-priority rule — no concrete
+driver) AND `bundle-talevia-json-split` (the bullet itself says "先写
+decision 评估触发条件再动" and the trigger — actual diff noise — hasn't
+fired) before landing on `bundle-cross-process-file-lock` as the first
+bullet with an active driver. That's 2 consecutive skips in one cycle.
+Structural signal: **P2 "记债 / 观望" bullets accumulate things that
+either (a) depend on a platform priority window that hasn't arrived, or
+(b) wait on a trigger condition that hasn't fired yet**. Neither is
+wrong for P2, but iterating top-down on them forces the skill to
+re-evaluate the same skip each cycle. Lightweight mitigation: when a
+P2 bullet is skipped by a cycle, tag it with a one-line
+"skipped YYYY-MM-DD: <reason>" comment inline. Next repopulate can
+de-prioritise bullets that have been skip-tagged N+ times in a row (or
+upgrade them if the gating condition landed). Today we just silently
+skip and re-encounter; the skip is free but the re-reading isn't.
+Logging here so a future skill-level cycle can wire the tag.
+
+### Cross-process correctness via `FileChannel.tryLock` is one-line on JVM but no equivalent on iOS/Android native
+JVM's `java.nio.channels.FileChannel.tryLock()` gives us cross-process
+exclusion with ~15 lines in `JvmBundleLocker`. The equivalent on
+Kotlin/Native for iOS would be `flock(2)` through cinterop (non-trivial;
+requires `posix` imports + `memScoped` + nullability plumbing). Android
+runs on Dalvik/ART which has `FileChannel` but a per-app sandbox makes
+multi-process-on-same-bundle vanishingly rare. So today the abstraction
+is: `interface BundleLocker` in commonMain, `JvmBundleLocker` in jvmMain,
+default `BundleLocker.Noop` everywhere else. This is fine — but the
+implicit assumption "iOS / Android are single-process-per-bundle" is
+genuinely a platform limitation now baked into core. If a future cycle
+ever needs cross-process bundles on mobile (e.g. shared iCloud folder
+accessed by Talevia + a sibling helper app), it's not a simple "add an
+iosMain actual" — it's a cinterop + test-harness expansion. Logging so
+future mobile-concurrency bullets start with accurate scope.
+
+### `withBundleLock` + inline lambda: ktlint sorted an import by moving alphabetically after `BundleBlobWriter`
+Third consecutive cycle (13 / 14 / 15 / 16) where inserting a single
+`import io.talevia.core.platform.Jvm*` line by eye put it in the wrong
+alphabetic slot and ktlint caught it on the full-repo pass. Same fix
+(`./gradlew ktlintFormat`), same 30 seconds. The "insert imports by
+hand" anti-pattern from cycles 9 + 13 + 15 just keeps re-surfacing. I'm
+re-logging because the cadence hasn't shifted — the fix is *always*
+`ktlintFormat`, so the skill could simply run `ktlintFormat` before
+`ktlintCheck` and skip the whole fail-then-fix round-trip. Not a
+semantic issue (ktlint on the "hygiene-only" profile we use is
+mechanical and safe), just wasted iteration. Likely a skill-level
+improvement to land when it justifies a cycle of its own. Cycle-16's
+hit is 9/15 ≈ 60% — crossing the threshold I noted in cycle-13's pain
+point ("if new-tool cycles hit 10 in a row without a break").

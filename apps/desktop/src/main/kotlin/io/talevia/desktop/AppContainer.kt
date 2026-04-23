@@ -20,6 +20,7 @@ import io.talevia.core.platform.FileBundleBlobWriter
 import io.talevia.core.platform.FilePicker
 import io.talevia.core.platform.FileSystem
 import io.talevia.core.platform.ImageGenEngine
+import io.talevia.core.platform.JvmBundleLocker
 import io.talevia.core.platform.JvmFileSystem
 import io.talevia.core.platform.JvmProcessRunner
 import io.talevia.core.platform.MediaPathResolver
@@ -195,6 +196,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         registry = recentsRegistry,
         defaultProjectsHome = projectsHome,
         bus = bus,
+        locker = JvmBundleLocker(),
     )
 
     /**

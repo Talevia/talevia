@@ -20,6 +20,7 @@ import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.FileBundleBlobWriter
 import io.talevia.core.platform.FileSystem
 import io.talevia.core.platform.ImageGenEngine
+import io.talevia.core.platform.JvmBundleLocker
 import io.talevia.core.platform.JvmFileSystem
 import io.talevia.core.platform.JvmProcessRunner
 import io.talevia.core.platform.MediaPathResolver
@@ -198,6 +199,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         registry = recentsRegistry,
         defaultProjectsHome = projectsHome,
         bus = bus,
+        locker = JvmBundleLocker(),
     )
 
     /**

@@ -7,6 +7,7 @@ import io.talevia.core.bus.EventBus
 import io.talevia.core.domain.render.ClipRenderCache
 import io.talevia.core.logging.Loggers
 import io.talevia.core.logging.warn
+import io.talevia.core.platform.BundleLocker
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
@@ -38,8 +39,15 @@ import okio.Path.Companion.toPath
  * bundle to another machine preserves the id; that machine's registry will
  * pick up the new path on first [openAt].
  *
- * Concurrency: a process-level [Mutex] serialises all writes — same model as
- * the old SQL-backed store. No cross-process locking.
+ * Concurrency: a process-level [Mutex] serialises all writes within a
+ * single process. A [BundleLocker] layered on top extends that guarantee
+ * *across* processes — every write path (`createAt` / `upsert` / `setTitle` /
+ * `mutate` / `delete`) acquires an OS file lock on `<bundle>/.talevia-cache/.lock`
+ * before touching `talevia.json`, so two concurrent Talevia processes on
+ * the same bundle can't lose a write. Lock acquisition failure is fail-loud:
+ * the second process sees `IllegalStateException("Bundle is locked by another
+ * Talevia process")` rather than silently racing. Default [BundleLocker.Noop]
+ * keeps this store usable in single-process mobile + test rigs.
  */
 class FileProjectStore(
     private val registry: RecentsRegistry,
@@ -58,6 +66,13 @@ class FileProjectStore(
      * the store usable in pure-persistence test rigs.
      */
     private val bus: EventBus? = null,
+    /**
+     * Cross-process write lock. [BundleLocker.Noop] disables the check (used
+     * on iOS / Android / tests that don't exercise concurrency). JVM apps
+     * (CLI / Desktop / Server) inject `JvmBundleLocker` so two Talevia
+     * processes on one machine can't silently stomp each other's writes.
+     */
+    private val locker: BundleLocker = BundleLocker.Noop,
 ) : ProjectStore {
 
     private val logger = Loggers.get("domain.FileProjectStore")
@@ -105,19 +120,20 @@ class FileProjectStore(
     ): Project = mutex.withLock {
         val taleviaJson = path.resolve(TALEVIA_JSON)
         require(!fs.exists(taleviaJson)) { "Project already exists at $path" }
-
-        val now = clock.now().toEpochMilliseconds()
-        val newId = ProjectId(generateProjectId())
-        val project = Project(
-            id = newId,
-            timeline = timeline,
-            outputProfile = outputProfile,
-        )
-        // Recency stamp the brand-new project so per-clip/track/asset stamps land at `now`.
-        val stamped = ProjectRecencyStamper.stamp(project, prior = null, now = now)
-        writeBundleLocked(path, title, stamped, createdAtEpochMs = now)
-        registry.upsert(newId, path, title, lastOpenedAtEpochMs = now)
-        stamped
+        withBundleLock(path) {
+            val now = clock.now().toEpochMilliseconds()
+            val newId = ProjectId(generateProjectId())
+            val project = Project(
+                id = newId,
+                timeline = timeline,
+                outputProfile = outputProfile,
+            )
+            // Recency stamp the brand-new project so per-clip/track/asset stamps land at `now`.
+            val stamped = ProjectRecencyStamper.stamp(project, prior = null, now = now)
+            writeBundleLocked(path, title, stamped, createdAtEpochMs = now)
+            registry.upsert(newId, path, title, lastOpenedAtEpochMs = now)
+            stamped
+        }
     }
 
     override suspend fun get(id: ProjectId): Project? = mutex.withLock {
@@ -141,30 +157,34 @@ class FileProjectStore(
         val path = registry.get(project.id)?.path?.toPath()
             ?: defaultProjectsHome.resolve(project.id.value.requireSafeFilename())
 
-        val existingStored = if (fs.exists(path.resolve(TALEVIA_JSON))) {
-            runCatching { decodeStored(path) }.getOrNull()
-        } else {
-            null
+        withBundleLock(path) {
+            val existingStored = if (fs.exists(path.resolve(TALEVIA_JSON))) {
+                runCatching { decodeStored(path) }.getOrNull()
+            } else {
+                null
+            }
+            val now = clock.now().toEpochMilliseconds()
+            val stamped = ProjectRecencyStamper.stamp(project, existingStored?.project, now)
+            // Preserve original createdAtEpochMs across overwrites; first write
+            // stamps it. A read of a pre-field bundle (createdAt == 0) heals on
+            // first upsert by adopting `now` rather than perpetuating the zero.
+            val createdAt = existingStored?.createdAtEpochMs?.takeIf { it > 0L } ?: now
+            writeBundleLocked(path, title, stamped, createdAtEpochMs = createdAt)
+            registry.upsert(project.id, path, title, lastOpenedAtEpochMs = now)
         }
-        val now = clock.now().toEpochMilliseconds()
-        val stamped = ProjectRecencyStamper.stamp(project, existingStored?.project, now)
-        // Preserve original createdAtEpochMs across overwrites; first write
-        // stamps it. A read of a pre-field bundle (createdAt == 0) heals on
-        // first upsert by adopting `now` rather than perpetuating the zero.
-        val createdAt = existingStored?.createdAtEpochMs?.takeIf { it > 0L } ?: now
-        writeBundleLocked(path, title, stamped, createdAtEpochMs = createdAt)
-        registry.upsert(project.id, path, title, lastOpenedAtEpochMs = now)
     }
 
     override suspend fun setTitle(id: ProjectId, title: String): Unit = mutex.withLock {
         val entry = registry.get(id) ?: error("Project ${id.value} does not exist")
         val path = entry.path.toPath()
         require(fs.exists(path.resolve(TALEVIA_JSON))) { "Project ${id.value} bundle missing at $path" }
-        // Read envelope, rewrite with new title — project body + createdAt untouched.
-        val stored = decodeStored(path)
-        val now = clock.now().toEpochMilliseconds()
-        writeStoredEnvelope(path, stored.copy(title = title))
-        registry.setTitle(id, title, updatedAtEpochMs = now)
+        withBundleLock(path) {
+            // Read envelope, rewrite with new title — project body + createdAt untouched.
+            val stored = decodeStored(path)
+            val now = clock.now().toEpochMilliseconds()
+            writeStoredEnvelope(path, stored.copy(title = title))
+            registry.setTitle(id, title, updatedAtEpochMs = now)
+        }
     }
 
     private fun resolvedCreatedAt(stored: StoredProject, fallback: Long): Long =
@@ -203,15 +223,17 @@ class FileProjectStore(
         val entry = registry.get(id) ?: error("Project ${id.value} does not exist")
         val path = entry.path.toPath()
         require(fs.exists(path.resolve(TALEVIA_JSON))) { "Project ${id.value} bundle missing at $path" }
-        val stored = decodeStored(path)
-        val current = readBundle(path)
-        val updated = block(current)
-        val now = clock.now().toEpochMilliseconds()
-        val createdAt = resolvedCreatedAt(stored, fallback = now)
-        val stamped = ProjectRecencyStamper.stamp(updated, prior = current, now = now)
-        writeBundleLocked(path, stored.title, stamped, createdAtEpochMs = createdAt)
-        registry.upsert(id, path, stored.title, lastOpenedAtEpochMs = now)
-        stamped
+        withBundleLock(path) {
+            val stored = decodeStored(path)
+            val current = readBundle(path)
+            val updated = block(current)
+            val now = clock.now().toEpochMilliseconds()
+            val createdAt = resolvedCreatedAt(stored, fallback = now)
+            val stamped = ProjectRecencyStamper.stamp(updated, prior = current, now = now)
+            writeBundleLocked(path, stored.title, stamped, createdAtEpochMs = createdAt)
+            registry.upsert(id, path, stored.title, lastOpenedAtEpochMs = now)
+            stamped
+        }
     }
 
     override suspend fun delete(id: ProjectId, deleteFiles: Boolean): Unit = mutex.withLock {
@@ -222,19 +244,24 @@ class FileProjectStore(
         val root = entry.path.toPath()
         if (!fs.exists(root)) return@withLock
 
-        // Remove only Talevia-owned content. If the user dropped a README.md
-        // inside the bundle, leave it alone (the directory survives).
-        val taleviaJson = root.resolve(TALEVIA_JSON)
-        if (fs.exists(taleviaJson)) fs.delete(taleviaJson)
+        withBundleLock(root) {
+            // Remove only Talevia-owned content. If the user dropped a README.md
+            // inside the bundle, leave it alone (the directory survives).
+            val taleviaJson = root.resolve(TALEVIA_JSON)
+            if (fs.exists(taleviaJson)) fs.delete(taleviaJson)
 
-        val gitignore = root.resolve(GITIGNORE)
-        if (fs.exists(gitignore) && fs.read(gitignore) { readUtf8() }.trim() == AUTO_GITIGNORE_BODY.trim()) {
-            fs.delete(gitignore)
+            val gitignore = root.resolve(GITIGNORE)
+            if (fs.exists(gitignore) && fs.read(gitignore) { readUtf8() }.trim() == AUTO_GITIGNORE_BODY.trim()) {
+                fs.delete(gitignore)
+            }
+
+            val mediaDir = root.resolve(MEDIA_DIR)
+            if (fs.exists(mediaDir)) fs.deleteRecursively(mediaDir)
         }
-
-        val mediaDir = root.resolve(MEDIA_DIR)
-        if (fs.exists(mediaDir)) fs.deleteRecursively(mediaDir)
-
+        // Delete the cache dir (including the lock sidecar) outside the lock
+        // scope — the handle was released on exit, and a concurrent acquire
+        // racing us is fine: we already unlinked talevia.json so the bundle
+        // is functionally gone.
         val cacheDir = root.resolve(CACHE_DIR)
         if (fs.exists(cacheDir)) fs.deleteRecursively(cacheDir)
 
@@ -251,6 +278,28 @@ class FileProjectStore(
     override suspend fun pathOf(id: ProjectId): Path? = registry.get(id)?.path?.toPath()
 
     // -- private helpers --
+
+    /**
+     * Acquire the OS file lock on `<path>/.talevia-cache/.lock`, run [block],
+     * release the lock in a finally. Caller already holds [mutex] so within
+     * one process there's only ever one contender for the file lock; the
+     * file lock's job is to exclude *other* Talevia processes on the same
+     * bundle. Acquisition failure is fail-loud — no retry, no backoff.
+     */
+    private inline fun <R> withBundleLock(path: Path, block: () -> R): R {
+        fs.createDirectories(path.resolve(CACHE_DIR))
+        val lockFile = path.resolve(CACHE_DIR).resolve(LOCK_FILE)
+        val handle = locker.tryAcquire(lockFile)
+            ?: error(
+                "Bundle is locked by another Talevia process: $path. " +
+                    "Close the other Talevia instance (CLI / Desktop / Server) before retrying.",
+            )
+        try {
+            return block()
+        } finally {
+            handle.release()
+        }
+    }
 
     private fun readBundle(path: Path): Project {
         val stored = decodeStored(path)
@@ -397,6 +446,7 @@ class FileProjectStore(
         const val BUNDLE_EXTENSION = "talevia"
         const val CACHE_DIR = ".talevia-cache"
         const val CLIP_RENDER_CACHE_FILE = "clip-render-cache.json"
+        const val LOCK_FILE = ".lock"
         const val AUTO_GITIGNORE_BODY = ".talevia-cache/\n"
         private val SAFE_ID = Regex("[A-Za-z0-9_.-]{1,200}")
 
