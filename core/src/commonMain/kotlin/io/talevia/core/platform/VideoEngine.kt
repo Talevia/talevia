@@ -98,7 +98,7 @@ interface VideoEngine {
 
     /**
      * Delete a previously-rendered mezzanine at [path]. Called by
-     * [io.talevia.core.tool.builtin.project.GcClipRenderCacheTool] when a cache
+     * [io.talevia.core.tool.builtin.project.ProjectMaintenanceActionTool] when a cache
      * entry is being pruned — the engine drops the on-disk mp4 so disk usage
      * tracks the cache policy. Returns `true` iff a file actually went (the
      * row count stays honest even when the user already nuked the file).

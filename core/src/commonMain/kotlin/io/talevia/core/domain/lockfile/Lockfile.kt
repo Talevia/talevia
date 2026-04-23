@@ -68,7 +68,7 @@ data class Lockfile(
      * Flip the `pinned` flag on the most recent entry matching [inputHash].
      *
      * VISION §3.1 "产物可 pin" — once the user marks a hero-shot entry pinned,
-     * it survives GC policy sweeps ([io.talevia.core.tool.builtin.project.GcLockfileTool])
+     * it survives GC policy sweeps ([io.talevia.core.tool.builtin.project.ProjectMaintenanceActionTool])
      * and `regenerate_stale_clips` skips re-generating its clip even when the
      * bound source changed. Returns the lockfile unchanged when no entry matches,
      * so callers can fail loudly on their own.

@@ -25,7 +25,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-class PruneLockfileToolTest {
+class ProjectMaintenanceActionToolPruneTest {
 
     private data class Rig(
         val store: FileProjectStore,
@@ -96,15 +96,15 @@ class PruneLockfileToolTest {
         val rig = rig()
         seed(rig, assetIds = listOf("a-1"))
 
-        val out = PruneLockfileTool(rig.store).execute(
-            PruneLockfileTool.Input(projectId = "p"),
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine).execute(
+            ProjectMaintenanceActionTool.Input(action = "prune-lockfile", projectId = "p"),
             rig.ctx,
         )
 
         assertEquals(0, out.data.totalEntries)
         assertEquals(0, out.data.prunedCount)
         assertEquals(0, out.data.keptCount)
-        assertTrue(out.data.prunedEntries.isEmpty())
+        assertTrue(out.data.prunedOrphanLockfileRows.isEmpty())
         assertEquals(false, out.data.dryRun)
 
         // Store unchanged.
@@ -121,15 +121,15 @@ class PruneLockfileToolTest {
         )
         seed(rig, assetIds = listOf("a-1", "a-2", "a-3"), entries = entries)
 
-        val out = PruneLockfileTool(rig.store).execute(
-            PruneLockfileTool.Input(projectId = "p"),
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine).execute(
+            ProjectMaintenanceActionTool.Input(action = "prune-lockfile", projectId = "p"),
             rig.ctx,
         )
 
         assertEquals(3, out.data.totalEntries)
         assertEquals(0, out.data.prunedCount)
         assertEquals(3, out.data.keptCount)
-        assertTrue(out.data.prunedEntries.isEmpty())
+        assertTrue(out.data.prunedOrphanLockfileRows.isEmpty())
 
         val refreshed = rig.store.get(ProjectId("p"))!!
         assertEquals(3, refreshed.lockfile.entries.size)
@@ -148,8 +148,8 @@ class PruneLockfileToolTest {
         // No assets in project — every entry is an orphan.
         seed(rig, assetIds = emptyList(), entries = entries)
 
-        val out = PruneLockfileTool(rig.store).execute(
-            PruneLockfileTool.Input(projectId = "p"),
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine).execute(
+            ProjectMaintenanceActionTool.Input(action = "prune-lockfile", projectId = "p"),
             rig.ctx,
         )
 
@@ -158,7 +158,7 @@ class PruneLockfileToolTest {
         assertEquals(0, out.data.keptCount)
         assertEquals(
             setOf("gone-1", "gone-2"),
-            out.data.prunedEntries.map { it.assetId }.toSet(),
+            out.data.prunedOrphanLockfileRows.map { it.assetId }.toSet(),
         )
 
         val refreshed = rig.store.get(ProjectId("p"))!!
@@ -176,8 +176,8 @@ class PruneLockfileToolTest {
         )
         seed(rig, assetIds = listOf("a-1", "a-2", "a-3"), entries = entries)
 
-        val out = PruneLockfileTool(rig.store).execute(
-            PruneLockfileTool.Input(projectId = "p"),
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine).execute(
+            ProjectMaintenanceActionTool.Input(action = "prune-lockfile", projectId = "p"),
             rig.ctx,
         )
 
@@ -186,11 +186,11 @@ class PruneLockfileToolTest {
         assertEquals(3, out.data.keptCount)
         assertEquals(
             setOf("gone-1", "gone-2"),
-            out.data.prunedEntries.map { it.assetId }.toSet(),
+            out.data.prunedOrphanLockfileRows.map { it.assetId }.toSet(),
         )
         // Pruned summaries expose inputHash + toolId + assetId so the agent
         // can phrase the dropped rows.
-        val goneOne = out.data.prunedEntries.single { it.assetId == "gone-1" }
+        val goneOne = out.data.prunedOrphanLockfileRows.single { it.assetId == "gone-1" }
         assertEquals("h-gone-1", goneOne.inputHash)
         assertEquals("generate_image", goneOne.toolId)
 
@@ -211,8 +211,8 @@ class PruneLockfileToolTest {
         )
         seed(rig, assetIds = listOf("a-1"), entries = entries)
 
-        val out = PruneLockfileTool(rig.store).execute(
-            PruneLockfileTool.Input(projectId = "p", dryRun = true),
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine).execute(
+            ProjectMaintenanceActionTool.Input(action = "prune-lockfile", projectId = "p", dryRun = true),
             rig.ctx,
         )
 
@@ -222,7 +222,7 @@ class PruneLockfileToolTest {
         assertEquals(1, out.data.keptCount)
         assertEquals(
             setOf("gone-1", "gone-2"),
-            out.data.prunedEntries.map { it.assetId }.toSet(),
+            out.data.prunedOrphanLockfileRows.map { it.assetId }.toSet(),
         )
 
         // Store still has the original three entries — dry run is preview only.
@@ -237,8 +237,8 @@ class PruneLockfileToolTest {
     @Test fun missingProjectFailsLoudly() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            PruneLockfileTool(rig.store).execute(
-                PruneLockfileTool.Input(projectId = "ghost"),
+            ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine).execute(
+                ProjectMaintenanceActionTool.Input(action = "prune-lockfile", projectId = "ghost"),
                 rig.ctx,
             )
         }
@@ -255,22 +255,22 @@ class PruneLockfileToolTest {
         )
         seed(rig, assetIds = listOf("a-1", "a-2"), entries = entries)
 
-        val first = PruneLockfileTool(rig.store).execute(
-            PruneLockfileTool.Input(projectId = "p"),
+        val first = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine).execute(
+            ProjectMaintenanceActionTool.Input(action = "prune-lockfile", projectId = "p"),
             rig.ctx,
         )
         assertEquals(2, first.data.prunedCount)
         assertEquals(2, first.data.keptCount)
 
-        val second = PruneLockfileTool(rig.store).execute(
-            PruneLockfileTool.Input(projectId = "p"),
+        val second = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine).execute(
+            ProjectMaintenanceActionTool.Input(action = "prune-lockfile", projectId = "p"),
             rig.ctx,
         )
         // Second call is a no-op over the already-pruned state.
         assertEquals(2, second.data.totalEntries)
         assertEquals(0, second.data.prunedCount)
         assertEquals(2, second.data.keptCount)
-        assertTrue(second.data.prunedEntries.isEmpty())
+        assertTrue(second.data.prunedOrphanLockfileRows.isEmpty())
 
         val refreshed = rig.store.get(ProjectId("p"))!!
         assertEquals(

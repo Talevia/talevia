@@ -26,12 +26,12 @@ import kotlinx.serialization.serializer
  * `docs/decisions/2026-04-21-debt-merge-pin-unpin-tool-pairs.md`.
  *
  * When `pinned=true`:
- *  - [GcLockfileTool] rescues the entry regardless of `maxAgeDays` /
+ *  - [ProjectMaintenanceActionTool] rescues the entry regardless of `maxAgeDays` /
  *    `keepLatestPerTool` / `preserveLiveAssets=false` verdicts.
  *  - [RegenerateStaleClipsTool] skips any clip whose current lockfile entry is
  *    pinned (reason `"pinned"`), leaving the clip stale-but-frozen until the
  *    user unpins it or replaces the clip outright.
- *  - [PruneLockfileTool] still drops orphan pinned entries — a pin with no
+ *  - [ProjectMaintenanceActionTool] still drops orphan pinned entries — a pin with no
  *    surviving asset protects nothing and is dead weight.
  *
  * When `pinned=false`: entry is again subject to gc_lockfile policy and

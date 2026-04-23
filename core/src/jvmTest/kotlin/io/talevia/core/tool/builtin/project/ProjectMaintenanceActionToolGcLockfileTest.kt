@@ -27,7 +27,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-class GcLockfileToolTest {
+class ProjectMaintenanceActionToolGcLockfileTest {
 
     private companion object {
         const val NOW_MS: Long = 1_700_000_000_000L
@@ -115,8 +115,8 @@ class GcLockfileToolTest {
         // No assets in the project so the live-asset guard never rescues any row.
         seed(rig, assetIds = emptyList(), entries = entries)
 
-        val out = GcLockfileTool(rig.store, fixedClock).execute(
-            GcLockfileTool.Input(projectId = "p", maxAgeDays = 7, preserveLiveAssets = false),
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-lockfile", projectId = "p", maxAgeDays = 7, preserveLiveAssets = false),
             rig.ctx,
         )
 
@@ -125,9 +125,9 @@ class GcLockfileToolTest {
         assertEquals(2, out.data.keptCount)
         assertEquals(
             setOf("just-past", "ancient"),
-            out.data.prunedEntries.map { it.assetId }.toSet(),
+            out.data.prunedGcLockfileRows.map { it.assetId }.toSet(),
         )
-        out.data.prunedEntries.forEach { assertEquals("age", it.reason) }
+        out.data.prunedGcLockfileRows.forEach { assertEquals("age", it.reason) }
 
         // Boundary row is preserved.
         val refreshed = rig.store.get(ProjectId("p"))!!
@@ -154,8 +154,8 @@ class GcLockfileToolTest {
         )
         seed(rig, assetIds = emptyList(), entries = entries)
 
-        val out = GcLockfileTool(rig.store, fixedClock).execute(
-            GcLockfileTool.Input(
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-lockfile",
                 projectId = "p",
                 keepLatestPerTool = 2,
                 preserveLiveAssets = false,
@@ -168,9 +168,9 @@ class GcLockfileToolTest {
         assertEquals(4, out.data.keptCount)
         assertEquals(
             setOf("gi-1", "gi-2", "ss-1", "ss-2"),
-            out.data.prunedEntries.map { it.assetId }.toSet(),
+            out.data.prunedGcLockfileRows.map { it.assetId }.toSet(),
         )
-        out.data.prunedEntries.forEach { assertEquals("count", it.reason) }
+        out.data.prunedGcLockfileRows.forEach { assertEquals("count", it.reason) }
 
         val refreshed = rig.store.get(ProjectId("p"))!!
         assertEquals(
@@ -198,8 +198,8 @@ class GcLockfileToolTest {
         )
         seed(rig, assetIds = emptyList(), entries = entries)
 
-        val out = GcLockfileTool(rig.store, fixedClock).execute(
-            GcLockfileTool.Input(
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-lockfile",
                 projectId = "p",
                 maxAgeDays = 10,
                 keepLatestPerTool = 2,
@@ -212,7 +212,7 @@ class GcLockfileToolTest {
         assertEquals(3, out.data.prunedCount)
         assertEquals(2, out.data.keptCount)
 
-        val byAsset = out.data.prunedEntries.associateBy { it.assetId }
+        val byAsset = out.data.prunedGcLockfileRows.associateBy { it.assetId }
         assertEquals("count", byAsset["mid"]?.reason)
         assertEquals("age+count", byAsset["stale"]?.reason)
         assertEquals("age", byAsset["solo-old"]?.reason)
@@ -233,8 +233,8 @@ class GcLockfileToolTest {
         )
         seed(rig, assetIds = listOf("live-asset"), entries = entries)
 
-        val out = GcLockfileTool(rig.store, fixedClock).execute(
-            GcLockfileTool.Input(
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-lockfile",
                 projectId = "p",
                 maxAgeDays = 30,
                 preserveLiveAssets = true,
@@ -248,7 +248,7 @@ class GcLockfileToolTest {
         assertEquals(1, out.data.keptByLiveAssetGuardCount)
         assertEquals(
             listOf("dead-asset"),
-            out.data.prunedEntries.map { it.assetId },
+            out.data.prunedGcLockfileRows.map { it.assetId },
         )
         assertTrue("liveAssetGuard" in out.data.policiesApplied)
 
@@ -267,8 +267,8 @@ class GcLockfileToolTest {
         )
         seed(rig, assetIds = listOf("live-asset"), entries = entries)
 
-        val out = GcLockfileTool(rig.store, fixedClock).execute(
-            GcLockfileTool.Input(
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-lockfile",
                 projectId = "p",
                 maxAgeDays = 30,
                 preserveLiveAssets = false,
@@ -294,8 +294,8 @@ class GcLockfileToolTest {
         )
         seed(rig, assetIds = emptyList(), entries = entries)
 
-        val out = GcLockfileTool(rig.store, fixedClock).execute(
-            GcLockfileTool.Input(
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-lockfile",
                 projectId = "p",
                 maxAgeDays = 30,
                 preserveLiveAssets = false,
@@ -324,8 +324,8 @@ class GcLockfileToolTest {
         )
         seed(rig, assetIds = emptyList(), entries = entries)
 
-        val out = GcLockfileTool(rig.store, fixedClock).execute(
-            GcLockfileTool.Input(projectId = "p"),
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-lockfile", projectId = "p"),
             rig.ctx,
         )
 
@@ -333,11 +333,11 @@ class GcLockfileToolTest {
         assertEquals(0, out.data.prunedCount)
         assertEquals(2, out.data.keptCount)
         assertEquals(0, out.data.keptByLiveAssetGuardCount)
-        assertTrue(out.data.prunedEntries.isEmpty())
+        assertTrue(out.data.prunedGcLockfileRows.isEmpty())
         assertTrue(out.data.policiesApplied.isEmpty())
         assertTrue(
-            "prune_lockfile" in out.outputForLlm,
-            "no-op message should point at prune_lockfile, was: ${out.outputForLlm}",
+            "prune-lockfile" in out.outputForLlm,
+            "no-op message should point at prune-lockfile, was: ${out.outputForLlm}",
         )
 
         val refreshed = rig.store.get(ProjectId("p"))!!
@@ -354,15 +354,15 @@ class GcLockfileToolTest {
         )
         seed(rig, assetIds = emptyList(), entries = entries)
 
-        val out = GcLockfileTool(rig.store, fixedClock).execute(
-            GcLockfileTool.Input(projectId = "p", maxAgeDays = 0, preserveLiveAssets = false),
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-lockfile", projectId = "p", maxAgeDays = 0, preserveLiveAssets = false),
             rig.ctx,
         )
 
         assertEquals(1, out.data.prunedCount)
         assertEquals(
             listOf("one-ms-older"),
-            out.data.prunedEntries.map { it.assetId },
+            out.data.prunedGcLockfileRows.map { it.assetId },
         )
 
         val refreshed = rig.store.get(ProjectId("p"))!!
@@ -376,15 +376,15 @@ class GcLockfileToolTest {
         val rig = rig()
         seed(rig, assetIds = emptyList(), entries = emptyList())
 
-        val out = GcLockfileTool(rig.store, fixedClock).execute(
-            GcLockfileTool.Input(projectId = "p", maxAgeDays = 7),
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-lockfile", projectId = "p", maxAgeDays = 7),
             rig.ctx,
         )
 
         assertEquals(0, out.data.totalEntries)
         assertEquals(0, out.data.prunedCount)
         assertEquals(0, out.data.keptCount)
-        assertTrue(out.data.prunedEntries.isEmpty())
+        assertTrue(out.data.prunedGcLockfileRows.isEmpty())
 
         val refreshed = rig.store.get(ProjectId("p"))!!
         assertTrue(refreshed.lockfile.entries.isEmpty())
@@ -399,8 +399,8 @@ class GcLockfileToolTest {
         )
         seed(rig, assetIds = emptyList(), entries = entries)
 
-        val out = GcLockfileTool(rig.store, fixedClock).execute(
-            GcLockfileTool.Input(
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-lockfile",
                 projectId = "p",
                 keepLatestPerTool = 0,
                 preserveLiveAssets = false,
@@ -412,7 +412,7 @@ class GcLockfileToolTest {
         assertEquals(0, out.data.keptCount)
         assertEquals(
             setOf("a-1", "a-2", "b-1"),
-            out.data.prunedEntries.map { it.assetId }.toSet(),
+            out.data.prunedGcLockfileRows.map { it.assetId }.toSet(),
         )
 
         val refreshed = rig.store.get(ProjectId("p"))!!
@@ -422,8 +422,8 @@ class GcLockfileToolTest {
     @Test fun missingProjectFailsLoudly() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            GcLockfileTool(rig.store, fixedClock).execute(
-                GcLockfileTool.Input(projectId = "ghost", maxAgeDays = 7),
+            ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+                ProjectMaintenanceActionTool.Input(action = "gc-lockfile", projectId = "ghost", maxAgeDays = 7),
                 rig.ctx,
             )
         }
@@ -435,8 +435,8 @@ class GcLockfileToolTest {
         seed(rig, assetIds = emptyList(), entries = emptyList())
 
         assertFailsWith<IllegalArgumentException> {
-            GcLockfileTool(rig.store, fixedClock).execute(
-                GcLockfileTool.Input(projectId = "p", maxAgeDays = -1),
+            ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+                ProjectMaintenanceActionTool.Input(action = "gc-lockfile", projectId = "p", maxAgeDays = -1),
                 rig.ctx,
             )
         }
@@ -447,8 +447,8 @@ class GcLockfileToolTest {
         seed(rig, assetIds = emptyList(), entries = emptyList())
 
         assertFailsWith<IllegalArgumentException> {
-            GcLockfileTool(rig.store, fixedClock).execute(
-                GcLockfileTool.Input(projectId = "p", keepLatestPerTool = -1),
+            ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+                ProjectMaintenanceActionTool.Input(action = "gc-lockfile", projectId = "p", keepLatestPerTool = -1),
                 rig.ctx,
             )
         }
@@ -465,10 +465,10 @@ class GcLockfileToolTest {
         )
         seed(rig, assetIds = emptyList(), entries = entries)
 
-        val out = GcLockfileTool(rig.store, fixedClock).execute(
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
             // maxAgeDays=7 drops both ancient rows; preserveLiveAssets=false removes
             // the live-asset safety net so only the pin guard can rescue the hero.
-            GcLockfileTool.Input(
+            ProjectMaintenanceActionTool.Input(action = "gc-lockfile",
                 projectId = "p",
                 maxAgeDays = 7,
                 preserveLiveAssets = false,
@@ -481,7 +481,7 @@ class GcLockfileToolTest {
         assertEquals(2, out.data.keptCount)
         assertEquals(1, out.data.keptByPinCount)
         assertEquals(0, out.data.keptByLiveAssetGuardCount)
-        assertEquals(setOf("ancient-other"), out.data.prunedEntries.map { it.assetId }.toSet())
+        assertEquals(setOf("ancient-other"), out.data.prunedGcLockfileRows.map { it.assetId }.toSet())
         assertTrue(out.data.policiesApplied.contains("pinGuard"))
 
         // The pinned row + the fresh row survived; only ancient-other dropped.
@@ -508,8 +508,8 @@ class GcLockfileToolTest {
         )
         seed(rig, assetIds = listOf("hero"), entries = entries)
 
-        val out = GcLockfileTool(rig.store, fixedClock).execute(
-            GcLockfileTool.Input(projectId = "p", maxAgeDays = 7),
+        val out = ProjectMaintenanceActionTool(rig.store, NoopMaintenanceEngine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-lockfile", projectId = "p", maxAgeDays = 7),
             rig.ctx,
         )
 

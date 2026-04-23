@@ -27,7 +27,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class GcClipRenderCacheToolTest {
+class ProjectMaintenanceActionToolGcRenderCacheTest {
 
     private companion object {
         const val NOW_MS: Long = 1_700_000_000_000L
@@ -115,8 +115,8 @@ class GcClipRenderCacheToolTest {
         val rig = rig()
         seed(rig, listOf(entry("a"), entry("b")))
 
-        val out = GcClipRenderCacheTool(rig.store, rig.engine, fixedClock).execute(
-            GcClipRenderCacheTool.Input(projectId = "p"),
+        val out = ProjectMaintenanceActionTool(rig.store, rig.engine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-render-cache", projectId = "p"),
             rig.ctx,
         )
 
@@ -148,17 +148,17 @@ class GcClipRenderCacheToolTest {
             ),
         )
 
-        val out = GcClipRenderCacheTool(rig.store, rig.engine, fixedClock).execute(
-            GcClipRenderCacheTool.Input(projectId = "p", maxAgeDays = 7),
+        val out = ProjectMaintenanceActionTool(rig.store, rig.engine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-render-cache", projectId = "p", maxAgeDays = 7),
             rig.ctx,
         )
 
         assertEquals(4, out.data.totalEntries)
         assertEquals(2, out.data.prunedCount)
         assertEquals(2, out.data.keptCount)
-        assertEquals(setOf("just-past", "ancient"), out.data.prunedEntries.map { it.fingerprint }.toSet())
-        out.data.prunedEntries.forEach { assertEquals("age", it.reason) }
-        assertTrue(out.data.prunedEntries.all { it.fileDeleted })
+        assertEquals(setOf("just-past", "ancient"), out.data.prunedRenderCacheRows.map { it.fingerprint }.toSet())
+        out.data.prunedRenderCacheRows.forEach { assertEquals("age", it.reason) }
+        assertTrue(out.data.prunedRenderCacheRows.all { it.fileDeleted })
 
         val refreshed = rig.store.get(ProjectId("p"))!!
         assertEquals(
@@ -188,16 +188,16 @@ class GcClipRenderCacheToolTest {
             ),
         )
 
-        val out = GcClipRenderCacheTool(rig.store, rig.engine, fixedClock).execute(
-            GcClipRenderCacheTool.Input(projectId = "p", keepLastN = 2),
+        val out = ProjectMaintenanceActionTool(rig.store, rig.engine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-render-cache", projectId = "p", keepLastN = 2),
             rig.ctx,
         )
 
         assertEquals(5, out.data.totalEntries)
         assertEquals(3, out.data.prunedCount)
         assertEquals(2, out.data.keptCount)
-        assertEquals(setOf("a", "b", "c"), out.data.prunedEntries.map { it.fingerprint }.toSet())
-        out.data.prunedEntries.forEach { assertEquals("count", it.reason) }
+        assertEquals(setOf("a", "b", "c"), out.data.prunedRenderCacheRows.map { it.fingerprint }.toSet())
+        out.data.prunedRenderCacheRows.forEach { assertEquals("count", it.reason) }
 
         val refreshed = rig.store.get(ProjectId("p"))!!
         assertEquals(
@@ -230,8 +230,8 @@ class GcClipRenderCacheToolTest {
             ),
         )
 
-        val out = GcClipRenderCacheTool(rig.store, rig.engine, fixedClock).execute(
-            GcClipRenderCacheTool.Input(projectId = "p", maxAgeDays = 7, keepLastN = 2),
+        val out = ProjectMaintenanceActionTool(rig.store, rig.engine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-render-cache", projectId = "p", maxAgeDays = 7, keepLastN = 2),
             rig.ctx,
         )
 
@@ -248,9 +248,9 @@ class GcClipRenderCacheToolTest {
         assertEquals(2, out.data.keptCount)
         assertEquals(
             setOf("old-dropped", "old-kept"),
-            out.data.prunedEntries.map { it.fingerprint }.toSet(),
+            out.data.prunedRenderCacheRows.map { it.fingerprint }.toSet(),
         )
-        out.data.prunedEntries.forEach { assertEquals("age+count", it.reason) }
+        out.data.prunedRenderCacheRows.forEach { assertEquals("age+count", it.reason) }
         assertEquals(setOf("age", "count"), out.data.policiesApplied.toSet())
     }
 
@@ -263,14 +263,14 @@ class GcClipRenderCacheToolTest {
         )
         seed(rig, listOf(entry("a", createdAt = NOW_MS - 10L * MS_PER_DAY), entry("b")))
 
-        val out = GcClipRenderCacheTool(rig.store, rig.engine, fixedClock).execute(
-            GcClipRenderCacheTool.Input(projectId = "p", maxAgeDays = 7, dryRun = true),
+        val out = ProjectMaintenanceActionTool(rig.store, rig.engine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-render-cache", projectId = "p", maxAgeDays = 7, dryRun = true),
             rig.ctx,
         )
 
         assertEquals(1, out.data.prunedCount)
         assertTrue(out.data.dryRun)
-        out.data.prunedEntries.forEach { assertFalse(it.fileDeleted) }
+        out.data.prunedRenderCacheRows.forEach { assertFalse(it.fileDeleted) }
         // Engine never asked to delete under dry-run.
         assertTrue(rig.engine.deleteCalls.isEmpty())
         // Cache rows intact.
@@ -281,14 +281,14 @@ class GcClipRenderCacheToolTest {
         val rig = rig()
         seed(rig, emptyList())
 
-        val out = GcClipRenderCacheTool(rig.store, rig.engine, fixedClock).execute(
-            GcClipRenderCacheTool.Input(projectId = "p", keepLastN = 3),
+        val out = ProjectMaintenanceActionTool(rig.store, rig.engine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-render-cache", projectId = "p", keepLastN = 3),
             rig.ctx,
         )
 
         assertEquals(0, out.data.totalEntries)
         assertEquals(0, out.data.prunedCount)
-        assertTrue(out.data.prunedEntries.isEmpty())
+        assertTrue(out.data.prunedRenderCacheRows.isEmpty())
         assertTrue(rig.engine.deleteCalls.isEmpty())
     }
 
@@ -296,8 +296,8 @@ class GcClipRenderCacheToolTest {
         val rig = rig()
 
         val ex = assertFailsWith<IllegalStateException> {
-            GcClipRenderCacheTool(rig.store, rig.engine, fixedClock).execute(
-                GcClipRenderCacheTool.Input(projectId = "nonexistent", keepLastN = 1),
+            ProjectMaintenanceActionTool(rig.store, rig.engine, fixedClock).execute(
+                ProjectMaintenanceActionTool.Input(action = "gc-render-cache", projectId = "nonexistent", keepLastN = 1),
                 rig.ctx,
             )
         }
@@ -308,8 +308,8 @@ class GcClipRenderCacheToolTest {
         val rig = rig(presentPaths = emptySet()) // nothing on disk
         seed(rig, listOf(entry("a", createdAt = NOW_MS - 30L * MS_PER_DAY)))
 
-        val out = GcClipRenderCacheTool(rig.store, rig.engine, fixedClock).execute(
-            GcClipRenderCacheTool.Input(projectId = "p", maxAgeDays = 7),
+        val out = ProjectMaintenanceActionTool(rig.store, rig.engine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-render-cache", projectId = "p", maxAgeDays = 7),
             rig.ctx,
         )
 
@@ -317,7 +317,7 @@ class GcClipRenderCacheToolTest {
         // Row pruned even though file was already gone.
         assertEquals(0, rig.store.get(ProjectId("p"))!!.clipRenderCache.entries.size)
         // fileDeleted=false because Files.deleteIfExists returned false.
-        assertFalse(out.data.prunedEntries.single().fileDeleted)
+        assertFalse(out.data.prunedRenderCacheRows.single().fileDeleted)
         // Engine was still asked.
         assertEquals(1, rig.engine.deleteCalls.size)
     }
@@ -327,8 +327,8 @@ class GcClipRenderCacheToolTest {
         seed(rig, listOf(entry("a")))
 
         val ex = assertFailsWith<IllegalArgumentException> {
-            GcClipRenderCacheTool(rig.store, rig.engine, fixedClock).execute(
-                GcClipRenderCacheTool.Input(projectId = "p", maxAgeDays = -1),
+            ProjectMaintenanceActionTool(rig.store, rig.engine, fixedClock).execute(
+                ProjectMaintenanceActionTool.Input(action = "gc-render-cache", projectId = "p", maxAgeDays = -1),
                 rig.ctx,
             )
         }
@@ -340,8 +340,8 @@ class GcClipRenderCacheToolTest {
         seed(rig, listOf(entry("a")))
 
         val ex = assertFailsWith<IllegalArgumentException> {
-            GcClipRenderCacheTool(rig.store, rig.engine, fixedClock).execute(
-                GcClipRenderCacheTool.Input(projectId = "p", keepLastN = -1),
+            ProjectMaintenanceActionTool(rig.store, rig.engine, fixedClock).execute(
+                ProjectMaintenanceActionTool.Input(action = "gc-render-cache", projectId = "p", keepLastN = -1),
                 rig.ctx,
             )
         }
@@ -357,8 +357,8 @@ class GcClipRenderCacheToolTest {
         )
         seed(rig, listOf(entry("a"), entry("b")))
 
-        val out = GcClipRenderCacheTool(rig.store, rig.engine, fixedClock).execute(
-            GcClipRenderCacheTool.Input(projectId = "p", keepLastN = 0),
+        val out = ProjectMaintenanceActionTool(rig.store, rig.engine, fixedClock).execute(
+            ProjectMaintenanceActionTool.Input(action = "gc-render-cache", projectId = "p", keepLastN = 0),
             rig.ctx,
         )
 

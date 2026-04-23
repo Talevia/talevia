@@ -46,15 +46,13 @@ import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.ExportProjectTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
 import io.talevia.core.tool.builtin.project.ForkProjectTool
-import io.talevia.core.tool.builtin.project.GcClipRenderCacheTool
-import io.talevia.core.tool.builtin.project.GcLockfileTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
 import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.project.OpenProjectTool
+import io.talevia.core.tool.builtin.project.ProjectMaintenanceActionTool
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
 import io.talevia.core.tool.builtin.project.ProjectSnapshotActionTool
-import io.talevia.core.tool.builtin.project.PruneLockfileTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
 import io.talevia.core.tool.builtin.project.RemoveAssetTool
 import io.talevia.core.tool.builtin.project.RenameProjectTool
@@ -222,9 +220,7 @@ internal fun ToolRegistry.registerProjectTools(
     register(SetOutputProfileTool(projects))
     register(ValidateProjectTool(projects))
     register(RegenerateStaleClipsTool(projects, this))
-    register(PruneLockfileTool(projects))
-    register(GcLockfileTool(projects))
-    register(GcClipRenderCacheTool(projects, engine))
+    register(ProjectMaintenanceActionTool(projects, engine))
     register(SetLockfileEntryPinnedTool(projects))
     register(SetClipAssetPinnedTool(projects))
     register(ProjectSnapshotActionTool(projects))

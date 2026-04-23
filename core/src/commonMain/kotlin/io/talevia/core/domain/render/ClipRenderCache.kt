@@ -44,7 +44,7 @@ data class ClipRenderCache(
 
     /**
      * Keep only entries whose `fingerprint` is in [keep]; drop the rest. Used
-     * by [io.talevia.core.tool.builtin.project.GcClipRenderCacheTool] to prune
+     * by [io.talevia.core.tool.builtin.project.ProjectMaintenanceActionTool] to prune
      * policy-selected rows. Preserves append order among survivors so
      * downstream consumers that rely on `lastOrNull { … }` (the "latest wins"
      * contract in [findByFingerprint]) keep matching the same entry.

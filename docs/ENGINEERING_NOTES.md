@@ -324,3 +324,31 @@ full `packageDmg` + install, not just a fast `:apps:desktop:run`. The
 `/iterate-gap` "run the gradle target matching your change" heuristic
 doesn't cover this; OS-integration bullets should budget a packageDmg
 step in their plan.
+
+## 2026-04-23 — BSD `sed` silently no-ops `\b` word boundaries
+
+Mac ships BSD sed, which (unlike GNU sed) doesn't recognise `\b` as a
+word boundary. `s/\.prunedEntries\b/…/g` matches zero things and
+exits 0 — no warning, no diff. The failure surfaces only when the
+post-sed file is compiled and the old identifier is still there.
+
+Hit during cycle 22's bulk rewrite of three test files (~1200
+lines): the first pass left every `.prunedEntries` reference
+unchanged, and only the Kotlin compile errors (`Unresolved
+reference 'prunedEntries'`) caught it.
+
+**Rule of thumb:** on Mac, don't rely on `\b` in `sed` patterns.
+Two workarounds:
+1. Use a negative character class at the boundary:
+   `s/\.prunedEntries\([^a-zA-Z0-9_]\)/.newName\1/g`. Verbose but
+   works everywhere.
+2. Require the boundary via a literal suffix the call site always
+   produces — e.g. if every usage is `.prunedEntries.` or
+   `.prunedEntries\n`, target that literal.
+3. If the dataset is small, do the replacement via `Edit` tool
+   calls instead of `sed` — Kotlin identifiers are usually small
+   enough that per-site edits are affordable.
+
+Always follow-up a `sed` rewrite with a `git diff --stat` + a
+quick compile-check before moving on — the match count is part of
+the diff; a zero-match rewrite should stand out visibly.
