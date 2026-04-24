@@ -45,9 +45,9 @@ bullet 打 tag；现有 bullet 不手动 backfill。
 - [x] Kind 可扩证明：`ConsistencyKinds.ALL` 至少出现第 4 个成员（如 `lora_binding`
   / `color_palette`）+ 在 `PromptFolding` 的 when-branch 里正式处理（grep: `ALL`
   大小 ≥ 4） — cycle 2026-04-24 db5f5d2f
-- [ ] 语义回归测试：改 `character_ref` 的可见字段（如 `name` / `appearance`）
+- [x] 语义回归测试：改 `character_ref` 的可见字段（如 `name` / `appearance`）
   → 下游 clip stale → re-export 后产物 prompt 确实包含新值（grep: e2e test 带
-  `character_ref` 字段改 → export → prompt 断言链条）
+  `character_ref` 字段改 → export → prompt 断言链条） — cycle 2026-04-24 51aaf884
 - [ ] Milestone 退出总结：在本文件 M1 block 末尾 append `### M1 exit summary`
   小段，列剩余的 §3.3 gap（LoRA fine-tune 产物持久化 / 多 character 交互
   一致性 / 音视频跨模态一致性 等）以便 M2 / M3 接力 —

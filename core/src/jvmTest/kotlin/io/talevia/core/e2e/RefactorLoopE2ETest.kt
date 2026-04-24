@@ -78,8 +78,19 @@ class RefactorLoopE2ETest {
         var calls: Int = 0
             private set
 
+        /**
+         * Captures the fully-folded prompt each provider call receives. Used by the
+         * M1 criterion 5 semantic regression assertion (see the prompt fold-through
+         * block in `editCharacterThenRegenerateThenExport`): if `AigcPipeline.foldPrompt`
+         * stops physically injecting consistency-binding fields into the request, the
+         * first element here stays identical between the seed call and the regenerate
+         * call and the assertion flips red.
+         */
+        val capturedPrompts: MutableList<String> = mutableListOf()
+
         override suspend fun generate(request: ImageGenRequest): ImageGenResult {
             calls += 1
+            capturedPrompts += request.prompt
             val marker = calls.toByte()
             val bytes = ByteArray(8) { marker }
             return ImageGenResult(
@@ -183,6 +194,19 @@ class RefactorLoopE2ETest {
         ).let { (it as JsonObject)["assetId"]!!.toString().trim('"') }
         assertEquals(1, imageEngine.calls)
 
+        // Seed-call prompt fold-through check: the stub received not just the base
+        // "portrait of Mei" text but the physically-injected character fragment from
+        // AigcPipeline.foldPrompt — both the name and the original visualDescription
+        // must land in the provider request. This pins M1 criterion 1 ("物理注入") to a
+        // real provider-boundary assertion, so a future silent regression in
+        // foldConsistencyIntoPrompt shows up here rather than as mysterious prompt
+        // drift in production.
+        val seedPrompt = imageEngine.capturedPrompts.single()
+        assertTrue(
+            seedPrompt.contains("Mei") && seedPrompt.contains("teal hair"),
+            "seed prompt must contain folded character name + visualDescription, got: $seedPrompt",
+        )
+
         // Place the generated asset on a video track, binding it to "mei"
         // so the DAG lane picks it up.
         store.mutate(pid) { p ->
@@ -259,6 +283,23 @@ class RefactorLoopE2ETest {
             ctx(),
         )
         assertEquals(2, imageEngine.calls, "regenerate must call the image engine exactly once")
+
+        // --- 5a. M1 criterion 5 semantic chain: edited character_ref field → regenerate
+        // → prompt physically contains the NEW value + no longer contains the OLD one.
+        // Without this assertion, "regenerate runs" and "asset id flips" could both be
+        // true while the re-fed prompt was stale (e.g. if RegenerateStaleClipsTool
+        // replayed cached baseInputs instead of re-resolving consistency against
+        // today's source). The two assertions together pin the whole refactor-loop
+        // invariant: edit a visible character_ref field → downstream prompt updates.
+        val regenPrompt = imageEngine.capturedPrompts.last()
+        assertTrue(
+            regenPrompt.contains("red hair"),
+            "regenerate prompt must contain new visualDescription, got: $regenPrompt",
+        )
+        assertTrue(
+            !regenPrompt.contains("teal hair"),
+            "regenerate prompt must NOT contain the stale visualDescription, got: $regenPrompt",
+        )
 
         val project = store.get(pid)!!
         val clip = project.timeline.tracks.first().clips.filterIsInstance<Clip.Video>().single()
