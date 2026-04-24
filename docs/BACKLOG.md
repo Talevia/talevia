@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **consistency-binding-reverse-lookup** — M1 criterion 3。现在只能从 `Clip` 读 binding 正向；给定一个 consistency source node，无法反查"哪些 clip 绑了我"。改 `character_ref` 的名字后缺失反查 = 不知道哪些 clip 需要 stale。**方向：** `source_query` 或 `project_query` 新增 select（如 `consistency_bound_clips`），输入 source node id，输出绑定了它的 clip id 列表。折入已有 dispatcher，不新开 tool。Rubric §5.3 / §5.5。Milestone §M1.
 - **consistency-kind-extension** — M1 criterion 4："Kind 可扩证明"。`ConsistencyKinds.ALL` 目前恰好 3 个（`CHARACTER_REF` / `STYLE_BIBLE` / `BRAND_PALETTE`），无第 4 个活例证明机制可扩。**方向：** 落第 4 个 kind（如 `lora_binding` 或 `color_palette`）+ 在 `PromptFolding` when-branch 里正式处理 + `ConsistencyBodies` 定义其 body schema。完整闭合一个最小样例。Rubric §5.5。Milestone §M1.
 
 ## P1 — 中优，做完 P0 再排
@@ -38,3 +37,4 @@
 - **cli-metrics-slash-command** — `CounterRegistry` 暴露 counters 只通过 server 的 `GET /metrics`。CLI / Desktop operator 无法 in-process 看 live count 答 "tool X 触发是否偏多"。**方向：** CLI `/metrics` slash-command 渲染当前 counters 为 2-列表（name, value）。无新 metric 类型，纯 readout。**触发条件：** operator 报告 CLI 上无法判断 tool X 触发是否偏多。Rubric §5.4 / §5.6。Milestone §later.
 - **cli-revoke-permission-command** — Cycle-53 落 `permission-rules.json` 持久化 + "Always" save 路径；operator 无 in-REPL revoke verb，只能手改 json。**方向：** CLI `/revoke-permission <permission> [pattern]` slash-command；drop 匹配 rule 从 in-memory list + 经 `permissionRulesPersistence` re-save。**触发条件：** operator 反馈手改 json 是 friction。Rubric §5.4。Milestone §later.
 - **desktop-permission-rules-persistence** — Cycle-53 只 wire CLI persistence。Desktop `PermissionDialog.kt` 的 "Always" reply 仍 append 到 `container.permissionRules` 未持久化。**方向：** 走 Desktop recents-path parent（同 CLI 目录）挂 `FilePermissionRulesPersistence`，dialog "Always" callback 调 `save()`。**触发条件：** Desktop 达 CLI parity（CLAUDE.md 平台优先级）。Rubric §5.4 / desktop。Milestone §later.
+- **debt-skill-milestone-reverse-grep** — 两连 skip-close（`clip-consistency-binding-persistence` 4ead8ad1, `consistency-binding-reverse-lookup` 本 cycle）暴露 R/repopulate 盲点：R.5/R.6 scan 按代码劣化信号扫，但不反向跑每条 `Milestone §M<N>` criterion 的 grep 确认"这 criterion 是不是已经被现有代码满足"。结果是 repopulate 把已实现的 M 条目写成 P0 bullet，下 cycle 一挑就 skip-close，浪费 cycle。**方向：** R 节在 draft 前先对 `docs/MILESTONES.md` 当前 M 的每条 `[ ]` 跑 §M.1 的 grep 反向 check；grep 命中即：(a) 在 repopulate commit body 里列出 "M criteria auto-evidence" 段告知候选已满足，(b) 不为该 criterion 生成 P0/P1 bullet。skill SKILL.md 的 §R 新增一小段 "R.0 Milestone evidence pre-check"。Rubric 外 / 顺手记录。Milestone §later.
