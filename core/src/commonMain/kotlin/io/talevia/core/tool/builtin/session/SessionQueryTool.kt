@@ -12,6 +12,7 @@ import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.query.ActiveRunSummaryRow
 import io.talevia.core.tool.builtin.session.query.AncestorRow
 import io.talevia.core.tool.builtin.session.query.CacheStatsRow
+import io.talevia.core.tool.builtin.session.query.CancellationHistoryRow
 import io.talevia.core.tool.builtin.session.query.CompactionRow
 import io.talevia.core.tool.builtin.session.query.ContextPressureRow
 import io.talevia.core.tool.builtin.session.query.FallbackHistoryRow
@@ -31,6 +32,7 @@ import io.talevia.core.tool.builtin.session.query.ToolSpecBudgetRow
 import io.talevia.core.tool.builtin.session.query.runActiveRunSummaryQuery
 import io.talevia.core.tool.builtin.session.query.runAncestorsQuery
 import io.talevia.core.tool.builtin.session.query.runCacheStatsQuery
+import io.talevia.core.tool.builtin.session.query.runCancellationHistoryQuery
 import io.talevia.core.tool.builtin.session.query.runCompactionsQuery
 import io.talevia.core.tool.builtin.session.query.runContextPressureQuery
 import io.talevia.core.tool.builtin.session.query.runFallbackHistoryQuery
@@ -198,6 +200,10 @@ class SessionQueryTool(
             "hop, oldest first. Rows: {messageId, createdAtEpochMs, model, finish, chain}. " +
             "Complements run_failure (which only surfaces on error turns) by showing successful " +
             "turns that recovered via fallback. requires sessionId; optional messageId narrows.\n" +
+            "  • cancellation_history — every assistant turn with finish=CANCELLED, oldest first. " +
+            "Rows: {messageId, createdAtEpochMs, model, reason, inFlightToolCallCount, inFlightToolIds}. " +
+            "Complements run_failure (error turns) + fallback_history (successful-with-recovery) " +
+            "with the third post-mortem axis. requires sessionId; optional messageId narrows.\n" +
             "  • active_run_summary — running stats for the latest turn (state, elapsedMs, " +
             "tokensIn/Out, toolCallCount, compactionsInRun). requires sessionId.\n" +
             "Common: limit (default 100, clamped 1..1000), offset (default 0). Filter-on-" +
@@ -229,6 +235,7 @@ class SessionQueryTool(
         SELECT_TOOL_SPEC_BUDGET -> ToolSpecBudgetRow.serializer()
         SELECT_RUN_FAILURE -> RunFailureRow.serializer()
         SELECT_FALLBACK_HISTORY -> FallbackHistoryRow.serializer()
+        SELECT_CANCELLATION_HISTORY -> CancellationHistoryRow.serializer()
         SELECT_ACTIVE_RUN_SUMMARY -> ActiveRunSummaryRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
@@ -259,6 +266,7 @@ class SessionQueryTool(
             SELECT_TOOL_SPEC_BUDGET -> runToolSpecBudgetQuery(toolRegistry, input)
             SELECT_RUN_FAILURE -> runRunFailureQuery(sessions, agentStates, fallbackTracker, input)
             SELECT_FALLBACK_HISTORY -> runFallbackHistoryQuery(sessions, fallbackTracker, input, limit, offset)
+            SELECT_CANCELLATION_HISTORY -> runCancellationHistoryQuery(sessions, input, limit, offset)
             SELECT_ACTIVE_RUN_SUMMARY -> runActiveRunSummaryQuery(sessions, agentStates, input)
             else -> error("unreachable — select validated above: '$select'")
         }
@@ -288,9 +296,10 @@ class SessionQueryTool(
             if (select != SELECT_MESSAGE &&
                 select != SELECT_RUN_FAILURE &&
                 select != SELECT_FALLBACK_HISTORY &&
+                select != SELECT_CANCELLATION_HISTORY &&
                 input.messageId != null
             ) {
-                add("messageId (select=message, run_failure, or fallback_history only)")
+                add("messageId (select=message, run_failure, fallback_history, or cancellation_history only)")
             }
             // sessionId is required for everything except sessions (and `message`, which
             // uses messageId for the drill-down); rejected for sessions.
@@ -332,6 +341,7 @@ class SessionQueryTool(
         const val SELECT_TOOL_SPEC_BUDGET = "tool_spec_budget"
         const val SELECT_RUN_FAILURE = "run_failure"
         const val SELECT_FALLBACK_HISTORY = "fallback_history"
+        const val SELECT_CANCELLATION_HISTORY = "cancellation_history"
         const val SELECT_ACTIVE_RUN_SUMMARY = "active_run_summary"
         internal val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
@@ -339,7 +349,8 @@ class SessionQueryTool(
             SELECT_SESSION_METADATA, SELECT_MESSAGE, SELECT_SPEND, SELECT_SPEND_SUMMARY,
             SELECT_CACHE_STATS,
             SELECT_CONTEXT_PRESSURE, SELECT_RUN_STATE_HISTORY, SELECT_TOOL_SPEC_BUDGET,
-            SELECT_RUN_FAILURE, SELECT_FALLBACK_HISTORY, SELECT_ACTIVE_RUN_SUMMARY,
+            SELECT_RUN_FAILURE, SELECT_FALLBACK_HISTORY, SELECT_CANCELLATION_HISTORY,
+            SELECT_ACTIVE_RUN_SUMMARY,
         )
 
         private const val DEFAULT_LIMIT = 100
