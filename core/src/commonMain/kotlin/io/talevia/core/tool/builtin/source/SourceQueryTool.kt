@@ -12,6 +12,7 @@ import io.talevia.core.tool.builtin.source.query.BodyRevisionRow
 import io.talevia.core.tool.builtin.source.query.DagSummaryRow
 import io.talevia.core.tool.builtin.source.query.DotRow
 import io.talevia.core.tool.builtin.source.query.NodeRow
+import io.talevia.core.tool.builtin.source.query.OrphanRow
 import io.talevia.core.tool.builtin.source.query.runAncestorsQuery
 import io.talevia.core.tool.builtin.source.query.runAsciiTreeQuery
 import io.talevia.core.tool.builtin.source.query.runDagSummaryQuery
@@ -20,6 +21,7 @@ import io.talevia.core.tool.builtin.source.query.runDotQuery
 import io.talevia.core.tool.builtin.source.query.runHistoryQuery
 import io.talevia.core.tool.builtin.source.query.runNodesAllProjectsQuery
 import io.talevia.core.tool.builtin.source.query.runNodesQuery
+import io.talevia.core.tool.builtin.source.query.runOrphansQuery
 import io.talevia.core.tool.query.QueryDispatcher
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -52,6 +54,11 @@ import kotlinx.serialization.serializer
  *    `├─` / `└─`). Dependency-free: read it straight in a terminal.
  *    Multi-parent nodes print under each parent with a `(dup)` marker
  *    after the first expansion so the output stays linear.
+ *  - `orphans` — every DAG node no clip binds to (same semantics as
+ *    [DagSummaryRow.orphanedNodeIds]). Rows: `{id, kind, revision,
+ *    parentCount, childCount}`, sorted by id. Dedicated surface so
+ *    cleanup workflows skip the `nodes` + O(N) `clips_for_source`
+ *    crosschecks needed to derive the same set from `select=nodes`.
  *
  * `describe_source_node` stays as a separate tool — it's single-entity deep
  * inspection (body + parents + children + bindings), not projection. Same
@@ -68,8 +75,8 @@ class SourceQueryTool(
 
     @Serializable data class Input(
         /** One of [SELECT_NODES] / [SELECT_DAG_SUMMARY] / [SELECT_DOT] /
-         *  [SELECT_DESCENDANTS] / [SELECT_ANCESTORS] / [SELECT_HISTORY]
-         *  (case-insensitive). */
+         *  [SELECT_ASCII_TREE] / [SELECT_ORPHANS] / [SELECT_DESCENDANTS] /
+         *  [SELECT_ANCESTORS] / [SELECT_HISTORY] (case-insensitive). */
         val select: String,
         /**
          * Target project. Required when `scope == "project"` (default) or unset.
@@ -168,6 +175,9 @@ class SourceQueryTool(
             "  • dot — whole DAG as Graphviz DOT (unbound-downstream nodes dashed). No filters.\n" +
             "  • ascii_tree — whole DAG as an indented ASCII tree (box-drawing, orphan / dup " +
             "markers). Dependency-free; reads straight in a terminal. No filters.\n" +
+            "  • orphans — rows: {id, kind, revision, parentCount, childCount}. Every node no " +
+            "clip binds to (same semantics as dag_summary.orphanedNodeIds). Sorted by id. " +
+            "No filters; dedicated to cleanup workflows.\n" +
             "  • descendants — BFS downstream from root; rows carry depthFromRoot (0=root). " +
             "requires root. Optional depth cap (null/negative=unbounded). Cycle-safe.\n" +
             "  • ancestors — BFS upstream from root; same shape as descendants.\n" +
@@ -190,8 +200,8 @@ class SourceQueryTool(
                 put("type", "string")
                 put(
                     "description",
-                    "What to query: nodes | dag_summary | dot | ascii_tree | descendants | " +
-                        "ancestors | history (case-insensitive).",
+                    "What to query: nodes | dag_summary | dot | ascii_tree | orphans | " +
+                        "descendants | ancestors | history (case-insensitive).",
                 )
             }
             putJsonObject("projectId") {
@@ -311,6 +321,7 @@ class SourceQueryTool(
         SELECT_DAG_SUMMARY -> DagSummaryRow.serializer()
         SELECT_DOT -> DotRow.serializer()
         SELECT_ASCII_TREE -> AsciiTreeRow.serializer()
+        SELECT_ORPHANS -> OrphanRow.serializer()
         SELECT_HISTORY -> BodyRevisionRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
@@ -338,6 +349,7 @@ class SourceQueryTool(
             SELECT_DAG_SUMMARY -> runDagSummaryQuery(project, input)
             SELECT_DOT -> runDotQuery(project)
             SELECT_ASCII_TREE -> runAsciiTreeQuery(project)
+            SELECT_ORPHANS -> runOrphansQuery(project)
             SELECT_DESCENDANTS -> runDescendantsQuery(project, input)
             SELECT_ANCESTORS -> runAncestorsQuery(project, input)
             SELECT_HISTORY -> runHistoryQuery(projects, project, input)
@@ -410,12 +422,13 @@ class SourceQueryTool(
         const val SELECT_DAG_SUMMARY = "dag_summary"
         const val SELECT_DOT = "dot"
         const val SELECT_ASCII_TREE = "ascii_tree"
+        const val SELECT_ORPHANS = "orphans"
         const val SELECT_DESCENDANTS = "descendants"
         const val SELECT_ANCESTORS = "ancestors"
         const val SELECT_HISTORY = "history"
         internal val ALL_SELECTS = setOf(
             SELECT_NODES, SELECT_DAG_SUMMARY, SELECT_DOT, SELECT_ASCII_TREE,
-            SELECT_DESCENDANTS, SELECT_ANCESTORS, SELECT_HISTORY,
+            SELECT_ORPHANS, SELECT_DESCENDANTS, SELECT_ANCESTORS, SELECT_HISTORY,
         )
 
         const val SCOPE_PROJECT = "project"
