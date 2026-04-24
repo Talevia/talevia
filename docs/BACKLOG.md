@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **session-query-fallback-history** — `AgentProviderFallbackTracker` 的 chain 数据已写进 `RunFailureRow.fallbackChain` + `StateTransition.retryAttempt`（e1adea8f, c3bad022, 47e23f74），但 agent 层只能看 max-retry-attempt 一个数——查不到 "本 session 过去 5 run 里 provider A→B→C 的序列"。**方向：** `session_query(select=fallback_history, runId?=)` 返 per-run 的 fallback chain 列表（每条 run 的 provider 序列 + 终态 providerId + 触发原因）。Rubric §5.4 / §5.7。Milestone §M2.
 - **debt-split-agent-turn-executor** — `AgentTurnExecutor.kt` 483 LOC（Core 第 3 长文件）。`buildSystemPrompt` + onboarding-lane 合成 + tool-spec 组装 + `streamTurn` 流控 + LlmEvent 路由全塞在一个 class。下一批 lane 或 event 新增会推过 500 阈值。**方向：** 抽 `SystemPromptComposer`（base + lanes + snapshot → String）+ `TurnEventRouter`（LlmEvent → assistant Part + store upserts）；`AgentTurnExecutor` 主流程收到 < 300 LOC。Rubric §5.6。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排
