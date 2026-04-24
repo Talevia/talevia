@@ -34,7 +34,7 @@ import kotlinx.serialization.serializer
  *      to hand it (not trivially recoverable from `provenance.parameters`, which
  *      holds the *folded* prompt, not the base prompt)
  *   3. Call that tool
- *   4. `replace_clip` with the new asset id
+ *   4. `clip_action(action="replace")` with the new asset id
  * Four round-trips per stale clip, plus a nontrivial reverse-engineering step
  * in #2 that every project's agent would redo. This tool does all of it in one
  * call by re-dispatching the exact [LockfileEntry.baseInputs] captured at
@@ -99,7 +99,7 @@ class RegenerateStaleClipsTool(
             "it with its original inputs; consistency folding re-runs against the current source " +
             "graph so the regenerations pick up the edit that made them stale. Swaps each new asset " +
             "onto its clip's timeline slot. Use after editing a character_ref / style_bible / " +
-            "brand_palette; one call replaces the find_stale_clips → generate_* → replace_clip " +
+            "brand_palette; one call replaces the find_stale_clips → generate_* → clip_action(action=\"replace\") " +
             "chain. Clips whose lockfile entry is pinned (set_lockfile_entry_pinned) are skipped with " +
             "reason 'pinned' — a pin is user intent and overrides regeneration."
     override val inputSerializer: KSerializer<Input> = serializer()

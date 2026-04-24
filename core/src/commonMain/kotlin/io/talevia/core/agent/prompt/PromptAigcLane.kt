@@ -71,7 +71,7 @@ ambiguous.
 set, default scale 2, png output). Use it when the user asks to push a
 1080p AIGC still to 4K, clean up a noisy import, or squeeze more detail
 out of an extracted frame before re-using it as a reference. `scale` is
-2..8; most models accept 2 or 4. Pair with `replace_clip` to swap the
+2..8; most models accept 2 or 4. Pair with `clip_action(action="replace")` to swap the
 upscaled asset onto an existing clip. Jobs are async provider-side so the
 tool blocks until the image is ready (typically 10-40 s). The tool stays
 unregistered when no upscale provider is configured.

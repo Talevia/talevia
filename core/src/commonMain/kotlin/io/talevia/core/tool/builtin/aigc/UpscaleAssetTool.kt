@@ -103,7 +103,7 @@ class UpscaleAssetTool(
         "Upscale / super-resolve an imported image asset via an ML provider (default model: " +
             "real-esrgan-4x, default scale: 2). Output bytes land in the project bundle's " +
             "media/ directory so the upscaled image travels with the project. Returns a new " +
-            "assetId you can substitute via replace_clip or drop onto the timeline via " +
+            "assetId you can substitute via clip_action(action=\"replace\") or drop onto the timeline via " +
             "add_clip. Lockfile cache kicks in automatically — a second call with identical " +
             "(assetId, model, scale, seed, format) returns the same upscaled asset without " +
             "re-billing the provider."

@@ -61,7 +61,7 @@ import kotlin.uuid.Uuid
  * bound character_ref's visual description + optional reference images +
  * optional LoRA pin flow into the request. The clip's `sourceBinding` is
  * populated via the lockfile so later edits to bound nodes cascade through
- * `find_stale_clips` / `replace_clip`.
+ * `find_stale_clips` / `clip_action(action="replace")`.
  *
  * Permission: `"aigc.generate"` — same bucket as image / TTS gen because all
  * three incur external cost + a cache-coherent seed.

@@ -127,6 +127,8 @@ internal fun rejectForeignClipActionFields(action: String, input: ClipActionTool
         if (action != "move" && input.moveItems != null) add("moveItems")
         if (action != "split" && input.splitItems != null) add("splitItems")
         if (action != "trim" && input.trimItems != null) add("trimItems")
+        if (action != "replace" && input.replaceItems != null) add("replaceItems")
+        if (action != "fade" && input.fadeItems != null) add("fadeItems")
     }
     require(foreign.isEmpty()) {
         "action=$action rejects ${foreign.joinToString(" / ")} — use this action's own payload field"

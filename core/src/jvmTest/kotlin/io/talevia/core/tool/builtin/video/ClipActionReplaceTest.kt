@@ -34,19 +34,23 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
+/**
+ * Replace-action coverage for the folded [ClipActionTool]. Migrated verbatim
+ * from the pre-phase-3 `ReplaceClipToolTest`; every assertion is preserved.
+ */
 @OptIn(ExperimentalUuidApi::class)
-class ReplaceClipToolTest {
+class ClipActionReplaceTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: ReplaceClipTool,
+        val tool: ClipActionTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
     )
 
     private suspend fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val tool = ReplaceClipTool(store)
+        val tool = ClipActionTool(store)
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),
@@ -79,9 +83,10 @@ class ReplaceClipToolTest {
         createdAtEpochMs = 1_700_000_000_000L,
     )
 
-    private fun single(clipId: String, newAssetId: String) = ReplaceClipTool.Input(
+    private fun single(clipId: String, newAssetId: String) = ClipActionTool.Input(
         projectId = "p",
-        items = listOf(ReplaceClipTool.Item(clipId, newAssetId)),
+        action = "replace",
+        replaceItems = listOf(ClipActionTool.ReplaceItem(clipId, newAssetId)),
     )
 
     @Test fun replacesAssetIdAndPreservesPositionAndFilters() = runTest {
@@ -103,7 +108,7 @@ class ReplaceClipToolTest {
         val replacement = rig.importAsset("/tmp/regen.mp4")
 
         val result = rig.tool.execute(single("c-1", replacement.value), rig.ctx).data
-        val only = result.results.single()
+        val only = result.replaced.single()
         assertEquals("c-1", only.clipId)
         assertEquals(originalAsset.value, only.previousAssetId)
         assertEquals(replacement.value, only.newAssetId)
@@ -183,11 +188,12 @@ class ReplaceClipToolTest {
         val r2 = rig.importAsset("/tmp/r2.mp4")
 
         rig.tool.execute(
-            ReplaceClipTool.Input(
+            ClipActionTool.Input(
                 projectId = rig.projectId.value,
-                items = listOf(
-                    ReplaceClipTool.Item("c-1", r1.value),
-                    ReplaceClipTool.Item("c-2", r2.value),
+                action = "replace",
+                replaceItems = listOf(
+                    ClipActionTool.ReplaceItem("c-1", r1.value),
+                    ClipActionTool.ReplaceItem("c-2", r2.value),
                 ),
             ),
             rig.ctx,
@@ -215,11 +221,12 @@ class ReplaceClipToolTest {
         val before = rig.store.get(rig.projectId)!!
         assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                ReplaceClipTool.Input(
+                ClipActionTool.Input(
                     projectId = rig.projectId.value,
-                    items = listOf(
-                        ReplaceClipTool.Item("c-1", r1.value),
-                        ReplaceClipTool.Item("c-1", "missing"),
+                    action = "replace",
+                    replaceItems = listOf(
+                        ClipActionTool.ReplaceItem("c-1", r1.value),
+                        ClipActionTool.ReplaceItem("c-1", "missing"),
                     ),
                 ),
                 rig.ctx,

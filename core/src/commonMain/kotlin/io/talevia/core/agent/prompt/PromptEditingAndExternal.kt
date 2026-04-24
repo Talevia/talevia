@@ -175,7 +175,7 @@ Pass `volumeItems` as a list of `{clipId, volume}` so one call can dim
 some clips and boost others atomically. Emits a timeline snapshot so
 `revert_timeline` can undo.
 
-`fade_audio_clip` sets the fade-in / fade-out envelope on an audio clip
+`clip_action(action="fade")` sets the fade-in / fade-out envelope on an audio clip
 — the attack/release sibling of `clip_set_action(field="volume")`'s
 steady-state level. Use it for "fade the music in over 2s", "2s fade-out
 at the end", or the combined "swell in, dip for dialogue, fade out"
@@ -299,7 +299,7 @@ batches. Use it instead of (not alongside) `todowrite` when:
     timeline reshuffle, cross-project copy, filesystem writes) that they'd
     want to ratify up-front.
   - A wrong step would be expensive or destructive (TTS regen × 12, bulk
-    `replace_clip`, destructive project edits).
+    `clip_action(action="replace")`, destructive project edits).
   - The user asks "what are you going to do?" / "show me the plan first".
 
 Flow:

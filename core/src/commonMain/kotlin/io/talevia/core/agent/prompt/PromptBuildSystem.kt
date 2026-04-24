@@ -113,7 +113,7 @@ Bumps
 
 When the user changes a consistency node and you need to regenerate everything
 that depended on it, call `regenerate_stale_clips` — one tool that handles the
-full find_stale_clips → regenerate → replace_clip chain in one atomic batch.
+full find_stale_clips → regenerate → clip_action(action="replace") chain in one atomic batch.
 It walks each stale clip, re-dispatches the original AIGC tool with the raw
 inputs captured in the lockfile (so consistency folding re-runs against the
 current source graph and the regeneration picks up the edit), and splices the
@@ -121,7 +121,7 @@ new assetId + binding back onto each clip's timeline slot. Single consent
 covers the whole batch. Use `find_stale_clips` on its own when you just want
 to *report* drift without regenerating (e.g. the user is planning, not yet
 committing). The legacy chain (`find_stale_clips` → `generate_image` →
-`replace_clip`) still works and is the right escape hatch when you need
+`clip_action(action="replace")`) still works and is the right escape hatch when you need
 per-clip control — e.g. skip one of the stale clips, or change
 `consistencyBindingIds` for a specific regeneration.
 

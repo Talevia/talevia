@@ -35,7 +35,7 @@ import kotlinx.serialization.serializer
  *   3. Agent: find_stale_clips → list of clip ids + which source ids changed
  *   4. Agent: regenerate each (calling generate_image with the same
  *      `consistencyBindingIds=["mei"]`) and replace via add_clip / future
- *      `replace_clip`.
+ *      `clip_action(action="replace")`.
  *
  * Read-only: permission `project.read`. Imported (non-AIGC) media is excluded
  * from the report — there's no lockfile entry to compare against, so we can't

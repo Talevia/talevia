@@ -1,7 +1,9 @@
 package io.talevia.core.tool.builtin.video
 
+import io.talevia.core.AssetId
 import io.talevia.core.ClipId
 import io.talevia.core.ProjectId
+import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.TimeRange
@@ -335,6 +337,154 @@ internal suspend fun executeClipTrim(
             action = "trim",
             snapshotId = snapshotId.value,
             trimmed = results,
+        ),
+    )
+}
+
+internal suspend fun executeClipReplace(
+    store: ProjectStore,
+    pid: ProjectId,
+    input: ClipActionTool.Input,
+    ctx: ToolContext,
+): ToolResult<ClipActionTool.Output> {
+    val items = input.replaceItems ?: error("action=replace requires `replaceItems`")
+    rejectForeignClipActionFields("replace", input)
+    require(items.isNotEmpty()) { "replaceItems must not be empty" }
+
+    val results = mutableListOf<ClipActionTool.ReplaceResult>()
+
+    val updated = store.mutate(pid) { project ->
+        items.forEachIndexed { idx, item ->
+            if (project.assets.none { it.id.value == item.newAssetId }) {
+                error(
+                    "replaceItems[$idx] (${item.clipId}): asset ${item.newAssetId} not found in project " +
+                        "${pid.value}; import or generate it first.",
+                )
+            }
+        }
+        var tracks = project.timeline.tracks
+        items.forEachIndexed { idx, item ->
+            val newAssetId = AssetId(item.newAssetId)
+            val lockBinding: Set<SourceNodeId> =
+                project.lockfile.findByAssetId(newAssetId)?.sourceBinding ?: emptySet()
+            var previousAssetId: String? = null
+            var found = false
+            tracks = tracks.map { track ->
+                val target = track.clips.firstOrNull { it.id.value == item.clipId } ?: return@map track
+                found = true
+                val replacement: Clip = when (target) {
+                    is Clip.Video -> {
+                        previousAssetId = target.assetId.value
+                        target.copy(assetId = newAssetId, sourceBinding = lockBinding)
+                    }
+                    is Clip.Audio -> {
+                        previousAssetId = target.assetId.value
+                        target.copy(assetId = newAssetId, sourceBinding = lockBinding)
+                    }
+                    is Clip.Text -> error(
+                        "replaceItems[$idx] (${item.clipId}): action=replace does not apply to text clips " +
+                            "(no underlying asset).",
+                    )
+                }
+                withClips(track, track.clips.map { if (it.id == target.id) replacement else it })
+            }
+            if (!found) error("replaceItems[$idx]: clip ${item.clipId} not found in project ${pid.value}")
+            results += ClipActionTool.ReplaceResult(
+                clipId = item.clipId,
+                previousAssetId = previousAssetId ?: error("internal: previousAssetId not captured"),
+                newAssetId = newAssetId.value,
+                sourceBindingIds = lockBinding.map { it.value },
+            )
+        }
+        project.copy(timeline = project.timeline.copy(tracks = tracks))
+    }
+
+    val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
+    return ToolResult(
+        title = "replace × ${results.size}",
+        outputForLlm = "Replaced asset on ${results.size} clip(s). Snapshot: ${snapshotId.value}",
+        data = ClipActionTool.Output(
+            projectId = pid.value,
+            action = "replace",
+            snapshotId = snapshotId.value,
+            replaced = results,
+        ),
+    )
+}
+
+internal suspend fun executeClipFade(
+    store: ProjectStore,
+    pid: ProjectId,
+    input: ClipActionTool.Input,
+    ctx: ToolContext,
+): ToolResult<ClipActionTool.Output> {
+    val items = input.fadeItems ?: error("action=fade requires `fadeItems`")
+    rejectForeignClipActionFields("fade", input)
+    require(items.isNotEmpty()) { "fadeItems must not be empty" }
+    items.forEachIndexed { idx, item ->
+        require(item.fadeInSeconds != null || item.fadeOutSeconds != null) {
+            "fadeItems[$idx] (${item.clipId}): at least one of fadeInSeconds / fadeOutSeconds required"
+        }
+        item.fadeInSeconds?.let {
+            require(it.isFinite() && it >= 0f) {
+                "fadeItems[$idx] (${item.clipId}): fadeInSeconds must be finite and >= 0 (got $it)"
+            }
+        }
+        item.fadeOutSeconds?.let {
+            require(it.isFinite() && it >= 0f) {
+                "fadeItems[$idx] (${item.clipId}): fadeOutSeconds must be finite and >= 0 (got $it)"
+            }
+        }
+    }
+
+    val results = mutableListOf<ClipActionTool.FadeResult>()
+
+    val updated = store.mutate(pid) { project ->
+        var tracks = project.timeline.tracks
+        items.forEachIndexed { idx, item ->
+            val hit = tracks.firstNotNullOfOrNull { track ->
+                track.clips.firstOrNull { it.id.value == item.clipId }?.let { track to it }
+            } ?: error("fadeItems[$idx]: clip ${item.clipId} not found in project ${pid.value}")
+            val (track, clip) = hit
+            val audio = clip as? Clip.Audio ?: error(
+                "fadeItems[$idx]: action=fade only applies to audio clips; clip ${item.clipId} " +
+                    "is a ${clip::class.simpleName}.",
+            )
+            val oldIn = audio.fadeInSeconds
+            val oldOut = audio.fadeOutSeconds
+            val newIn = item.fadeInSeconds ?: oldIn
+            val newOut = item.fadeOutSeconds ?: oldOut
+            val clipDurationSeconds = audio.timeRange.duration.toDouble(DurationUnit.SECONDS).toFloat()
+            require(newIn + newOut <= clipDurationSeconds + 1e-3f) {
+                "fadeItems[$idx] (${item.clipId}): fadeIn ($newIn) + fadeOut ($newOut) would exceed " +
+                    "clip duration ($clipDurationSeconds); fades would overlap."
+            }
+            val rebuilt = track.clips.map { c ->
+                if (c.id == audio.id) audio.copy(fadeInSeconds = newIn, fadeOutSeconds = newOut) else c
+            }
+            val newTrack: Track = withClips(track, rebuilt)
+            tracks = tracks.map { if (it.id == newTrack.id) newTrack else it }
+            results += ClipActionTool.FadeResult(
+                clipId = item.clipId,
+                trackId = track.id.value,
+                oldFadeInSeconds = oldIn,
+                newFadeInSeconds = newIn,
+                oldFadeOutSeconds = oldOut,
+                newFadeOutSeconds = newOut,
+            )
+        }
+        project.copy(timeline = project.timeline.copy(tracks = tracks))
+    }
+
+    val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
+    return ToolResult(
+        title = "fade × ${results.size}",
+        outputForLlm = "Set fades on ${results.size} audio clip(s). Snapshot: ${snapshotId.value}",
+        data = ClipActionTool.Output(
+            projectId = pid.value,
+            action = "fade",
+            snapshotId = snapshotId.value,
+            faded = results,
         ),
     )
 }

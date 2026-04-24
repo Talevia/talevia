@@ -63,8 +63,10 @@ class TaleviaSystemPromptTest {
         // Stale-clip detection — the lockfile-driven query that closes the
         // edit-character-then-regenerate loop (VISION §3.2).
         "find_stale_clips",
-        // The mutation half of the regenerate-after-stale loop.
-        "replace_clip",
+        // The mutation half of the regenerate-after-stale loop — post phase-3
+        // (2026-04-24) the verb is an action on `clip_action`, not a
+        // standalone tool id.
+        "clip_action(action=\"replace\")",
         // The missing scalpel — clip deletion sits alongside split / replace.
         // Post-`debt-video-clip-consolidate-verbs-phase-1` (2026-04-23) the verb is
         // an action on `clip_action`, not a standalone tool id.

@@ -37,7 +37,7 @@ import okio.Path.Companion.toPath
  * same `AssetId`s and `MediaSource` entries as the source; external paths and
  * bundle-relative paths stay as-is. If the user later mutates one project's
  * assets in place we'll need refcounting; for now the canonical mutation
- * pattern is "produce a new asset and replace_clip", so the shared-id model
+ * pattern is "produce a new asset and clip_action(action="replace")", so the shared-id model
  * is safe.
  *
  * Fails loud on duplicate `newProjectId` so the agent reconciles via
@@ -116,7 +116,7 @@ class ForkProjectTool(
          * recorded into the fork's lockfile (keyed by the same text plus
          * this language) so a second fork in the same language is a cache
          * hit. The fork's timeline is **not** rewired automatically — the
-         * caller chains `replace_clip` per entry in
+         * caller chains `clip_action(action="replace")` per entry in
          * [Output.languageRegeneratedClips] to swap existing audio. This
          * mirrors the "fork stays a reshape primitive" principle: we
          * surface side-effectful generations on the fork, not timeline
@@ -128,7 +128,7 @@ class ForkProjectTool(
     /**
      * One TTS regeneration outcome produced by `variantSpec.language`. The
      * caller (usually the agent) wires the generated [assetId] onto the
-     * appropriate audio clip via `replace_clip` or `add_clip`; we leave that
+     * appropriate audio clip via `clip_action(action="replace")` or `add_clip`; we leave that
      * bind explicit so the fork's timeline shape is never mutated without a
      * direct tool call the user can see in the transcript.
      *
@@ -167,7 +167,7 @@ class ForkProjectTool(
          * `variantSpec.language`. Empty / null when language wasn't set or
          * there were no text clips with non-blank `text`. Each entry's
          * `assetId` is the new audio the caller should bind via
-         * `replace_clip` (or `add_clip` on a voiceover track).
+         * `clip_action(action="replace")` (or `add_clip` on a voiceover track).
          */
         val languageRegeneratedClips: List<LanguageRegenResult> = emptyList(),
     )
@@ -244,7 +244,7 @@ class ForkProjectTool(
                                 "every non-blank text clip in the fork against this language; " +
                                 "results land in Output.languageRegeneratedClips as (clipId, " +
                                 "assetId, cacheHit). The fork's timeline isn't rewired — chain " +
-                                "replace_clip per entry to swap audio.",
+                                "clip_action(action=\"replace\") per entry to swap audio.",
                         )
                     }
                 }

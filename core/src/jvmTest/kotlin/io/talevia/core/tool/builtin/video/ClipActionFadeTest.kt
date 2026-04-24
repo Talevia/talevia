@@ -25,11 +25,16 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-class FadeAudioClipToolTest {
+/**
+ * Fade-action coverage for the folded [ClipActionTool]. Migrated verbatim
+ * from the pre-phase-3 `FadeAudioClipToolTest`; every assertion is
+ * preserved.
+ */
+class ClipActionFadeTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: FadeAudioClipTool,
+        val tool: ClipActionTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
         val emittedParts: MutableList<Part>,
@@ -37,7 +42,7 @@ class FadeAudioClipToolTest {
 
     private suspend fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val tool = FadeAudioClipTool(store)
+        val tool = ClipActionTool(store)
         val parts = mutableListOf<Part>()
         val ctx = ToolContext(
             sessionId = SessionId("s"),
@@ -69,9 +74,10 @@ class FadeAudioClipToolTest {
         clipId: String,
         fadeInSeconds: Float? = null,
         fadeOutSeconds: Float? = null,
-    ) = FadeAudioClipTool.Input(
+    ) = ClipActionTool.Input(
         projectId = "p",
-        items = listOf(FadeAudioClipTool.Item(clipId, fadeInSeconds, fadeOutSeconds)),
+        action = "fade",
+        fadeItems = listOf(ClipActionTool.FadeItem(clipId, fadeInSeconds, fadeOutSeconds)),
     )
 
     @Test fun setsFadeInOnlyPreservesExistingFadeOut() = runTest {
@@ -84,7 +90,7 @@ class FadeAudioClipToolTest {
             ),
         )
         val out = rig.tool.execute(single("c1", fadeInSeconds = 2.0f), rig.ctx).data
-        val only = out.results.single()
+        val only = out.faded.single()
         assertEquals(0.0f, only.oldFadeInSeconds)
         assertEquals(2.0f, only.newFadeInSeconds)
         assertEquals(1.5f, only.oldFadeOutSeconds)
@@ -134,11 +140,12 @@ class FadeAudioClipToolTest {
             ),
         )
         rig.tool.execute(
-            FadeAudioClipTool.Input(
+            ClipActionTool.Input(
                 projectId = "p",
-                items = listOf(
-                    FadeAudioClipTool.Item("c1", fadeInSeconds = 1f),
-                    FadeAudioClipTool.Item("c2", fadeOutSeconds = 2f),
+                action = "fade",
+                fadeItems = listOf(
+                    ClipActionTool.FadeItem("c1", fadeInSeconds = 1f),
+                    ClipActionTool.FadeItem("c2", fadeOutSeconds = 2f),
                 ),
             ),
             rig.ctx,

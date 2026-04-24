@@ -19,7 +19,7 @@ import kotlinx.serialization.Serializable
  *       └─ add_clip ✓
  *   user: "swap in Mei's portrait"
  *     assistant (TOOL_CALLS, still running):
- *       └─ replace_clip ⏳
+ *       └─ clip_action(action="replace") ⏳
  *
  * Built by walking `listMessagesWithParts` once: assistant messages are the
  * turn anchors; `Part.Tool` rows on each assistant message become the

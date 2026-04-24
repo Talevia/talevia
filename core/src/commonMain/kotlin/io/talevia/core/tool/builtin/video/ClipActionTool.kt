@@ -18,11 +18,13 @@ import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 
 /**
- * Six-way clip edit verb — consolidates `AddClipTool` + `RemoveClipTool` +
- * `DuplicateClipTool` (phase-1, 2026-04-23) AND `MoveClipTool` +
- * `SplitClipTool` + `TrimClipTool` (phase-2, 2026-04-23).
+ * Eight-way clip edit verb — consolidates `AddClipTool` + `RemoveClipTool` +
+ * `DuplicateClipTool` (phase-1, 2026-04-23), `MoveClipTool` + `SplitClipTool`
+ * + `TrimClipTool` (phase-2, 2026-04-23), and `ReplaceClipTool` +
+ * `FadeAudioClipTool` (phase-3, 2026-04-24 — fold enabled by the axis
+ * split landed earlier the same day).
  *
- * **Structure (post axis-split, 2026-04-24).** The class itself carries
+ * **Structure (post axis-split + phase-3, 2026-04-24).** The class itself carries
  * only the LLM-facing surface: nested data classes for input/output
  * payloads, the JSON schema, the tool metadata, the `rejectForeign`
  * one-liner, and the six-way dispatch `when` in [execute]. The actual
@@ -51,6 +53,8 @@ import kotlinx.serialization.serializer
  * - `move` + `moveItems` → [executeClipMove]
  * - `split` + `splitItems` → [executeClipSplit]
  * - `trim` + `trimItems` → [executeClipTrim]
+ * - `replace` + `replaceItems` → [executeClipReplace]
+ * - `fade` + `fadeItems` → [executeClipFade]
  */
 class ClipActionTool(
     private val store: ProjectStore,
@@ -92,6 +96,21 @@ class ClipActionTool(
         val newDurationSeconds: Double? = null,
     )
 
+    /** One replace request. Mirrors the legacy `ReplaceClipTool.Item`. */
+    @Serializable data class ReplaceItem(
+        val clipId: String,
+        val newAssetId: String,
+    )
+
+    /** One fade request. Mirrors the legacy `FadeAudioClipTool.Item`. */
+    @Serializable data class FadeItem(
+        val clipId: String,
+        /** Fade-in ramp length in seconds. 0.0 disables; omit to keep current. */
+        val fadeInSeconds: Float? = null,
+        /** Fade-out ramp length in seconds. 0.0 disables; omit to keep current. */
+        val fadeOutSeconds: Float? = null,
+    )
+
     @Serializable data class Input(
         /**
          * Optional — omit to default to the session's current project binding
@@ -101,7 +120,7 @@ class ClipActionTool(
         val projectId: String? = null,
         /**
          * One of `"add"`, `"remove"`, `"duplicate"`, `"move"`, `"split"`,
-         * `"trim"`. Case-sensitive.
+         * `"trim"`, `"replace"`, `"fade"`. Case-sensitive.
          */
         val action: String,
         /** Required when `action="add"`. Clips to insert. */
@@ -118,6 +137,10 @@ class ClipActionTool(
         val splitItems: List<SplitItem>? = null,
         /** Required when `action="trim"`. Clips to re-trim. */
         val trimItems: List<TrimItem>? = null,
+        /** Required when `action="replace"`. Clip → new-asset mappings. */
+        val replaceItems: List<ReplaceItem>? = null,
+        /** Required when `action="fade"`. Audio clip fade-envelope edits. */
+        val fadeItems: List<FadeItem>? = null,
     )
 
     @Serializable data class AddResult(
@@ -166,6 +189,22 @@ class ClipActionTool(
         val newTimelineEndSeconds: Double,
     )
 
+    @Serializable data class ReplaceResult(
+        val clipId: String,
+        val previousAssetId: String,
+        val newAssetId: String,
+        val sourceBindingIds: List<String>,
+    )
+
+    @Serializable data class FadeResult(
+        val clipId: String,
+        val trackId: String,
+        val oldFadeInSeconds: Float,
+        val newFadeInSeconds: Float,
+        val oldFadeOutSeconds: Float,
+        val newFadeOutSeconds: Float,
+    )
+
     @Serializable data class Output(
         val projectId: String,
         val action: String,
@@ -182,13 +221,17 @@ class ClipActionTool(
         val split: List<SplitResult> = emptyList(),
         /** Populated when `action="trim"`. */
         val trimmed: List<TrimResult> = emptyList(),
+        /** Populated when `action="replace"`. */
+        val replaced: List<ReplaceResult> = emptyList(),
+        /** Populated when `action="fade"`. */
+        val faded: List<FadeResult> = emptyList(),
         /** `action="remove"` only — echoes the input `ripple` flag. */
         val rippled: Boolean = false,
     )
 
     override val id: String = "clip_action"
     override val helpText: String =
-        "Six-way clip edit verb dispatching on `action`: " +
+        "Eight-way clip edit verb dispatching on `action`: " +
             "`add` + `addItems` (assetId, timelineStartSeconds?, sourceStartSeconds?, " +
             "durationSeconds?, trackId?) appends clips. " +
             "`remove` + `clipIds` + optional `ripple` (default false) deletes clips; " +
@@ -201,6 +244,11 @@ class ClipActionTool(
             "timeline position; split point must lie strictly inside the clip. " +
             "`trim` + `trimItems` (clipId, newSourceStartSeconds?, newDurationSeconds?) " +
             "retrims video/audio clips preserving filters; text clips rejected. " +
+            "`replace` + `replaceItems` (clipId, newAssetId) swaps the asset on one or many " +
+            "clips, preserving timeline position + transforms + filters and copying the new " +
+            "asset's lockfile sourceBinding; text clips rejected. " +
+            "`fade` + `fadeItems` (clipId, fadeInSeconds?, fadeOutSeconds?) sets fade " +
+            "envelope on audio clips; fadeIn + fadeOut must not exceed clip duration. " +
             "All-or-nothing per call; one timeline snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
@@ -216,10 +264,13 @@ class ClipActionTool(
             }
             putJsonObject("action") {
                 put("type", "string")
-                put("description", "One of: add, remove, duplicate, move, split, trim.")
+                put("description", "One of: add, remove, duplicate, move, split, trim, replace, fade.")
                 put(
                     "enum",
-                    JsonArray(listOf("add", "remove", "duplicate", "move", "split", "trim").map(::JsonPrimitive)),
+                    JsonArray(
+                        listOf("add", "remove", "duplicate", "move", "split", "trim", "replace", "fade")
+                            .map(::JsonPrimitive),
+                    ),
                 )
             }
             putJsonObject("addItems") {
@@ -294,6 +345,28 @@ class ClipActionTool(
                     )
                 }
             }
+            putJsonObject("replaceItems") {
+                itemArray(
+                    "Required when action=replace. Clip → new-asset swaps; at least one.",
+                    required = listOf("clipId", "newAssetId"),
+                ) {
+                    stringProp("clipId")
+                    stringProp(
+                        "newAssetId",
+                        "Replacement asset; must already exist in the project's asset catalog.",
+                    )
+                }
+            }
+            putJsonObject("fadeItems") {
+                itemArray(
+                    "Required when action=fade. Audio-clip fade envelope edits; at least one.",
+                    required = listOf("clipId"),
+                ) {
+                    stringProp("clipId")
+                    numberProp("fadeInSeconds", "Fade-in ramp seconds. 0.0 disables. Omit to keep current.")
+                    numberProp("fadeOutSeconds", "Fade-out ramp seconds. 0.0 disables. Omit to keep current.")
+                }
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("action"))))
         put("additionalProperties", false)
@@ -308,8 +381,10 @@ class ClipActionTool(
             "move" -> executeClipMove(store, pid, input, ctx)
             "split" -> executeClipSplit(store, pid, input, ctx)
             "trim" -> executeClipTrim(store, pid, input, ctx)
+            "replace" -> executeClipReplace(store, pid, input, ctx)
+            "fade" -> executeClipFade(store, pid, input, ctx)
             else -> error(
-                "unknown action '${input.action}'; accepted: add, remove, duplicate, move, split, trim",
+                "unknown action '${input.action}'; accepted: add, remove, duplicate, move, split, trim, replace, fade",
             )
         }
     }
