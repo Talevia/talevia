@@ -1,6 +1,7 @@
 package io.talevia.core.domain.render
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * Per-project memoization of full-timeline exports. VISION §3.2 "只重编译必要的部分" —
@@ -13,16 +14,29 @@ import kotlinx.serialization.Serializable
  * is a useful subset — a second `export` call in the same Agent turn with identical
  * inputs costs zero seconds instead of however long the full render takes.
  *
- * Ordered list, lookup is O(n). We cap implicitly via "latest wins" in
- * [findByFingerprint]: if a fingerprint appears twice the later entry is returned.
- * No explicit eviction — a project's export count per session is ≤ dozens.
+ * Lookup is O(1) via a `@Transient byFingerprint` index rebuilt from [entries] on
+ * every construction (same pattern [io.talevia.core.domain.lockfile.Lockfile.byInputHash]
+ * and [io.talevia.core.domain.render.ClipRenderCache.byFingerprint] use). We cap
+ * implicitly via "latest wins" in [findByFingerprint]: if a fingerprint appears
+ * twice the later entry is returned — [List.associateBy] overwrites on duplicate
+ * keys, matching the pre-index `entries.lastOrNull { … }` semantic. No explicit
+ * eviction — a project's export count per session is ≤ dozens.
  */
 @Serializable
 data class RenderCache(
     val entries: List<RenderCacheEntry> = emptyList(),
 ) {
+    /**
+     * Fingerprint → most recent [RenderCacheEntry] with that fingerprint.
+     * `@Transient` means it's recomputed on every construction (deserialize +
+     * every `copy(entries = …)`); the serialized shape is byte-identical to
+     * the pre-index form so existing bundles decode without migration.
+     */
+    @Transient
+    val byFingerprint: Map<String, RenderCacheEntry> = entries.associateBy { it.fingerprint }
+
     fun findByFingerprint(fingerprint: String): RenderCacheEntry? =
-        entries.lastOrNull { it.fingerprint == fingerprint }
+        byFingerprint[fingerprint]
 
     fun append(entry: RenderCacheEntry): RenderCache = copy(entries = entries + entry)
 
