@@ -357,6 +357,80 @@ class SessionQueryRunFailureTest {
         assertNull(row.runStateTerminalKind, "no tracker → terminalKind null (not thrown)")
     }
 
+    @Test fun maxRetryAttemptObservedPickedFromTrackerHistory() = runTest {
+        // Guards the cycle-58 plumbing end-to-end: publish retry-tagged
+        // AgentRunStateChanged events inside a failed turn's window →
+        // max of their retryAttempt populates RunFailureRow.
+        val rigB = rigWithBus()
+        val rig = rigB.rig
+        val sid = SessionId("s-retry")
+        val base = Instant.fromEpochMilliseconds(2000)
+        val msg = Message.Assistant(
+            id = MessageId("m-retry-fail"),
+            sessionId = sid,
+            createdAt = base,
+            parentId = MessageId("u-retry"),
+            model = ModelRef("anthropic", "claude-opus-4-7"),
+            finish = FinishReason.ERROR,
+            error = "retries exhausted",
+        )
+        seedSessionWithAssistants(rig.sessions, sid, listOf(msg))
+
+        // Retry events land after the message's createdAt, inside the
+        // wall-clock window the query scopes to this message.
+        rigB.bus.publish(
+            io.talevia.core.bus.BusEvent.AgentRunStateChanged(sid, io.talevia.core.agent.AgentRunState.Generating, retryAttempt = 1),
+        )
+        kotlinx.coroutines.yield()
+        rigB.bus.publish(
+            io.talevia.core.bus.BusEvent.AgentRunStateChanged(sid, io.talevia.core.agent.AgentRunState.Generating, retryAttempt = 3),
+        )
+        kotlinx.coroutines.yield()
+        rigB.bus.publish(
+            io.talevia.core.bus.BusEvent.AgentRunStateChanged(sid, io.talevia.core.agent.AgentRunState.Failed("retries exhausted")),
+        )
+        kotlinx.coroutines.yield()
+
+        val result = rig.tool.execute(
+            SessionQueryTool.Input(select = "run_failure", sessionId = sid.value),
+            rig.ctx,
+        )
+        val row = result.data.rows.decodeRowsAs(RunFailureRow.serializer()).single()
+        assertEquals(3, row.maxRetryAttemptObserved, "max across retry-tagged transitions must win")
+    }
+
+    @Test fun maxRetryAttemptObservedNullWhenNoRetriesInWindow() = runTest {
+        // A failed turn whose tracker transitions carry no retryAttempt
+        // (legacy path / first-attempt failure) stays null rather than 0
+        // — distinguishes "never retried" from "retried once".
+        val rigB = rigWithBus()
+        val rig = rigB.rig
+        val sid = SessionId("s-first-fail")
+        val base = Instant.fromEpochMilliseconds(3000)
+        val msg = Message.Assistant(
+            id = MessageId("m-first-fail"),
+            sessionId = sid,
+            createdAt = base,
+            parentId = MessageId("u-first"),
+            model = ModelRef("fake", "x"),
+            finish = FinishReason.ERROR,
+            error = "provider 500 on first try",
+        )
+        seedSessionWithAssistants(rig.sessions, sid, listOf(msg))
+
+        rigB.bus.publish(
+            io.talevia.core.bus.BusEvent.AgentRunStateChanged(sid, io.talevia.core.agent.AgentRunState.Failed("provider 500 on first try")),
+        )
+        kotlinx.coroutines.yield()
+
+        val result = rig.tool.execute(
+            SessionQueryTool.Input(select = "run_failure", sessionId = sid.value),
+            rig.ctx,
+        )
+        val row = result.data.rows.decodeRowsAs(RunFailureRow.serializer()).single()
+        assertNull(row.maxRetryAttemptObserved, "first-attempt failure → null, not 0")
+    }
+
     @Test fun fallbackChainPopulatesWhenTrackerWired() = runTest {
         // A failed turn's wall-clock window captures every provider-
         // fallback hop observed by AgentProviderFallbackTracker between

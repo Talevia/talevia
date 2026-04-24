@@ -96,6 +96,16 @@ data class RunFailureRow(
      * bus stream.
      */
     val fallbackChain: List<FallbackHopEntry> = emptyList(),
+    /**
+     * Highest `retryAttempt` value observed on any
+     * [AgentRunStateTracker.StateTransition] inside this failed turn's
+     * wall-clock window. Null when no retry-tagged transitions were
+     * seen (either because the turn failed on the first attempt or
+     * because the tracker wasn't wired at all). Cycle-58 plumbed
+     * `retryAttempt` through `StateTransition`; consumers now see how
+     * many retries this turn burned before the terminal failure.
+     */
+    val maxRetryAttemptObserved: Int? = null,
 )
 
 /**
@@ -180,6 +190,11 @@ internal suspend fun runRunFailureQuery(
             .lastOrNull { it.epochMs in windowStart until windowEnd }
             ?.let { terminalKindTag(it.state) }
 
+        val maxRetry = trackerHistory
+            .filter { it.epochMs in windowStart until windowEnd }
+            .mapNotNull { it.retryAttempt }
+            .maxOrNull()
+
         val chain = fallbackHops
             .filter { it.epochMs in windowStart until windowEnd }
             .map {
@@ -199,6 +214,7 @@ internal suspend fun runRunFailureQuery(
             runStateTerminalKind = runStateTerminalKind,
             createdAtEpochMs = msg.createdAt.toEpochMilliseconds(),
             fallbackChain = chain,
+            maxRetryAttemptObserved = maxRetry,
         )
     }
 

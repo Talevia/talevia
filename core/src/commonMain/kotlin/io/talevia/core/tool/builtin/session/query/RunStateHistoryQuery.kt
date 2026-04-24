@@ -26,6 +26,15 @@ import kotlinx.serialization.builtins.ListSerializer
     val state: String,
     /** Non-null only for `state="failed"` transitions. */
     val cause: String? = null,
+    /**
+     * Non-null when the transition was published as part of an in-flight
+     * retry after a transient provider failure (mirrors
+     * `BusEvent.AgentRunStateChanged.retryAttempt` via
+     * `AgentRunStateTracker.StateTransition.retryAttempt`). Null for
+     * normal state transitions. Cycle-58 plumbed this through; older
+     * clients see the defaulted null, no regression.
+     */
+    val retryAttempt: Int? = null,
 )
 
 /**
@@ -86,6 +95,7 @@ internal suspend fun runRunStateHistoryQuery(
             epochMs = transition.epochMs,
             state = state,
             cause = cause,
+            retryAttempt = transition.retryAttempt,
         )
     }
     val rows = encodeRows(

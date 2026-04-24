@@ -82,7 +82,11 @@ class AgentRunStateTracker(
                 when (event) {
                     is BusEvent.AgentRunStateChanged -> {
                         val now = clock.now().toEpochMilliseconds()
-                        val transition = StateTransition(epochMs = now, state = event.state)
+                        val transition = StateTransition(
+                            epochMs = now,
+                            state = event.state,
+                            retryAttempt = event.retryAttempt,
+                        )
                         _states.update { prev -> prev + (event.sessionId to event.state) }
                         historyFlowInternal.update { prev ->
                             val existing = prev[event.sessionId].orEmpty()
@@ -159,8 +163,15 @@ class AgentRunStateTracker(
  * carry one today). Pair with the target [state]; the "previous"
  * state of a given transition is the prior entry's `state`
  * (effectively the same as the run state published at that point).
+ *
+ * [retryAttempt] mirrors [BusEvent.AgentRunStateChanged.retryAttempt]:
+ * non-null when the transition was published as part of an in-flight
+ * retry after a transient provider failure, null otherwise.
+ * Defaulted so pre-cycle-58 call sites and decoded JSON stay
+ * compatible.
  */
 data class StateTransition(
     val epochMs: Long,
     val state: AgentRunState,
+    val retryAttempt: Int? = null,
 )
