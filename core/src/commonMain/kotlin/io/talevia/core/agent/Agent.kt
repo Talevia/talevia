@@ -7,6 +7,7 @@ import io.talevia.core.SessionId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
+import io.talevia.core.compaction.DEFAULT_COMPACTION_TOKEN_THRESHOLD
 import io.talevia.core.compaction.TokenEstimator
 import io.talevia.core.logging.Loggers
 import io.talevia.core.logging.info
@@ -84,11 +85,19 @@ class Agent(
     /**
      * Optional compaction hook. When set, the Agent estimates the current history
      * before each LLM turn and calls [Compactor.process] once the estimate crosses
-     * [compactionTokenThreshold] (OpenCode uses ~85 % of the model's context
-     * window; ~120k for 200k-context Claude models is roughly equivalent).
+     * the per-model threshold returned by [compactionThreshold].
      */
     private val compactor: Compactor? = null,
-    private val compactionTokenThreshold: Int = 120_000,
+    /**
+     * Resolves the auto-compaction threshold for the model being used on a
+     * given turn. Invoked with `input.model` on every step. Default returns
+     * [DEFAULT_COMPACTION_TOKEN_THRESHOLD] (legacy one-size-fits-all behavior);
+     * composition roots that want per-model thresholds pass a
+     * [io.talevia.core.compaction.PerModelCompactionThreshold] resolver keyed
+     * off the wired provider registry, which scales to
+     * `contextWindow × 0.85` per OpenCode's convention.
+     */
+    private val compactionThreshold: (ModelRef) -> Int = { DEFAULT_COMPACTION_TOKEN_THRESHOLD },
     /**
      * Optional session titler. When set, the Agent fires title generation on the
      * [backgroundScope] the first time a session receives user input. A placeholder
@@ -324,7 +333,8 @@ class Agent(
             // writes a new CompactionPart and marks older parts compacted.
             if (compactor != null) {
                 val estimated = TokenEstimator.forHistory(history)
-                if (estimated > compactionTokenThreshold) {
+                val perModelThreshold = compactionThreshold(input.model)
+                if (estimated > perModelThreshold) {
                     // Publish before kicking off compaction — subscribers (UI, SSE clients)
                     // can render "compacting…" while the summarisation call is in flight,
                     // instead of watching the next turn look stuck.
@@ -332,7 +342,7 @@ class Agent(
                         BusEvent.SessionCompactionAuto(
                             sessionId = input.sessionId,
                             historyTokensBefore = estimated,
-                            thresholdTokens = compactionTokenThreshold,
+                            thresholdTokens = perModelThreshold,
                         ),
                     )
                     bus.publish(

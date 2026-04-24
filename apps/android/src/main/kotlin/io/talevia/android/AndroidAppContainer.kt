@@ -8,6 +8,7 @@ import io.talevia.core.agent.Agent
 import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
+import io.talevia.core.compaction.PerModelCompactionThreshold
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.ProjectStore
@@ -165,6 +166,16 @@ class AndroidAppContainer(context: Context) {
 
     private val agents = mutableMapOf<String, Agent>()
 
+    /**
+     * Per-model auto-compaction threshold prefetched from the wired
+     * providers (see [PerModelCompactionThreshold]). Hardcoded
+     * ModelInfo lists make `runBlocking` effectively synchronous at
+     * container construction.
+     */
+    private val compactionThreshold: PerModelCompactionThreshold = kotlinx.coroutines.runBlocking {
+        PerModelCompactionThreshold.fromRegistry(providers)
+    }
+
     fun agentFor(providerId: String): Agent? {
         val provider: LlmProvider = providers.get(providerId) ?: return null
         return agents.getOrPut(providerId) {
@@ -175,6 +186,7 @@ class AndroidAppContainer(context: Context) {
                 permissions = permissions,
                 bus = bus,
                 compactor = Compactor(provider, sessions, bus),
+                compactionThreshold = compactionThreshold,
                 fallbackProviders = providers.all().filter { it.id != provider.id },
             )
         }

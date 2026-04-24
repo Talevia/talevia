@@ -94,7 +94,7 @@ class AgentCompactionTest {
             bus = bus,
             compactor = compactor,
             // Threshold below the seeded history so compaction definitely fires.
-            compactionTokenThreshold = 100,
+            compactionThreshold = { 100 },
         )
 
         val asst = agent.run(RunInput(sid, "continue please", ModelRef("fake", "test")))
@@ -192,7 +192,7 @@ class AgentCompactionTest {
             permissions = AllowAllPermissionService(),
             bus = bus,
             compactor = compactor,
-            compactionTokenThreshold = 100,
+            compactionThreshold = { 100 },
         )
 
         agent.run(RunInput(sid, "continue please", ModelRef("fake", "test")))

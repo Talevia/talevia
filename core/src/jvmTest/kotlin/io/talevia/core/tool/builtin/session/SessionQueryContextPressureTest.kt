@@ -145,7 +145,7 @@ class SessionQueryContextPressureTest {
         ).data
         val row = rows(out).single()
         assertEquals(0, row.currentEstimate)
-        assertEquals(120_000, row.threshold, "Threshold must match Agent.compactionTokenThreshold default")
+        assertEquals(120_000, row.threshold, "Threshold must match DEFAULT_COMPACTION_TOKEN_THRESHOLD")
         assertEquals(0.0, row.ratio)
         assertEquals(120_000, row.marginTokens, "Empty session: full threshold is remaining margin")
         assertEquals(false, row.overThreshold)

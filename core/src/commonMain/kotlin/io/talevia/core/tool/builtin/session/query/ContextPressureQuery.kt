@@ -1,6 +1,7 @@
 package io.talevia.core.tool.builtin.session.query
 
 import io.talevia.core.SessionId
+import io.talevia.core.compaction.DEFAULT_COMPACTION_TOKEN_THRESHOLD
 import io.talevia.core.compaction.TokenEstimator
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult

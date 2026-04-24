@@ -8,6 +8,7 @@ import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.agent.SessionTitler
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
+import io.talevia.core.compaction.PerModelCompactionThreshold
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.db.TaleviaDbFactory
 import io.talevia.core.domain.FileProjectStore
@@ -336,9 +337,19 @@ class ServerContainer(
                 store = sessions,
                 bus = bus,
             ),
+            compactionThreshold = compactionThreshold,
             titler = SessionTitler(provider = provider, store = sessions),
             fallbackProviders = providers.all().filter { it.id != provider.id },
         )
+
+    /**
+     * Per-model auto-compaction threshold resolver built from the wired
+     * [providers]. See [PerModelCompactionThreshold]. `runBlocking` is
+     * safe at init; all in-tree providers list models synchronously.
+     */
+    private val compactionThreshold: PerModelCompactionThreshold = kotlinx.coroutines.runBlocking {
+        PerModelCompactionThreshold.fromRegistry(providers)
+    }
 
     /**
      * One Agent per provider so callers can choose a backend per request while

@@ -8,6 +8,7 @@ import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.agent.SessionTitler
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
+import io.talevia.core.compaction.PerModelCompactionThreshold
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.db.TaleviaDbFactory
 import io.talevia.core.domain.FileProjectStore
@@ -289,10 +290,21 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
                 store = sessions,
                 bus = bus,
             ),
+            compactionThreshold = compactionThreshold,
             titler = SessionTitler(provider = provider, store = sessions),
             fallbackProviders = providers.all().filter { it.id != provider.id },
             projects = projects,
         )
+    }
+
+    /**
+     * Per-model auto-compaction threshold resolver — prefetched once at
+     * init from the wired providers. `runBlocking` is fine here because
+     * all current providers return hardcoded ModelInfo lists (no IO);
+     * init cost is microseconds.
+     */
+    private val compactionThreshold: PerModelCompactionThreshold = kotlinx.coroutines.runBlocking {
+        PerModelCompactionThreshold.fromRegistry(providers)
     }
 
     /**

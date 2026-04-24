@@ -3,6 +3,7 @@ package io.talevia.core.tool.builtin.session.query
 import io.talevia.core.SessionId
 import io.talevia.core.agent.AgentRunState
 import io.talevia.core.agent.AgentRunStateTracker
+import io.talevia.core.compaction.DEFAULT_COMPACTION_TOKEN_THRESHOLD
 import io.talevia.core.compaction.TokenEstimator
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult
@@ -131,14 +132,6 @@ internal suspend fun runStatusQuery(
         ),
     )
 }
-
-/**
- * Mirrors `Agent.compactionTokenThreshold` default (120_000). Kept in sync
- * by convention — if the Agent default changes, bump here too. A future
- * cycle can replace this with a per-session wire-through once Agent exposes
- * its threshold on an accessible surface.
- */
-internal const val DEFAULT_COMPACTION_TOKEN_THRESHOLD: Int = 120_000
 
 private fun stateTag(state: AgentRunState?): String = when (state) {
     null, is AgentRunState.Idle -> "idle"
