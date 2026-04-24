@@ -7,6 +7,7 @@ import io.talevia.core.bus.EventBus
 import io.talevia.core.permission.PermissionAction
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.permission.PermissionRule
+import io.talevia.core.permission.PermissionRulesPersistence
 import io.talevia.core.permission.PermissionService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -32,6 +33,15 @@ class StdinPermissionPrompt(
     private val lineReader: LineReader,
     private val permissionRules: MutableList<PermissionRule>,
     private val activeSessionId: () -> SessionId,
+    /**
+     * Per-user persistence for "Always" replies. When non-null, every new
+     * `[A]lways`-appended rule also gets saved (whole-list rewrite) so the
+     * grant survives process restart — see
+     * `docs/decisions/2026-04-23-permission-persistent-rules.md`.
+     * [PermissionRulesPersistence.Noop] preserves the legacy in-memory-only
+     * behaviour for tests / rigs that don't want a file on disk.
+     */
+    private val persistence: PermissionRulesPersistence = PermissionRulesPersistence.Noop,
 ) {
     private var job: Job? = null
 
@@ -62,7 +72,14 @@ class StdinPermissionPrompt(
             'a' -> PermissionDecision.Once
             'A' -> {
                 val pattern = ev.patterns.singleOrNull() ?: "*"
-                permissionRules += PermissionRule(ev.permission, pattern, PermissionAction.ALLOW)
+                val newRule = PermissionRule(ev.permission, pattern, PermissionAction.ALLOW)
+                permissionRules += newRule
+                // Persist the full current list so the new grant survives
+                // process restart. save() internally runCatches, so a
+                // read-only home directory doesn't block the interactive
+                // path — in-memory list still has the rule, just the
+                // "forever" part weakens to "this process only".
+                persistence.save(permissionRules.toList())
                 PermissionDecision.Always
             }
             'r', 'R' -> PermissionDecision.Reject

@@ -112,6 +112,7 @@ class Repl(
             lineReader = reader,
             permissionRules = container.permissionRules,
             activeSessionId = { sessionId },
+            persistence = container.permissionRulesPersistence,
         )
         permissionPrompt.start(routerScope)
 

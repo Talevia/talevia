@@ -15,6 +15,8 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.RecentsRegistry
 import io.talevia.core.permission.DefaultPermissionRuleset
 import io.talevia.core.permission.DefaultPermissionService
+import io.talevia.core.permission.FilePermissionRulesPersistence
+import io.talevia.core.permission.PermissionRulesPersistence
 import io.talevia.core.platform.AsrEngine
 import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.FileBundleBlobWriter
@@ -59,6 +61,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
+import okio.Path
 import okio.Path.Companion.toPath
 
 /**
@@ -137,12 +140,28 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
     val permissions = DefaultPermissionService(bus)
 
     /**
+     * Per-user persistence for interactive "Always" permission grants.
+     * Lives at `<TALEVIA_RECENTS_PATH>.parent/permission-rules.json` (i.e.
+     * next to `recents.json` under `~/.talevia/` by default). Grants
+     * written here survive CLI process restarts so operators don't
+     * re-answer the same prompts every launch.
+     */
+    val permissionRulesPath: Path = env["TALEVIA_RECENTS_PATH"]!!.toPath()
+        .let { it.parent ?: "/".toPath() }
+        .resolve("permission-rules.json")
+    val permissionRulesPersistence: PermissionRulesPersistence =
+        FilePermissionRulesPersistence(permissionRulesPath)
+
+    /**
      * CLI auto-approves every ASK by default — see [cliPermissionRules] for the
-     * rationale. Opt out with `TALEVIA_CLI_PROMPT_ON_ASK=1`.
+     * rationale. Opt out with `TALEVIA_CLI_PROMPT_ON_ASK=1`. Interactive
+     * "Always" grants from prior CLI sessions merge in at startup via
+     * [permissionRulesPersistence].
      */
     val permissionRules: MutableList<io.talevia.core.permission.PermissionRule> =
         cliPermissionRules(
-            base = DefaultPermissionRuleset.rules,
+            base = DefaultPermissionRuleset.rules +
+                runBlocking { permissionRulesPersistence.load() },
             autoApprove = env["TALEVIA_CLI_PROMPT_ON_ASK"] != "1",
         ).toMutableList()
     val secrets: SecretStore = FileSecretStore()
