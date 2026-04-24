@@ -33,12 +33,12 @@ bullet 打 tag；现有 bullet 不手动 backfill。
 
 ### Exit criteria
 
-- [ ] Lockfile 完整性：每个成功的 AIGC clip 都在 `project.lockfile.entries`
+- [x] Lockfile 完整性：每个成功的 AIGC clip 都在 `project.lockfile.entries`
   产一条 `LockfileEntry`，含 `(modelId, modelVersion?, seed, parameters,
   inputHash, sourceBindingContentHashes)`；test 覆盖 "运行 AIGC tool →
   查 lockfile 里能找到对应 entry" 的 round-trip
   （grep: `class LockfileEntry` 在 `core/domain/lockfile/`；e2e test 带
-  `project.lockfile.entries` 断言）
+  `project.lockfile.entries` 断言） — cycle 2026-04-24 3fde671a
 - [ ] Provider 多元：`ImageGenEngine` / `VideoGenEngine` / `MusicGenEngine` /
   `TtsEngine` **至少一个**长出第二个非 stub impl，证明 provider 抽象真的
   是 provider-agnostic 而非 replicate-hardcoded（grep: `class .* :

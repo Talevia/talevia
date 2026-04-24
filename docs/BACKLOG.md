@@ -15,7 +15,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **m2-lockfile-completeness-field-audit** — M2 criterion 1："Lockfile 完整性"。`LockfileEntry` 在 `core/domain/lockfile/Lockfile.kt:163` 存在，但 criterion 要求字段集 `(modelId, modelVersion?, seed, parameters, inputHash, sourceBindingContentHashes)` 全 + round-trip e2e test。**方向：** 审字段齐全否 + 补缺 + e2e 断言 "AIGC tool 跑完 → `project.lockfile.entries` 有对应 entry + 全字段非空"。§M 无法 auto-tick，需 manual 决议。Rubric §5.7 / §5.2。Milestone §M2.
 - **m2-provider-second-impl** — M2 criterion 2："provider 多元"。`ImageGenEngine` / `VideoGenEngine` / `MusicGenEngine` / `TtsEngine` 除 Replicate + test stub 外，产品路径下 0 个第二 impl。**方向：** 任一 engine 长出第二个非 stub 生产 impl（如 `OpenAiImageGenEngine` via DALL-E、`ElevenLabsTtsEngine`）。需要专有 API key + 产品抉择，待用户决定。Rubric §5.7 / §5.2。Milestone §M2. · skipped 2026-04-24: 需专有 API key + 产品抉择（vendor 选型），待用户决定.
 - **debt-split-clip-action-tool-axis** — `ClipActionTool.kt` 938 LOC；phase-3 的 Replace/Fade 再合入会破 1100+ LOC。phase-2 commit body 已标注 "clip-create vs clip-mutate" 为拆分轴。**方向：** 先拆 `ClipCreateActionTool(action=add|duplicate|replace)` / `ClipMutateActionTool(action=remove|move|split|trim|fade)`，再吸收 Replace+Fade 不会超 500 LOC。**触发条件：** phase-3 重新激活时。Rubric §5.6。Milestone §later.
 - **debt-video-clip-consolidate-verbs-phase-3** — Replace + Fade 未并入 ClipActionTool。**方向：** 先走 `debt-split-clip-action-tool-axis` 按轴拆，再把 Replace + Fade 放 `ClipMutateActionTool`。**触发条件：** axis split 已落地，或 tool_spec_budget 逼近上限。Rubric §5.6 / §5.7。Milestone §later.
