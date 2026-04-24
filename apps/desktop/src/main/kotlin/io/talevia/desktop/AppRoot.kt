@@ -47,10 +47,12 @@ import io.talevia.core.platform.FileFilter
 import io.talevia.core.session.Part
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -327,15 +329,18 @@ internal fun AppRoot(container: AppContainer, shortcuts: DesktopShortcutHolder) 
                         val nextAssetId = assets.last().substringBefore("  ·  ")
                         scope.launch {
                             runCatching {
-                                container.tools["add_clip"]!!.dispatch(
+                                container.tools["clip_action"]!!.dispatch(
                                     buildJsonObject {
                                         put("projectId", projectId.value)
-                                        put("assetId", nextAssetId)
+                                        put("action", "add")
+                                        putJsonArray("addItems") {
+                                            addJsonObject { put("assetId", nextAssetId) }
+                                        }
                                     },
                                     container.uiToolContext(projectId),
                                 )
                                 log += "added clip"
-                            }.onFailure { log += "add_clip failed: ${friendly(it)}" }
+                            }.onFailure { log += "clip_action(action=add) failed: ${friendly(it)}" }
                         }
                     },
                     modifier = Modifier.fillMaxWidth(),

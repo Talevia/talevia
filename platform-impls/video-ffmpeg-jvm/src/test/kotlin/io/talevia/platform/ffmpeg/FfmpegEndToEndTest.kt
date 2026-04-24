@@ -20,9 +20,9 @@ import io.talevia.core.platform.OutputSpec
 import io.talevia.core.platform.RenderProgress
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
-import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.AddTransitionTool
+import io.talevia.core.tool.builtin.video.ClipActionTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import kotlinx.coroutines.flow.toList
@@ -90,7 +90,7 @@ class FfmpegEndToEndTest {
 
         val registry = ToolRegistry().apply {
             register(ImportMediaTool(engine, projects))
-            register(AddClipTool(projects))
+            register(ClipActionTool(projects))
             register(ExportTool(projects, engine))
         }
 
@@ -123,10 +123,11 @@ class FfmpegEndToEndTest {
         val assetIdA = (importA.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
         val assetIdB = (importB.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
 
-        registry["add_clips"]!!.dispatch(
+        registry["clip_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                putJsonArray("items") {
+                put("action", "add")
+                putJsonArray("addItems") {
                     addJsonObject { put("assetId", assetIdA) }
                     addJsonObject { put("assetId", assetIdB) }
                 }
@@ -178,7 +179,7 @@ class FfmpegEndToEndTest {
 
         val registry = ToolRegistry().apply {
             register(ImportMediaTool(engine, projects))
-            register(AddClipTool(projects))
+            register(ClipActionTool(projects))
             register(AddSubtitlesTool(projects))
             register(ExportTool(projects, engine))
         }
@@ -200,10 +201,11 @@ class FfmpegEndToEndTest {
             ctx,
         )
         val assetId = (import.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
-        registry["add_clips"]!!.dispatch(
+        registry["clip_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                putJsonArray("items") {
+                put("action", "add")
+                putJsonArray("addItems") {
                     addJsonObject { put("assetId", assetId) }
                 }
             },
@@ -268,7 +270,7 @@ class FfmpegEndToEndTest {
 
         val registry = ToolRegistry().apply {
             register(ImportMediaTool(engine, projects))
-            register(AddClipTool(projects))
+            register(ClipActionTool(projects))
             register(AddTransitionTool(projects))
             register(ExportTool(projects, engine))
         }
@@ -299,17 +301,18 @@ class FfmpegEndToEndTest {
         val assetIdA = (importA.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
         val assetIdB = (importB.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
 
-        val addBoth = registry["add_clips"]!!.dispatch(
+        val addBoth = registry["clip_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                putJsonArray("items") {
+                put("action", "add")
+                putJsonArray("addItems") {
                     addJsonObject { put("assetId", assetIdA) }
                     addJsonObject { put("assetId", assetIdB) }
                 }
             },
             ctx,
         )
-        val addResults = (addBoth.data as io.talevia.core.tool.builtin.video.AddClipTool.Output).results
+        val addResults = (addBoth.data as io.talevia.core.tool.builtin.video.ClipActionTool.Output).added
         val clipIdA = addResults[0].clipId
         val clipIdB = addResults[1].clipId
 
@@ -440,7 +443,7 @@ class FfmpegEndToEndTest {
 
         val registry = ToolRegistry().apply {
             register(ImportMediaTool(engine, projects))
-            register(AddClipTool(projects))
+            register(ClipActionTool(projects))
             register(ExportTool(projects, engine))
         }
 
@@ -461,10 +464,11 @@ class FfmpegEndToEndTest {
             ctx,
         )
         val assetId = (import.data as io.talevia.core.tool.builtin.video.ImportMediaTool.Output).assetId
-        registry["add_clips"]!!.dispatch(
+        registry["clip_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                putJsonArray("items") {
+                put("action", "add")
+                putJsonArray("addItems") {
                     addJsonObject { put("assetId", assetId) }
                 }
             },

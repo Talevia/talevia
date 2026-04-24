@@ -19,7 +19,7 @@ import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.AllowAllPermissionService
 import io.talevia.core.session.Part
 import io.talevia.core.session.SqlDelightSessionStore
-import io.talevia.core.tool.builtin.video.AddClipTool
+import io.talevia.core.tool.builtin.video.ClipActionTool
 import io.talevia.core.tool.builtin.video.FilterActionTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import kotlinx.coroutines.test.runTest
@@ -47,7 +47,7 @@ class RevertTimelineTest {
 
         val sessionId = SessionId("s")
         val projectId = ProjectId("p")
-        // Seed a fake asset so AddClipTool has something to reference without ffmpeg.
+        // Seed a fake asset so ClipActionTool(action=add) has something to reference without ffmpeg.
         val asset = MediaAsset(
             id = AssetId("fake-source"),
             source = MediaSource.File("/tmp/fake.mp4"),
@@ -80,15 +80,16 @@ class RevertTimelineTest {
             ),
         )
 
-        val addClip = AddClipTool(projects)
+        val addClip = ClipActionTool(projects)
         val addResult = addClip.execute(
-            AddClipTool.Input(
+            ClipActionTool.Input(
                 projectId = projectId.value,
-                items = listOf(AddClipTool.Item(assetId = asset.id.value)),
+                action = "add",
+                addItems = listOf(ClipActionTool.AddItem(assetId = asset.id.value)),
             ),
             ctx,
         )
-        assertTrue(addResult.outputForLlm.contains("Snapshot:"), "add_clips should surface snapshot id")
+        assertTrue(addResult.outputForLlm.contains("Snapshot:"), "clip_action(action=add) should surface snapshot id")
         assertEquals(1, projects.get(projectId)!!.timeline.tracks.flatMap { it.clips }.size)
 
         val revert = RevertTimelineTool(sessions, projects)
@@ -100,7 +101,7 @@ class RevertTimelineTest {
         assertEquals(0, projects.get(projectId)!!.timeline.tracks.flatMap { it.clips }.size)
 
         val snapshots = sessions.listSessionParts(sessionId).filterIsInstance<Part.TimelineSnapshot>()
-        // baseline + add_clips' snapshot + revert's snapshot
+        // baseline + clip_action(action=add)'s snapshot + revert's snapshot
         assertEquals(3, snapshots.size)
 
         driver.close()
@@ -136,15 +137,16 @@ class RevertTimelineTest {
             messages = emptyList(),
         )
 
-        val addClip = AddClipTool(projects)
+        val addClip = ClipActionTool(projects)
         val addResp = addClip.execute(
-            AddClipTool.Input(
+            ClipActionTool.Input(
                 projectId = projectId.value,
-                items = listOf(AddClipTool.Item(assetId = asset.id.value)),
+                action = "add",
+                addItems = listOf(ClipActionTool.AddItem(assetId = asset.id.value)),
             ),
             ctxFor("c1", "m1"),
         )
-        val clipId = addResp.data.results.single().clipId
+        val clipId = addResp.data.added.single().clipId
         val midSnapshotId = addResp.data.snapshotId
 
         val applyFilter = FilterActionTool(projects)

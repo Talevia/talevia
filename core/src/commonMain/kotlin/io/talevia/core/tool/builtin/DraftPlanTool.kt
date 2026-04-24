@@ -132,7 +132,7 @@ class DraftPlanTool(private val clock: Clock = Clock.System) : Tool<DraftPlanToo
                             put("type", "string")
                             put(
                                 "description",
-                                "The registered tool id to dispatch (e.g. \"generate_image\", \"add_clip\").",
+                                "The registered tool id to dispatch (e.g. \"generate_image\", \"clip_action\").",
                             )
                         }
                         putJsonObject("inputSummary") {

@@ -21,8 +21,8 @@ import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
-import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
+import io.talevia.core.tool.builtin.video.ClipActionTool
 import io.talevia.core.tool.builtin.video.FilterActionTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.TransitionActionTool
@@ -47,7 +47,7 @@ class M6FeaturesTest {
     @Test
     fun applyFilterAddsFilterToVideoClip() = runTest {
         val (store, projects, registry, ctx, projectId) = newWiring()
-        // Register a fake asset directly so add_clip works without ffmpeg.
+        // Register a fake asset directly so clip_action(action=add) works without ffmpeg.
         val fakeAsset = io.talevia.core.domain.MediaAsset(
             id = AssetId("fake-x"),
             source = io.talevia.core.domain.MediaSource.File("/tmp/x.mp4"),
@@ -55,14 +55,15 @@ class M6FeaturesTest {
         )
         projects.mutate(projectId) { it.copy(assets = it.assets + fakeAsset) }
         val r = ToolRegistry().apply {
-            register(AddClipTool(projects))
+            register(ClipActionTool(projects))
             register(FilterActionTool(projects))
         }
 
-        val addResp = r["add_clips"]!!.dispatch(
+        val addResp = r["clip_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                putJsonArray("items") {
+                put("action", "add")
+                putJsonArray("addItems") {
                     addJsonObject {
                         put("assetId", fakeAsset.id.value)
                     }
@@ -70,7 +71,7 @@ class M6FeaturesTest {
             },
             ctx,
         )
-        val clipId = (addResp.data as AddClipTool.Output).results.single().clipId
+        val clipId = (addResp.data as ClipActionTool.Output).added.single().clipId
 
         r["filter_action"]!!.dispatch(
             buildJsonObject {
@@ -224,7 +225,7 @@ class M6FeaturesTest {
         projects.upsert("test", Project(id = projectId, timeline = Timeline(), outputProfile = OutputProfile.DEFAULT_1080P))
         val registry = ToolRegistry().apply {
             register(ImportMediaTool(engine, projects))
-            register(AddClipTool(projects))
+            register(ClipActionTool(projects))
             register(FilterActionTool(projects))
             register(AddSubtitlesTool(projects))
             register(TransitionActionTool(projects))

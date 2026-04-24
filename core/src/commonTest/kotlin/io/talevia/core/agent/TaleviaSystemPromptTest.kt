@@ -64,7 +64,9 @@ class TaleviaSystemPromptTest {
         // The mutation half of the regenerate-after-stale loop.
         "replace_clip",
         // The missing scalpel — clip deletion sits alongside split / replace.
-        "remove_clip",
+        // Post-`debt-video-clip-consolidate-verbs-phase-1` (2026-04-23) the verb is
+        // an action on `clip_action`, not a standalone tool id.
+        "clip_action(action=\"remove\")",
         // The ripple-delete chain partner — same-track reposition by id.
         "move_clip",
         // Re-trim after creation — edits sourceRange without losing bound filters.

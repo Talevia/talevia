@@ -10,7 +10,7 @@ import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.AllowAllPermissionService
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
-import io.talevia.core.tool.builtin.video.AddClipTool
+import io.talevia.core.tool.builtin.video.ClipActionTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import kotlinx.coroutines.test.runTest
@@ -139,7 +139,7 @@ class ExportDeterminismTest {
 
         val registry = ToolRegistry().apply {
             register(ImportMediaTool(engine, projects))
-            register(AddClipTool(projects))
+            register(ClipActionTool(projects))
             register(ExportTool(projects, engine))
         }
 
@@ -160,10 +160,11 @@ class ExportDeterminismTest {
             ctx,
         )
         val assetId = (import.data as ImportMediaTool.Output).assetId
-        registry["add_clips"]!!.dispatch(
+        registry["clip_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                putJsonArray("items") {
+                put("action", "add")
+                putJsonArray("addItems") {
                     addJsonObject { put("assetId", assetId) }
                 }
             },

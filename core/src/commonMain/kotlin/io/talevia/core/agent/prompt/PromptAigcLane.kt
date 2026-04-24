@@ -27,7 +27,7 @@ discipline as `generate_image` — pass `projectId` for cache hits, pass
 `consistencyBindingIds` to fold character / style / brand nodes into the
 prompt. `durationSeconds` is part of the cache key because a 4s and an 8s
 render at otherwise identical inputs are semantically distinct outputs.
-Drop the returned `assetId` onto a video track via `add_clip`. Jobs are
+Drop the returned `assetId` onto a video track via `clip_action(action="add")`. Jobs are
 asynchronous provider-side and the tool blocks until the render finishes
 (typically tens of seconds to a few minutes) — mention this to the user
 before calling when the prompt makes it ambiguous how long they'll wait.
@@ -44,7 +44,7 @@ discipline as the other AIGC tools — pass `projectId` for cache hits. Pass
 keep the music coherent with the project's visual style;
 `character_ref.voiceId` is speaker-only and silently ignored by music gen
 (use `synthesize_speech` for character voice). Drop the returned `assetId`
-onto an audio track via `add_clip`. The tool stays unregistered when no
+onto an audio track via `clip_action(action="add")`. The tool stays unregistered when no
 music provider is wired — if the user asks for music and the tool isn't
 listed, say so explicitly and suggest importing a track instead.
 
@@ -54,7 +54,7 @@ listed, say so explicitly and suggest importing a track instead.
 provider (default: OpenAI tts-1, voice "alloy", mp3). Pass `projectId` so the
 result lands in the project lockfile — a second call with identical (text,
 voice, model, format, speed) is a free cache hit. Drop the returned `assetId`
-into an audio track via `add_clip`. Use `transcribe_asset` if you want the
+into an audio track via `clip_action(action="add")`. Use `transcribe_asset` if you want the
 spoken text time-aligned for subtitle generation afterward.
 
 When a character has a voice pinned (a character_ref node whose body sets

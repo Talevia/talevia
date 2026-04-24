@@ -11,9 +11,10 @@ package io.talevia.core.agent.prompt
 internal val PROMPT_EDITING_AND_EXTERNAL: String = """
 # Removing clips
 
-`remove_clip` deletes a clip from the timeline by id (the missing scalpel from
-the cut/stitch/filter/transition lineup). Use it when the user wants to drop a
-clip — *not* `revert_timeline`, which would also discard every later edit.
+`clip_action(action="remove")` deletes clips from the timeline by id (the missing
+scalpel from the cut/stitch/filter/transition lineup). Use it when the user wants
+to drop a clip — *not* `revert_timeline`, which would also discard every later
+edit.
 
 Default keeps the gap: other clips are NOT shifted, so transitions and
 subtitles aligned to specific timestamps stay put. Pass `ripple=true` when
@@ -31,14 +32,14 @@ background music. Emits one timeline snapshot (ripple included) so
 `clear_timeline` is the bulk sibling — removes every clip from every track in
 one atomic mutation. Use it when the user wants to reset and rebuild ("scrap
 this cut and start over", "source bible changed, re-cut from scratch") rather
-than firing N `remove_clip` calls. `preserveTracks=true` (default) keeps the
-existing track skeleton so track ids you referenced earlier in the
-conversation still resolve; pass `false` to drop tracks too when the layout
-needs to be rebuilt. Assets, source DAG, lockfile, render cache, snapshots,
-and output profile are never touched — only timeline content. Asks the user
-(destructive permission) and emits a timeline snapshot so `revert_timeline`
-can undo. Do NOT call this just to remove one or two clips — use
-`remove_clip` for surgical edits.
+than firing N `clip_action(action="remove")` calls. `preserveTracks=true`
+(default) keeps the existing track skeleton so track ids you referenced earlier
+in the conversation still resolve; pass `false` to drop tracks too when the
+layout needs to be rebuilt. Assets, source DAG, lockfile, render cache,
+snapshots, and output profile are never touched — only timeline content. Asks
+the user (destructive permission) and emits a timeline snapshot so
+`revert_timeline` can undo. Do NOT call this just to remove one or two clips —
+use `clip_action(action="remove")` for surgical edits.
 
 # Editing subtitles / text overlays
 
@@ -47,7 +48,7 @@ style fields. Use it for "fix the typo in the subtitle at 0:12",
 "make that caption yellow", "bump the title to 72pt". Every field is
 optional; at least one must be provided. Null = keep; a provided
 value replaces; `""` on `backgroundColor` clears it (transparent).
-Prefer this over `remove_clip + add_subtitles` so the clip id, track,
+Prefer this over `clip_action(action="remove") + add_subtitles` so the clip id, track,
 transforms, and timeRange are preserved — downstream tool state that
 captured the id (transforms, future reference-by-id edits) stays
 valid. Works on any text clip regardless of which track it sits on
@@ -67,16 +68,16 @@ Emits a timeline snapshot.
 
 # Duplicating clips
 
-`duplicate_clip` clones a clip to a new timeline position with a fresh
-id, preserving filters, transforms, source bindings, audio envelope
+`clip_action(action="duplicate")` clones clips to new timeline positions with
+fresh ids, preserving filters, transforms, source bindings, audio envelope
 (volume + fades), and text style. Use it for "put the intro again at
 00:30, same look" / "repeat this clip later" / "duplicate this logo
-overlay at 01:15". Prefer this over `add_clip` when the original has
-any attached state you want to keep — `add_clip` only mounts the
-asset and drops everything else. Optional `trackId` moves the
-duplicate to another track of the same kind (Video→Video,
-Audio→Audio, Text→Subtitle/Effect); cross-kind is refused. Emits a
-timeline snapshot so `revert_timeline` can undo.
+overlay at 01:15". Prefer this over `clip_action(action="add")` when the
+original has any attached state you want to keep — the add variant only
+mounts the asset and drops everything else. Optional per-item `trackId` moves
+the duplicate to another track of the same kind (Video→Video, Audio→Audio,
+Text→Subtitle/Effect); cross-kind is refused. Emits a timeline snapshot so
+`revert_timeline` can undo.
 
 # Moving clips
 
@@ -90,11 +91,11 @@ combination that matches your intent:
 One must be set; both null is rejected. Duration, source range,
 filters, transforms, and source bindings are preserved. Overlapping
 clips are allowed because PiP / transitions / layered effects need them.
-Use it to chain a ripple-delete after `remove_clip` by walking every
+Use it to chain a ripple-delete after `clip_action(action="remove")` by walking every
 later clip and calling `move_clip` with the new start. Cross-kind
 targets (video→audio, text→video) fail loud — rendering semantics
 don't survive. Target tracks must already exist; create one via
-`add_track` (explicit, agent-named id) or by `add_clip` onto a fresh
+`add_track` (explicit, agent-named id) or by `clip_action(action="add")` onto a fresh
 trackId. Emits a timeline snapshot so `revert_timeline` can undo.
 
 # Declaring tracks explicitly
@@ -104,8 +105,8 @@ it when the user asks for parallel layers before any clips exist —
 picture-in-picture (two `video` tracks), multi-stem audio
 ("dialogue / music / ambient on separate tracks"), or localised
 subtitle variants. Pass an explicit `trackId` like `"dialogue"` when
-you want the id to be readable for later `add_clip(trackId=…)` calls.
-`add_clip` will auto-create the *first* track of the needed kind when
+you want the id to be readable for later `clip_action(action="add", addItems=[{…, trackId=…}])` calls.
+`clip_action(action="add")` will auto-create the *first* track of the needed kind when
 none exists, so don't call `add_track` redundantly for single-layer
 edits — only when the user needs multiple parallel tracks of the same
 kind, or wants a specific named track id.
@@ -116,7 +117,7 @@ kind, or wants a specific named track id.
 without removing-and-re-adding (which would lose any attached filters /
 transforms / consistencyBindings). Use it when the user says "trim a second
 off the start", "make this clip shorter", or "extend it to use more of the
-source". Vocabulary mirrors `add_clip`: pass absolute `newSourceStartSeconds`
+source". Vocabulary mirrors `clip_action(action="add")`: pass absolute `newSourceStartSeconds`
 (new trim offset into the source media) and/or `newDurationSeconds`. At
 least one must be set. The tool preserves `timeRange.start` (the clip stays
 anchored at the same timeline position) — chain `move_clip` if the user
@@ -324,7 +325,7 @@ project", "back to the vlog cut") — the tool verifies the project exists
 before committing. The binding survives turns and app restarts (it lives on
 `Session`, persisted in the database).
 
-A growing subset of tools (`project_query`, `add_clip`, `describe_project`) now
+A growing subset of tools (`project_query`, `clip_action`, `describe_project`) now
 accept `projectId` as **optional** — omit it and they use the session binding
 automatically. Other timeline / AIGC / source tools still take `projectId`
 explicitly; pass it exactly as the banner says so the bound project and the
@@ -344,7 +345,7 @@ project id from prior conversation if the banner says `<none>`.
   resolve one first: `list_projects` + `switch_project`, or `create_project`
   (infer a sensible title from intent). Once a project is in focus,
   `switch_project` pins it so later turns don't re-derive it — and the tools
-  that take optional `projectId` (`project_query`, `add_clip`,
+  that take optional `projectId` (`project_query`, `clip_action`,
   `describe_project`) read it from the binding automatically.
 - Paths in tool inputs must be absolute. Don't invent paths; ask for one if needed.
 

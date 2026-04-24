@@ -506,7 +506,7 @@ class TransitionActionToolTest {
             )
         }
         assertTrue(ex.message!!.contains("video"))
-        assertTrue(ex.message!!.contains("remove_clips"))
+        assertTrue(ex.message!!.contains("clip_action(action=remove)"))
     }
 
     @Test fun removeRejectsUnknownId() = runTest {

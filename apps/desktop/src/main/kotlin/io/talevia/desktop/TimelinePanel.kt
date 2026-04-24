@@ -46,7 +46,7 @@ import kotlinx.serialization.json.putJsonObject
  * Rich timeline inspector for the desktop editor — replaces the earlier
  * flat list of clips. Groups clips by track, surfaces filters / volume /
  * transforms / source bindings per clip, flags stale clips (VISION §3.2),
- * and dispatches `remove_clip` through the shared `ToolRegistry`.
+ * and dispatches `clip_action(action=remove)` through the shared `ToolRegistry`.
  *
  * Same refresh strategy as [SourcePanel]: subscribe to
  * `BusEvent.PartUpdated` and re-read the project — tool mutations picked
@@ -247,10 +247,11 @@ fun TimelinePanel(
                         },
                         onRemove = {
                             dispatch(
-                                "remove_clip",
+                                "clip_action",
                                 buildJsonObject {
                                     put("projectId", projectId.value)
-                                    put("clipId", clip.id.value)
+                                    put("action", "remove")
+                                    putJsonArray("clipIds") { add(clip.id.value) }
                                 },
                                 "remove clip ${clip.id.value.take(6)}",
                             )

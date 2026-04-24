@@ -20,7 +20,7 @@ import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
 import io.talevia.core.permission.AllowAllPermissionService
 import io.talevia.core.tool.ToolContext
-import io.talevia.core.tool.builtin.video.AddClipTool
+import io.talevia.core.tool.builtin.video.ClipActionTool
 import io.talevia.core.tool.builtin.video.FilterActionTool
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.filterIsInstance
@@ -37,7 +37,7 @@ import kotlin.time.Duration.Companion.seconds
 
 /**
  * End-to-end exercise of SessionRevert: seed a session with a user→assistant
- * turn that mutates the timeline via AddClipTool, fire a second mutating turn
+ * turn that mutates the timeline via ClipActionTool(action=add), fire a second mutating turn
  * (FilterActionTool), then revert to the anchor at the first user message and
  * verify (a) the second turn's messages are gone, (b) the timeline rolled back
  * to the pre-turn snapshot, (c) the bus emitted `SessionReverted`.
@@ -93,15 +93,16 @@ class SessionRevertTest {
             emitPart = { sessions.upsertPart(it) },
             messages = emptyList(),
         )
-        val addClip = AddClipTool(projects)
+        val addClip = ClipActionTool(projects)
         val addResp = addClip.execute(
-            AddClipTool.Input(
+            ClipActionTool.Input(
                 projectId = projectId.value,
-                items = listOf(AddClipTool.Item(assetId = asset.id.value)),
+                action = "add",
+                addItems = listOf(ClipActionTool.AddItem(assetId = asset.id.value)),
             ),
             ctxFor("c-add", a1),
         )
-        val clipId = addResp.data.results.single().clipId
+        val clipId = addResp.data.added.single().clipId
         assertEquals(1, projects.get(projectId)!!.timeline.tracks.flatMap { it.clips }.size)
 
         // Turn 2: user message u2, assistant a2 running filter_action(apply) → second mutation.

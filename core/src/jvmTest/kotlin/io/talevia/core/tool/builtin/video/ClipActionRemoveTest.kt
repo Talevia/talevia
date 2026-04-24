@@ -25,11 +25,17 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
-class RemoveClipToolTest {
+/**
+ * Exercises `ClipActionTool(action="remove")` — reshaped from the legacy
+ * `RemoveClipToolTest` as part of `debt-video-clip-consolidate-verbs-phase-1`.
+ * All original semantic cases preserved; only the input/output types (and the
+ * action dispatch) changed.
+ */
+class ClipActionRemoveTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: RemoveClipTool,
+        val tool: ClipActionTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
         val emittedParts: MutableList<Part>,
@@ -37,7 +43,7 @@ class RemoveClipToolTest {
 
     private fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val tool = RemoveClipTool(store)
+        val tool = ClipActionTool(store)
         val parts = mutableListOf<Part>()
         val ctx = ToolContext(
             sessionId = SessionId("s"),
@@ -58,8 +64,12 @@ class RemoveClipToolTest {
         assetId = AssetId("a-$id"),
     )
 
-    private fun single(clipId: String, ripple: Boolean = false) = RemoveClipTool.Input(
+    private fun removeInput(
+        clipId: String,
+        ripple: Boolean = false,
+    ) = ClipActionTool.Input(
         projectId = "p",
+        action = "remove",
         clipIds = listOf(clipId),
         ripple = ripple,
     )
@@ -75,9 +85,10 @@ class RemoveClipToolTest {
             ),
         )
 
-        val out = rig.tool.execute(single("c2"), rig.ctx).data
-        assertEquals(1, out.results.size)
-        val only = out.results.single()
+        val out = rig.tool.execute(removeInput("c2"), rig.ctx).data
+        assertEquals("remove", out.action)
+        assertEquals(1, out.removed.size)
+        val only = out.removed.single()
         assertEquals("c2", only.clipId)
         assertEquals("v1", only.trackId)
 
@@ -101,10 +112,14 @@ class RemoveClipToolTest {
         )
 
         val out = rig.tool.execute(
-            RemoveClipTool.Input("p", listOf("c1", "c3"), ripple = false),
+            ClipActionTool.Input(
+                projectId = "p",
+                action = "remove",
+                clipIds = listOf("c1", "c3"),
+            ),
             rig.ctx,
         ).data
-        assertEquals(2, out.results.size)
+        assertEquals(2, out.removed.size)
         val remainingIds = rig.store.get(rig.projectId)!!.timeline.tracks.single().clips.map { it.id.value }
         assertEquals(listOf("c2"), remainingIds)
     }
@@ -121,7 +136,11 @@ class RemoveClipToolTest {
         val before = rig.store.get(rig.projectId)!!
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                RemoveClipTool.Input("p", listOf("c1", "ghost")),
+                ClipActionTool.Input(
+                    projectId = "p",
+                    action = "remove",
+                    clipIds = listOf("c1", "ghost"),
+                ),
                 rig.ctx,
             )
         }
@@ -149,7 +168,7 @@ class RemoveClipToolTest {
                 ),
             ),
         )
-        rig.tool.execute(single("vc"), rig.ctx)
+        rig.tool.execute(removeInput("vc"), rig.ctx)
         val refreshed = rig.store.get(rig.projectId)!!
         assertTrue(refreshed.timeline.tracks.filterIsInstance<Track.Video>().single().clips.isEmpty())
         assertEquals(1, refreshed.timeline.tracks.filterIsInstance<Track.Audio>().single().clips.size)
@@ -163,7 +182,7 @@ class RemoveClipToolTest {
                 timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(a)))),
             ),
         )
-        rig.tool.execute(single("c1"), rig.ctx)
+        rig.tool.execute(removeInput("c1"), rig.ctx)
         val refreshed = rig.store.get(rig.projectId)!!
         assertEquals(1, refreshed.timeline.tracks.size)
         assertTrue(refreshed.timeline.tracks.single().clips.isEmpty())
@@ -183,8 +202,8 @@ class RemoveClipToolTest {
                 timeline = Timeline(tracks = listOf(Track.Audio(TrackId("a"), listOf(audio)))),
             ),
         )
-        val out = rig.tool.execute(single("a1"), rig.ctx).data
-        assertEquals("a", out.results.single().trackId)
+        val out = rig.tool.execute(removeInput("a1"), rig.ctx).data
+        assertEquals("a", out.removed.single().trackId)
     }
 
     @Test fun missingClipFailsLoudly() = runTest {
@@ -196,7 +215,7 @@ class RemoveClipToolTest {
             ),
         )
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(single("ghost"), rig.ctx)
+            rig.tool.execute(removeInput("ghost"), rig.ctx)
         }
         assertTrue("ghost" in ex.message!!, ex.message)
         val refreshed = rig.store.get(rig.projectId)!!
@@ -213,7 +232,14 @@ class RemoveClipToolTest {
                 timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"), listOf(a, b, c)))),
             ),
         )
-        rig.tool.execute(RemoveClipTool.Input("p", listOf("c1", "c3")), rig.ctx)
+        rig.tool.execute(
+            ClipActionTool.Input(
+                projectId = "p",
+                action = "remove",
+                clipIds = listOf("c1", "c3"),
+            ),
+            rig.ctx,
+        )
         val snaps = rig.emittedParts.filterIsInstance<Part.TimelineSnapshot>()
         assertEquals(1, snaps.size)
         val ids = snaps.single().timeline.tracks.single().clips.map { it.id.value }
@@ -231,10 +257,10 @@ class RemoveClipToolTest {
             ),
         )
 
-        val out = rig.tool.execute(single("c2", ripple = true), rig.ctx).data
+        val out = rig.tool.execute(removeInput("c2", ripple = true), rig.ctx).data
         assertTrue(out.rippled)
-        assertEquals(1, out.results.single().shiftedClipCount)
-        assertEquals(3.0, out.results.single().durationSeconds)
+        assertEquals(1, out.removed.single().shiftedClipCount)
+        assertEquals(3.0, out.removed.single().durationSeconds)
 
         val clips = rig.store.get(rig.projectId)!!.timeline.tracks.single().clips
         assertEquals(listOf("c1", "c3"), clips.map { it.id.value })
@@ -253,8 +279,8 @@ class RemoveClipToolTest {
             ),
         )
 
-        val out = rig.tool.execute(single("c1", ripple = true), rig.ctx).data
-        assertEquals(1, out.results.single().shiftedClipCount)
+        val out = rig.tool.execute(removeInput("c1", ripple = true), rig.ctx).data
+        assertEquals(1, out.removed.single().shiftedClipCount)
         val clips = rig.store.get(rig.projectId)!!.timeline.tracks.single().clips
         val byId = clips.associateBy { it.id.value }
         assertEquals(2.seconds, byId["c2"]!!.timeRange.start, "overlapping clip must stay put")
@@ -282,7 +308,7 @@ class RemoveClipToolTest {
             ),
         )
 
-        rig.tool.execute(single("v1", ripple = true), rig.ctx)
+        rig.tool.execute(removeInput("v1", ripple = true), rig.ctx)
         val project = rig.store.get(rig.projectId)!!
         val video = project.timeline.tracks.filterIsInstance<Track.Video>().single()
         val audio = project.timeline.tracks.filterIsInstance<Track.Audio>().single()
@@ -294,7 +320,37 @@ class RemoveClipToolTest {
     @Test fun rejectsEmptyClipIdList() = runTest {
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline()))
         assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(RemoveClipTool.Input("p", emptyList()), rig.ctx)
+            rig.tool.execute(
+                ClipActionTool.Input(
+                    projectId = "p",
+                    action = "remove",
+                    clipIds = emptyList(),
+                ),
+                rig.ctx,
+            )
         }
+    }
+
+    @Test fun removeRejectsConflictingPayloadFields() = runTest {
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(
+                    tracks = listOf(Track.Video(TrackId("v1"), listOf(videoClip("c1", Duration.ZERO, 3.seconds)))),
+                ),
+            ),
+        )
+        val ex = assertFailsWith<IllegalArgumentException> {
+            rig.tool.execute(
+                ClipActionTool.Input(
+                    projectId = "p",
+                    action = "remove",
+                    clipIds = listOf("c1"),
+                    duplicateItems = listOf(ClipActionTool.DuplicateItem("c1", 5.0)),
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("rejects"), ex.message)
     }
 }

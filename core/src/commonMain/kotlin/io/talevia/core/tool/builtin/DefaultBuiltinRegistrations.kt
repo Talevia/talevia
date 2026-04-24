@@ -80,13 +80,12 @@ import io.talevia.core.tool.builtin.source.RenameSourceNodeTool
 import io.talevia.core.tool.builtin.source.SetSourceNodeParentsTool
 import io.talevia.core.tool.builtin.source.SourceQueryTool
 import io.talevia.core.tool.builtin.source.UpdateSourceNodeBodyTool
-import io.talevia.core.tool.builtin.video.AddClipTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
 import io.talevia.core.tool.builtin.video.ClearTimelineTool
+import io.talevia.core.tool.builtin.video.ClipActionTool
 import io.talevia.core.tool.builtin.video.ConsolidateMediaIntoBundleTool
-import io.talevia.core.tool.builtin.video.DuplicateClipTool
 import io.talevia.core.tool.builtin.video.DuplicateTrackTool
 import io.talevia.core.tool.builtin.video.EditTextClipTool
 import io.talevia.core.tool.builtin.video.ExportDryRunTool
@@ -97,7 +96,6 @@ import io.talevia.core.tool.builtin.video.FilterActionTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RelinkAssetTool
-import io.talevia.core.tool.builtin.video.RemoveClipTool
 import io.talevia.core.tool.builtin.video.ReorderTracksTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
@@ -207,13 +205,11 @@ fun ToolRegistry.registerClipAndTrackTools(
     projects: ProjectStore,
     sessions: SessionStore,
 ) {
-    register(AddClipTool(projects))
+    register(ClipActionTool(projects))
     register(ReplaceClipTool(projects))
     register(SplitClipTool(projects))
-    register(RemoveClipTool(projects))
     register(MoveClipTool(projects))
     register(SetClipSourceBindingTool(projects))
-    register(DuplicateClipTool(projects))
     register(TrimClipTool(projects))
     register(SetClipVolumeTool(projects))
     register(FadeAudioClipTool(projects))

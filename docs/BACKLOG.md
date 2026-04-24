@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **debt-video-clip-consolidate-verbs-phase-1** — `debt-video-clip-action-consolidation` 2026-04-24 skip-tag 的首个 phase。Add+Remove+Duplicate 三个 clip 动作 tool（220+200+226=646 LOC）shape 近似、payload 简单，在 SessionActionTool 4-way 精度以内。**方向：** 按 `TransitionActionTool` / `SessionActionTool` 模式，新建 `ClipActionTool(action=add|remove|duplicate)`，把三者 merge 进来；删掉 `AddClipTool.kt` / `RemoveClipTool.kt` / `DuplicateClipTool.kt`；`DefaultBuiltinRegistrations.registerClipAndTrackTools` 里对应 3 register 变 1；prompt 文本（PromptEditingAndExternal 等）里 `add_clip` / `remove_clip` / `duplicate_clip` 同步换名；测试更新。Phase 2（Move+Split+Trim+Replace+Fade）和 Set 族留 P1 单独 bullet。Rubric §5.6 / §5.7。Milestone §later.
 - **debt-source-consolidate-add-remove-fork** — `debt-source-tool-consolidation` 2026-04-24 skip-tag 的降维方案。Rename（338 LOC）太复杂单独处理，Add(184)+Remove(95)+Fork(162)=441 LOC 按 SessionActionTool 精度能合成 `SourceNodeActionTool(action=add|remove|fork)` 且最终文件不破 500 line。**方向：** 新建 `SourceNodeActionTool`，merge 三者，删旧 tool；DefaultBuiltinRegistrations 里 3 register 变 1；prompt 同步换名；测试更新。Rename 单独评估（可能 368-LOC 独立 tool 比折成 action 更干净）。Rubric §5.6 / §5.7。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排

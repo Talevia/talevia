@@ -285,7 +285,7 @@ class TransitionActionTool(
                     if (elsewhere != null) {
                         error(
                             "transitionClipIds[$idx] ($transitionClipId) is on a ${trackKindOf(elsewhere)} " +
-                                "track, not a transition. Use remove_clips for regular clips.",
+                                "track, not a transition. Use clip_action(action=remove) for regular clips.",
                         )
                     }
                     error("transitionClipIds[$idx] ($transitionClipId) not found in project ${pid.value}")
@@ -294,7 +294,7 @@ class TransitionActionTool(
                     error(
                         "transitionClipIds[$idx] ($transitionClipId) is on the effect track but is not " +
                             "a transition (assetId '${(locatedClip as? Clip.Video)?.assetId?.value ?: "n/a"}' " +
-                            "does not start with '$TRANSITION_ASSET_PREFIX'). Use remove_clips if you meant " +
+                            "does not start with '$TRANSITION_ASSET_PREFIX'). Use clip_action(action=remove) if you meant " +
                             "a non-transition effect clip.",
                     )
                 }

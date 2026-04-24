@@ -29,19 +29,25 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
+/**
+ * Exercises `ClipActionTool(action="add")` — reshaped from the legacy
+ * `AddClipToolTest` as part of `debt-video-clip-consolidate-verbs-phase-1`.
+ * Every semantic case from the old suite is preserved; only the input/output
+ * types (and the action dispatch) changed.
+ */
 @OptIn(ExperimentalUuidApi::class)
-class AddClipToolTest {
+class ClipActionAddTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: AddClipTool,
+        val tool: ClipActionTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
     )
 
     private suspend fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val tool = AddClipTool(store)
+        val tool = ClipActionTool(store)
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),
@@ -65,16 +71,18 @@ class AddClipToolTest {
         return assetId
     }
 
-    private fun single(
+    private fun addInput(
+        projectId: String? = null,
         assetId: String,
         timelineStartSeconds: Double? = null,
         sourceStartSeconds: Double = 0.0,
         durationSeconds: Double? = null,
         trackId: String? = null,
-    ) = AddClipTool.Input(
-        projectId = null,
-        items = listOf(
-            AddClipTool.Item(
+    ) = ClipActionTool.Input(
+        projectId = projectId,
+        action = "add",
+        addItems = listOf(
+            ClipActionTool.AddItem(
                 assetId = assetId,
                 timelineStartSeconds = timelineStartSeconds,
                 sourceStartSeconds = sourceStartSeconds,
@@ -100,10 +108,11 @@ class AddClipToolTest {
         val assetId = rig.importAsset("/tmp/new.mp4", durationSeconds = 3.0)
 
         val result = rig.tool.execute(
-            AddClipTool.Input(
+            ClipActionTool.Input(
                 projectId = rig.projectId.value,
-                items = listOf(
-                    AddClipTool.Item(
+                action = "add",
+                addItems = listOf(
+                    ClipActionTool.AddItem(
                         assetId = assetId.value,
                         timelineStartSeconds = 1.0,
                         durationSeconds = 1.5,
@@ -113,7 +122,8 @@ class AddClipToolTest {
             rig.ctx,
         )
 
-        val only = result.data.results.single()
+        val only = result.data.added.single()
+        assertEquals("add", result.data.action)
         assertEquals(1.0, only.timelineStartSeconds, 0.001)
         assertEquals(2.5, only.timelineEndSeconds, 0.001)
 
@@ -133,20 +143,21 @@ class AddClipToolTest {
         val a3 = rig.importAsset("/tmp/c.mp4", 2.0)
 
         val out = rig.tool.execute(
-            AddClipTool.Input(
+            ClipActionTool.Input(
                 projectId = rig.projectId.value,
-                items = listOf(
-                    AddClipTool.Item(a1.value),
-                    AddClipTool.Item(a2.value),
-                    AddClipTool.Item(a3.value),
+                action = "add",
+                addItems = listOf(
+                    ClipActionTool.AddItem(a1.value),
+                    ClipActionTool.AddItem(a2.value),
+                    ClipActionTool.AddItem(a3.value),
                 ),
             ),
             rig.ctx,
         ).data
-        assertEquals(3, out.results.size)
-        assertEquals(0.0, out.results[0].timelineStartSeconds, 0.001)
-        assertEquals(3.0, out.results[1].timelineStartSeconds, 0.001)
-        assertEquals(7.0, out.results[2].timelineStartSeconds, 0.001)
+        assertEquals(3, out.added.size)
+        assertEquals(0.0, out.added[0].timelineStartSeconds, 0.001)
+        assertEquals(3.0, out.added[1].timelineStartSeconds, 0.001)
+        assertEquals(7.0, out.added[2].timelineStartSeconds, 0.001)
 
         val refreshed = rig.store.get(rig.projectId)!!
         assertEquals(3, refreshed.timeline.tracks.single().clips.size)
@@ -158,11 +169,12 @@ class AddClipToolTest {
         val before = rig.store.get(rig.projectId)!!
         assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                AddClipTool.Input(
+                ClipActionTool.Input(
                     projectId = rig.projectId.value,
-                    items = listOf(
-                        AddClipTool.Item(a1.value),
-                        AddClipTool.Item("missing-asset"),
+                    action = "add",
+                    addItems = listOf(
+                        ClipActionTool.AddItem(a1.value),
+                        ClipActionTool.AddItem("missing-asset"),
                     ),
                 ),
                 rig.ctx,
@@ -178,9 +190,10 @@ class AddClipToolTest {
 
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                AddClipTool.Input(
+                ClipActionTool.Input(
                     projectId = rig.projectId.value,
-                    items = listOf(AddClipTool.Item(assetId.value, trackId = "a1")),
+                    action = "add",
+                    addItems = listOf(ClipActionTool.AddItem(assetId.value, trackId = "a1")),
                 ),
                 rig.ctx,
             )
@@ -194,9 +207,10 @@ class AddClipToolTest {
 
         val ex = assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(
-                AddClipTool.Input(
+                ClipActionTool.Input(
                     projectId = rig.projectId.value,
-                    items = listOf(AddClipTool.Item(assetId.value, sourceStartSeconds = 3.0)),
+                    action = "add",
+                    addItems = listOf(ClipActionTool.AddItem(assetId.value, sourceStartSeconds = 3.0)),
                 ),
                 rig.ctx,
             )
@@ -217,9 +231,10 @@ class AddClipToolTest {
         val assetId = rig.importAsset("/tmp/new.mp4", durationSeconds = 3.0)
 
         rig.tool.execute(
-            AddClipTool.Input(
+            ClipActionTool.Input(
                 projectId = rig.projectId.value,
-                items = listOf(AddClipTool.Item(assetId.value, trackId = "v1")),
+                action = "add",
+                addItems = listOf(ClipActionTool.AddItem(assetId.value, trackId = "v1")),
             ),
             rig.ctx,
         )
@@ -247,10 +262,10 @@ class AddClipToolTest {
         )
 
         val result = rig.tool.execute(
-            single(assetId = assetId.value),
+            addInput(projectId = null, assetId = assetId.value),
             ctxBound,
         ).data
-        assertEquals("v1", result.results.single().trackId)
+        assertEquals("v1", result.added.single().trackId)
         val refreshed = rig.store.get(rig.projectId)!!
         val videoTrack = refreshed.timeline.tracks.filterIsInstance<Track.Video>().single { it.id.value == "v1" }
         assertEquals(1, videoTrack.clips.size)
@@ -262,8 +277,43 @@ class AddClipToolTest {
         )
         val assetId = rig.importAsset("/tmp/new.mp4", durationSeconds = 3.0)
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(single(assetId = assetId.value), rig.ctx)
+            rig.tool.execute(addInput(projectId = null, assetId = assetId.value), rig.ctx)
         }
         assertTrue(ex.message!!.contains("switch_project"), ex.message)
+    }
+
+    @Test fun addRejectsConflictingPayloadFields() = runTest {
+        val rig = newRig(
+            Project(id = ProjectId("p"), timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"))))),
+        )
+        val assetId = rig.importAsset("/tmp/x.mp4", durationSeconds = 3.0)
+        val ex = assertFailsWith<IllegalArgumentException> {
+            rig.tool.execute(
+                ClipActionTool.Input(
+                    projectId = rig.projectId.value,
+                    action = "add",
+                    addItems = listOf(ClipActionTool.AddItem(assetId.value)),
+                    clipIds = listOf("c1"),
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("rejects"), ex.message)
+    }
+
+    @Test fun addWithoutAddItemsFailsLoud() = runTest {
+        val rig = newRig(
+            Project(id = ProjectId("p"), timeline = Timeline(tracks = listOf(Track.Video(TrackId("v1"))))),
+        )
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                ClipActionTool.Input(
+                    projectId = rig.projectId.value,
+                    action = "add",
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("addItems"), ex.message)
     }
 }
