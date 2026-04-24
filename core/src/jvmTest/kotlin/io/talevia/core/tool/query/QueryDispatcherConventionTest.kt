@@ -44,11 +44,12 @@ class QueryDispatcherConventionTest {
             TaleviaDb.Schema.create(driver)
             val sessions = SqlDelightSessionStore(TaleviaDb(driver), EventBus())
             val providers = ProviderRegistry(byId = emptyMap(), default = null)
+            val warmupStats = io.talevia.core.provider.ProviderWarmupStats.withSupervisor(EventBus())
             return listOf(
                 ProjectQueryTool(projects),
                 SessionQueryTool(sessions),
                 SourceQueryTool(projects),
-                ProviderQueryTool(providers),
+                ProviderQueryTool(providers, warmupStats),
             )
         }
 

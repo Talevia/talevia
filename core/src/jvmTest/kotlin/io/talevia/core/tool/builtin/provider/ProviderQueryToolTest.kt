@@ -56,9 +56,15 @@ class ProviderQueryToolTest {
         return ProviderRegistry(byId, default = providers.firstOrNull())
     }
 
+    private fun tool(reg: ProviderRegistry): ProviderQueryTool =
+        ProviderQueryTool(
+            reg,
+            io.talevia.core.provider.ProviderWarmupStats.withSupervisor(io.talevia.core.bus.EventBus()),
+        )
+
     @Test fun providersSelectEnumeratesAllWithDefaultMarker() = runTest {
         val reg = registry(FakeProvider("anthropic"), FakeProvider("openai"))
-        val out = ProviderQueryTool(reg).execute(
+        val out = tool(reg).execute(
             ProviderQueryTool.Input(select = "providers"),
             ctx(),
         ).data
@@ -71,7 +77,7 @@ class ProviderQueryToolTest {
     }
 
     @Test fun providersSelectReturnsEmptyWhenNoneRegistered() = runTest {
-        val out = ProviderQueryTool(registry()).execute(
+        val out = tool(registry()).execute(
             ProviderQueryTool.Input(select = "providers"),
             ctx(),
         ).data
@@ -92,7 +98,7 @@ class ProviderQueryToolTest {
                 ),
             ),
         )
-        val out = ProviderQueryTool(reg).execute(
+        val out = tool(reg).execute(
             ProviderQueryTool.Input(select = "models", providerId = "anthropic"),
             ctx(),
         ).data
@@ -109,7 +115,7 @@ class ProviderQueryToolTest {
         val reg = registry(
             FakeProvider("openai", listModelsThrows = RuntimeException("HTTP 401 invalid_api_key")),
         )
-        val out = ProviderQueryTool(reg).execute(
+        val out = tool(reg).execute(
             ProviderQueryTool.Input(select = "models", providerId = "openai"),
             ctx(),
         ).data
@@ -121,7 +127,7 @@ class ProviderQueryToolTest {
     @Test fun modelsSelectFailsLoudOnUnknownProvider() = runTest {
         val reg = registry(FakeProvider("anthropic"))
         val e = assertFailsWith<IllegalStateException> {
-            ProviderQueryTool(reg).execute(
+            tool(reg).execute(
                 ProviderQueryTool.Input(select = "models", providerId = "nonexistent"),
                 ctx(),
             )
@@ -135,7 +141,7 @@ class ProviderQueryToolTest {
     @Test fun modelsSelectRequiresProviderId() = runTest {
         val reg = registry(FakeProvider("anthropic"))
         val e = assertFailsWith<IllegalStateException> {
-            ProviderQueryTool(reg).execute(
+            tool(reg).execute(
                 ProviderQueryTool.Input(select = "models"),
                 ctx(),
             )
@@ -149,7 +155,7 @@ class ProviderQueryToolTest {
     @Test fun providersSelectRejectsProviderIdFilter() = runTest {
         val reg = registry(FakeProvider("anthropic"))
         val e = assertFailsWith<IllegalStateException> {
-            ProviderQueryTool(reg).execute(
+            tool(reg).execute(
                 ProviderQueryTool.Input(select = "providers", providerId = "anthropic"),
                 ctx(),
             )
@@ -163,7 +169,7 @@ class ProviderQueryToolTest {
     @Test fun unknownSelectFailsLoud() = runTest {
         val reg = registry(FakeProvider("anthropic"))
         assertFailsWith<IllegalStateException> {
-            ProviderQueryTool(reg).execute(
+            tool(reg).execute(
                 ProviderQueryTool.Input(select = "garbage"),
                 ctx(),
             )
@@ -172,7 +178,7 @@ class ProviderQueryToolTest {
 
     @Test fun caseInsensitiveSelect() = runTest {
         val reg = registry(FakeProvider("anthropic"))
-        val out = ProviderQueryTool(reg).execute(
+        val out = tool(reg).execute(
             ProviderQueryTool.Input(select = "PROVIDERS"),
             ctx(),
         ).data
@@ -183,7 +189,7 @@ class ProviderQueryToolTest {
 
     @Test fun costCompareSelectReturnsEveryPricedPairSortedAscending() = runTest {
         val reg = registry(FakeProvider("anthropic"))
-        val out = ProviderQueryTool(reg).execute(
+        val out = tool(reg).execute(
             ProviderQueryTool.Input(
                 select = "cost_compare",
                 requestedInputTokens = 10_000,
@@ -214,7 +220,7 @@ class ProviderQueryToolTest {
         val reg = registry(FakeProvider("anthropic"))
         // Missing both token params → fail loud.
         val ex1 = assertFailsWith<IllegalStateException> {
-            ProviderQueryTool(reg).execute(
+            tool(reg).execute(
                 ProviderQueryTool.Input(select = "cost_compare"),
                 ctx(),
             )
@@ -226,7 +232,7 @@ class ProviderQueryToolTest {
         )
         // Missing only output → still rejected.
         assertFailsWith<IllegalStateException> {
-            ProviderQueryTool(reg).execute(
+            tool(reg).execute(
                 ProviderQueryTool.Input(
                     select = "cost_compare",
                     requestedInputTokens = 1000,
@@ -239,7 +245,7 @@ class ProviderQueryToolTest {
     @Test fun costCompareSelectRejectsProviderId() = runTest {
         val reg = registry(FakeProvider("anthropic"))
         val ex = assertFailsWith<IllegalStateException> {
-            ProviderQueryTool(reg).execute(
+            tool(reg).execute(
                 ProviderQueryTool.Input(
                     select = "cost_compare",
                     providerId = "anthropic",
@@ -260,7 +266,7 @@ class ProviderQueryToolTest {
         // handler as a cleaner error than "0-of-empty-table".
         val reg = registry(FakeProvider("anthropic"))
         assertFailsWith<IllegalArgumentException> {
-            ProviderQueryTool(reg).execute(
+            tool(reg).execute(
                 ProviderQueryTool.Input(
                     select = "cost_compare",
                     requestedInputTokens = -1,
@@ -288,7 +294,7 @@ class ProviderQueryToolTest {
             ),
         )
         val ex = assertFailsWith<IllegalStateException> {
-            ProviderQueryTool(reg).execute(
+            tool(reg).execute(
                 ProviderQueryTool.Input(
                     select = "models",
                     providerId = "anthropic",
@@ -309,7 +315,7 @@ class ProviderQueryToolTest {
         // Symmetric guard: providers select doesn't accept tokens either.
         val reg = registry(FakeProvider("anthropic"))
         assertFailsWith<IllegalStateException> {
-            ProviderQueryTool(reg).execute(
+            tool(reg).execute(
                 ProviderQueryTool.Input(
                     select = "providers",
                     requestedInputTokens = 1000,

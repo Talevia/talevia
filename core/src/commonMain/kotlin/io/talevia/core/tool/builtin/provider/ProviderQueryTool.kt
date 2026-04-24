@@ -3,14 +3,17 @@ package io.talevia.core.tool.builtin.provider
 import io.talevia.core.JsonConfig
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.provider.ProviderRegistry
+import io.talevia.core.provider.ProviderWarmupStats
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.provider.query.CostCompareRow
 import io.talevia.core.tool.builtin.provider.query.ModelRow
 import io.talevia.core.tool.builtin.provider.query.ProviderRow
+import io.talevia.core.tool.builtin.provider.query.WarmupStatsRow
 import io.talevia.core.tool.builtin.provider.query.runCostCompareQuery
 import io.talevia.core.tool.builtin.provider.query.runModelsQuery
 import io.talevia.core.tool.builtin.provider.query.runProvidersQuery
+import io.talevia.core.tool.builtin.provider.query.runWarmupStatsQuery
 import io.talevia.core.tool.query.QueryDispatcher
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -53,10 +56,12 @@ import kotlinx.serialization.serializer
  */
 class ProviderQueryTool(
     private val providers: ProviderRegistry,
+    private val warmupStats: ProviderWarmupStats,
 ) : QueryDispatcher<ProviderQueryTool.Input, ProviderQueryTool.Output>() {
 
     @Serializable data class Input(
-        /** One of [SELECT_PROVIDERS] / [SELECT_MODELS] / [SELECT_COST_COMPARE] (case-insensitive). */
+        /** One of [SELECT_PROVIDERS] / [SELECT_MODELS] / [SELECT_COST_COMPARE] /
+         *  [SELECT_WARMUP_STATS] (case-insensitive). */
         val select: String,
         /** Required for [SELECT_MODELS]; rejected for [SELECT_PROVIDERS] / [SELECT_COST_COMPARE]. */
         val providerId: String? = null,
@@ -99,7 +104,12 @@ class ProviderQueryTool(
             "failures surface via Output.error with empty rows.\n" +
             "  • cost_compare — priced (provider, model) pairs + cents-per-1k rates + rolled-up " +
             "estimatedCostCents for (requestedInputTokens, requestedOutputTokens). " +
-            "Sorted ascending; rows.first() is cheapest. Local snapshot table; no HTTP."
+            "Sorted ascending; rows.first() is cheapest. Local snapshot table; no HTTP.\n" +
+            "  • warmup_stats — per-provider cold-start latency over the rolling window. Rows: " +
+            "{providerId, count, p50Ms, p95Ms, p99Ms, minMs, maxMs, latestMs}. Sourced from " +
+            "BusEvent.ProviderWarmup(Starting→Ready) pairings since process start. Providers " +
+            "without a warmup/streaming split (e.g. synchronous OpenAI image endpoints) are " +
+            "absent from the result. No filters; no HTTP."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("provider.read")
@@ -111,7 +121,8 @@ class ProviderQueryTool(
                 put("type", "string")
                 put(
                     "description",
-                    "What to query: providers | models | cost_compare (case-insensitive).",
+                    "What to query: providers | models | cost_compare | warmup_stats " +
+                        "(case-insensitive).",
                 )
                 put(
                     "enum",
@@ -119,6 +130,7 @@ class ProviderQueryTool(
                         add(JsonPrimitive(SELECT_PROVIDERS))
                         add(JsonPrimitive(SELECT_MODELS))
                         add(JsonPrimitive(SELECT_COST_COMPARE))
+                        add(JsonPrimitive(SELECT_WARMUP_STATS))
                     },
                 )
             }
@@ -147,6 +159,7 @@ class ProviderQueryTool(
         SELECT_PROVIDERS -> ProviderRow.serializer()
         SELECT_MODELS -> ModelRow.serializer()
         SELECT_COST_COMPARE -> CostCompareRow.serializer()
+        SELECT_WARMUP_STATS -> WarmupStatsRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
 
@@ -161,6 +174,7 @@ class ProviderQueryTool(
                 requestedInputTokens = input.requestedInputTokens!!,
                 requestedOutputTokens = input.requestedOutputTokens!!,
             )
+            SELECT_WARMUP_STATS -> runWarmupStatsQuery(warmupStats)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -171,6 +185,13 @@ class ProviderQueryTool(
                 "The following filter fields do not apply to select='$select': " +
                     "providerId (select=models only — select=providers is the " +
                     "enumerate-all verb).",
+            )
+        }
+        if (select == SELECT_WARMUP_STATS && input.providerId != null) {
+            error(
+                "The following filter fields do not apply to select='$select': " +
+                    "providerId (warmup_stats returns one row per observed provider; " +
+                    "filter client-side if you only want one).",
             )
         }
         if (select == SELECT_MODELS && input.providerId.isNullOrBlank()) {
@@ -217,6 +238,9 @@ class ProviderQueryTool(
         const val SELECT_PROVIDERS = "providers"
         const val SELECT_MODELS = "models"
         const val SELECT_COST_COMPARE = "cost_compare"
-        internal val ALL_SELECTS = setOf(SELECT_PROVIDERS, SELECT_MODELS, SELECT_COST_COMPARE)
+        const val SELECT_WARMUP_STATS = "warmup_stats"
+        internal val ALL_SELECTS = setOf(
+            SELECT_PROVIDERS, SELECT_MODELS, SELECT_COST_COMPARE, SELECT_WARMUP_STATS,
+        )
     }
 }

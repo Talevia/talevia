@@ -92,6 +92,10 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         bus,
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
+    val warmupStats: io.talevia.core.provider.ProviderWarmupStats = io.talevia.core.provider.ProviderWarmupStats(
+        bus,
+        CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    )
 
     val sessions = SqlDelightSessionStore(db, bus)
 
@@ -234,7 +238,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
     }
 
     init {
-        tools.register(io.talevia.core.tool.builtin.provider.ProviderQueryTool(providers))
+        tools.register(io.talevia.core.tool.builtin.provider.ProviderQueryTool(providers, warmupStats))
         tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
     }
 
