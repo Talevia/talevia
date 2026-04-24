@@ -30,7 +30,8 @@ import kotlinx.serialization.serializer
 /**
  * Atomically rename a [SourceNode] by id — closes the VISION §3.4 "可读" leg and the
  * §5.1 "refactor without losing history" question. Without this tool the only way to
- * "rename" is `remove_source_node` + `define_*` under a new id, which drops every
+ * "rename" is `source_node_action(action="remove")` + `define_*` under a new id,
+ * which drops every
  * downstream reference: sibling nodes' [SourceNode.parents], [Clip.sourceBinding]
  * entries, and lockfile bindings / content-hash snapshots. Giving the agent one
  * primitive that rewires all of those in a single mutation keeps the DAG, timeline,
@@ -62,7 +63,7 @@ import kotlinx.serialization.serializer
  * previous one, so we skip it to keep the undo stack tidy.
  *
  * **Permission.** `source.write` — same tier as `set_source_node_parents` /
- * `remove_source_node`. A rename has the same blast radius as a parent edit.
+ * `source_node_action(action="remove")`. A rename has the same blast radius as a parent edit.
  */
 class RenameSourceNodeTool(
     private val projects: ProjectStore,
@@ -171,7 +172,8 @@ class RenameSourceNodeTool(
             if (source.byId[newId] != null) {
                 error(
                     "Source node ${input.newId} already exists in project ${input.projectId}; " +
-                        "rename would collide. Pick a different newId or remove_source_node first.",
+                        "rename would collide. Pick a different newId or " +
+                        "source_node_action(action=remove) first.",
                 )
             }
 

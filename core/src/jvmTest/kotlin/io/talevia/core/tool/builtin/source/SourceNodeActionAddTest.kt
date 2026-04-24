@@ -24,7 +24,14 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class AddSourceNodeToolTest {
+/**
+ * `action="add"` branch of [SourceNodeActionTool] — reshaped from the
+ * pre-consolidation `AddSourceNodeToolTest` (2026-04-24,
+ * `debt-source-consolidate-add-remove-fork`). Every semantic case from the
+ * original test is preserved plus new ones covering cross-action payload
+ * rejection and missing-required-field dispatches.
+ */
+class SourceNodeActionAddTest {
 
     private data class Rig(
         val store: FileProjectStore,
@@ -52,9 +59,10 @@ class AddSourceNodeToolTest {
             put("action", JsonPrimitive("protagonist enters a neon-lit alley"))
         }
 
-        val out = AddSourceNodeTool(rig.store).execute(
-            AddSourceNodeTool.Input(
+        val out = SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
                 projectId = "p",
+                action = "add",
                 nodeId = "scene-1",
                 kind = "narrative.scene",
                 body = body,
@@ -62,9 +70,11 @@ class AddSourceNodeToolTest {
             rig.ctx,
         ).data
 
-        assertEquals("scene-1", out.nodeId)
-        assertEquals("narrative.scene", out.kind)
-        assertTrue(out.contentHash.isNotBlank())
+        assertEquals("add", out.action)
+        val added = out.added.single()
+        assertEquals("scene-1", added.nodeId)
+        assertEquals("narrative.scene", added.kind)
+        assertTrue(added.contentHash.isNotBlank())
 
         val node = rig.store.get(ProjectId("p"))!!.source.byId[SourceNodeId("scene-1")]
         assertNotNull(node)
@@ -78,9 +88,10 @@ class AddSourceNodeToolTest {
             it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Mei", visualDescription = "teal hair"))
         }
 
-        val out = AddSourceNodeTool(rig.store).execute(
-            AddSourceNodeTool.Input(
+        val out = SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
                 projectId = "p",
+                action = "add",
                 nodeId = "scene-1",
                 kind = "narrative.scene",
                 body = JsonObject(emptyMap()),
@@ -89,7 +100,7 @@ class AddSourceNodeToolTest {
             rig.ctx,
         ).data
 
-        assertEquals(listOf("mei"), out.parentIds)
+        assertEquals(listOf("mei"), out.added.single().parentIds)
         val scene = rig.store.get(ProjectId("p"))!!.source.byId[SourceNodeId("scene-1")]!!
         assertEquals(listOf(SourceNodeId("mei")), scene.parents.map { it.nodeId })
     }
@@ -97,9 +108,10 @@ class AddSourceNodeToolTest {
     @Test fun rejectsDanglingParent() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalArgumentException> {
-            AddSourceNodeTool(rig.store).execute(
-                AddSourceNodeTool.Input(
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
                     projectId = "p",
+                    action = "add",
                     nodeId = "scene-1",
                     kind = "narrative.scene",
                     parentIds = listOf("ghost"),
@@ -118,9 +130,10 @@ class AddSourceNodeToolTest {
             it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Mei", visualDescription = "teal"))
         }
         val ex = assertFailsWith<IllegalArgumentException> {
-            AddSourceNodeTool(rig.store).execute(
-                AddSourceNodeTool.Input(
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
                     projectId = "p",
+                    action = "add",
                     nodeId = "mei",
                     kind = "narrative.scene",
                 ),
@@ -136,9 +149,10 @@ class AddSourceNodeToolTest {
     @Test fun rejectsBlankKind() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalArgumentException> {
-            AddSourceNodeTool(rig.store).execute(
-                AddSourceNodeTool.Input(
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
                     projectId = "p",
+                    action = "add",
                     nodeId = "x",
                     kind = "  ",
                 ),
@@ -151,9 +165,10 @@ class AddSourceNodeToolTest {
     @Test fun rejectsBlankNodeId() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalArgumentException> {
-            AddSourceNodeTool(rig.store).execute(
-                AddSourceNodeTool.Input(
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
                     projectId = "p",
+                    action = "add",
                     nodeId = "",
                     kind = "narrative.scene",
                 ),
@@ -163,17 +178,65 @@ class AddSourceNodeToolTest {
         assertTrue(ex.message!!.contains("nodeId"), ex.message)
     }
 
+    @Test fun rejectsMissingKindField() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalStateException> {
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
+                    projectId = "p",
+                    action = "add",
+                    nodeId = "x",
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("kind"), ex.message)
+    }
+
+    @Test fun rejectsMissingNodeIdField() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalStateException> {
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
+                    projectId = "p",
+                    action = "add",
+                    kind = "narrative.scene",
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("nodeId"), ex.message)
+    }
+
+    @Test fun rejectsForkPayloadOnAdd() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalArgumentException> {
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
+                    projectId = "p",
+                    action = "add",
+                    nodeId = "scene-1",
+                    kind = "narrative.scene",
+                    sourceNodeId = "mei",
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("sourceNodeId"), ex.message)
+    }
+
     @Test fun defaultsToEmptyBodyAndNoParents() = runTest {
         val rig = rig()
-        val out = AddSourceNodeTool(rig.store).execute(
-            AddSourceNodeTool.Input(
+        val out = SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
                 projectId = "p",
+                action = "add",
                 nodeId = "marker",
                 kind = "custom.marker",
             ),
             rig.ctx,
         ).data
-        assertTrue(out.parentIds.isEmpty())
+        assertTrue(out.added.single().parentIds.isEmpty())
 
         val node = rig.store.get(ProjectId("p"))!!.source.byId[SourceNodeId("marker")]!!
         assertEquals(JsonObject(emptyMap()), node.body)
@@ -182,9 +245,10 @@ class AddSourceNodeToolTest {
 
     @Test fun contentHashStableAcrossReads() = runTest {
         val rig = rig()
-        val out = AddSourceNodeTool(rig.store).execute(
-            AddSourceNodeTool.Input(
+        val out = SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
                 projectId = "p",
+                action = "add",
                 nodeId = "stable",
                 kind = "custom.marker",
                 body = buildJsonObject { put("x", JsonPrimitive(1)) },
@@ -193,6 +257,22 @@ class AddSourceNodeToolTest {
         ).data
 
         val stored = rig.store.get(ProjectId("p"))!!.source.byId[SourceNodeId("stable")]!!
-        assertEquals(out.contentHash, stored.contentHash)
+        assertEquals(out.added.single().contentHash, stored.contentHash)
+    }
+
+    @Test fun rejectsUnknownAction() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalStateException> {
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
+                    projectId = "p",
+                    action = "mutate",
+                    nodeId = "x",
+                    kind = "k",
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue("unknown action" in ex.message!!, ex.message)
     }
 }

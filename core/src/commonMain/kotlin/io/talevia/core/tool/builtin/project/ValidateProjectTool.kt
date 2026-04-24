@@ -26,7 +26,7 @@ import kotlin.time.Duration
  * edits and — especially during autonomous multi-step runs — leave the
  * project in a shape that will bite at export time: a clip pointing at an
  * imported-then-deleted asset, a source binding whose node id no longer
- * exists after `remove_source_node`, an audio clip whose `volume` was
+ * exists after `source_node_action(action=remove)`, an audio clip whose `volume` was
  * clamped to 5.0 by a hand-authored snapshot, a fade-in/out pair that
  * exceeds the clip duration.
  *
@@ -286,7 +286,7 @@ private fun Duration.secondsString(): String {
  * today:
  *
  *  1. **Dangling parent**: a `SourceRef` whose nodeId is not present in
- *     `project.source.byId`. Typically arises from `remove_source_node`
+ *     `project.source.byId`. Typically arises from `source_node_action(action=remove)`
  *     on a referenced node (the kdoc explicitly says it does not
  *     cascade). Breaks staleness propagation silently — `Source.stale`
  *     walks parents and simply skips missing ids, so an edit upstream of
@@ -319,7 +319,7 @@ private fun sourceDagIssues(project: Project): List<ValidateProjectTool.Issue> {
                     code = "source-parent-dangling",
                     message = "source node '${node.id.value}' references missing parent " +
                         "'${parent.nodeId.value}' (call set_source_node_parents / " +
-                        "remove_source_node to fix).",
+                        "source_node_action(action=remove) to fix).",
                 )
             }
         }

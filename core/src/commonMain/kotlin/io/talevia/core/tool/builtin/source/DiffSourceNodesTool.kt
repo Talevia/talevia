@@ -30,7 +30,7 @@ import kotlinx.serialization.serializer
  * Two modes selected by input shape:
  *  - **Within-project**: omit `leftProjectId` / `rightProjectId` → both nodes are
  *    resolved from `projectId`. Useful for diffing a freshly-added consistency
- *    node against a later `fork_source_node` of it.
+ *    node against a later `source_node_action(action="fork")` of it.
  *  - **Cross-project**: set `leftProjectId` and/or `rightProjectId` → either override
  *    `projectId` for that side. Useful post-`fork_project` when comparing a
  *    character variant in the fork against its origin.
@@ -90,7 +90,8 @@ class DiffSourceNodesTool(
         "Compare two source nodes — within one project, or across two projects (e.g. a fork " +
             "vs its parent) — and report kind change, contentHash change, per-field body deltas, " +
             "and parent adds/removes. Use this to debug consistency drift, audit a " +
-            "fork_source_node edit, or walk a generate→update history. Read-only; returns a " +
+            "source_node_action(action=fork) edit, or walk a generate→update history. Read-only; " +
+            "returns a " +
             "structured answer even when one side is missing."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()

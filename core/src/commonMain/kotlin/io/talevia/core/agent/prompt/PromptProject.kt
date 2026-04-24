@@ -70,7 +70,7 @@ duration, and `timeline.duration` behind the latest clip end. Each row
 has `severity` (`error`/`warn`), machine `code`, `trackId`, `clipId`,
 and a human message. `passed: Boolean` is true iff `errorCount == 0`;
 warnings are informational. Call this before `export` when you've made
-several edits in one turn, after `remove_source_node` (to catch clips
+several edits in one turn, after `source_node_action(action="remove")` (to catch clips
 that still bind the removed node), or whenever the user reports an
 unexpected render. It does NOT cover staleness — pair with
 `find_stale_clips` for content-hash drift.
@@ -141,7 +141,7 @@ without dumping both projects. Detail lists are capped; counts are exact.
 one project, or across two projects) it reports kind change, contentHash
 change, per-field JSON body deltas (dotted path + left/right values), and
 parent set adds/removes. Reach for it to debug consistency drift, compare a
-`fork_source_node` against its origin, or walk a generate→update history.
+`source_node_action(action="fork")` against its origin, or walk a generate→update history.
 Missing nodes are reported via `leftExists` / `rightExists` / `bothExist`
 instead of failing, so you can also ask "did this node still exist after my
 rename?".

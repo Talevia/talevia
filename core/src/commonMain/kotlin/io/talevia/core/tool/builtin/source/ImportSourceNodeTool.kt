@@ -58,7 +58,8 @@ import kotlinx.serialization.serializer
  *  - different contentHash → fail loudly with rename hint
  *
  * **Self-import is rejected** on the live path (`fromProjectId == toProjectId`);
- * within-project copies belong to `add_source_node` with a fresh id. The
+ * within-project copies belong to `source_node_action(action="add")` /
+ * `source_node_action(action="fork")` with a fresh id. The
  * envelope path doesn't need this check — by construction the envelope was
  * produced outside the target project.
  *
@@ -191,7 +192,7 @@ class ImportSourceNodeTool(
         val fromNodeIdStr = input.fromNodeId!!
         require(fromProjectIdStr != toPid.value) {
             "fromProjectId and toProjectId are the same ($fromProjectIdStr); " +
-                "use add_source_node with a fresh nodeId for within-project copies."
+                "use source_node_action(action=add) with a fresh nodeId for within-project copies."
         }
         val fromPid = ProjectId(fromProjectIdStr)
         val fromProject = projects.get(fromPid)
@@ -231,7 +232,7 @@ class ImportSourceNodeTool(
                     existingAtId != null -> error(
                         "Target project ${toPid.value} already has a node ${proposedId.value} " +
                             "with a different contentHash (kind=${existingAtId.kind}). Pick a fresh " +
-                            "newNodeId or remove_source_node first.",
+                            "newNodeId or source_node_action(action=remove) first.",
                     )
                     else -> {
                         working = working.addNode(
@@ -328,7 +329,7 @@ class ImportSourceNodeTool(
                     existingAtId != null -> error(
                         "Target project ${toPid.value} already has a node ${proposedId.value} " +
                             "with a different contentHash (kind=${existingAtId.kind}). Pick a fresh " +
-                            "newNodeId or remove_source_node first.",
+                            "newNodeId or source_node_action(action=remove) first.",
                     )
                     else -> {
                         working = working.addNode(candidate)

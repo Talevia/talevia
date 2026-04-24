@@ -29,7 +29,13 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotEquals
 import kotlin.test.assertTrue
 
-class ForkSourceNodeToolTest {
+/**
+ * `action="fork"` branch of [SourceNodeActionTool] — reshaped from the
+ * pre-consolidation `ForkSourceNodeToolTest` (2026-04-24,
+ * `debt-source-consolidate-add-remove-fork`). Every semantic case preserved
+ * plus a new one covering cross-action payload rejection.
+ */
+class SourceNodeActionForkTest {
 
     private data class Rig(
         val store: FileProjectStore,
@@ -68,17 +74,19 @@ class ForkSourceNodeToolTest {
             CharacterRefBody(name = "Mei", visualDescription = "teal hair", voiceId = "nova"),
         )
 
-        val out = ForkSourceNodeTool(rig.store).execute(
-            ForkSourceNodeTool.Input(
+        val out = SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "fork",
                 sourceNodeId = "mei",
                 newNodeId = "mei-alt",
             ),
             rig.ctx,
         ).data
 
-        assertEquals("mei", out.sourceNodeId)
-        assertEquals("mei-alt", out.forkedNodeId)
+        val forked = out.forked.single()
+        assertEquals("mei", forked.sourceNodeId)
+        assertEquals("mei-alt", forked.forkedNodeId)
 
         val project = rig.store.get(rig.pid)!!
         val original = project.source.byId[SourceNodeId("mei")]!!
@@ -99,12 +107,17 @@ class ForkSourceNodeToolTest {
             rig.store, rig.pid, SourceNodeId("mei"),
             CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
         )
-        val out = ForkSourceNodeTool(rig.store).execute(
-            ForkSourceNodeTool.Input(projectId = rig.pid.value, sourceNodeId = "mei"),
+        val out = SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
+                projectId = rig.pid.value,
+                action = "fork",
+                sourceNodeId = "mei",
+            ),
             rig.ctx,
         ).data
-        assertNotEquals("mei", out.forkedNodeId)
-        assertTrue(out.forkedNodeId.isNotBlank())
+        val forkedId = out.forked.single().forkedNodeId
+        assertNotEquals("mei", forkedId)
+        assertTrue(forkedId.isNotBlank())
         val project = rig.store.get(rig.pid)!!
         assertEquals(2, project.source.nodes.size)
     }
@@ -115,16 +128,18 @@ class ForkSourceNodeToolTest {
             rig.store, rig.pid, SourceNodeId("mei"),
             CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
         )
-        val out = ForkSourceNodeTool(rig.store).execute(
-            ForkSourceNodeTool.Input(
+        val out = SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "fork",
                 sourceNodeId = "mei",
                 newNodeId = "   ",
             ),
             rig.ctx,
         ).data
-        assertNotEquals("mei", out.forkedNodeId)
-        assertTrue(out.forkedNodeId.isNotBlank())
+        val forkedId = out.forked.single().forkedNodeId
+        assertNotEquals("mei", forkedId)
+        assertTrue(forkedId.isNotBlank())
     }
 
     @Test fun preservesParentRefsOnFork() = runTest {
@@ -145,9 +160,10 @@ class ForkSourceNodeToolTest {
             )
         }
 
-        ForkSourceNodeTool(rig.store).execute(
-            ForkSourceNodeTool.Input(
+        SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "fork",
                 sourceNodeId = "shot-1",
                 newNodeId = "shot-1-alt",
             ),
@@ -169,9 +185,10 @@ class ForkSourceNodeToolTest {
             CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
         )
         val ex = assertFailsWith<IllegalArgumentException> {
-            ForkSourceNodeTool(rig.store).execute(
-                ForkSourceNodeTool.Input(
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
                     projectId = rig.pid.value,
+                    action = "fork",
                     sourceNodeId = "mei",
                     newNodeId = "mei",
                 ),
@@ -192,9 +209,10 @@ class ForkSourceNodeToolTest {
             CharacterRefBody(name = "Kai", visualDescription = "silver hair"),
         )
         val ex = assertFailsWith<IllegalStateException> {
-            ForkSourceNodeTool(rig.store).execute(
-                ForkSourceNodeTool.Input(
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
                     projectId = rig.pid.value,
+                    action = "fork",
                     sourceNodeId = "mei",
                     newNodeId = "kai",
                 ),
@@ -207,9 +225,10 @@ class ForkSourceNodeToolTest {
     @Test fun rejectsUnknownSource() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            ForkSourceNodeTool(rig.store).execute(
-                ForkSourceNodeTool.Input(
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
                     projectId = rig.pid.value,
+                    action = "fork",
                     sourceNodeId = "not-there",
                 ),
                 rig.ctx,
@@ -221,9 +240,10 @@ class ForkSourceNodeToolTest {
     @Test fun rejectsMissingProject() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            ForkSourceNodeTool(rig.store).execute(
-                ForkSourceNodeTool.Input(
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
                     projectId = "nope",
+                    action = "fork",
                     sourceNodeId = "mei",
                 ),
                 rig.ctx,
@@ -243,16 +263,17 @@ class ForkSourceNodeToolTest {
             source.addCharacterRef(SourceNodeId("kai"), CharacterRefBody(name = "Kai", visualDescription = "v"))
         }
 
-        val out = ForkSourceNodeTool(rig.store).execute(
-            ForkSourceNodeTool.Input(
+        val out = SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "fork",
                 sourceNodeId = "mei",
                 newNodeId = "mei-fork",
             ),
             rig.ctx,
         ).data
 
-        val fork = rig.store.get(rig.pid)!!.source.byId[SourceNodeId(out.forkedNodeId)]!!
+        val fork = rig.store.get(rig.pid)!!.source.byId[SourceNodeId(out.forked.single().forkedNodeId)]!!
         // addNode → bumpedForWrite increments to 1.
         assertEquals(1L, fork.revision)
     }
@@ -264,9 +285,10 @@ class ForkSourceNodeToolTest {
             CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
         )
         val before = rig.store.get(rig.pid)!!.source.revision
-        ForkSourceNodeTool(rig.store).execute(
-            ForkSourceNodeTool.Input(
+        SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "fork",
                 sourceNodeId = "mei",
                 newNodeId = "mei-fork",
             ),
@@ -282,15 +304,37 @@ class ForkSourceNodeToolTest {
             rig.store, rig.pid, SourceNodeId("mei"),
             CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
         )
-        val out = ForkSourceNodeTool(rig.store).execute(
-            ForkSourceNodeTool.Input(
+        val out = SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "fork",
                 sourceNodeId = "mei",
                 newNodeId = "mei-fork",
             ),
             rig.ctx,
         ).data
-        assertEquals("core.consistency.character_ref", out.kind)
-        assertTrue(out.contentHash.isNotBlank())
+        val forked = out.forked.single()
+        assertEquals("core.consistency.character_ref", forked.kind)
+        assertTrue(forked.contentHash.isNotBlank())
+    }
+
+    @Test fun rejectsAddPayloadOnFork() = runTest {
+        val rig = rig()
+        seedCharacter(
+            rig.store, rig.pid, SourceNodeId("mei"),
+            CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
+        )
+        val ex = assertFailsWith<IllegalArgumentException> {
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
+                    projectId = rig.pid.value,
+                    action = "fork",
+                    sourceNodeId = "mei",
+                    nodeId = "mei-fork",
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("add/remove"), ex.message)
     }
 }

@@ -33,7 +33,8 @@ import kotlinx.serialization.serializer
  *
  * The consistency kinds (character_ref / style_bible / brand_palette) once had
  * bespoke `set_*` tools with partial-patch semantics; they were removed in
- * favour of the kind-agnostic pair `add_source_node` + `update_source_node_body`
+ * favour of the kind-agnostic pair `source_node_action(action="add")` +
+ * `update_source_node_body`
  * (see docs/decisions/2026-04-22-debt-fold-set-source-node-body-helpers.md).
  * Partial-patch is deliberately out of scope — the caller is expected to
  * round-trip via `describe_source_node` (read current body), mutate

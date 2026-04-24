@@ -29,8 +29,8 @@ import kotlinx.serialization.serializer
  *  - "What's in this photo?" after the user imports one.
  *  - "Pick the best shot from these imports" — describe each, then reason.
  *  - Auto-scaffolding a character_ref: describe a reference image, lift the
- *    description into the `visualDescription` field of an `add_source_node` /
- *    `update_source_node_body` body.
+ *    description into the `visualDescription` field of a
+ *    `source_node_action(action="add")` / `update_source_node_body` body.
  *
  * Permission: `"ml.describe"` — defaults to ASK because the image is uploaded
  * to a third-party provider; user consent parallels the AIGC / ASR lanes.

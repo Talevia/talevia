@@ -40,13 +40,15 @@ Every Project is (Source → Compiler → Artifact):
 # Consistency bindings (VISION §3.3 — cross-shot identity)
 
 Consistency nodes are created and edited through the same kind-agnostic pair as
-every other source kind: `add_source_node` to create, `update_source_node_body`
-to edit. A lightweight id convention keeps things readable — prefix the
-`nodeId` with the kind stem (`character-mei`, `style-warm`, `brand-acme`) so
-`source_query(select=nodes, kindPrefix=core.consistency.)` gives a clean list.
+every other source kind: `source_node_action(action="add")` to create,
+`update_source_node_body` to edit. A lightweight id convention keeps things
+readable — prefix the `nodeId` with the kind stem (`character-mei`,
+`style-warm`, `brand-acme`) so `source_query(select=nodes,
+kindPrefix=core.consistency.)` gives a clean list.
 
 Create a character_ref:
-  `add_source_node(projectId, nodeId="character-mei", kind="core.consistency.character_ref",
+  `source_node_action(action="add", projectId, nodeId="character-mei",
+   kind="core.consistency.character_ref",
    body={"name":"Mei","visualDescription":"teal hair, round glasses",
    "voiceId":"nova"})`.
 Create a style_bible: same shape with `kind="core.consistency.style_bible"` and
@@ -64,7 +66,8 @@ bumps `contentHash` so downstream clips go stale and `find_stale_clips`
 surfaces them for regeneration.
 
 Use `source_query(select=nodes, kindPrefix=core.consistency.)` to recover
-ids when you forget them. Use `remove_source_node` only when the user asks.
+ids when you forget them. Use `source_node_action(action="remove")` only when
+the user asks.
 
 For AIGC tools that take `consistencyBindingIds`:
 - Always pass character_ref ids when the shot features a named character.
@@ -87,8 +90,8 @@ derivation relationship.
 id: the node itself, every descendant's parent-ref, every clip's `sourceBinding`
 set, and every lockfile entry's binding + content-hash keys are rewritten in one
 mutation. Use it when the user wants a better name ("rename `character-mei` to
-`mei`") instead of `remove_source_node` + a fresh `add_source_node`, which would
-drop all those references. The node's own contentHash survives the rename (it's
+`mei`") instead of `source_node_action(action="remove")` + a fresh
+`source_node_action(action="add")`, which would drop all those references. The node's own contentHash survives the rename (it's
 a hash of `(kind, body, parents)`, not `id`); descendant nodes whose parent-ref
 changed do get a new hash, which correctly invalidates any AIGC render that
 consumed the old ref. `newId` must match the slug shape (lowercase letters /
@@ -134,8 +137,9 @@ shapes, exactly one at a time:
   the node's `lutReference` at apply time and also binds the clip to the
   style_bible's nodeId, so future stale-clip detection can propagate
   edits. This is the preferred path when a project has a style_bible that
-  already owns its LUT — set the style_bible node once via `add_source_node`,
-  then apply it to every clip with `apply_lut(styleBibleId=…)`.
+  already owns its LUT — set the style_bible node once via
+  `source_node_action(action="add")`, then apply it to every clip with
+  `apply_lut(styleBibleId=…)`.
 FFmpeg renders this via `lut3d`; Media3 (Android) bakes it via
 `SingleColorLut`; AVFoundation (iOS) bakes it via `CIColorCube`. All
 three engines share the `.cube` v1.0 parser in `core.platform.lut`.

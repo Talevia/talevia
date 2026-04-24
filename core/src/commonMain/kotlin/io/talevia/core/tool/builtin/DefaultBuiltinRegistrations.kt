@@ -69,15 +69,13 @@ import io.talevia.core.tool.builtin.session.SetSessionSpendCapTool
 import io.talevia.core.tool.builtin.session.SetToolEnabledTool
 import io.talevia.core.tool.builtin.session.SwitchProjectTool
 import io.talevia.core.tool.builtin.shell.BashTool
-import io.talevia.core.tool.builtin.source.AddSourceNodeTool
 import io.talevia.core.tool.builtin.source.DescribeSourceNodeTool
 import io.talevia.core.tool.builtin.source.DiffSourceNodesTool
 import io.talevia.core.tool.builtin.source.ExportSourceNodeTool
-import io.talevia.core.tool.builtin.source.ForkSourceNodeTool
 import io.talevia.core.tool.builtin.source.ImportSourceNodeTool
-import io.talevia.core.tool.builtin.source.RemoveSourceNodeTool
 import io.talevia.core.tool.builtin.source.RenameSourceNodeTool
 import io.talevia.core.tool.builtin.source.SetSourceNodeParentsTool
+import io.talevia.core.tool.builtin.source.SourceNodeActionTool
 import io.talevia.core.tool.builtin.source.SourceQueryTool
 import io.talevia.core.tool.builtin.source.UpdateSourceNodeBodyTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
@@ -269,11 +267,9 @@ fun ToolRegistry.registerSourceNodeTools(projects: ProjectStore) {
     register(SourceQueryTool(projects))
     register(DescribeSourceNodeTool(projects))
     register(DiffSourceNodesTool(projects))
-    register(RemoveSourceNodeTool(projects))
     register(ImportSourceNodeTool(projects))
     register(ExportSourceNodeTool(projects))
-    register(AddSourceNodeTool(projects))
-    register(ForkSourceNodeTool(projects))
+    register(SourceNodeActionTool(projects))
     register(SetSourceNodeParentsTool(projects))
     register(RenameSourceNodeTool(projects))
     register(UpdateSourceNodeBodyTool(projects))

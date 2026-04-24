@@ -240,7 +240,7 @@ class ImportSourceNodeToolTest {
                 rig.ctx,
             )
         }
-        assertTrue("add_source_node" in ex.message!!, ex.message)
+        assertTrue("source_node_action(action=add)" in ex.message!!, ex.message)
     }
 
     @Test fun missingSourceProjectFailsLoudly() = runTest {

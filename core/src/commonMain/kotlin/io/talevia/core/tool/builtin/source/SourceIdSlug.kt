@@ -7,7 +7,7 @@ package io.talevia.core.tool.builtin.source
  * Deterministic in both directions: slugifying "Mei" → `character-mei` →
  * idempotent replacement, which is the behaviour the lockfile / DAG lanes
  * expect. Public so UI code can compute the same ids the LLM would when
- * dispatching `add_source_node` for a consistency kind.
+ * dispatching `source_node_action(action="add")` for a consistency kind.
  */
 fun slugifyId(name: String, prefix: String): String {
     val sanitised = buildString(name.length) {

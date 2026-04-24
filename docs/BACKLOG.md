@@ -13,8 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **debt-source-consolidate-add-remove-fork** — `debt-source-tool-consolidation` 2026-04-24 skip-tag 的降维方案。Rename（338 LOC）太复杂单独处理，Add(184)+Remove(95)+Fork(162)=441 LOC 按 SessionActionTool 精度能合成 `SourceNodeActionTool(action=add|remove|fork)` 且最终文件不破 500 line。**方向：** 新建 `SourceNodeActionTool`，merge 三者，删旧 tool；DefaultBuiltinRegistrations 里 3 register 变 1；prompt 同步换名；测试更新。Rename 单独评估（可能 368-LOC 独立 tool 比折成 action 更干净）。Rubric §5.6 / §5.7。Milestone §later.
-
 ## P1 — 中优，做完 P0 再排
 
 - **debt-video-clip-consolidate-verbs-phase-2** — phase 1（Add/Remove/Duplicate）落地后的第二批：Move(~150)+Split(~150)+Trim(~200)+Replace(~200)+FadeAudio(~150)=~850 LOC 并入 `ClipActionTool` 的 action 枚举。拆 phase 1/2 主要是 per-PR 大小控制，phase 2 单独跑能把合成文件最终控制在 800 LOC 以内（仍偏大但能评）。**方向：** 扩 `ClipActionTool(action=...|move|split|trim|replace|fade)`，删 5 个老 tool；注册 + 测试 + prompt 同步换。Rubric §5.6 / §5.7。Milestone §later. · skipped 2026-04-24: depends on phase 1 first.

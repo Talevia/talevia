@@ -168,9 +168,10 @@ fun SourcePanel(
                         onToggle = { expanded[node.id.value] = expanded[node.id.value] != true },
                         onRemove = {
                             dispatch(
-                                "remove_source_node",
+                                "source_node_action",
                                 buildJsonObject {
                                     put("projectId", projectId.value)
+                                    put("action", "remove")
                                     put("nodeId", node.id.value)
                                 },
                                 "remove ${displayName(node)}",
@@ -248,9 +249,10 @@ fun SourcePanel(
         AddSourceControls(
             onAddCharacter = { name, desc ->
                 dispatch(
-                    "add_source_node",
+                    "source_node_action",
                     buildJsonObject {
                         put("projectId", projectId.value)
+                        put("action", "add")
                         put("nodeId", slugifyId(name, "character"))
                         put("kind", ConsistencyKinds.CHARACTER_REF)
                         put(
@@ -266,9 +268,10 @@ fun SourcePanel(
             },
             onAddStyle = { name, desc ->
                 dispatch(
-                    "add_source_node",
+                    "source_node_action",
                     buildJsonObject {
                         put("projectId", projectId.value)
+                        put("action", "add")
                         put("nodeId", slugifyId(name, "style"))
                         put("kind", ConsistencyKinds.STYLE_BIBLE)
                         put(
@@ -285,9 +288,10 @@ fun SourcePanel(
             onAddPalette = { name, hexCsv ->
                 val hexList = hexCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                 dispatch(
-                    "add_source_node",
+                    "source_node_action",
                     buildJsonObject {
                         put("projectId", projectId.value)
+                        put("action", "add")
                         put("nodeId", slugifyId(name, "brand"))
                         put("kind", ConsistencyKinds.BRAND_PALETTE)
                         put(

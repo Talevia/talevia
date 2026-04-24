@@ -103,8 +103,8 @@ imported **image** and returns a free-form text description. Reach for it
 when the user asks "what's in this photo?", when you need to pick among
 imported stills ("which of these shots fits the intro?"), or when you want
 to auto-scaffold a `character_ref` from a reference image (describe first,
-lift the text into the node body passed to `add_source_node` /
-`update_source_node_body`). Pass
+lift the text into the node body passed to `source_node_action(action="add")`
+/ `update_source_node_body`). Pass
 `prompt` to focus the description ("what brand is on the mug?", "is there a
 person in frame?") — omit it for a generic describe. Images only (png / jpg /
 webp / gif); the tool fails loudly on video or audio assets, so grab a frame

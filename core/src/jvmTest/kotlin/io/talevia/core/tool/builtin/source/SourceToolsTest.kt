@@ -34,12 +34,13 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * End-to-end check that the kind-agnostic source tools — `add_source_node` for
- * create, `update_source_node_body` for body edits, `set_source_node_parents`
- * for parent edits — carry every consistency-node scenario the consistency fold
- * pipeline depends on. Replaces the old `set_character_ref` / `set_style_bible`
- * / `set_brand_palette` trio; those wrappers were removed when the kind-agnostic
- * pair proved sufficient (see
+ * End-to-end check that the kind-agnostic source tools —
+ * `source_node_action(action="add")` for create, `update_source_node_body`
+ * for body edits, `set_source_node_parents` for parent edits — carry every
+ * consistency-node scenario the consistency fold pipeline depends on.
+ * Replaces the old `set_character_ref` / `set_style_bible` /
+ * `set_brand_palette` trio; those wrappers were removed when the
+ * kind-agnostic pair proved sufficient (see
  * docs/decisions/2026-04-22-debt-fold-set-source-node-body-helpers.md).
  */
 class SourceToolsTest {
@@ -97,11 +98,12 @@ class SourceToolsTest {
 
     @Test fun addSourceNodeCreatesCharacterRefThatRoundTripsThroughTypedBody() = runTest {
         val rig = rig()
-        val add = AddSourceNodeTool(rig.store)
+        val add = SourceNodeActionTool(rig.store)
 
         val result = add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = slugifyId("Mei", "character"),
                 kind = ConsistencyKinds.CHARACTER_REF,
                 body = characterBody("Mei", "teal hair, round glasses, yellow raincoat"),
@@ -109,7 +111,7 @@ class SourceToolsTest {
             rig.ctx,
         )
 
-        assertEquals("character-mei", result.data.nodeId)
+        assertEquals("character-mei", result.data.added.single().nodeId)
         val node = assertNotNull(rig.store.get(rig.pid)!!.source.byId[SourceNodeId("character-mei")])
         assertEquals(ConsistencyKinds.CHARACTER_REF, node.kind)
         assertEquals("Mei", node.asCharacterRef()?.name)
@@ -117,12 +119,13 @@ class SourceToolsTest {
 
     @Test fun updateSourceNodeBodyBumpsContentHashAndReplacesBody() = runTest {
         val rig = rig()
-        val add = AddSourceNodeTool(rig.store)
+        val add = SourceNodeActionTool(rig.store)
         val update = UpdateSourceNodeBodyTool(rig.store)
 
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "character-mei",
                 kind = ConsistencyKinds.CHARACTER_REF,
                 body = characterBody("Mei", "v1"),
@@ -149,12 +152,13 @@ class SourceToolsTest {
 
     @Test fun characterRefVoiceIdSurvivesCreateAndIsClearedOnFullReplacement() = runTest {
         val rig = rig()
-        val add = AddSourceNodeTool(rig.store)
+        val add = SourceNodeActionTool(rig.store)
         val update = UpdateSourceNodeBodyTool(rig.store)
 
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "character-mei",
                 kind = ConsistencyKinds.CHARACTER_REF,
                 body = characterBody("Mei", "x", voiceId = "nova"),
@@ -178,10 +182,11 @@ class SourceToolsTest {
 
     @Test fun explicitNodeIdBypassesSlugHelper() = runTest {
         val rig = rig()
-        val add = AddSourceNodeTool(rig.store)
+        val add = SourceNodeActionTool(rig.store)
         val result = add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "house-style",
                 kind = ConsistencyKinds.STYLE_BIBLE,
                 body = styleBody(
@@ -193,7 +198,7 @@ class SourceToolsTest {
             ),
             rig.ctx,
         )
-        assertEquals("house-style", result.data.nodeId)
+        assertEquals("house-style", result.data.added.single().nodeId)
         val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("house-style")]!!
         val body = node.asStyleBible()!!
         assertEquals(listOf("warm", "nostalgic"), body.moodKeywords)
@@ -202,9 +207,10 @@ class SourceToolsTest {
 
     @Test fun brandPaletteRoundTripsThroughTypedBody() = runTest {
         val rig = rig()
-        val result = AddSourceNodeTool(rig.store).execute(
-            AddSourceNodeTool.Input(
+        val result = SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = slugifyId("Talevia Brand", "brand"),
                 kind = ConsistencyKinds.BRAND_PALETTE,
                 body = brandBody(
@@ -215,7 +221,7 @@ class SourceToolsTest {
             ),
             rig.ctx,
         )
-        val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId(result.data.nodeId)]!!
+        val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId(result.data.added.single().nodeId)]!!
         val body = node.asBrandPalette()!!
         assertEquals(listOf("#0A84FF", "#FF3B30"), body.hexColors)
         assertEquals(listOf("Inter / geometric sans"), body.typographyHints)
@@ -223,10 +229,11 @@ class SourceToolsTest {
 
     @Test fun addSourceNodeRejectsDuplicateIdEvenAcrossKinds() = runTest {
         val rig = rig()
-        val add = AddSourceNodeTool(rig.store)
+        val add = SourceNodeActionTool(rig.store)
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "shared",
                 kind = ConsistencyKinds.CHARACTER_REF,
                 body = characterBody("Mei", "v1"),
@@ -235,8 +242,9 @@ class SourceToolsTest {
         )
         val ex = assertFailsWith<IllegalArgumentException> {
             add.execute(
-                AddSourceNodeTool.Input(
+                SourceNodeActionTool.Input(
                     projectId = rig.pid.value,
+                    action = "add",
                     nodeId = "shared",
                     kind = ConsistencyKinds.STYLE_BIBLE,
                     body = styleBody("house", "warm"),
@@ -249,10 +257,11 @@ class SourceToolsTest {
 
     @Test fun sourceQueryFiltersByKindPrefixAndSurfacesContentHash() = runTest {
         val rig = rig()
-        val add = AddSourceNodeTool(rig.store)
+        val add = SourceNodeActionTool(rig.store)
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "character-mei",
                 kind = ConsistencyKinds.CHARACTER_REF,
                 body = characterBody("Mei", "teal hair"),
@@ -260,8 +269,9 @@ class SourceToolsTest {
             rig.ctx,
         )
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "style-house",
                 kind = ConsistencyKinds.STYLE_BIBLE,
                 body = styleBody("house", "warm look"),
@@ -303,9 +313,10 @@ class SourceToolsTest {
 
     @Test fun sourceQueryIncludeBodySurfacesFullJson() = runTest {
         val rig = rig()
-        AddSourceNodeTool(rig.store).execute(
-            AddSourceNodeTool.Input(
+        SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "character-mei",
                 kind = ConsistencyKinds.CHARACTER_REF,
                 body = characterBody("Mei", "teal hair"),
@@ -322,34 +333,47 @@ class SourceToolsTest {
 
     @Test fun removeSourceNodeRemovesAndErrorsOnMissing() = runTest {
         val rig = rig()
-        AddSourceNodeTool(rig.store).execute(
-            AddSourceNodeTool.Input(
+        val tool = SourceNodeActionTool(rig.store)
+        tool.execute(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "character-mei",
                 kind = ConsistencyKinds.CHARACTER_REF,
                 body = characterBody("Mei", "v1"),
             ),
             rig.ctx,
         )
-        val remove = RemoveSourceNodeTool(rig.store)
-        val out = remove.execute(
-            RemoveSourceNodeTool.Input(rig.pid.value, "character-mei"),
+        val out = tool.execute(
+            SourceNodeActionTool.Input(
+                projectId = rig.pid.value,
+                action = "remove",
+                nodeId = "character-mei",
+            ),
             rig.ctx,
         )
-        assertEquals(ConsistencyKinds.CHARACTER_REF, out.data.removedKind)
+        assertEquals(ConsistencyKinds.CHARACTER_REF, out.data.removed.single().removedKind)
         assertTrue(rig.store.get(rig.pid)!!.source.byId.isEmpty())
 
         assertFailsWith<IllegalStateException> {
-            remove.execute(RemoveSourceNodeTool.Input(rig.pid.value, "character-mei"), rig.ctx)
+            tool.execute(
+                SourceNodeActionTool.Input(
+                    projectId = rig.pid.value,
+                    action = "remove",
+                    nodeId = "character-mei",
+                ),
+                rig.ctx,
+            )
         }
     }
 
     @Test fun foldedPromptPicksUpAddedBindingsEndToEnd() = runTest {
         val rig = rig()
-        val add = AddSourceNodeTool(rig.store)
+        val add = SourceNodeActionTool(rig.store)
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "character-mei",
                 kind = ConsistencyKinds.CHARACTER_REF,
                 body = characterBody("Mei", "teal hair, round glasses"),
@@ -357,8 +381,9 @@ class SourceToolsTest {
             rig.ctx,
         )
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "style-warm",
                 kind = ConsistencyKinds.STYLE_BIBLE,
                 body = styleBody(
@@ -385,10 +410,11 @@ class SourceToolsTest {
 
     @Test fun addSourceNodeThreadsParentIdsIntoNode() = runTest {
         val rig = rig()
-        val add = AddSourceNodeTool(rig.store)
+        val add = SourceNodeActionTool(rig.store)
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "style-warm",
                 kind = ConsistencyKinds.STYLE_BIBLE,
                 body = styleBody("Warm", "warm grain"),
@@ -396,8 +422,9 @@ class SourceToolsTest {
             rig.ctx,
         )
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "character-mei",
                 kind = ConsistencyKinds.CHARACTER_REF,
                 body = characterBody("Mei", "teal hair"),
@@ -411,10 +438,11 @@ class SourceToolsTest {
 
     @Test fun parentEditCascadesStaleDownstream() = runTest {
         val rig = rig()
-        val add = AddSourceNodeTool(rig.store)
+        val add = SourceNodeActionTool(rig.store)
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "brand-acme",
                 kind = ConsistencyKinds.BRAND_PALETTE,
                 body = brandBody("Acme", listOf("#0A84FF")),
@@ -422,8 +450,9 @@ class SourceToolsTest {
             rig.ctx,
         )
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "style-acmelook",
                 kind = ConsistencyKinds.STYLE_BIBLE,
                 body = styleBody("AcmeLook", "brand-aligned look"),
@@ -459,9 +488,10 @@ class SourceToolsTest {
     @Test fun parentIdsThatDontExistFailLoudly() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalArgumentException> {
-            AddSourceNodeTool(rig.store).execute(
-                AddSourceNodeTool.Input(
+            SourceNodeActionTool(rig.store).execute(
+                SourceNodeActionTool.Input(
                     projectId = rig.pid.value,
+                    action = "add",
                     nodeId = "character-mei",
                     kind = ConsistencyKinds.CHARACTER_REF,
                     body = characterBody("Mei", "teal hair"),
@@ -475,10 +505,11 @@ class SourceToolsTest {
 
     @Test fun setSourceNodeParentsUpdatesParentListAfterCreate() = runTest {
         val rig = rig()
-        val add = AddSourceNodeTool(rig.store)
+        val add = SourceNodeActionTool(rig.store)
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "style-warm",
                 kind = ConsistencyKinds.STYLE_BIBLE,
                 body = styleBody("Warm", "warm grain"),
@@ -486,8 +517,9 @@ class SourceToolsTest {
             rig.ctx,
         )
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "brand-acme",
                 kind = ConsistencyKinds.BRAND_PALETTE,
                 body = brandBody("Acme", listOf("#0A84FF")),
@@ -495,8 +527,9 @@ class SourceToolsTest {
             rig.ctx,
         )
         add.execute(
-            AddSourceNodeTool.Input(
+            SourceNodeActionTool.Input(
                 projectId = rig.pid.value,
+                action = "add",
                 nodeId = "character-mei",
                 kind = ConsistencyKinds.CHARACTER_REF,
                 body = characterBody("Mei", "teal hair"),

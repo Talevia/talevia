@@ -42,7 +42,7 @@ internal fun SectionTitle(text: String) {
  * asset-id fields (generate_image / _video / _music / extract_frame /
  * upscale_asset / synthesize_speech) and resolves them through the project
  * bundle. Returns null when the tool output has no natural file artefact
- * (e.g. `apply_filter`, `add_clip`, `add_source_node`).
+ * (e.g. `apply_filter`, `clip_action(action=add)`, `source_node_action(action=add)`).
  */
 internal suspend fun resolveOpenablePath(
     container: AppContainer,

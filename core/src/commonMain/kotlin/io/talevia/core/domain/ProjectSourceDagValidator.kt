@@ -39,7 +39,7 @@ internal object ProjectSourceDagValidator {
                 if (parent.nodeId !in byId) {
                     issues += "source node '${node.id.value}' references missing parent " +
                         "'${parent.nodeId.value}' (call set_source_node_parents / " +
-                        "remove_source_node to fix)."
+                        "source_node_action(action=remove) to fix)."
                 }
             }
         }

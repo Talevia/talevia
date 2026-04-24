@@ -32,7 +32,7 @@ import okio.Path.Companion.toPath
 /**
  * Bootstrap a project *pre-populated* with a genre skeleton (VISION §5.4
  * novice path). `create_project` alone leaves a blank source DAG — the
- * agent then has to call `add_source_node` for a character_ref, a
+ * agent then has to call `source_node_action(action="add")` for a character_ref, a
  * style_bible, and so on before it can do anything useful with AIGC. This
  * tool inverts the order: pick a genre template, get a working source graph
  * with placeholder character / style / scene stubs, then refine.
