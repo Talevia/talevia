@@ -4,6 +4,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.talevia.cli.permission.cliPermissionRules
 import io.talevia.core.agent.Agent
+import io.talevia.core.agent.AgentProviderFallbackTracker
 import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.agent.SessionTitler
 import io.talevia.core.bus.EventBus
@@ -93,6 +94,10 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
     val dbPath: String = opened.path
     val bus: EventBus = EventBus()
     val agentStates: AgentRunStateTracker = AgentRunStateTracker(
+        bus,
+        CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    )
+    val fallbackStates: AgentProviderFallbackTracker = AgentProviderFallbackTracker(
         bus,
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
@@ -250,7 +255,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         ?.let { TavilySearchEngine(httpClient, it) }
 
     val tools: ToolRegistry = ToolRegistry().apply {
-        registerSessionAndMetaTools(sessions, agentStates, projects, bus)
+        registerSessionAndMetaTools(sessions, agentStates, projects, bus, fallbackStates)
         registerMediaTools(engine, projects, bundleBlobWriter, FfmpegProxyGenerator())
         registerClipAndTrackTools(projects, sessions)
         registerProjectTools(projects, engine)

@@ -6,7 +6,9 @@ import io.talevia.core.MessageId
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
+import io.talevia.core.agent.AgentProviderFallbackTracker
 import io.talevia.core.agent.AgentRunStateTracker
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.permission.PermissionDecision
@@ -54,7 +56,15 @@ class SessionQueryRunFailureTest {
         val scopeJob: Job,
     )
 
-    private fun rig(): Rig {
+    private data class RigWithBus(
+        val rig: Rig,
+        val bus: EventBus,
+        val fallbackTracker: AgentProviderFallbackTracker,
+    )
+
+    private fun rig(): Rig = rigWithBus().rig
+
+    private fun rigWithBus(): RigWithBus {
         val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
         TaleviaDb.Schema.create(driver)
         val db = TaleviaDb(driver)
@@ -62,8 +72,9 @@ class SessionQueryRunFailureTest {
         val job = SupervisorJob()
         val scope = CoroutineScope(job + Dispatchers.Unconfined)
         val tracker = AgentRunStateTracker(bus, scope)
+        val fallbackTracker = AgentProviderFallbackTracker(bus, scope)
         val sessions = SqlDelightSessionStore(db, bus)
-        val tool = SessionQueryTool(sessions, tracker)
+        val tool = SessionQueryTool(sessions, tracker, fallbackTracker = fallbackTracker)
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),
@@ -72,7 +83,7 @@ class SessionQueryRunFailureTest {
             emitPart = {},
             messages = emptyList(),
         )
-        return Rig(tool, sessions, ctx, job)
+        return RigWithBus(Rig(tool, sessions, ctx, job), bus, fallbackTracker)
     }
 
     private suspend fun seedSessionWithAssistants(
@@ -344,5 +355,96 @@ class SessionQueryRunFailureTest {
         val row = result.data.rows.decodeRowsAs(RunFailureRow.serializer()).single()
         assertEquals("boom", row.terminalCause)
         assertNull(row.runStateTerminalKind, "no tracker → terminalKind null (not thrown)")
+    }
+
+    @Test fun fallbackChainPopulatesWhenTrackerWired() = runTest {
+        // A failed turn's wall-clock window captures every provider-
+        // fallback hop observed by AgentProviderFallbackTracker between
+        // this message's createdAt and the next message's createdAt
+        // (cycle-57). Two hops in-window + one out-of-window hop in a
+        // separate session — only the two in-window show up.
+        val rigB = rigWithBus()
+        val rig = rigB.rig
+        val sid = SessionId("s-chain")
+        val base = Instant.fromEpochMilliseconds(1000)
+        val msg = Message.Assistant(
+            id = MessageId("m-chain"),
+            sessionId = sid,
+            createdAt = base,
+            parentId = MessageId("u-chain"),
+            model = ModelRef("anthropic", "claude-opus-4-7"),
+            finish = FinishReason.ERROR,
+            error = "primary 503",
+        )
+        seedSessionWithAssistants(rig.sessions, sid, listOf(msg))
+
+        rigB.bus.publish(
+            BusEvent.AgentProviderFallback(sid, "anthropic", "openai", "503"),
+        )
+        kotlinx.coroutines.yield()
+        rigB.bus.publish(
+            BusEvent.AgentProviderFallback(sid, "openai", "gemini", "429"),
+        )
+        kotlinx.coroutines.yield()
+        // Fallback on a different session must not leak into this query.
+        rigB.bus.publish(
+            BusEvent.AgentProviderFallback(
+                SessionId("other"),
+                "p1",
+                "p2",
+                "should-not-appear",
+            ),
+        )
+        kotlinx.coroutines.yield()
+
+        val result = rig.tool.execute(
+            SessionQueryTool.Input(select = "run_failure", sessionId = sid.value),
+            rig.ctx,
+        )
+        val row = result.data.rows.decodeRowsAs(RunFailureRow.serializer()).single()
+        assertEquals(2, row.fallbackChain.size, "both in-window hops should populate chain")
+        assertEquals("anthropic", row.fallbackChain[0].fromProviderId)
+        assertEquals("openai", row.fallbackChain[0].toProviderId)
+        assertEquals("503", row.fallbackChain[0].reason)
+        assertEquals("openai", row.fallbackChain[1].fromProviderId)
+        assertEquals("gemini", row.fallbackChain[1].toProviderId)
+        assertEquals("429", row.fallbackChain[1].reason)
+    }
+
+    @Test fun fallbackChainDefaultsEmptyWhenTrackerNotWired() = runTest {
+        // Explicit guard: container without a fallback tracker still
+        // returns a row (with empty chain), no crash, no null. Mirrors
+        // the runStateTerminalKind-null path for unwired AgentRunStateTracker.
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val db = TaleviaDb(driver)
+        val sessions = SqlDelightSessionStore(db, EventBus())
+        val tool = SessionQueryTool(sessions, AgentRunStateTracker(EventBus(), CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)))
+        val ctx = ToolContext(
+            sessionId = SessionId("s"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { PermissionDecision.Once },
+            emitPart = {},
+            messages = emptyList(),
+        )
+        val sid = SessionId("s-no-fb-tracker")
+        val msg = Message.Assistant(
+            id = MessageId("m-fail"),
+            sessionId = sid,
+            createdAt = Instant.fromEpochMilliseconds(1000),
+            parentId = MessageId("u"),
+            model = ModelRef("fake", "x"),
+            finish = FinishReason.ERROR,
+            error = "boom",
+        )
+        seedSessionWithAssistants(sessions, sid, listOf(msg))
+
+        val result = tool.execute(
+            SessionQueryTool.Input(select = "run_failure", sessionId = sid.value),
+            ctx,
+        )
+        val row = result.data.rows.decodeRowsAs(RunFailureRow.serializer()).single()
+        assertEquals(emptyList(), row.fallbackChain, "unwired tracker → empty chain (not thrown)")
     }
 }

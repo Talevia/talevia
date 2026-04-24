@@ -5,6 +5,7 @@ import app.cash.sqldelight.driver.android.AndroidSqliteDriver
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.talevia.core.agent.Agent
+import io.talevia.core.agent.AgentProviderFallbackTracker
 import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
@@ -50,6 +51,10 @@ class AndroidAppContainer(context: Context) {
     val db = TaleviaDb(driver)
     val bus = EventBus()
     val agentStates = AgentRunStateTracker(
+        bus,
+        CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    )
+    val fallbackStates = AgentProviderFallbackTracker(
         bus,
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
@@ -111,7 +116,7 @@ class AndroidAppContainer(context: Context) {
     val httpClient: HttpClient = HttpClient(CIO)
 
     val tools: ToolRegistry = ToolRegistry().apply {
-        registerSessionAndMetaTools(sessions, agentStates, projects, bus)
+        registerSessionAndMetaTools(sessions, agentStates, projects, bus, fallbackStates)
         registerMediaTools(engine, projects, bundleBlobWriter, proxyGenerator)
         registerClipAndTrackTools(projects, sessions)
         registerProjectTools(projects, engine)

@@ -3,6 +3,7 @@ package io.talevia.desktop
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.talevia.core.agent.Agent
+import io.talevia.core.agent.AgentProviderFallbackTracker
 import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.agent.SessionTitler
 import io.talevia.core.bus.EventBus
@@ -84,6 +85,10 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
      * by subscribing to the bus. `session_query(select=status)` reads from it.
      */
     val agentStates: AgentRunStateTracker = AgentRunStateTracker(
+        bus,
+        CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    )
+    val fallbackStates: AgentProviderFallbackTracker = AgentProviderFallbackTracker(
         bus,
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
@@ -203,7 +208,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         ?.let { TavilySearchEngine(httpClient, it) }
 
     val tools: ToolRegistry = ToolRegistry().apply {
-        registerSessionAndMetaTools(sessions, agentStates, projects, bus)
+        registerSessionAndMetaTools(sessions, agentStates, projects, bus, fallbackStates)
         registerMediaTools(engine, projects, bundleBlobWriter, FfmpegProxyGenerator())
         registerClipAndTrackTools(projects, sessions)
         registerProjectTools(projects, engine)

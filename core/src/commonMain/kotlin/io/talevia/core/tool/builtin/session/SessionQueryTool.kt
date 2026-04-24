@@ -1,6 +1,7 @@
 package io.talevia.core.tool.builtin.session
 
 import io.talevia.core.JsonConfig
+import io.talevia.core.agent.AgentProviderFallbackTracker
 import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
@@ -101,6 +102,13 @@ class SessionQueryTool(
      * dispatch time, after the composition root has finished wiring.
      */
     private val toolRegistry: ToolRegistry? = null,
+    /**
+     * Optional provider-fallback tracker. Populates
+     * `RunFailureRow.fallbackChain` on `select=run_failure` results. Null
+     * when the container doesn't wire it; `fallbackChain` then defaults
+     * to the empty list (no regression from pre-cycle-57 callers).
+     */
+    private val fallbackTracker: AgentProviderFallbackTracker? = null,
 ) : QueryDispatcher<SessionQueryTool.Input, SessionQueryTool.Output>() {
 
     @Serializable data class Input(
@@ -234,7 +242,7 @@ class SessionQueryTool(
             SELECT_CONTEXT_PRESSURE -> runContextPressureQuery(sessions, input)
             SELECT_RUN_STATE_HISTORY -> runRunStateHistoryQuery(sessions, agentStates, input, limit, offset)
             SELECT_TOOL_SPEC_BUDGET -> runToolSpecBudgetQuery(toolRegistry, input)
-            SELECT_RUN_FAILURE -> runRunFailureQuery(sessions, agentStates, input)
+            SELECT_RUN_FAILURE -> runRunFailureQuery(sessions, agentStates, fallbackTracker, input)
             SELECT_ACTIVE_RUN_SUMMARY -> runActiveRunSummaryQuery(sessions, agentStates, input)
             else -> error("unreachable — select validated above: '$select'")
         }

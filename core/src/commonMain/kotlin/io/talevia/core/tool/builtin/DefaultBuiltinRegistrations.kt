@@ -152,13 +152,22 @@ fun ToolRegistry.registerSessionAndMetaTools(
     agentStates: AgentRunStateTracker,
     projects: ProjectStore,
     bus: EventBus,
+    fallbackTracker: io.talevia.core.agent.AgentProviderFallbackTracker? = null,
 ) {
     register(ListToolsTool(this))
     register(EstimateTokensTool())
     register(TodoWriteTool())
     register(DraftPlanTool())
     register(ExecutePlanTool(this, sessions))
-    register(SessionQueryTool(sessions, agentStates, projects, toolRegistry = this))
+    register(
+        SessionQueryTool(
+            sessions,
+            agentStates,
+            projects,
+            toolRegistry = this,
+            fallbackTracker = fallbackTracker,
+        ),
+    )
     register(ExportSessionTool(sessions))
     register(EstimateSessionTokensTool(sessions))
     register(ForkSessionTool(sessions))

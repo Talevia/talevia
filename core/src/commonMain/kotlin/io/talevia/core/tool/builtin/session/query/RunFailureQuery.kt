@@ -1,6 +1,7 @@
 package io.talevia.core.tool.builtin.session.query
 
 import io.talevia.core.SessionId
+import io.talevia.core.agent.AgentProviderFallbackTracker
 import io.talevia.core.agent.AgentRunState
 import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.session.FinishReason
@@ -29,17 +30,33 @@ data class StepFinishErrorEntry(
 )
 
 /**
+ * One provider-fallback hop observed within a failed assistant turn's
+ * wall-clock window. Matches [io.talevia.core.agent.FallbackHop] 1:1 but
+ * with epoch-ms normalised to the [RunFailureRow] shape for
+ * JSON-serialisation via `decodeRowsAs`.
+ */
+@Serializable
+data class FallbackHopEntry(
+    val fromProviderId: String,
+    val toProviderId: String,
+    val reason: String,
+    val epochMs: Long,
+)
+
+/**
  * One failed assistant turn's post-mortem. Aggregates persisted state
  * (message + parts) with live-tracker signals (terminal run-state via
- * [AgentRunStateTracker]).
+ * [AgentRunStateTracker], provider-fallback chain via
+ * [AgentProviderFallbackTracker]).
  *
- * `fallbackChain` is deliberately NOT surfaced in this iteration —
- * `BusEvent.AgentProviderFallback` is bus-only today and isn't persisted;
- * wiring a parallel tracker to capture it is filed as a follow-up
- * (`agent-provider-fallback-chain-tracking`) in BACKLOG. Same for
- * per-retry reason strings — `BusEvent.AgentRetryScheduled.reason` is
- * bus-only; `Message.Assistant.error` holds the aggregated terminal
- * cause which is sufficient for the "why did this turn fail?" question.
+ * `fallbackChain` is wired via [AgentProviderFallbackTracker] as of
+ * cycle-57 — hops observed in the window
+ * `[message.createdAt, nextMessage.createdAt)` populate the list;
+ * untracked containers still see an empty list (no regression).
+ * Per-retry reason strings remain deferred — `BusEvent.AgentRetryScheduled.reason`
+ * is bus-only and correlating individual retry events to a specific
+ * turn's window is a larger design decision filed as
+ * `agent-retry-attempt-tracker-capture`.
  */
 @Serializable
 data class RunFailureRow(
@@ -69,6 +86,16 @@ data class RunFailureRow(
      */
     val runStateTerminalKind: String?,
     val createdAtEpochMs: Long,
+    /**
+     * Provider-fallback hops observed within this failed turn's wall-
+     * clock window, oldest first. Populated from
+     * [AgentProviderFallbackTracker] when wired; empty on containers
+     * that don't wire the tracker (no regression from pre-cycle-57
+     * behavior). A non-empty chain answers "which providers did the
+     * Agent try before giving up?" without cross-referencing the live
+     * bus stream.
+     */
+    val fallbackChain: List<FallbackHopEntry> = emptyList(),
 )
 
 /**
@@ -96,6 +123,7 @@ data class RunFailureRow(
 internal suspend fun runRunFailureQuery(
     sessions: SessionStore,
     tracker: AgentRunStateTracker?,
+    fallbackTracker: AgentProviderFallbackTracker?,
     input: SessionQueryTool.Input,
 ): ToolResult<SessionQueryTool.Output> {
     val sessionIdStr = input.sessionId
@@ -121,6 +149,7 @@ internal suspend fun runRunFailureQuery(
     }
 
     val trackerHistory = tracker?.history(sid).orEmpty()
+    val fallbackHops = fallbackTracker?.hops(sid).orEmpty()
 
     val rows = scoped.map { (i, mwp) ->
         val msg = mwp.message as Message.Assistant
@@ -151,6 +180,17 @@ internal suspend fun runRunFailureQuery(
             .lastOrNull { it.epochMs in windowStart until windowEnd }
             ?.let { terminalKindTag(it.state) }
 
+        val chain = fallbackHops
+            .filter { it.epochMs in windowStart until windowEnd }
+            .map {
+                FallbackHopEntry(
+                    fromProviderId = it.fromProviderId,
+                    toProviderId = it.toProviderId,
+                    reason = it.reason,
+                    epochMs = it.epochMs,
+                )
+            }
+
         RunFailureRow(
             messageId = msg.id.value,
             model = "${msg.model.providerId}/${msg.model.modelId}",
@@ -158,6 +198,7 @@ internal suspend fun runRunFailureQuery(
             stepFinishErrors = stepErrors,
             runStateTerminalKind = runStateTerminalKind,
             createdAtEpochMs = msg.createdAt.toEpochMilliseconds(),
+            fallbackChain = chain,
         )
     }
 
