@@ -32,35 +32,40 @@ class EventRouter(
 
     fun start(scope: CoroutineScope) {
         jobs += scope.launch {
-            bus.subscribe<BusEvent.PartDelta>()
-                .filter { it.sessionId == activeSessionId() && it.field == "text" }
+            // Producer-variant of sessionScopedSubscribe: [activeSessionId]
+            // is re-invoked per event so `/resume` / `/new` swaps take effect
+            // without tearing down this subscription. Outer `.filter` still
+            // needed for the `field == "text"` narrowing — the typed helper
+            // only does session + event-type filtering.
+            bus.sessionScopedSubscribe<BusEvent.PartDelta>(activeSessionId)
+                .filter { it.field == "text" }
                 .collect { ev -> renderer.streamAssistantDelta(ev.partId, ev.delta) }
         }
         jobs += scope.launch {
-            bus.subscribe<BusEvent.AgentRetryScheduled>()
-                .filter { it.sessionId == activeSessionId() }
+            bus.sessionScopedSubscribe<BusEvent.AgentRetryScheduled>(activeSessionId)
                 .collect { ev -> renderer.retryNotice(ev.attempt, ev.waitMs, ev.reason) }
         }
         jobs += scope.launch {
-            bus.subscribe<BusEvent.SessionCompacted>()
-                .filter { it.sessionId == activeSessionId() }
+            bus.sessionScopedSubscribe<BusEvent.SessionCompacted>(activeSessionId)
                 .collect { ev -> renderer.compactedNotice(ev.prunedCount, ev.summaryLength) }
         }
         jobs += scope.launch {
             // AssetsMissing is a project-scope event, not session-scope — every
             // open in this CLI run surfaces its warning regardless of which
-            // session is active. Fires once per openAt that detects dangling
-            // File sources; downstream `relink_asset` calls don't re-fire it
-            // (by design in FileProjectStore), so the operator sees exactly
-            // one warning per stale load.
+            // session is active. It is NOT a BusEvent.SessionEvent, so it
+            // can't go through `sessionScopedSubscribe` (that's the point of
+            // the typed helper's `E : SessionEvent` bound). Fires once per
+            // openAt that detects dangling File sources; downstream
+            // `relink_asset` calls don't re-fire it (by design in
+            // FileProjectStore), so the operator sees exactly one warning per
+            // stale load.
             bus.subscribe<BusEvent.AssetsMissing>()
                 .collect { ev ->
                     renderer.assetsMissingNotice(ev.missing.map { it.originalPath })
                 }
         }
         jobs += scope.launch {
-            bus.subscribe<BusEvent.PartUpdated>()
-                .filter { it.sessionId == activeSessionId() }
+            bus.sessionScopedSubscribe<BusEvent.PartUpdated>(activeSessionId)
                 .collect { ev ->
                     when (val p = ev.part) {
                         is Part.Text -> {

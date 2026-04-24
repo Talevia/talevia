@@ -36,4 +36,25 @@ class EventBus(extraBufferCapacity: Int = 256) {
 
     fun forSession(sessionId: SessionId): Flow<BusEvent.SessionEvent> =
         events.filterIsInstance<BusEvent.SessionEvent>().filter { it.sessionId == sessionId }
+
+    /**
+     * Typed session-scoped subscription: filters the bus by both event type
+     * and [sessionId] in a single helper. The `E : BusEvent.SessionEvent`
+     * bound means callers physically cannot ask to "session-scope" a
+     * project-level event (e.g. [BusEvent.AssetsMissing]) — the compiler
+     * rejects it. Collapses the subscribe+filter pairs that used to live in
+     * CLI / iOS call sites.
+     */
+    inline fun <reified E : BusEvent.SessionEvent> sessionScopedSubscribe(sessionId: SessionId): Flow<E> =
+        events.filterIsInstance<E>().filter { it.sessionId == sessionId }
+
+    /**
+     * Producer-variant: the CLI's REPL hands in a `() -> SessionId` so
+     * `/resume` / `/new` can swap the active session without tearing down
+     * subscriptions. The producer is re-invoked per event (matching the
+     * pre-helper `.filter { it.sessionId == activeSessionId() }` shape).
+     */
+    inline fun <reified E : BusEvent.SessionEvent> sessionScopedSubscribe(
+        crossinline sessionIdProducer: () -> SessionId,
+    ): Flow<E> = events.filterIsInstance<E>().filter { it.sessionId == sessionIdProducer() }
 }

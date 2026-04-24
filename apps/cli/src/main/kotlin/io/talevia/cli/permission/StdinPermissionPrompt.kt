@@ -12,7 +12,6 @@ import io.talevia.core.permission.PermissionService
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
 import org.jline.reader.LineReader
 
@@ -47,8 +46,7 @@ class StdinPermissionPrompt(
 
     fun start(scope: CoroutineScope) {
         job = scope.launch {
-            bus.subscribe<BusEvent.PermissionAsked>()
-                .filter { it.sessionId == activeSessionId() }
+            bus.sessionScopedSubscribe<BusEvent.PermissionAsked>(activeSessionId)
                 .collect { ev -> handle(ev) }
         }
     }

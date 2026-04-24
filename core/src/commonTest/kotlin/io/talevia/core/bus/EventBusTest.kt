@@ -121,6 +121,57 @@ class EventBusTest {
     }
 
     @Test
+    fun sessionScopedSubscribeFiltersByTypeAndSession() = runTest {
+        // Typed helper narrows to BOTH event type (filterIsInstance) and
+        // sessionId. Non-matching type OR non-matching session must not
+        // show up. Guards against the silent-drop bug that used to live in
+        // subscribe+filter pairs (cycle-54).
+        val bus = EventBus()
+        val target = SessionId("target")
+        val other = SessionId("other")
+
+        val seen = async(start = CoroutineStart.UNDISPATCHED) {
+            bus.sessionScopedSubscribe<BusEvent.PartDelta>(target).take(2).toList()
+        }
+        // Wrong type, matching session — must be dropped.
+        bus.publish(BusEvent.SessionUpdated(target))
+        // Wrong session, matching type — must be dropped.
+        bus.publish(BusEvent.PartDelta(other, mid, PartId("p"), "text", "drop-me"))
+        // Matching both — delivered.
+        bus.publish(BusEvent.PartDelta(target, mid, PartId("p"), "text", "keep-1"))
+        bus.publish(BusEvent.PartDelta(target, mid, PartId("p"), "text", "keep-2"))
+
+        val received = seen.await().map { it.delta }
+        assertEquals(listOf("keep-1", "keep-2"), received)
+    }
+
+    @Test
+    fun sessionScopedSubscribeProducerVariantIsReEvaluatedPerEvent() = runTest {
+        // Producer overload re-invokes the lambda per event so the CLI REPL
+        // can swap sessions (e.g. /resume, /new) without tearing down the
+        // subscription. Regression guard: a baked-at-subscribe-time capture
+        // would show up here as only ≤ 1 producer evaluations despite 3
+        // matching events. (We don't attempt to mutate `active` mid-test —
+        // that race is timing-sensitive between producer and collector; this
+        // assertion is enough to pin the "called per event" contract.)
+        val bus = EventBus()
+        val target = SessionId("target")
+        var evaluations = 0
+
+        val seen = async(start = CoroutineStart.UNDISPATCHED) {
+            bus.sessionScopedSubscribe<BusEvent.SessionUpdated> {
+                evaluations++
+                target
+            }.take(3).toList()
+        }
+        repeat(3) { bus.publish(BusEvent.SessionUpdated(target)) }
+        val received = seen.await().map { it.sessionId }
+
+        assertEquals(listOf(target, target, target), received)
+        assertTrue(evaluations >= 3, "producer must be re-invoked per event; got $evaluations")
+    }
+
+    @Test
     fun cancelledSubscriberDoesNotBlockOtherSubscribers() = runTest {
         // A cancelled or completed subscription must not jam future publishes.
         // Concretely: if the bus held onto a dead collector, publish() to a

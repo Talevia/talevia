@@ -35,7 +35,6 @@ import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.takeWhile
 import okio.Path.Companion.toPath
 import platform.Foundation.NSData
@@ -565,7 +564,7 @@ suspend fun bootstrapChatSession(
  * subscribe+filter plumbing.
  */
 fun sessionPartUpdates(bus: EventBus, sessionId: SessionId): Flow<BusEvent.PartUpdated> =
-    bus.subscribe<BusEvent.PartUpdated>().filter { it.sessionId == sessionId }
+    bus.sessionScopedSubscribe<BusEvent.PartUpdated>(sessionId)
 
 /**
  * Find-or-create a default project for the iOS shell. Mirrors the bootstrap
