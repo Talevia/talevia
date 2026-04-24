@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **debt-add-benchmark-export-tool** — R.6 #4 scan：`ExportTool` 是 VISION §3.2 "可复用渲染" 的核心路径，目前零 wall-time regression guard。Agent loop / lockfile lookup / lockfile cold-decode 都有 benchmark 了（cycle `c5daba05` + `6a47516d`）。**方向：** 新增 `ExportToolBenchmark` 走 synthetic 5-clip timeline + fake VideoEngine（或真 ffmpeg 如果装了），测 wall-time 从 `ExportTool.execute` 入口到 snapshot 写入的端到端耗时。同 bench 基础设施，soft budget 初版仅 warning。Rubric §5.7。Milestone §later.
 - **debt-split-agent-kt-round-2** — `Agent.kt` 502 LOC。先前一轮已拆出 `AgentTurnExecutor`（`decisions/2026-04-21-debt-split-agent-kt.md`）；当前主类承载 run() + runLoop() + retry / compaction / cancel / titler 协调逻辑，继续膨胀会把 test-helper 耐受度磨低。**方向：** 把 retry-backoff 子状态机（当前散在 runLoop）抽 `RetryCoordinator`，compaction 触发抽 `CompactionGate`；dispatcher 保留在主类。Rubric §5.6。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排
