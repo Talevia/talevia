@@ -46,6 +46,14 @@ import io.talevia.core.provider.replicate.ReplicateUpscaleEngine
 import io.talevia.core.provider.tavily.TavilySearchEngine
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
+import io.talevia.core.tool.builtin.registerAigcTools
+import io.talevia.core.tool.builtin.registerBuiltinFileTools
+import io.talevia.core.tool.builtin.registerClipAndTrackTools
+import io.talevia.core.tool.builtin.registerMediaTools
+import io.talevia.core.tool.builtin.registerProjectTools
+import io.talevia.core.tool.builtin.registerSessionAndMetaTools
+import io.talevia.core.tool.builtin.registerSourceNodeTools
+import io.talevia.platform.ffmpeg.FfmpegProxyGenerator
 import io.talevia.platform.ffmpeg.FfmpegVideoEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -68,7 +76,9 @@ import okio.Path.Companion.toPath
  * (`~/.talevia/...`) so sessions created in one app show up in the other.
  *
  * Tool registration is grouped into category-scoped extension functions in
- * [CliContainerTools]; see the `apply { ... }` block on [tools] below.
+ * `io.talevia.core.tool.builtin.DefaultBuiltinRegistrations` (shared with
+ * every other composition root — see `debt-cross-container-tool-list-builder`);
+ * see the `apply { ... }` block on [tools] below.
  */
 class CliContainer(env: Map<String, String> = System.getenv()) {
     private val opened = TaleviaDbFactory.open(env)
@@ -221,7 +231,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
 
     val tools: ToolRegistry = ToolRegistry().apply {
         registerSessionAndMetaTools(sessions, agentStates, projects, bus)
-        registerMediaTools(engine, projects, bundleBlobWriter)
+        registerMediaTools(engine, projects, bundleBlobWriter, FfmpegProxyGenerator())
         registerClipAndTrackTools(projects, sessions)
         registerProjectTools(projects, engine)
         registerSourceNodeTools(projects)

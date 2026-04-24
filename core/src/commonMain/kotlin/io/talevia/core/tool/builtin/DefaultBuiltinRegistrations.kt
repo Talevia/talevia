@@ -1,4 +1,4 @@
-package io.talevia.cli
+package io.talevia.core.tool.builtin
 
 import io.ktor.client.HttpClient
 import io.talevia.core.agent.AgentRunStateTracker
@@ -10,6 +10,7 @@ import io.talevia.core.platform.FileSystem
 import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.MusicGenEngine
 import io.talevia.core.platform.ProcessRunner
+import io.talevia.core.platform.ProxyGenerator
 import io.talevia.core.platform.SearchEngine
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.UpscaleEngine
@@ -18,9 +19,6 @@ import io.talevia.core.platform.VideoGenEngine
 import io.talevia.core.platform.VisionEngine
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolRegistry
-import io.talevia.core.tool.builtin.DraftPlanTool
-import io.talevia.core.tool.builtin.ExecutePlanTool
-import io.talevia.core.tool.builtin.TodoWriteTool
 import io.talevia.core.tool.builtin.aigc.CompareAigcCandidatesTool
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import io.talevia.core.tool.builtin.aigc.GenerateMusicTool
@@ -112,27 +110,44 @@ import io.talevia.core.tool.builtin.video.TransitionActionTool
 import io.talevia.core.tool.builtin.video.TrimClipTool
 import io.talevia.core.tool.builtin.web.WebFetchTool
 import io.talevia.core.tool.builtin.web.WebSearchTool
-import io.talevia.platform.ffmpeg.FfmpegProxyGenerator
 
 /**
- * Grouped tool-registration helpers for [CliContainer]. Split out of
- * `CliContainer.kt` as part of `debt-split-cli-container` (2026-04-23) —
- * same shape as `ServerContainerTools.kt` from cycle 12's
- * `debt-split-server-container`. Each `ToolRegistry.registerXxxTools(...)`
- * extension owns one category; callers compose them inside
- * `ToolRegistry().apply { ... }`.
+ * Shared tool-registration extensions for every [ToolRegistry]-owning
+ * composition root (CLI / Desktop / Server / Android). One place, one
+ * truth — `debt-cross-container-tool-list-builder` (2026-04-23).
  *
- * Two tools (`ProviderQueryTool`, `CompactSessionTool`) still register
- * from the container's `init {}` block because they depend on
- * `providers: ProviderRegistry`, which is built from the same container
- * in a second pass.
+ * Before this file existed, `apps/cli/.../CliContainerTools.kt` and
+ * `apps/server/.../ServerContainerTools.kt` carried byte-identical
+ * copies of the 7 extensions below (see commit log for
+ * `CliContainerTools.kt` + `ServerContainerTools.kt` — both landed in
+ * cycle 12 / 20's split-container decisions, then drifted in
+ * lockstep). Desktop's `AppContainer` + Android's `AndroidAppContainer`
+ * inlined the same registrations directly in their `apply { ... }`
+ * blocks. Adding a new Core tool required 4 × {import insertion +
+ * register-line insertion + ktlint-sort pass}; a single miss silently
+ * dropped the tool on one platform.
  *
- * Intentional duplication with `apps/server/.../ServerContainerTools.kt`:
- * the two files are near-identical; the P2 bullet
- * `debt-register-tool-script` tracks the cross-container dedup.
+ * The 7 extensions below own the common registrations every container
+ * wants. Each takes the concrete dependencies it actually needs — no
+ * god-object container ref. Composition roots call whichever subset
+ * applies and overlay platform-specific or provider-gated tools on
+ * top (e.g. Server registers `ProviderQueryTool` + `CompactSessionTool`
+ * in a second pass because those depend on `ProviderRegistry`, which
+ * itself is built from the same container).
+ *
+ * Two tools (`ProviderQueryTool`, `CompactSessionTool`) are
+ * intentionally NOT in here — they depend on `ProviderRegistry`,
+ * which is built from the same container in a second pass. Keeping
+ * them in the container's `init {}` block keeps this file's deps
+ * acyclic.
  */
 
-internal fun ToolRegistry.registerSessionAndMetaTools(
+/**
+ * Meta introspection + session lifecycle + agent / todo / plan tools.
+ * Uses `this` (the registry) for tools that self-reference the registry
+ * (`ListToolsTool`, `ExecutePlanTool`, `SessionQueryTool`).
+ */
+fun ToolRegistry.registerSessionAndMetaTools(
     sessions: SessionStore,
     agentStates: AgentRunStateTracker,
     projects: ProjectStore,
@@ -155,18 +170,31 @@ internal fun ToolRegistry.registerSessionAndMetaTools(
     register(ReadPartTool(sessions))
 }
 
-internal fun ToolRegistry.registerMediaTools(
+/**
+ * Media import / frame extraction / bundle consolidation / asset
+ * relinking. The `proxyGenerator` parameter is platform-injected:
+ * JVM hosts (CLI / Desktop / Server) pass `FfmpegProxyGenerator()`;
+ * Android passes `Media3ProxyGenerator(...)`. Both implement the
+ * common [ProxyGenerator] interface.
+ */
+fun ToolRegistry.registerMediaTools(
     engine: VideoEngine,
     projects: ProjectStore,
     bundleBlobWriter: BundleBlobWriter,
+    proxyGenerator: ProxyGenerator,
 ) {
-    register(ImportMediaTool(engine, projects, proxyGenerator = FfmpegProxyGenerator()))
+    register(ImportMediaTool(engine, projects, proxyGenerator = proxyGenerator))
     register(ExtractFrameTool(engine, projects, bundleBlobWriter))
     register(ConsolidateMediaIntoBundleTool(projects))
     register(RelinkAssetTool(projects))
 }
 
-internal fun ToolRegistry.registerClipAndTrackTools(
+/**
+ * Timeline clip + track edit verbs, filter / LUT / subtitle / transition
+ * ops, and the clip-level state-reset tools (`RevertTimelineTool`,
+ * `ClearTimelineTool`).
+ */
+fun ToolRegistry.registerClipAndTrackTools(
     projects: ProjectStore,
     sessions: SessionStore,
 ) {
@@ -193,7 +221,13 @@ internal fun ToolRegistry.registerClipAndTrackTools(
     register(ClearTimelineTool(projects))
 }
 
-internal fun ToolRegistry.registerProjectTools(
+/**
+ * Project CRUD, export/render, snapshot / lockfile / cache GC,
+ * validation, and fork/diff. `RegenerateStaleClipsTool` + `ForkProjectTool`
+ * take the registry via `this` so they can look up `apply_filter` /
+ * `generate_*` at dispatch time.
+ */
+fun ToolRegistry.registerProjectTools(
     projects: ProjectStore,
     engine: VideoEngine,
 ) {
@@ -222,7 +256,11 @@ internal fun ToolRegistry.registerProjectTools(
     register(ImportProjectFromJsonTool(projects))
 }
 
-internal fun ToolRegistry.registerSourceNodeTools(projects: ProjectStore) {
+/**
+ * Source-DAG tools: consolidated `source_query` + deep-inspect +
+ * CRUD / fork / rename / body-update verbs.
+ */
+fun ToolRegistry.registerSourceNodeTools(projects: ProjectStore) {
     register(SourceQueryTool(projects))
     register(DescribeSourceNodeTool(projects))
     register(DiffSourceNodesTool(projects))
@@ -236,7 +274,13 @@ internal fun ToolRegistry.registerSourceNodeTools(projects: ProjectStore) {
     register(UpdateSourceNodeBodyTool(projects))
 }
 
-internal fun ToolRegistry.registerBuiltinFileTools(
+/**
+ * Filesystem / shell / web — coding-agent surface. `WebSearchTool`
+ * only registers when the Tavily search engine was wired (CLI / Server
+ * need `TAVILY_API_KEY` in the env for that). Android deliberately
+ * skips this group — phone UI doesn't want shell / fs / web tools.
+ */
+fun ToolRegistry.registerBuiltinFileTools(
     fileSystem: FileSystem,
     processRunner: ProcessRunner,
     httpClient: HttpClient,
@@ -254,7 +298,19 @@ internal fun ToolRegistry.registerBuiltinFileTools(
     search?.let { register(WebSearchTool(it)) }
 }
 
-internal fun ToolRegistry.registerAigcTools(
+/**
+ * AIGC pipeline: generation, upscale, speech synthesis, transcription,
+ * auto-subtitle, vision description. All conditional — each engine is
+ * wired only when the provider API key was present in the env.
+ * `CompareAigcCandidatesTool` + `ReplayLockfileTool` take the registry
+ * via `this` so they can dispatch back to the conditionally-present
+ * `generate_*` tools they were asked to compare.
+ *
+ * All AIGC tools persist into the project bundle via [bundleBlobWriter];
+ * reference-asset resolution goes through `BundleMediaPathResolver`
+ * inside each tool (see `core/platform/BundleMediaPathResolver.kt`).
+ */
+fun ToolRegistry.registerAigcTools(
     imageGen: ImageGenEngine?,
     videoGen: VideoGenEngine?,
     musicGen: MusicGenEngine?,
