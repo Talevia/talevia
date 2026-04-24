@@ -17,14 +17,15 @@ import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.session.TokenUsage
 import io.talevia.core.tool.ToolRegistry
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
-import kotlinx.coroutines.yield
 import kotlinx.datetime.Clock
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -62,11 +63,23 @@ class AgentRetryTest {
 
         val retryEvents = mutableListOf<BusEvent.AgentRetryScheduled>()
         val collectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        // `onSubscription { ready.complete(Unit) }` + `ready.await()` gives us a
+        // deterministic sync point the old `yield()` couldn't — a bare yield is a
+        // hint, not a barrier, and races the `Agent.run` state-change publish
+        // under load (observed flake on `:core:jvmTest --rerun-tasks`, tracked
+        // as `debt-agent-retry-test-flake`).
+        val ready = CompletableDeferred<Unit>()
+        val done = CompletableDeferred<Unit>()
         val collectorJob = collectorScope.launch {
-            bus.events.filterIsInstance<BusEvent.AgentRetryScheduled>().collect { retryEvents += it }
+            bus.events
+                .onSubscription { ready.complete(Unit) }
+                .filterIsInstance<BusEvent.AgentRetryScheduled>()
+                .collect {
+                    retryEvents += it
+                    if (!done.isCompleted) done.complete(Unit)
+                }
         }
-        // Let the subscribe land before we run the agent.
-        yield()
+        ready.await()
 
         val provider = FakeProvider(listOf(failing, success))
         val agent = Agent(
@@ -92,8 +105,10 @@ class AgentRetryTest {
         val texts = messages.flatMap { it.parts }.filterIsInstance<Part.Text>().map { it.text }
         assertTrue(texts.contains("hello"), "retry success text should persist")
 
-        // Let the collector drain pending emissions before we check.
-        yield()
+        // Deterministic sync on the collector — same pattern the state-change
+        // tests use. The expected retry count is exactly 1 so we complete
+        // `done` on the first event the collector sees.
+        done.await()
         collectorJob.cancel()
         collectorScope.cancel()
         assertEquals(1, retryEvents.size)
@@ -216,10 +231,18 @@ class AgentRetryTest {
 
         val stateEvents = mutableListOf<BusEvent.AgentRunStateChanged>()
         val collectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val ready = CompletableDeferred<Unit>()
+        val done = CompletableDeferred<Unit>()
         val collectorJob = collectorScope.launch {
-            bus.events.filterIsInstance<BusEvent.AgentRunStateChanged>().collect { stateEvents += it }
+            bus.events
+                .onSubscription { ready.complete(Unit) }
+                .filterIsInstance<BusEvent.AgentRunStateChanged>()
+                .collect {
+                    stateEvents += it
+                    if (it.state is AgentRunState.Idle && !done.isCompleted) done.complete(Unit)
+                }
         }
-        yield()
+        ready.await()
 
         val provider = FakeProvider(listOf(failing, success))
         val agent = Agent(
@@ -232,7 +255,12 @@ class AgentRetryTest {
         )
 
         agent.run(RunInput(sessionId, "hi", ModelRef("fake", "test")))
-        yield()
+        // Wait for the terminal Idle transition to land on the collector,
+        // not just for `yield()` — the collector is on Dispatchers.Default
+        // and runTest's virtual clock can't drive it. Idle is the always-
+        // fires terminal state, so waiting on it is safe for both retry
+        // and clean paths.
+        done.await()
         collectorJob.cancel()
         collectorScope.cancel()
 
@@ -264,10 +292,18 @@ class AgentRetryTest {
 
         val stateEvents = mutableListOf<BusEvent.AgentRunStateChanged>()
         val collectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val ready = CompletableDeferred<Unit>()
+        val done = CompletableDeferred<Unit>()
         val collectorJob = collectorScope.launch {
-            bus.events.filterIsInstance<BusEvent.AgentRunStateChanged>().collect { stateEvents += it }
+            bus.events
+                .onSubscription { ready.complete(Unit) }
+                .filterIsInstance<BusEvent.AgentRunStateChanged>()
+                .collect {
+                    stateEvents += it
+                    if (it.state is AgentRunState.Idle && !done.isCompleted) done.complete(Unit)
+                }
         }
-        yield()
+        ready.await()
 
         val provider = FakeProvider(listOf(cleanTurn))
         val agent = Agent(
@@ -278,7 +314,7 @@ class AgentRetryTest {
             bus = bus,
         )
         agent.run(RunInput(sessionId, "hi", ModelRef("fake", "test")))
-        yield()
+        done.await()
         collectorJob.cancel()
         collectorScope.cancel()
 
@@ -308,10 +344,18 @@ class AgentRetryTest {
 
         val stateEvents = mutableListOf<BusEvent.AgentRunStateChanged>()
         val collectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val ready = CompletableDeferred<Unit>()
+        val done = CompletableDeferred<Unit>()
         val collectorJob = collectorScope.launch {
-            bus.events.filterIsInstance<BusEvent.AgentRunStateChanged>().collect { stateEvents += it }
+            bus.events
+                .onSubscription { ready.complete(Unit) }
+                .filterIsInstance<BusEvent.AgentRunStateChanged>()
+                .collect {
+                    stateEvents += it
+                    if (it.state is AgentRunState.Idle && !done.isCompleted) done.complete(Unit)
+                }
         }
-        yield()
+        ready.await()
 
         val provider = FakeProvider(listOf(failing, failing, success))
         val agent = Agent(
@@ -323,7 +367,7 @@ class AgentRetryTest {
             retryPolicy = RetryPolicy(maxAttempts = 4, initialDelayMs = 0, maxDelayNoHeadersMs = 0),
         )
         agent.run(RunInput(sessionId, "hi", ModelRef("fake", "test")))
-        yield()
+        done.await()
         collectorJob.cancel()
         collectorScope.cancel()
 
