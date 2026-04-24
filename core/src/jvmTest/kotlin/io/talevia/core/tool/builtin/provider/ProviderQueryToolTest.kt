@@ -10,6 +10,7 @@ import io.talevia.core.provider.LlmRequest
 import io.talevia.core.provider.ModelInfo
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.provider.query.CostCompareRow
 import io.talevia.core.tool.builtin.provider.query.ModelRow
 import io.talevia.core.tool.builtin.provider.query.ProviderRow
 import io.talevia.core.tool.query.decodeRowsAs
@@ -176,5 +177,146 @@ class ProviderQueryToolTest {
             ctx(),
         ).data
         assertEquals("providers", out.select)
+    }
+
+    // ----- cost_compare select (cycle 39) ---------------------------------
+
+    @Test fun costCompareSelectReturnsEveryPricedPairSortedAscending() = runTest {
+        val reg = registry(FakeProvider("anthropic"))
+        val out = ProviderQueryTool(reg).execute(
+            ProviderQueryTool.Input(
+                select = "cost_compare",
+                requestedInputTokens = 10_000,
+                requestedOutputTokens = 2_000,
+            ),
+            ctx(),
+        ).data
+        assertEquals("cost_compare", out.select)
+        assertTrue(out.total > 0, "expected at least one priced model in the table")
+        val rows = out.rows.decodeRowsAs(CostCompareRow.serializer())
+        assertEquals(out.total, rows.size)
+        // Sort contract: cheapest first.
+        val costs = rows.map { it.estimatedCostCents }
+        assertEquals(
+            costs,
+            costs.sorted(),
+            "cost_compare rows must be sorted ascending on estimatedCostCents; got $costs",
+        )
+        // Every row non-negative + carries its per-1k rates.
+        for (r in rows) {
+            assertTrue(r.estimatedCostCents >= 0, "row ${r.providerId}/${r.modelId} had negative cost")
+            assertTrue(r.centsPer1kInputTokens >= 0.0)
+            assertTrue(r.centsPer1kOutputTokens >= 0.0)
+        }
+    }
+
+    @Test fun costCompareSelectRejectsMissingTokens() = runTest {
+        val reg = registry(FakeProvider("anthropic"))
+        // Missing both token params → fail loud.
+        val ex1 = assertFailsWith<IllegalStateException> {
+            ProviderQueryTool(reg).execute(
+                ProviderQueryTool.Input(select = "cost_compare"),
+                ctx(),
+            )
+        }
+        assertTrue(
+            ex1.message!!.contains("requestedInputTokens") &&
+                ex1.message!!.contains("requestedOutputTokens"),
+            "error must name both missing params: ${ex1.message}",
+        )
+        // Missing only output → still rejected.
+        assertFailsWith<IllegalStateException> {
+            ProviderQueryTool(reg).execute(
+                ProviderQueryTool.Input(
+                    select = "cost_compare",
+                    requestedInputTokens = 1000,
+                ),
+                ctx(),
+            )
+        }
+    }
+
+    @Test fun costCompareSelectRejectsProviderId() = runTest {
+        val reg = registry(FakeProvider("anthropic"))
+        val ex = assertFailsWith<IllegalStateException> {
+            ProviderQueryTool(reg).execute(
+                ProviderQueryTool.Input(
+                    select = "cost_compare",
+                    providerId = "anthropic",
+                    requestedInputTokens = 1000,
+                    requestedOutputTokens = 500,
+                ),
+                ctx(),
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("providerId"),
+            "error must name the rejected filter: ${ex.message}",
+        )
+    }
+
+    @Test fun costCompareRejectsNegativeTokens() = runTest {
+        // Non-negative is the Input-level require(). Threads through to the
+        // handler as a cleaner error than "0-of-empty-table".
+        val reg = registry(FakeProvider("anthropic"))
+        assertFailsWith<IllegalArgumentException> {
+            ProviderQueryTool(reg).execute(
+                ProviderQueryTool.Input(
+                    select = "cost_compare",
+                    requestedInputTokens = -1,
+                    requestedOutputTokens = 100,
+                ),
+                ctx(),
+            )
+        }
+    }
+
+    @Test fun modelsSelectRejectsTokenParams() = runTest {
+        // Cross-select param rejection — providerId is valid for models but
+        // tokens are cost_compare-only. Guard against typos that mix shapes.
+        val reg = registry(
+            FakeProvider(
+                id = "anthropic",
+                models = listOf(
+                    ModelInfo(
+                        id = "x",
+                        name = "x",
+                        contextWindow = 100_000,
+                        supportsTools = false,
+                    ),
+                ),
+            ),
+        )
+        val ex = assertFailsWith<IllegalStateException> {
+            ProviderQueryTool(reg).execute(
+                ProviderQueryTool.Input(
+                    select = "models",
+                    providerId = "anthropic",
+                    requestedInputTokens = 1000,
+                    requestedOutputTokens = 500,
+                ),
+                ctx(),
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("requestedInputTokens") ||
+                ex.message!!.contains("cost_compare"),
+            "error must point operator at the shape mismatch: ${ex.message}",
+        )
+    }
+
+    @Test fun providersSelectRejectsTokenParams() = runTest {
+        // Symmetric guard: providers select doesn't accept tokens either.
+        val reg = registry(FakeProvider("anthropic"))
+        assertFailsWith<IllegalStateException> {
+            ProviderQueryTool(reg).execute(
+                ProviderQueryTool.Input(
+                    select = "providers",
+                    requestedInputTokens = 1000,
+                    requestedOutputTokens = 500,
+                ),
+                ctx(),
+            )
+        }
     }
 }

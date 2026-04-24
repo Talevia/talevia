@@ -5,8 +5,10 @@ import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.provider.query.CostCompareRow
 import io.talevia.core.tool.builtin.provider.query.ModelRow
 import io.talevia.core.tool.builtin.provider.query.ProviderRow
+import io.talevia.core.tool.builtin.provider.query.runCostCompareQuery
 import io.talevia.core.tool.builtin.provider.query.runModelsQuery
 import io.talevia.core.tool.builtin.provider.query.runProvidersQuery
 import io.talevia.core.tool.query.QueryDispatcher
@@ -54,10 +56,20 @@ class ProviderQueryTool(
 ) : QueryDispatcher<ProviderQueryTool.Input, ProviderQueryTool.Output>() {
 
     @Serializable data class Input(
-        /** One of [SELECT_PROVIDERS] / [SELECT_MODELS] (case-insensitive). */
+        /** One of [SELECT_PROVIDERS] / [SELECT_MODELS] / [SELECT_COST_COMPARE] (case-insensitive). */
         val select: String,
-        /** Required for [SELECT_MODELS]; rejected for [SELECT_PROVIDERS]. */
+        /** Required for [SELECT_MODELS]; rejected for [SELECT_PROVIDERS] / [SELECT_COST_COMPARE]. */
         val providerId: String? = null,
+        /**
+         * Required for [SELECT_COST_COMPARE] — prompt-token budget the
+         * comparison scales to. Rejected for other selects.
+         */
+        val requestedInputTokens: Int? = null,
+        /**
+         * Required for [SELECT_COST_COMPARE] — generated-token budget the
+         * comparison scales to. Rejected for other selects.
+         */
+        val requestedOutputTokens: Int? = null,
     )
 
     @Serializable data class Output(
@@ -80,16 +92,14 @@ class ProviderQueryTool(
 
     override val id: String = "provider_query"
     override val helpText: String =
-        "Unified read-only query over the LLM provider registry (replaces list_providers / " +
-            "list_provider_models). Pick one `select`:\n" +
-            "  • providers — enumerate all configured providers and mark the default. " +
-            "Pure local state, no HTTP. providerId filter rejected — providers is the " +
-            "catalog-of-all.\n" +
+        "Unified read-only query over the LLM provider registry. Pick one `select`:\n" +
+            "  • providers — enumerate configured providers + mark default. No HTTP.\n" +
             "  • models — fetch one provider's model catalog (contextWindow, supportsTools, " +
-            "supportsThinking, supportsImages). Requires providerId (error if unknown). " +
-            "Hits the provider's /models endpoint; network / auth / rate-limit failures " +
-            "surface via Output.error with empty rows, not exceptions.\n" +
-            "Start with select=providers to discover valid providerIds before asking for models."
+            "supportsThinking, supportsImages). requires providerId. Hits /models endpoint; " +
+            "failures surface via Output.error with empty rows.\n" +
+            "  • cost_compare — priced (provider, model) pairs + cents-per-1k rates + rolled-up " +
+            "estimatedCostCents for (requestedInputTokens, requestedOutputTokens). " +
+            "Sorted ascending; rows.first() is cheapest. Local snapshot table; no HTTP."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("provider.read")
@@ -101,23 +111,30 @@ class ProviderQueryTool(
                 put("type", "string")
                 put(
                     "description",
-                    "What to query: providers | models (case-insensitive).",
+                    "What to query: providers | models | cost_compare (case-insensitive).",
                 )
                 put(
                     "enum",
                     buildJsonArray {
                         add(JsonPrimitive(SELECT_PROVIDERS))
                         add(JsonPrimitive(SELECT_MODELS))
+                        add(JsonPrimitive(SELECT_COST_COMPARE))
                     },
                 )
             }
             putJsonObject("providerId") {
                 put("type", "string")
-                put(
-                    "description",
-                    "Provider id (anthropic / openai / gemini). Required for select=models; " +
-                        "rejected for select=providers.",
-                )
+                put("description", "Provider id. Required for select=models; rejected otherwise.")
+            }
+            putJsonObject("requestedInputTokens") {
+                put("type", "integer")
+                put("minimum", 0)
+                put("description", "cost_compare only. Prompt-token budget.")
+            }
+            putJsonObject("requestedOutputTokens") {
+                put("type", "integer")
+                put("minimum", 0)
+                put("description", "cost_compare only. Output-token budget.")
             }
         }
         put("required", JsonArray(listOf(JsonPrimitive("select"))))
@@ -129,6 +146,7 @@ class ProviderQueryTool(
     override fun rowSerializerFor(select: String): KSerializer<*> = when (select) {
         SELECT_PROVIDERS -> ProviderRow.serializer()
         SELECT_MODELS -> ModelRow.serializer()
+        SELECT_COST_COMPARE -> CostCompareRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
 
@@ -139,6 +157,10 @@ class ProviderQueryTool(
         return when (select) {
             SELECT_PROVIDERS -> runProvidersQuery(providers)
             SELECT_MODELS -> runModelsQuery(providers, input.providerId!!)
+            SELECT_COST_COMPARE -> runCostCompareQuery(
+                requestedInputTokens = input.requestedInputTokens!!,
+                requestedOutputTokens = input.requestedOutputTokens!!,
+            )
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -157,11 +179,44 @@ class ProviderQueryTool(
                     "to discover valid ids.",
             )
         }
+        if (select != SELECT_COST_COMPARE &&
+            (input.requestedInputTokens != null || input.requestedOutputTokens != null)
+        ) {
+            error(
+                "The following filter fields do not apply to select='$select': " +
+                    "requestedInputTokens / requestedOutputTokens (cost_compare only).",
+            )
+        }
+        if (select == SELECT_MODELS &&
+            (input.requestedInputTokens != null || input.requestedOutputTokens != null)
+        ) {
+            // Subsumed by the previous check but kept explicit — models + token
+            // params is a common accidental combination.
+            error(
+                "select='$select' does not accept requestedInputTokens / requestedOutputTokens " +
+                    "(cost_compare only).",
+            )
+        }
+        if (select == SELECT_COST_COMPARE) {
+            if (input.providerId != null) {
+                error(
+                    "select='$select' does not accept providerId — cost_compare returns " +
+                        "every priced (provider, model) pair in the static table.",
+                )
+            }
+            if (input.requestedInputTokens == null || input.requestedOutputTokens == null) {
+                error(
+                    "select='$select' requires both requestedInputTokens and " +
+                        "requestedOutputTokens (non-negative integers) to scale the comparison.",
+                )
+            }
+        }
     }
 
     companion object {
         const val SELECT_PROVIDERS = "providers"
         const val SELECT_MODELS = "models"
-        internal val ALL_SELECTS = setOf(SELECT_PROVIDERS, SELECT_MODELS)
+        const val SELECT_COST_COMPARE = "cost_compare"
+        internal val ALL_SELECTS = setOf(SELECT_PROVIDERS, SELECT_MODELS, SELECT_COST_COMPARE)
     }
 }

@@ -65,13 +65,20 @@ class ToolSpecBudgetGateTest {
      *   - 27_000 (pre-ratchet, cycle 6): 25_253 baseline + ~7% buffer.
      *   - 25_000 (previous cycle): 24_384 measured + ~2.5% buffer,
      *     after five consolidations landed.
-     *   - 22_500 (this cycle): 22_470 measured + ~0.1% buffer, after
+     *   - 22_500 (cycle-31): 22_470 measured + ~0.1% buffer, after
      *     trimming helpText on top-10 offenders (project_query /
      *     session_query / source_query / draft_plan / fork_project /
      *     filter_action / transition_action / track_action /
      *     create_project_from_template / import_media /
      *     project_maintenance_action / update_source_node_body /
      *     todowrite). -1_911 tokens / -7.8%.
+     *   - 22_600 (this cycle, cycle-39): 22_518 measured. +18 tokens
+     *     above prior ceiling; load-bearing addition of
+     *     `provider_query(select=cost_compare)` per
+     *     `docs/decisions/2026-04-23-core-provider-cost-compare-query.md`.
+     *     Cost-compare is a new LLM-facing select that answers
+     *     "cheapest model for this request?" — high-value surface no
+     *     consolidation path shrinks further. ~0.4% buffer.
      *   - 20_000 (next target, R.6 P0 threshold): requires either
      *     deleting ~10 more tools or moving per-action details to a
      *     `list_tools(select=tool_detail)` sidecar so the live spec
@@ -85,7 +92,7 @@ class ToolSpecBudgetGateTest {
      * decision file in `docs/decisions/` alongside the ceiling bump
      * explaining why this number increased.
      */
-    private val CEILING_TOKENS: Int = 22_500
+    private val CEILING_TOKENS: Int = 22_600
 
     @Test
     fun registeredToolSpecsFitWithinCeiling() {
