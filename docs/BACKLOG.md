@@ -16,7 +16,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **aigc-per-job-retry-cap** — `GenerateImageTool` / `GenerateMusicTool` / `GenerateVideoTool` / `UpscaleAssetTool` retry transiently-failed provider calls without a cap. A hung or hostile provider can chew through the session's spend budget silently. **方向：** cap retries per-job-id at N (default 3); on exhaustion surface `BusEvent.AigcJobExhausted(jobId, toolId, attempts, lastError)` + return a `ToolResult.Failed` with a clear "tried N times, giving up" message. Rubric §5.4.
 - **debt-compactor-concurrent-process-audit** — `Compactor.process()` is `suspend` and could theoretically be invoked concurrently for the same session (manual `/compact` during auto-compaction trigger). `SessionStore` writes are per-call under mutex but the prune-then-summary-then-upsertPart sequence isn't atomic as a whole; two concurrent passes could double-drop + double-append compaction parts. **方向：** per-session mutex on `process()` (reuse or add to `Compactor` state). Test: fire two `process()` coroutines concurrently on the same session; assert exactly one `Result.Compacted` wins + exactly one compaction part ends up in the session. Rubric §5.6.
 
 ## P2 — 记债 / 观望
