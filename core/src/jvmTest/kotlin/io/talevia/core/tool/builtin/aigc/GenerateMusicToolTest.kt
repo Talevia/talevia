@@ -5,6 +5,7 @@ import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.SessionId
 import io.talevia.core.SourceNodeId
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.source.consistency.StyleBibleBody
@@ -156,6 +157,74 @@ class GenerateMusicToolTest {
         assertTrue("late-night diner" in sent, "base prompt must still be present: $sent")
         assertEquals(sent, result.data.effectivePrompt)
         assertEquals(listOf("cool-jazz"), result.data.appliedConsistencyBindingIds)
+    }
+
+    /**
+     * A MusicGenEngine that fires warmup phases during `generate(..., onWarmup)` —
+     * models the async-poll Replicate shape so the tool's plumbing (engine
+     * callback → ctx.publishEvent → BusEvent.ProviderWarmup) is exercisable
+     * without standing up HTTP mocks.
+     */
+    private class WarmingFakeEngine(private val bytes: ByteArray) : MusicGenEngine {
+        override val providerId: String = "warming-fake"
+        override suspend fun generate(request: MusicGenRequest): MusicGenResult =
+            generate(request) { }
+
+        override suspend fun generate(
+            request: MusicGenRequest,
+            onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
+        ): MusicGenResult {
+            onWarmup(BusEvent.ProviderWarmup.Phase.Starting)
+            onWarmup(BusEvent.ProviderWarmup.Phase.Ready)
+            return MusicGenResult(
+                music = GeneratedMusic(
+                    audioBytes = bytes,
+                    format = request.format,
+                    durationSeconds = request.durationSeconds,
+                ),
+                provenance = GenerationProvenance(
+                    providerId = providerId,
+                    modelId = request.modelId,
+                    modelVersion = null,
+                    seed = request.seed,
+                    parameters = buildJsonObject { },
+                    createdAtEpochMs = 1_700_000_000_000L,
+                ),
+            )
+        }
+    }
+
+    @Test fun publishesProviderWarmupEventsViaToolContext() = runTest {
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/warmup".toPath(), title = "warmup").id
+        val engine = WarmingFakeEngine(tinyMp3)
+        val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
+
+        val published = mutableListOf<BusEvent>()
+        val warmupCtx = ToolContext(
+            sessionId = SessionId("sess-warm"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { PermissionDecision.Once },
+            emitPart = { },
+            messages = emptyList(),
+            publishEvent = { ev -> published += ev },
+        )
+
+        tool.execute(
+            GenerateMusicTool.Input(prompt = "x", seed = 1L, projectId = pid.value),
+            warmupCtx,
+        )
+
+        val warmups = published.filterIsInstance<BusEvent.ProviderWarmup>()
+        // Starting before Ready; both carry the tool's sessionId and the
+        // engine's providerId so UI subscribers can route per session.
+        assertEquals(
+            listOf(BusEvent.ProviderWarmup.Phase.Starting, BusEvent.ProviderWarmup.Phase.Ready),
+            warmups.map { it.phase },
+        )
+        assertTrue(warmups.all { it.sessionId == SessionId("sess-warm") })
+        assertTrue(warmups.all { it.providerId == "warming-fake" })
     }
 
     @Test fun secondCallWithIdenticalInputsIsLockfileCacheHit() = runTest {

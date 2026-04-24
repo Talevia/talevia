@@ -12,6 +12,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.talevia.core.JsonConfig
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.platform.GeneratedMusic
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.platform.MusicGenEngine
@@ -75,9 +76,18 @@ class ReplicateMusicGenEngine(
 
     override val providerId: String = "replicate"
 
-    override suspend fun generate(request: MusicGenRequest): MusicGenResult {
+    override suspend fun generate(request: MusicGenRequest): MusicGenResult = generate(request) { }
+
+    override suspend fun generate(
+        request: MusicGenRequest,
+        onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): MusicGenResult {
         val wireInput = buildWireInput(request)
         val createBody = buildJsonObject { put("input", wireInput) }
+        // Signal warmup start before any network I/O so a subscriber sees
+        // the "warming up…" line even if the POST itself stalls on TLS
+        // handshake / DNS (which is exactly what the bullet flagged).
+        onWarmup(BusEvent.ProviderWarmup.Phase.Starting)
         val createResp: HttpResponse = httpClient.post("$baseUrl/v1/models/$modelSlug/predictions") {
             bearerAuth(apiKey)
             contentType(ContentType.Application.Json)
@@ -94,7 +104,7 @@ class ReplicateMusicGenEngine(
         val pollUrl = createJson["urls"]?.jsonObject?.get("get")?.jsonPrimitive?.content
             ?: "$baseUrl/v1/predictions/$jobId"
 
-        val finalJob = pollUntilTerminal(pollUrl, jobId)
+        val finalJob = pollUntilTerminal(pollUrl, jobId, onWarmup)
         val status = finalJob["status"]?.jsonPrimitive?.content
         if (status != "succeeded") {
             val err = finalJob["error"]?.takeUnless { it is JsonNull }?.toString().orEmpty()
@@ -132,13 +142,28 @@ class ReplicateMusicGenEngine(
         return MusicGenResult(music = music, provenance = provenance)
     }
 
-    private suspend fun pollUntilTerminal(pollUrl: String, jobId: String): JsonObject {
+    private suspend fun pollUntilTerminal(
+        pollUrl: String,
+        jobId: String,
+        onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): JsonObject {
         val deadline = clock.now().toEpochMilliseconds() + maxWaitMs
+        var readyFired = false
         while (true) {
             val resp: HttpResponse = httpClient.get(pollUrl) { bearerAuth(apiKey) }
             if (resp.status != HttpStatusCode.OK) {
                 val errBody = runCatching { resp.bodyAsText() }.getOrNull().orEmpty()
                 error("Replicate predictions poll failed: ${resp.status} $errBody")
+            }
+            // The first 200 response is the signal that the provider is past
+            // warmup and into the actual job lifecycle — emit `Ready` exactly
+            // once so UI can collapse the "warming up…" notice. Don't tie
+            // this to `status=succeeded` because that fires later and would
+            // miss the whole point (we want to know when the provider
+            // started talking, not when it finished).
+            if (!readyFired) {
+                onWarmup(BusEvent.ProviderWarmup.Phase.Ready)
+                readyFired = true
             }
             val payload = json.parseToJsonElement(resp.bodyAsText()).jsonObject
             val status = payload["status"]?.jsonPrimitive?.content

@@ -10,6 +10,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.platform.MusicGenRequest
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -132,6 +133,77 @@ class ReplicateMusicGenEngineTest {
             engine.generate(MusicGenRequest(prompt = "x", modelId = "m", seed = 1L, durationSeconds = 5.0))
         }
         assertTrue(ex.message!!.contains("status=failed"), ex.message)
+    }
+
+    @Test fun warmupPhasesFireInOrder() = runTest {
+        // Verifies the contract behind BusEvent.ProviderWarmup emission:
+        // Starting is published before the initial POST and Ready is
+        // published on the first successful poll (not on later polls or on
+        // terminal success). Assertions key on ordering and cardinality so
+        // subscribers can rely on `Starting ≺ Ready` and "at-most-one Ready
+        // per generate() call".
+        var calls = 0
+        val http = mockHttp { req ->
+            calls += 1
+            when {
+                req.url.encodedPath.endsWith("/predictions") && req.method.value == "POST" -> respond(
+                    content = """{"id":"pw","status":"starting","urls":{"get":"https://api.replicate.com/v1/predictions/pw"}}""",
+                    status = HttpStatusCode.Created,
+                    headers = jsonHeaders(),
+                )
+                req.url.toString().endsWith("/predictions/pw") -> {
+                    // Two poll responses: first still processing, second terminal.
+                    // Ready should fire on the first (not the second).
+                    val body = if (calls <= 2) {
+                        """{"id":"pw","status":"processing"}"""
+                    } else {
+                        """{"id":"pw","status":"succeeded","output":"https://cdn.replicate.delivery/pw.mp3"}"""
+                    }
+                    respond(content = body, status = HttpStatusCode.OK, headers = jsonHeaders())
+                }
+                req.url.toString().endsWith("pw.mp3") -> respond(
+                    content = ByteReadChannel(audioBody),
+                    status = HttpStatusCode.OK,
+                    headers = audioHeaders(),
+                )
+                else -> error("unexpected ${req.url}")
+            }
+        }
+        val engine = ReplicateMusicGenEngine(http, apiKey = "test", pollIntervalMs = 0L)
+        val phases = mutableListOf<BusEvent.ProviderWarmup.Phase>()
+        engine.generate(
+            MusicGenRequest(prompt = "x", modelId = "m", seed = 1L, durationSeconds = 5.0),
+            onWarmup = { phases += it },
+        )
+        assertEquals(
+            listOf(BusEvent.ProviderWarmup.Phase.Starting, BusEvent.ProviderWarmup.Phase.Ready),
+            phases,
+        )
+    }
+
+    @Test fun warmupStartingFiresEvenIfCreateFails() = runTest {
+        // Starting is emitted before the POST, so a provider that 500s on
+        // create still produces a Starting (no Ready) — UI shows "warming
+        // up…" and then the outer error surface takes over.
+        val http = mockHttp { req ->
+            when {
+                req.url.encodedPath.endsWith("/predictions") && req.method.value == "POST" -> respond(
+                    content = """{"error":"boom"}""",
+                    status = HttpStatusCode.InternalServerError,
+                    headers = jsonHeaders(),
+                )
+                else -> error("unexpected ${req.url}")
+            }
+        }
+        val engine = ReplicateMusicGenEngine(http, apiKey = "test", pollIntervalMs = 0L)
+        val phases = mutableListOf<BusEvent.ProviderWarmup.Phase>()
+        assertFailsWith<IllegalStateException> {
+            engine.generate(
+                MusicGenRequest(prompt = "x", modelId = "m", seed = 1L, durationSeconds = 5.0),
+                onWarmup = { phases += it },
+            )
+        }
+        assertEquals(listOf(BusEvent.ProviderWarmup.Phase.Starting), phases)
     }
 
     @Test fun durationIsCeilInSeconds() = runTest {

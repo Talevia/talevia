@@ -188,6 +188,13 @@ class EventBusMetricsSink(
         is BusEvent.AigcCostRecorded -> "aigc.cost.recorded"
         is BusEvent.AigcCacheProbe ->
             if (event.hit) "aigc.cache.hits.total" else "aigc.cache.misses.total"
+        // Per-phase counters so a Prometheus scrape can alert when
+        // Starting / Ready cardinalities drift (e.g. an engine emits
+        // Starting but never Ready = upstream timeouts before first poll).
+        is BusEvent.ProviderWarmup -> when (event.phase) {
+            BusEvent.ProviderWarmup.Phase.Starting -> "provider.warmup.starting"
+            BusEvent.ProviderWarmup.Phase.Ready -> "provider.warmup.ready"
+        }
     }
 
     /**

@@ -1,5 +1,6 @@
 package io.talevia.core.platform
 
+import io.talevia.core.bus.BusEvent
 import kotlinx.serialization.Serializable
 
 /**
@@ -25,6 +26,22 @@ interface MusicGenEngine {
     val providerId: String
 
     suspend fun generate(request: MusicGenRequest): MusicGenResult
+
+    /**
+     * Warmup-aware variant. Callers that want to surface the provider's
+     * cold-start lag (see [BusEvent.ProviderWarmup]) pass a non-no-op
+     * [onWarmup]; the engine invokes it with `Starting` right before the
+     * first provider HTTP call and `Ready` after the first successful poll
+     * response (or the equivalent first-byte signal for synchronous
+     * providers). Engines with no meaningful warmup window MAY elect not to
+     * call it at all — the default implementation below delegates to the
+     * plain [generate] so existing impls + tests keep working without
+     * change.
+     */
+    suspend fun generate(
+        request: MusicGenRequest,
+        onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): MusicGenResult = generate(request)
 }
 
 /**

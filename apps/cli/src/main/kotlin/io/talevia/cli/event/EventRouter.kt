@@ -46,6 +46,15 @@ class EventRouter(
                 .collect { ev -> renderer.retryNotice(ev.attempt, ev.waitMs, ev.reason) }
         }
         jobs += scope.launch {
+            // Render only the `Starting` edge — by the time `Ready` fires,
+            // streaming has resumed and a "…ready" line would just be noise.
+            // See BusEvent.ProviderWarmup for the broader rationale (M2 exit
+            // summary §3.1 follow-up #4: silent cold-start stall UX).
+            bus.sessionScopedSubscribe<BusEvent.ProviderWarmup>(activeSessionId)
+                .filter { it.phase == BusEvent.ProviderWarmup.Phase.Starting }
+                .collect { ev -> renderer.warmupNotice(ev.providerId) }
+        }
+        jobs += scope.launch {
             bus.sessionScopedSubscribe<BusEvent.SessionCompacted>(activeSessionId)
                 .collect { ev -> renderer.compactedNotice(ev.prunedCount, ev.summaryLength) }
         }

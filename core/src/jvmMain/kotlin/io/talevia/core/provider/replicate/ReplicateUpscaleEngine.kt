@@ -12,6 +12,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.talevia.core.JsonConfig
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.platform.UpscaleEngine
 import io.talevia.core.platform.UpscaleRequest
@@ -73,13 +74,21 @@ class ReplicateUpscaleEngine(
 
     override val providerId: String = "replicate"
 
-    override suspend fun upscale(request: UpscaleRequest): UpscaleResult {
+    override suspend fun upscale(request: UpscaleRequest): UpscaleResult = upscale(request) { }
+
+    override suspend fun upscale(
+        request: UpscaleRequest,
+        onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): UpscaleResult {
         val bytes = File(request.imagePath).readBytes()
         if (bytes.isEmpty()) error("upscale source ${request.imagePath} is empty or unreadable")
         val dataUri = "data:application/octet-stream;base64," + kotlin.io.encoding.Base64.encode(bytes)
 
         val wireInput = buildWireInput(request, dataUri)
         val createBody = buildJsonObject { put("input", wireInput) }
+        // See ReplicateMusicGenEngine: emit before any network I/O so warmup
+        // UI shows even when the POST itself stalls on TLS / DNS.
+        onWarmup(BusEvent.ProviderWarmup.Phase.Starting)
         val createResp: HttpResponse = httpClient.post("$baseUrl/v1/models/$modelSlug/predictions") {
             bearerAuth(apiKey)
             contentType(ContentType.Application.Json)
@@ -96,7 +105,7 @@ class ReplicateUpscaleEngine(
         val pollUrl = createJson["urls"]?.jsonObject?.get("get")?.jsonPrimitive?.content
             ?: "$baseUrl/v1/predictions/$jobId"
 
-        val finalJob = pollUntilTerminal(pollUrl, jobId)
+        val finalJob = pollUntilTerminal(pollUrl, jobId, onWarmup)
         val status = finalJob["status"]?.jsonPrimitive?.content
         if (status != "succeeded") {
             val err = finalJob["error"]?.takeUnless { it is JsonNull }?.toString().orEmpty()
@@ -133,13 +142,24 @@ class ReplicateUpscaleEngine(
         return UpscaleResult(image = image, provenance = provenance)
     }
 
-    private suspend fun pollUntilTerminal(pollUrl: String, jobId: String): JsonObject {
+    private suspend fun pollUntilTerminal(
+        pollUrl: String,
+        jobId: String,
+        onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): JsonObject {
         val deadline = clock.now().toEpochMilliseconds() + maxWaitMs
+        var readyFired = false
         while (true) {
             val resp: HttpResponse = httpClient.get(pollUrl) { bearerAuth(apiKey) }
             if (resp.status != HttpStatusCode.OK) {
                 val errBody = runCatching { resp.bodyAsText() }.getOrNull().orEmpty()
                 error("Replicate predictions poll failed: ${resp.status} $errBody")
+            }
+            // First 200 poll = provider past warmup. See
+            // ReplicateMusicGenEngine.pollUntilTerminal for rationale.
+            if (!readyFired) {
+                onWarmup(BusEvent.ProviderWarmup.Phase.Ready)
+                readyFired = true
             }
             val payload = json.parseToJsonElement(resp.bodyAsText()).jsonObject
             val status = payload["status"]?.jsonPrimitive?.content

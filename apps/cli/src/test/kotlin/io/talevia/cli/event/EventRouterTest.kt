@@ -145,6 +145,46 @@ class EventRouterTest {
         assertTrue("321" in out, "summaryLength missing: <$out>")
     }
 
+    @Test fun providerWarmupStartingRoutesToWarmupNotice() = runTest {
+        // The router renders `Starting` as "warming up <providerId>…" so the
+        // session-cold first AIGC call stops looking like a hang (M2 exit
+        // summary §3.1 follow-up #4).
+        val rig = rig()
+        rig.bus.publish(
+            BusEvent.ProviderWarmup(
+                sessionId = sessionId,
+                providerId = "replicate",
+                phase = BusEvent.ProviderWarmup.Phase.Starting,
+                epochMs = 1_700_000_000_000L,
+            ),
+        )
+        rig.settle()
+        val out = rig.stdout()
+        assertTrue("warming up" in out, "warmupNotice prefix missing: <$out>")
+        assertTrue("replicate" in out, "providerId missing from warmup line: <$out>")
+    }
+
+    @Test fun providerWarmupReadyIsSuppressed() = runTest {
+        // Ready is emitted by the engine so metrics can pair it with
+        // Starting, but the CLI renderer deliberately drops it — by the
+        // time Ready arrives, streaming has resumed and a "…ready" line
+        // would be redundant noise.
+        val rig = rig()
+        rig.bus.publish(
+            BusEvent.ProviderWarmup(
+                sessionId = sessionId,
+                providerId = "replicate",
+                phase = BusEvent.ProviderWarmup.Phase.Ready,
+                epochMs = 1_700_000_000_000L,
+            ),
+        )
+        rig.settle()
+        assertFalse(
+            "warming up" in rig.stdout(),
+            "Ready phase must not render: <${rig.stdout()}>",
+        )
+    }
+
     @Test fun assetsMissingRoutesIgnoresSessionFilter() = runTest {
         // AssetsMissing has no sessionId — the router intentionally skips the
         // active-session filter for this event (commented rationale in
@@ -346,7 +386,7 @@ class EventRouterTest {
         val router = EventRouter(bus, sessions, renderer) { sessionId }
         router.start(backgroundScope)
 
-        // Wait for all 5 subscribe<T>() collectors to install before any
+        // Wait for every subscribe<T>() collector to install before any
         // publish: a replay=0 MutableSharedFlow silently drops events
         // without a live subscriber. Yield repeatedly until the router's
         // launches have definitely installed on the test dispatcher; after

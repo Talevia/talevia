@@ -20,6 +20,7 @@ import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import kotlinx.datetime.Clock
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -193,6 +194,16 @@ class GenerateMusicTool(
                     durationSeconds = input.durationSeconds,
                     format = input.format,
                 ),
+                onWarmup = { phase ->
+                    ctx.publishEvent(
+                        BusEvent.ProviderWarmup(
+                            sessionId = ctx.sessionId,
+                            providerId = engine.providerId,
+                            phase = phase,
+                            epochMs = Clock.System.now().toEpochMilliseconds(),
+                        ),
+                    )
+                },
             )
         }
         val music = result.music

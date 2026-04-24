@@ -1,5 +1,6 @@
 package io.talevia.core.platform
 
+import io.talevia.core.bus.BusEvent
 import kotlinx.serialization.Serializable
 
 /**
@@ -27,6 +28,17 @@ interface UpscaleEngine {
     val providerId: String
 
     suspend fun upscale(request: UpscaleRequest): UpscaleResult
+
+    /**
+     * Warmup-aware variant. See [MusicGenEngine.generate] for the rationale.
+     * Engines invoke [onWarmup] with `Starting` right before the first
+     * provider HTTP call and `Ready` after the first successful poll
+     * response so UI subscribers can surface the cold-start lag.
+     */
+    suspend fun upscale(
+        request: UpscaleRequest,
+        onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): UpscaleResult = upscale(request)
 }
 
 /**

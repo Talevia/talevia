@@ -370,6 +370,28 @@ class Renderer(
     }
 
     /**
+     * Print a one-line notice that an AIGC provider is warming up — the
+     * cold-start connection setup / model load / seed-pinning handshake
+     * that precedes the first useful poll response. Driven by
+     * `BusEvent.ProviderWarmup(phase=Starting)`; the paired `Ready` event
+     * isn't rendered because by the time it fires streaming has resumed
+     * and a redundant "…ready" line would just be noise.
+     *
+     * Without this, session-cold first AIGC calls silently stall for
+     * 2-20s, which is the single most visible "hang" the user sees on a
+     * fresh session (M2 exit summary §3.1 follow-up #4).
+     */
+    suspend fun warmupNotice(providerId: String) = mutex.withLock {
+        breakAssistantLineLocked()
+        markAllPartsUnrepaintableLocked()
+        invalidateBottomLocked()
+        terminal.writer().println(
+            "  ${Styles.running("⟳")} ${Styles.meta("warming up $providerId…")}",
+        )
+        terminal.writer().flush()
+    }
+
+    /**
      * If we're mid-assistant-line (no trailing newline emitted yet), close it
      * so the next printed line starts at column 0. We deliberately do not reset
      * [assistantOpen] — the next delta will still want to flow inline on its

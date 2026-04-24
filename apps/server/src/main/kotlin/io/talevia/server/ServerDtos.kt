@@ -95,6 +95,7 @@ internal fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.AigcCostRecorded -> "aigc.cost.recorded"
     is BusEvent.AigcCacheProbe -> "aigc.cache.probe"
     is BusEvent.AssetsMissing -> "project.assets.missing"
+    is BusEvent.ProviderWarmup -> "provider.warmup"
 }
 
 /**
@@ -161,6 +162,15 @@ data class BusEventDto(
     val assetId: String? = null,
     /** Set for `aigc.cost.recorded` — USD cents (null = no pricing rule). */
     val costCents: Long? = null,
+    /**
+     * Set for `provider.warmup` — the warmup phase
+     * (`"starting"` / `"ready"`). See [BusEvent.ProviderWarmup].
+     */
+    val warmupPhase: String? = null,
+    /** Set for `provider.warmup` — the canonical provider id (e.g. `"replicate"`). */
+    val providerId: String? = null,
+    /** Set for `provider.warmup` — wall-clock epochMs the phase fired at. */
+    val epochMs: Long? = null,
 ) {
     companion object {
         fun from(e: BusEvent): BusEventDto = when (e) {
@@ -259,6 +269,16 @@ data class BusEventDto(
                 "project.assets.missing",
                 sessionId = null,
                 projectId = e.projectId.value,
+            )
+            is BusEvent.ProviderWarmup -> BusEventDto(
+                "provider.warmup",
+                e.sessionId.value,
+                providerId = e.providerId,
+                warmupPhase = when (e.phase) {
+                    BusEvent.ProviderWarmup.Phase.Starting -> "starting"
+                    BusEvent.ProviderWarmup.Phase.Ready -> "ready"
+                },
+                epochMs = e.epochMs,
             )
         }
     }

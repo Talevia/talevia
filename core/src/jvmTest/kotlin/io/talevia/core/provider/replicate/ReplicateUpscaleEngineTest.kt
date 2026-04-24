@@ -10,6 +10,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.headersOf
 import io.ktor.utils.io.ByteReadChannel
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.platform.UpscaleRequest
 import kotlinx.coroutines.test.runTest
 import java.io.File
@@ -135,6 +136,48 @@ class ReplicateUpscaleEngineTest {
             engine.upscale(UpscaleRequest(imagePath = src.absolutePath, modelId = "m", scale = 2, seed = 1L))
         }
         assertTrue(ex.message!!.contains("status=failed"))
+    }
+
+    @Test fun warmupPhasesFireInOrder() = runTest {
+        // Same contract as ReplicateMusicGenEngineTest.warmupPhasesFireInOrder:
+        // Starting before POST, Ready on the first successful poll, not on
+        // later polls or on terminal success.
+        val src = writeSource()
+        var calls = 0
+        val http = mockHttp { req ->
+            calls += 1
+            when {
+                req.url.encodedPath.endsWith("/predictions") && req.method.value == "POST" -> respond(
+                    content = """{"id":"uw","status":"starting","urls":{"get":"https://api.replicate.com/v1/predictions/uw"}}""",
+                    status = HttpStatusCode.Created,
+                    headers = jsonHeaders(),
+                )
+                req.url.toString().endsWith("/predictions/uw") -> {
+                    val body = if (calls <= 2) {
+                        """{"id":"uw","status":"processing"}"""
+                    } else {
+                        """{"id":"uw","status":"succeeded","output":"https://cdn.replicate.delivery/uw.png"}"""
+                    }
+                    respond(content = body, status = HttpStatusCode.OK, headers = jsonHeaders())
+                }
+                req.url.toString().endsWith("uw.png") -> respond(
+                    content = ByteReadChannel(upscaledBytes),
+                    status = HttpStatusCode.OK,
+                    headers = pngHeaders(),
+                )
+                else -> error("unexpected ${req.url}")
+            }
+        }
+        val engine = ReplicateUpscaleEngine(http, apiKey = "test", pollIntervalMs = 0L)
+        val phases = mutableListOf<BusEvent.ProviderWarmup.Phase>()
+        engine.upscale(
+            UpscaleRequest(imagePath = src.absolutePath, modelId = "m", scale = 2, seed = 1L),
+            onWarmup = { phases += it },
+        )
+        assertEquals(
+            listOf(BusEvent.ProviderWarmup.Phase.Starting, BusEvent.ProviderWarmup.Phase.Ready),
+            phases,
+        )
     }
 
     @Test fun emptySourceFailsLoud() = runTest {

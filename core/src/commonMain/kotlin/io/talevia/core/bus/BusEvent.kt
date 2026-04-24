@@ -346,4 +346,40 @@ sealed interface BusEvent {
         val assetId: String,
         val originalPath: String,
     )
+
+    /**
+     * AIGC provider is warming up — the connection setup, model load and
+     * seed-pinning handshake that precede the first useful byte of output.
+     * Published in `Starting → Ready` pairs bracketing the first HTTP round
+     * trip of a long-running provider call; later calls in the same dispatch
+     * do not re-emit (warmup is a cold-start signal, not a per-poll signal).
+     *
+     * Motivation (M2 exit summary §3.1 follow-up #4): the session-cold first
+     * image used to sit silent for ~2-20s with no UI indication — users saw
+     * the assistant go quiet and assumed a hang. Every other visible pause
+     * (retry, compaction, clip render) has a bus event driving a one-line
+     * notice; warmup was the last unvoiced one. CLI / Desktop subscribers
+     * render `Starting` as `warming up <providerId>…` and suppress `Ready`
+     * (redundant once streaming resumes).
+     *
+     * Phase is a 2-state enum (not a sealed class with payloads) because
+     * neither edge carries additional data — epochMs + providerId + sessionId
+     * are sufficient for the "time to first useful byte" metric that falls
+     * out of subtracting paired `Starting`/`Ready` events.
+     *
+     * Not every AIGC engine publishes this — OpenAI's synchronous
+     * `/v1/images/generations` has no separate warmup/streaming split, so
+     * it stays silent. Replicate's async poll shape (create prediction →
+     * poll until terminal) is where the visible lag lives, so the
+     * Replicate-backed engines (`ReplicateMusicGenEngine`,
+     * `ReplicateUpscaleEngine`) are the emitters today.
+     */
+    data class ProviderWarmup(
+        override val sessionId: SessionId,
+        val providerId: String,
+        val phase: Phase,
+        val epochMs: Long,
+    ) : SessionEvent {
+        enum class Phase { Starting, Ready }
+    }
 }
