@@ -144,14 +144,15 @@ class AgentCancellationTest {
         // + ToolCallReady (Running via dispatch launch) before hanging.
         // The dispatch launched inside supervisorScope is also cancelled by
         // the parent, so the Tool part may remain Pending or Running — either
-        // way finalizeCancelled must stamp it Failed with "cancelled".
+        // way finalizeCancelled must stamp it with the dedicated Cancelled
+        // variant (cycle-62 upgrade from `Failed("cancelled: <reason>")`).
         val toolParts = store.listSessionParts(sid).filterIsInstance<Part.Tool>()
         assertTrue(toolParts.isNotEmpty(), "provider should have emitted a tool part before cancel")
         toolParts.forEach { part ->
             val state = part.state
             assertTrue(
-                state is ToolState.Failed && state.message.startsWith("cancelled"),
-                "every in-flight tool part must be stamped Failed/cancelled after cancel; got $state",
+                state is ToolState.Cancelled,
+                "every in-flight tool part must be stamped Cancelled after cancel; got $state",
             )
         }
 

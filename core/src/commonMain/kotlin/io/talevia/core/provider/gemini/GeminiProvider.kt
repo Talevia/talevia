@@ -285,19 +285,25 @@ class GeminiProvider(
                                 put("text", ReplayFormatting.formatTimelineSnapshot(p))
                             }
                             is Part.Tool -> when (val s = p.state) {
-                                // Failed must be replayed as functionCall so
-                                // the paired functionResponse below has a
-                                // matching call to resolve against — same
-                                // invariant as OpenAI's tool_calls/tool and
-                                // Anthropic's tool_use/tool_result. Pending is
-                                // still skipped (no input/callId on the wire).
-                                is ToolState.Running, is ToolState.Completed, is ToolState.Failed -> addJsonObject {
+                                // Failed / Cancelled must be replayed as
+                                // functionCall so the paired functionResponse
+                                // below has a matching call to resolve against
+                                // — same invariant as OpenAI's tool_calls/tool
+                                // and Anthropic's tool_use/tool_result.
+                                // Pending is still skipped (no input/callId
+                                // on the wire).
+                                is ToolState.Running,
+                                is ToolState.Completed,
+                                is ToolState.Failed,
+                                is ToolState.Cancelled,
+                                -> addJsonObject {
                                     putJsonObject("functionCall") {
                                         put("name", p.toolId)
                                         put("args", when (s) {
                                             is ToolState.Running -> s.input
                                             is ToolState.Completed -> s.input
                                             is ToolState.Failed -> s.input ?: JsonObject(emptyMap())
+                                            is ToolState.Cancelled -> s.input ?: JsonObject(emptyMap())
                                             else -> JsonObject(emptyMap())
                                         })
                                     }
@@ -308,7 +314,11 @@ class GeminiProvider(
                         }
                     }
                 }
-                val results = toolParts.filter { it.state is ToolState.Completed || it.state is ToolState.Failed }
+                val results = toolParts.filter {
+                    it.state is ToolState.Completed ||
+                        it.state is ToolState.Failed ||
+                        it.state is ToolState.Cancelled
+                }
                 if (results.isNotEmpty()) addJsonObject {
                     put("role", "user")
                     putJsonArray("parts") {
@@ -320,6 +330,9 @@ class GeminiProvider(
                                         is ToolState.Completed -> put("result", s.outputForLlm)
                                         is ToolState.Failed -> {
                                             put("error", s.message)
+                                        }
+                                        is ToolState.Cancelled -> {
+                                            put("error", "cancelled: ${s.message}")
                                         }
                                         else -> {}
                                     }

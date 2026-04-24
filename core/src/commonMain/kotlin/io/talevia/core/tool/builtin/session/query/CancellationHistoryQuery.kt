@@ -91,16 +91,13 @@ internal suspend fun runCancellationHistoryQuery(
 
     val rowsAll = scoped.map { (mwp, msg) ->
         // `finalizeCancelled` rewrites in-flight tool parts from
-        // Pending/Running to Failed("cancelled: <reason>"). That's the
-        // stable marker — message-level finish=CANCELLED pairs with
-        // tool-level Failed.message prefix so we don't conflate with
+        // Pending/Running to the dedicated [ToolState.Cancelled] variant
+        // (cycle-62 upgrade from `Failed("cancelled: <reason>")`).
+        // Counting by variant avoids any prefix-parsing ambiguity with
         // ordinary tool failures in the same turn.
         val cancelledTools = mwp.parts
             .filterIsInstance<Part.Tool>()
-            .filter {
-                val s = it.state
-                s is ToolState.Failed && s.message.startsWith("cancelled:")
-            }
+            .filter { it.state is ToolState.Cancelled }
         val toolIds = cancelledTools.map { it.toolId }.distinct().sorted()
         CancellationHistoryRow(
             messageId = msg.id.value,

@@ -57,6 +57,7 @@ internal fun Part.preview(): String = when (this) {
             is ToolState.Running -> "running"
             is ToolState.Completed -> "completed"
             is ToolState.Failed -> "error"
+            is ToolState.Cancelled -> "cancelled"
         }
         "$toolId[$state]"
     }

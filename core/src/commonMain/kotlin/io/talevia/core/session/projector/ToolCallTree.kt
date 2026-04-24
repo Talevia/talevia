@@ -106,4 +106,5 @@ private fun ToolState.stateLabel(): String = when (this) {
     is ToolState.Running -> "running"
     is ToolState.Completed -> "completed"
     is ToolState.Failed -> "error"
+    is ToolState.Cancelled -> "cancelled"
 }

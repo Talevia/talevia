@@ -32,8 +32,8 @@ import kotlin.test.assertTrue
  * Coverage for `session_query(select=cancellation_history)`. Edges (§3a #9):
  *  - no cancelled turns → empty rows + distinctive narrative.
  *  - cancelled turn with in-flight tools → row reports the count + distinct
- *    toolIds (set to the `"cancelled: <reason>"` Failed state that
- *    `finalizeCancelled` stamps).
+ *    toolIds (set to the dedicated `ToolState.Cancelled` variant that
+ *    `finalizeCancelled` stamps as of cycle-62).
  *  - cancelled turn without in-flight tools → zero count + empty ids list.
  *  - mixed error / cancelled / end_turn messages → only CANCELLED ones surface.
  *  - messageId filter → narrows to one specific cancelled turn.
@@ -106,7 +106,7 @@ class SessionQueryCancellationHistoryTest {
         messageId: String,
         sid: SessionId,
         toolId: String,
-        cancelledMessage: String,
+        state: ToolState,
     ): Part.Tool = Part.Tool(
         id = PartId(partId),
         messageId = MessageId(messageId),
@@ -114,7 +114,7 @@ class SessionQueryCancellationHistoryTest {
         createdAt = Instant.fromEpochMilliseconds(0),
         callId = CallId("call-$partId"),
         toolId = toolId,
-        state = ToolState.Failed(input = JsonObject(emptyMap()), message = cancelledMessage),
+        state = state,
     )
 
     private fun decode(out: SessionQueryTool.Output): List<CancellationHistoryRow> =
@@ -142,11 +142,11 @@ class SessionQueryCancellationHistoryTest {
                 assistant("a-cancel", sid, 1_000, FinishReason.CANCELLED, error = "user ctrl-c"),
             ),
             parts = listOf(
-                toolPart("p1", "a-cancel", sid, "generate_image", "cancelled: user ctrl-c"),
-                toolPart("p2", "a-cancel", sid, "generate_image", "cancelled: user ctrl-c"),
-                toolPart("p3", "a-cancel", sid, "synthesize_speech", "cancelled: user ctrl-c"),
+                toolPart("p1", "a-cancel", sid, "generate_image", ToolState.Cancelled(input = JsonObject(emptyMap()), message = "user ctrl-c")),
+                toolPart("p2", "a-cancel", sid, "generate_image", ToolState.Cancelled(input = JsonObject(emptyMap()), message = "user ctrl-c")),
+                toolPart("p3", "a-cancel", sid, "synthesize_speech", ToolState.Cancelled(input = JsonObject(emptyMap()), message = "user ctrl-c")),
                 // Same-message normal Failed (not cancelled) — must NOT count.
-                toolPart("p4", "a-cancel", sid, "read_file", "ENOENT"),
+                toolPart("p4", "a-cancel", sid, "read_file", ToolState.Failed(input = JsonObject(emptyMap()), message = "ENOENT")),
             ),
         )
         val rows = decode(
@@ -159,7 +159,7 @@ class SessionQueryCancellationHistoryTest {
         val row = rows.single()
         assertEquals("a-cancel", row.messageId)
         assertEquals("user ctrl-c", row.reason)
-        assertEquals(3, row.inFlightToolCallCount, "only cancelled-prefix tool parts count")
+        assertEquals(3, row.inFlightToolCallCount, "only Cancelled-state tool parts count")
         assertEquals(
             listOf("generate_image", "synthesize_speech"),
             row.inFlightToolIds,

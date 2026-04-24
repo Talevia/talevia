@@ -109,7 +109,8 @@ private fun buildMessages(request: LlmRequest, json: Json): JsonArray = buildJso
                 val replayable = toolParts.filter {
                     it.state is ToolState.Running ||
                         it.state is ToolState.Completed ||
-                        it.state is ToolState.Failed
+                        it.state is ToolState.Failed ||
+                        it.state is ToolState.Cancelled
                 }
                 if (text.isNotEmpty()) {
                     put("content", text)
@@ -131,8 +132,10 @@ private fun buildMessages(request: LlmRequest, json: Json): JsonArray = buildJso
                                     // missing required field). Replay as {} so
                                     // the entry is well-formed; the paired
                                     // `role: tool` message below still carries
-                                    // the error text.
+                                    // the error text. Cancelled is the same
+                                    // shape — null input → {}.
                                     is ToolState.Failed -> s.input ?: JsonObject(emptyMap())
+                                    is ToolState.Cancelled -> s.input ?: JsonObject(emptyMap())
                                     else -> JsonObject(emptyMap())
                                 }
                                 put("arguments", json.encodeToString(JsonElement.serializer(), input))
@@ -143,7 +146,7 @@ private fun buildMessages(request: LlmRequest, json: Json): JsonArray = buildJso
             }
             for (p in toolParts) {
                 val s = p.state
-                if (s is ToolState.Completed || s is ToolState.Failed) {
+                if (s is ToolState.Completed || s is ToolState.Failed || s is ToolState.Cancelled) {
                     addJsonObject {
                         put("role", "tool")
                         put("tool_call_id", p.callId.value)
@@ -152,6 +155,7 @@ private fun buildMessages(request: LlmRequest, json: Json): JsonArray = buildJso
                             when (s) {
                                 is ToolState.Completed -> s.outputForLlm
                                 is ToolState.Failed -> s.message
+                                is ToolState.Cancelled -> "cancelled: ${s.message}"
                                 else -> ""
                             },
                         )

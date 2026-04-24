@@ -48,6 +48,7 @@ object TokenEstimator {
             is ToolState.Completed -> s.estimatedTokens
                 ?: (24 + forJson(s.input) + forText(s.outputForLlm) + forJson(s.data))
             is ToolState.Failed -> 24 + (s.input?.let(::forJson) ?: 0) + forText(s.message)
+            is ToolState.Cancelled -> 24 + (s.input?.let(::forJson) ?: 0) + forText(s.message)
         }
         is Part.Media -> forMedia(resolveAsset(part.assetId)?.metadata?.resolution)
         is Part.TimelineSnapshot -> forText(part.timeline.toString())

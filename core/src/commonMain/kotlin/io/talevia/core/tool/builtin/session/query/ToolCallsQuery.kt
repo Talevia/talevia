@@ -51,6 +51,7 @@ internal suspend fun runToolCallsQuery(
                 is ToolState.Running -> "running"
                 is ToolState.Completed -> "completed"
                 is ToolState.Failed -> "error"
+                is ToolState.Cancelled -> "cancelled"
             },
             title = p.title,
             createdAtEpochMs = p.createdAt.toEpochMilliseconds(),

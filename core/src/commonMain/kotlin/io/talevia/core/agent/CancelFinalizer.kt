@@ -12,21 +12,21 @@ import io.talevia.core.session.ToolState
  * Tool parts left in `Pending` or `Running`.
  *
  * Extracted from [Agent]'s private `finalizeCancelled` so the orchestration
- * file stays under the R.5.4 500-LOC threshold. Every byte of behaviour is
- * preserved — same `FinishReason.CANCELLED` stamp on the assistant
- * message, same `ToolState.Failed(input, "cancelled: <reason>")` stamp on
- * in-flight tool parts, same non-fatal `runCatching` around both store
- * calls.
- *
- * **Why Failed instead of a new Cancelled variant?** The `ToolState`
- * sealed hierarchy has 47 exhaustive `when` call sites across providers,
- * serialisers, UI, and tests. A fifth variant would touch every one for
- * a signal that the `"cancelled: "` message prefix captures cleanly. See
- * the cycle-50 cancel-stamp commit body for the full rationale.
+ * file stays under the R.5.4 500-LOC threshold. Stamps:
+ *  - `FinishReason.CANCELLED` on the assistant message (with the cancel
+ *    reason copied to `Message.Assistant.error`).
+ *  - `ToolState.Cancelled(input, reason)` on every Tool part of that
+ *    message currently in `Pending` or `Running` state. Cycle-62
+ *    upgraded this from `Failed("cancelled: <reason>")` to the
+ *    dedicated `Cancelled` variant so downstream consumers can
+ *    distinguish run-level cancel from tool-level error without
+ *    parsing the `Failed.message` prefix.
  *
  * Safe to call when `assistantId == null` (no assistant message was
  * spawned before cancel — nothing to update), or when the message is
- * unknown / already-finished (no-op on both).
+ * unknown / already-finished (no-op on both). The two store writes are
+ * each wrapped in `runCatching` so a transient persistence error never
+ * blocks the cancel path itself.
  */
 internal suspend fun finalizeCancelled(
     store: SessionStore,
@@ -47,8 +47,10 @@ internal suspend fun finalizeCancelled(
     // the cancel lands here stamped Pending or Running. Without this pass
     // the part would stay "in progress" forever in the session log —
     // misleading any post-mortem query (run_failure, listMessagesWithParts)
-    // about what actually happened. Stamp them Failed with a "cancelled"
-    // message so the audit trail matches the message-level finish.
+    // about what actually happened. Stamp them with the dedicated
+    // [ToolState.Cancelled] variant so consumers can distinguish run-
+    // level cancel from tool-level failure without parsing message
+    // prefixes (cycle-62 upgraded from `Failed("cancelled: <reason>")`).
     val msg = reason ?: "cancelled"
     runCatching {
         val parts = store.listSessionParts(existing.sessionId, includeCompacted = true)
@@ -57,11 +59,15 @@ internal suspend fun finalizeCancelled(
             val state = part.state
             val input = when (state) {
                 is ToolState.Running -> state.input
-                ToolState.Pending, is ToolState.Completed, is ToolState.Failed -> null
+                ToolState.Pending,
+                is ToolState.Completed,
+                is ToolState.Failed,
+                is ToolState.Cancelled,
+                -> null
             }
             if (state !is ToolState.Pending && state !is ToolState.Running) continue
             val updated = part.copy(
-                state = ToolState.Failed(input = input, message = "cancelled: $msg"),
+                state = ToolState.Cancelled(input = input, message = msg),
             )
             runCatching { store.upsertPart(updated) }
         }

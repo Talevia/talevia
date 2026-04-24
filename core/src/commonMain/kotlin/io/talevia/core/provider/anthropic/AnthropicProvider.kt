@@ -322,14 +322,19 @@ class AnthropicProvider(
                                 put("text", p.text)
                             }
                             is Part.Tool -> when (val s = p.state) {
-                                // Failed tool calls MUST be replayed as
-                                // tool_use too: the paired tool_result below
-                                // references p.callId via tool_use_id, and
-                                // Anthropic rejects any tool_result that
-                                // doesn't resolve to a tool_use in the
-                                // preceding assistant turn. Pending is still
-                                // skipped — no callId yet on the wire.
-                                is ToolState.Running, is ToolState.Completed, is ToolState.Failed -> addJsonObject {
+                                // Failed / Cancelled tool calls MUST be
+                                // replayed as tool_use too: the paired
+                                // tool_result below references p.callId via
+                                // tool_use_id, and Anthropic rejects any
+                                // tool_result that doesn't resolve to a
+                                // tool_use in the preceding assistant turn.
+                                // Pending is still skipped — no callId yet
+                                // on the wire.
+                                is ToolState.Running,
+                                is ToolState.Completed,
+                                is ToolState.Failed,
+                                is ToolState.Cancelled,
+                                -> addJsonObject {
                                     put("type", "tool_use")
                                     put("id", p.callId.value)
                                     put("name", p.toolId)
@@ -343,6 +348,7 @@ class AnthropicProvider(
                                         // still surfaces the error via
                                         // is_error=true.
                                         is ToolState.Failed -> s.input ?: JsonObject(emptyMap())
+                                        is ToolState.Cancelled -> s.input ?: JsonObject(emptyMap())
                                         else -> JsonObject(emptyMap())
                                     })
                                 }
@@ -360,7 +366,11 @@ class AnthropicProvider(
                         }
                     })
                 }
-                val results = toolParts.filter { it.state is ToolState.Completed || it.state is ToolState.Failed }
+                val results = toolParts.filter {
+                    it.state is ToolState.Completed ||
+                        it.state is ToolState.Failed ||
+                        it.state is ToolState.Cancelled
+                }
                 if (results.isNotEmpty()) addJsonObject {
                     put("role", "user")
                     put("content", buildJsonArray {
@@ -371,6 +381,13 @@ class AnthropicProvider(
                                 is ToolState.Completed -> put("content", s.outputForLlm)
                                 is ToolState.Failed -> {
                                     put("content", s.message)
+                                    put("is_error", true)
+                                }
+                                is ToolState.Cancelled -> {
+                                    // Replay cancellation as a Failed-shape tool_result so
+                                    // Anthropic accepts the message; the agent on the next
+                                    // turn sees the cancel reason verbatim.
+                                    put("content", "cancelled: ${s.message}")
                                     put("is_error", true)
                                 }
                                 else -> {}

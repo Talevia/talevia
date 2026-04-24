@@ -101,6 +101,7 @@ class EventRouter(
                             is ToolState.Running -> renderer.toolRunning(p.id, p.toolId)
                             is ToolState.Completed -> renderer.toolCompleted(p.id, p.toolId, s.outputForLlm)
                             is ToolState.Failed -> renderer.toolFailed(p.id, p.toolId, s.message)
+                            is ToolState.Cancelled -> renderer.toolFailed(p.id, p.toolId, "cancelled: ${s.message}")
                             ToolState.Pending -> Unit
                         }
                         is Part.RenderProgress -> renderer.renderProgress(

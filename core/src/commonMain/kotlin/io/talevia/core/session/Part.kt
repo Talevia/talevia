@@ -312,4 +312,21 @@ sealed class ToolState {
 
     @Serializable @SerialName("error")
     data class Failed(val input: JsonElement?, val message: String) : ToolState()
+
+    /**
+     * The tool dispatch was cancelled mid-flight (Agent.run cancelled via
+     * `agent.cancel(sessionId)` / CLI Ctrl-C / `BusEvent.SessionCancelRequested`).
+     * Distinct from [Failed] so downstream consumers can render
+     * "cancelled" differently from "errored" (UI emoji, agent post-mortem
+     * reasoning, audit logs) without parsing the [Failed.message] prefix.
+     *
+     * Stamped by [io.talevia.core.agent.finalizeCancelled] for any
+     * `Pending` / `Running` Tool part on the cancelled assistant message.
+     * The optional [input] preserves whatever the LLM had streamed up to
+     * the cancel point (null when the part was still in `Pending` —
+     * arguments hadn't streamed yet); [message] carries the cancel
+     * reason from `CancellationException.message` when available.
+     */
+    @Serializable @SerialName("cancelled")
+    data class Cancelled(val input: JsonElement?, val message: String) : ToolState()
 }
