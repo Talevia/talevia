@@ -1,6 +1,7 @@
 package io.talevia.core.domain.render
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 
 /**
  * Per-clip mezzanine memo — the fine-grained counterpart to [RenderCache].
@@ -37,17 +38,34 @@ import kotlinx.serialization.Serializable
 data class ClipRenderCache(
     val entries: List<ClipRenderCacheEntry> = emptyList(),
 ) {
+    /**
+     * Fingerprint → most recent [ClipRenderCacheEntry] with that fingerprint.
+     *
+     * Reconstructed from [entries] on deserialize via the default lazy-init
+     * pattern [io.talevia.core.domain.lockfile.Lockfile.byInputHash] already
+     * uses. [List.associateBy] overwrites on duplicate keys, so the resulting
+     * entry is the last one in insertion order — matching the original
+     * `entries.lastOrNull { … }` last-wins semantic exactly.
+     *
+     * `@Transient` means it's recomputed on every construction (including
+     * deserialize + every `copy(entries = …)`); the field doesn't touch the
+     * serialized shape, so pre-existing `clip-render-cache.json` files
+     * decode as before.
+     */
+    @Transient
+    val byFingerprint: Map<String, ClipRenderCacheEntry> = entries.associateBy { it.fingerprint }
+
     fun findByFingerprint(fingerprint: String): ClipRenderCacheEntry? =
-        entries.lastOrNull { it.fingerprint == fingerprint }
+        byFingerprint[fingerprint]
 
     fun append(entry: ClipRenderCacheEntry): ClipRenderCache = copy(entries = entries + entry)
 
     /**
      * Keep only entries whose `fingerprint` is in [keep]; drop the rest. Used
      * by [io.talevia.core.tool.builtin.project.ProjectMaintenanceActionTool] to prune
-     * policy-selected rows. Preserves append order among survivors so
-     * downstream consumers that rely on `lastOrNull { … }` (the "latest wins"
-     * contract in [findByFingerprint]) keep matching the same entry.
+     * policy-selected rows. Preserves append order among survivors so the
+     * "latest wins" contract in [findByFingerprint] keeps matching the same
+     * entry after the prune.
      */
     fun retainByFingerprint(keep: Set<String>): ClipRenderCache =
         copy(entries = entries.filter { it.fingerprint in keep })
