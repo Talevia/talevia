@@ -54,10 +54,10 @@ bullet 打 tag；现有 bullet 不手动 backfill。
   同一 session 反复调用 `generate_image` 能看到数字累加
   （grep: `spend_summary` 或 `aigc_spend` 在 SessionQueryTool；handler
   消费 `LockfileEntry.cost` / `ProviderUsage` 类字段） — cycle 2026-04-24 7862ce7d
-- [ ] Fallback 生产回归测试：e2e test 覆盖 "provider A 抛 `ProviderError` →
+- [x] Fallback 生产回归测试：e2e test 覆盖 "provider A 抛 `ProviderError` →
   `AgentProviderFallbackTracker` 切 provider B → 产物仍正确落地"
   （grep: jvmTest 里有 `ProviderFallback` / `FallbackChain` 相关测试 +
-  `assertEquals` 断言最终 assetId / provenance.providerId 是 B）
+  `assertEquals` 断言最终 assetId / provenance.providerId 是 B） — cycle 2026-04-24 c3bad022
 - [x] Seed 复现证明：seed + inputs 相同时重跑 `generate_image` 得到 bit-identical
   `GenerationProvenance` + 同 assetId（或 lockfile cache-hit）——验证 Talevia
   的随机边界契约真的锁住了
