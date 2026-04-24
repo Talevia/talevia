@@ -108,6 +108,7 @@ internal class SlashCommandDispatcher(
                 }
             }
             "cost" -> renderer.println(costSummary(currentSession))
+            "spend" -> renderer.println(spendSummary(currentSession))
             "todos" -> renderer.println(todosSummary(currentSession))
             "status" -> renderer.println(statusLine(projectId, currentSession, currentModel))
             "history" -> renderer.println(historyTable(currentSession))
@@ -351,6 +352,59 @@ internal class SlashCommandDispatcher(
             TodoStatus.COMPLETED, TodoStatus.CANCELLED -> Styles.meta(row)
             TodoStatus.PENDING -> row
         }
+    }
+
+    /**
+     * `/spend` surfaces `session_query(select=spend_summary)` through a
+     * CLI shortcut — the AIGC dollar roll-up is different from `/cost`'s
+     * LLM-token totals. Same data an agent would see via the tool; the
+     * slash form saves the user from hand-typing
+     * `session_query(select=spend_summary, sessionId=...)` every time
+     * they want to answer "how much am I burning on image gen this
+     * session?".
+     *
+     * Implementation: construct a fresh `SessionQueryTool` wired to the
+     * container's stores and decode the single-row `SessionSpendSummaryRow`
+     * from the output. Zero new schema — we reuse the existing query
+     * handler so the CLI view can't drift from what the agent sees.
+     */
+    private suspend fun spendSummary(sessionId: SessionId): String {
+        val tool = io.talevia.core.tool.builtin.session.SessionQueryTool(
+            sessions = container.sessions,
+            agentStates = container.agentStates,
+            projects = container.projects,
+        )
+        val ctx = io.talevia.core.tool.ToolContext(
+            sessionId = sessionId,
+            messageId = io.talevia.core.MessageId("slash-spend"),
+            callId = io.talevia.core.CallId("slash-spend"),
+            askPermission = { io.talevia.core.permission.PermissionDecision.Once },
+            emitPart = { },
+            messages = emptyList(),
+        )
+        val out = runCatching {
+            tool.execute(
+                io.talevia.core.tool.builtin.session.SessionQueryTool.Input(
+                    select = io.talevia.core.tool.builtin.session.SessionQueryTool.SELECT_SPEND_SUMMARY,
+                    sessionId = sessionId.value,
+                ),
+                ctx,
+            )
+        }.getOrElse { e ->
+            return Styles.meta("/spend: ${e.message ?: e::class.simpleName}")
+        }
+        val row = runCatching {
+            io.talevia.core.JsonConfig.default.decodeFromJsonElement(
+                kotlinx.serialization.builtins.ListSerializer(
+                    io.talevia.core.tool.builtin.session.query.SessionSpendSummaryRow.serializer(),
+                ),
+                out.data.rows,
+            ).single()
+        }.getOrElse { e ->
+            return Styles.meta("/spend: failed to decode row — ${e.message}")
+        }
+
+        return formatSpendSummary(row)
     }
 
     private suspend fun costSummary(sessionId: SessionId): String {
