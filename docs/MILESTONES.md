@@ -45,15 +45,15 @@ bullet 打 tag；现有 bullet 不手动 backfill。
   ImageGenEngine` 或同类 interface 的 prod 实现在
   `core/src/*Main/` 或 `platform-impls/*/src/main/` 下计数 ≥ 2；
   `AgentProviderFallbackTracker` 有真实 chain 可填）
-- [ ] Pin 命中率可见：`project_query` 有 select 答 "export 了几次、有多少
+- [x] Pin 命中率可见：`project_query` 有 select 答 "export 了几次、有多少
   clip 的 asset 从 lockfile cache 命中（无需重跑 AIGC）"
   （grep: 新 select 如 `lockfile_cache_stats` / `pin_hit_rate` 在
-  ProjectQueryTool ALL_SELECTS + handler 实现）
-- [ ] 成本可见：`session_query(select=spend_summary)` 或等价 select 聚合
+  ProjectQueryTool ALL_SELECTS + handler 实现） — cycle 2026-04-24 08223ac3
+- [x] 成本可见：`session_query(select=spend_summary)` 或等价 select 聚合
   per-session AIGC spend（至少按 provider 分档，有 tokens / USD 估算），
   同一 session 反复调用 `generate_image` 能看到数字累加
   （grep: `spend_summary` 或 `aigc_spend` 在 SessionQueryTool；handler
-  消费 `LockfileEntry.cost` / `ProviderUsage` 类字段）
+  消费 `LockfileEntry.cost` / `ProviderUsage` 类字段） — cycle 2026-04-24 7862ce7d
 - [ ] Fallback 生产回归测试：e2e test 覆盖 "provider A 抛 `ProviderError` →
   `AgentProviderFallbackTracker` 切 provider B → 产物仍正确落地"
   （grep: jvmTest 里有 `ProviderFallback` / `FallbackChain` 相关测试 +

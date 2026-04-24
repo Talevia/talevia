@@ -22,6 +22,7 @@ import io.talevia.core.tool.builtin.session.query.RunFailureRow
 import io.talevia.core.tool.builtin.session.query.RunStateTransitionRow
 import io.talevia.core.tool.builtin.session.query.SessionMetadataRow
 import io.talevia.core.tool.builtin.session.query.SessionRow
+import io.talevia.core.tool.builtin.session.query.SessionSpendSummaryRow
 import io.talevia.core.tool.builtin.session.query.SpendSummaryRow
 import io.talevia.core.tool.builtin.session.query.StatusRow
 import io.talevia.core.tool.builtin.session.query.ToolCallRow
@@ -40,6 +41,7 @@ import io.talevia.core.tool.builtin.session.query.runRunStateHistoryQuery
 import io.talevia.core.tool.builtin.session.query.runSessionMetadataQuery
 import io.talevia.core.tool.builtin.session.query.runSessionsQuery
 import io.talevia.core.tool.builtin.session.query.runSpendQuery
+import io.talevia.core.tool.builtin.session.query.runSpendSummaryQuery
 import io.talevia.core.tool.builtin.session.query.runStatusQuery
 import io.talevia.core.tool.builtin.session.query.runToolCallsQuery
 import io.talevia.core.tool.builtin.session.query.runToolSpecBudgetQuery
@@ -180,6 +182,10 @@ class SessionQueryTool(
             "  • message — single-row drill-down + per-part summaries. requires messageId.\n" +
             "  • spend — single-row AIGC cost aggregate for this session's current project. " +
             "requires sessionId.\n" +
+            "  • spend_summary — per-provider roll-up of this session's AIGC spend: " +
+            "(totalCalls, totalTokens?, estimatedUsdCents?, perProviderBreakdown[providerId, " +
+            "calls, tokens?, usdCents?, unknownCalls]). Complements `spend` (grouped by tool) " +
+            "with a provider lens. requires sessionId.\n" +
             "  • context_pressure — (currentEstimate, threshold, ratio, marginTokens, " +
             "overThreshold, messageCount); ratio un-clamped > 1.0 when over. requires sessionId.\n" +
             "  • tool_spec_budget — registry-wide (toolCount, estimatedTokens, specBytes, " +
@@ -210,6 +216,7 @@ class SessionQueryTool(
         SELECT_SESSION_METADATA -> SessionMetadataRow.serializer()
         SELECT_MESSAGE -> MessageDetailRow.serializer()
         SELECT_SPEND -> SpendSummaryRow.serializer()
+        SELECT_SPEND_SUMMARY -> SessionSpendSummaryRow.serializer()
         SELECT_CACHE_STATS -> CacheStatsRow.serializer()
         SELECT_CONTEXT_PRESSURE -> ContextPressureRow.serializer()
         SELECT_RUN_STATE_HISTORY -> RunStateTransitionRow.serializer()
@@ -238,6 +245,7 @@ class SessionQueryTool(
             SELECT_SESSION_METADATA -> runSessionMetadataQuery(sessions, input)
             SELECT_MESSAGE -> runMessageDetailQuery(sessions, input)
             SELECT_SPEND -> runSpendQuery(sessions, projects, input)
+            SELECT_SPEND_SUMMARY -> runSpendSummaryQuery(sessions, projects, input)
             SELECT_CACHE_STATS -> runCacheStatsQuery(sessions, input)
             SELECT_CONTEXT_PRESSURE -> runContextPressureQuery(sessions, input)
             SELECT_RUN_STATE_HISTORY -> runRunStateHistoryQuery(sessions, agentStates, input, limit, offset)
@@ -305,6 +313,7 @@ class SessionQueryTool(
         const val SELECT_SESSION_METADATA = "session_metadata"
         const val SELECT_MESSAGE = "message"
         const val SELECT_SPEND = "spend"
+        const val SELECT_SPEND_SUMMARY = "spend_summary"
         const val SELECT_CACHE_STATS = "cache_stats"
         const val SELECT_CONTEXT_PRESSURE = "context_pressure"
         const val SELECT_RUN_STATE_HISTORY = "run_state_history"
@@ -314,7 +323,8 @@ class SessionQueryTool(
         internal val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
             SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
-            SELECT_SESSION_METADATA, SELECT_MESSAGE, SELECT_SPEND, SELECT_CACHE_STATS,
+            SELECT_SESSION_METADATA, SELECT_MESSAGE, SELECT_SPEND, SELECT_SPEND_SUMMARY,
+            SELECT_CACHE_STATS,
             SELECT_CONTEXT_PRESSURE, SELECT_RUN_STATE_HISTORY, SELECT_TOOL_SPEC_BUDGET,
             SELECT_RUN_FAILURE, SELECT_ACTIVE_RUN_SUMMARY,
         )

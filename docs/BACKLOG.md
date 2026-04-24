@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **m2-spend-summary-select** — M2 criterion 4："成本可见"。每次 AIGC 调用后 `LockfileEntry` 记了 `providerId + modelId`，但 session 无聚合 spend 视图。**方向：** `session_query(select=spend_summary)` 聚合 per-session AIGC spend，按 provider 分档，含 `{totalCalls, totalTokens, estimatedUsdCents, perProviderBreakdown}`；从 LockfileEntry 的 cost / ProviderUsage 消费（若 cost 字段未加，先加 default 0.0 占位）。Rubric §5.7。Milestone §M2.
 - **m2-seed-reproducibility-test** — M2 criterion 6："seed 复现证明"。缺 e2e test 证明 seed + inputs 相同 → 产 bit-identical assetId 或 lockfile cache-hit。**方向：** jvmTest 加 e2e："generate_image with seed=42 twice, assert same assetId or cache-hit"；复用 `RefactorLoopE2ETest` 的 `CountingImageEngine` 引入 "deterministic-stub" mode（相同 seed → 相同 bytes）。Rubric §5.7。Milestone §M2.
 
 ## P1 — 中优，做完 P0 再排
