@@ -32,6 +32,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 import kotlin.time.Duration
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -252,15 +253,23 @@ class SynthesizeSpeechTool(
 
         val newAssetId = AssetId(Uuid.random().toString())
         val bundleSource = bundleBlobWriter.writeBlob(pid, newAssetId, result.audio.audioBytes, result.audio.format)
-        // Duration / sample rate would need an audio probe to fill in honestly. The TTS
-        // endpoint doesn't echo a duration and we have no portable audio probe in
-        // commonMain — leaving it Duration.ZERO is the same compromise the image
-        // engine makes for non-image dimensions.
+        // Probe the audio bytes for duration using the pure-Kotlin probe in
+        // `core.platform.audio`. The probe handles MP3 (the OpenAI default)
+        // via frame-header scanning + Xing/Info VBR tag when present; non-
+        // MP3 formats return null and fall back to Duration.ZERO preserving
+        // the prior behaviour for them. Sample rate stays 0 for now — the
+        // probe could expose it but no consumer reads it and MediaMetadata's
+        // own shape doesn't carry an audio sample rate field.
+        val durationMs = io.talevia.core.platform.audio.probeAudioDurationMs(
+            result.audio.audioBytes,
+            result.audio.format,
+        )
+        val resolvedDuration = durationMs?.milliseconds ?: Duration.ZERO
         val newAsset = MediaAsset(
             id = newAssetId,
             source = bundleSource,
             metadata = MediaMetadata(
-                duration = Duration.ZERO,
+                duration = resolvedDuration,
                 resolution = Resolution(0, 0),
                 frameRate = null,
             ),

@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **tts-result-duration-probe** — `TtsResult.audio` 的 `Duration.ZERO` 是 SynthesizeSpeechTool 代码里明确注释过的 TODO（"The TTS endpoint doesn't echo a duration and we have no portable audio probe in commonMain"）。任何 `session_query(select=spend_summary)` 之后的 "这段 vlog 多长" 都拿不到正确答案，也阻塞了未来的 "audio-only timeline 时长估算"。**方向：** 在 commonMain 给 TtsEngine 暴露 `probe(bytes, format)` 抽象；JVM 走 javax.sound / ffprobe，iOS/Android 平台各自填。Rubric §5.2 / §5.4。Milestone §later.
 - **export-per-clip-incremental-render** — CLAUDE.md "Known incomplete" 列出；M2 exit summary 也承认是 AIGC 驯服之外最明显的 §5.3 洞。`ExportTool` 只 memoize 整-timeline；改一个 clip 触发全 timeline hash miss，重渲。长项目小改动 × 这条成本最高。**方向：** `render(project)` 变 `render(project, priorCache = ...)` —— per-clip fingerprint 命中复用之前的 mezzanine，其他 clip 走 fresh path。Rubric §5.3 / §5.7。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排
