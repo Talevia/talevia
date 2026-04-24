@@ -8,6 +8,7 @@ import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.session.query.ActiveRunSummaryRow
 import io.talevia.core.tool.builtin.session.query.AncestorRow
 import io.talevia.core.tool.builtin.session.query.CacheStatsRow
 import io.talevia.core.tool.builtin.session.query.CompactionRow
@@ -24,6 +25,7 @@ import io.talevia.core.tool.builtin.session.query.SpendSummaryRow
 import io.talevia.core.tool.builtin.session.query.StatusRow
 import io.talevia.core.tool.builtin.session.query.ToolCallRow
 import io.talevia.core.tool.builtin.session.query.ToolSpecBudgetRow
+import io.talevia.core.tool.builtin.session.query.runActiveRunSummaryQuery
 import io.talevia.core.tool.builtin.session.query.runAncestorsQuery
 import io.talevia.core.tool.builtin.session.query.runCacheStatsQuery
 import io.talevia.core.tool.builtin.session.query.runCompactionsQuery
@@ -176,6 +178,8 @@ class SessionQueryTool(
             "registryResolved, topByTokens[5]). Session-independent — sessionId rejected.\n" +
             "  • run_failure — post-mortem for failed turns (terminalCause + stepFinishErrors); " +
             "requires sessionId; optional messageId drills to one turn.\n" +
+            "  • active_run_summary — running stats for the latest turn (state, elapsedMs, " +
+            "tokensIn/Out, toolCallCount, compactionsInRun). requires sessionId.\n" +
             "Common: limit (default 100, clamped 1..1000), offset (default 0). Filter-on-" +
             "wrong-select fails loud."
     override val inputSerializer: KSerializer<Input> = serializer()
@@ -203,6 +207,7 @@ class SessionQueryTool(
         SELECT_RUN_STATE_HISTORY -> RunStateTransitionRow.serializer()
         SELECT_TOOL_SPEC_BUDGET -> ToolSpecBudgetRow.serializer()
         SELECT_RUN_FAILURE -> RunFailureRow.serializer()
+        SELECT_ACTIVE_RUN_SUMMARY -> ActiveRunSummaryRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
 
@@ -230,6 +235,7 @@ class SessionQueryTool(
             SELECT_RUN_STATE_HISTORY -> runRunStateHistoryQuery(sessions, agentStates, input, limit, offset)
             SELECT_TOOL_SPEC_BUDGET -> runToolSpecBudgetQuery(toolRegistry, input)
             SELECT_RUN_FAILURE -> runRunFailureQuery(sessions, agentStates, input)
+            SELECT_ACTIVE_RUN_SUMMARY -> runActiveRunSummaryQuery(sessions, agentStates, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -296,12 +302,13 @@ class SessionQueryTool(
         const val SELECT_RUN_STATE_HISTORY = "run_state_history"
         const val SELECT_TOOL_SPEC_BUDGET = "tool_spec_budget"
         const val SELECT_RUN_FAILURE = "run_failure"
+        const val SELECT_ACTIVE_RUN_SUMMARY = "active_run_summary"
         internal val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
             SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
             SELECT_SESSION_METADATA, SELECT_MESSAGE, SELECT_SPEND, SELECT_CACHE_STATS,
             SELECT_CONTEXT_PRESSURE, SELECT_RUN_STATE_HISTORY, SELECT_TOOL_SPEC_BUDGET,
-            SELECT_RUN_FAILURE,
+            SELECT_RUN_FAILURE, SELECT_ACTIVE_RUN_SUMMARY,
         )
 
         private const val DEFAULT_LIMIT = 100
