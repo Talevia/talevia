@@ -103,6 +103,42 @@ git pull --rebase origin main
 
 分档建议比例（非硬性）：P0 约 3-5 条（含 1-2 条 debt）、P1 约 8-10 条（含 3-4 条 debt）、P2 余数。如果真找不出 20 条值得做的 gap，可以少写（最少 8 条，其中 debt 至少 3 条），在报告里说明。
 
+### R.0 Milestone evidence pre-check（draft bullet 前必做）
+
+`Milestone §M<N>` tag 的 bullet 特别容易"被实现了但 criterion 描述还在"——Talevia 的 M1 头两次 draft 里就撞过两条（4ead8ad1 `clip-consistency-binding-persistence`、949a6551 `consistency-binding-reverse-lookup`，均在 dispatch 时 §2.5 skip-close）。每多一条 draft→skip-close 的 bullet 浪费下一整个 cycle，所以 repopulate 阶段必须**反向**跑 §M.1 的 grep，把已满足的 criterion 先从 draft 候选里剔除。
+
+**先决条件**：`docs/MILESTONES.md` 存在且有 `> Current: M<N>` 指针。缺失则整节跳过。
+
+**步骤**：
+
+1. 读 `docs/MILESTONES.md` 当前 M block 里每条 `[ ]`。
+2. 提取 criterion 的 grep-able 子句（`grep: <pattern>` 或 bullet 文本中点名的 class / 函数 / 文件 / 常量）。
+3. 对每个 pattern 跑 §M.1 的正向 check（`git grep -nE '<pattern>'` 非空且至少一条命中在产品路径）。
+4. **若 pattern 足够严格且 grep 命中**：该 criterion 已被现有代码满足（intent + pattern 都对齐），**不为此 criterion 生成 P0/P1 bullet**；在 repopulate commit body 的 `## M criteria auto-evidence` 段里列出 `- criterion N: <shorthand> — <命中文件:行>`。
+5. **若 pattern 是散文（看不到严格 grep 锚点）或命中但 intent 不匹配**：仍可为 criterion 生成 bullet，但在 bullet 文本里加一句"§M 无法 auto-tick，需 manual 决议"以帮助下一 cycle 的 §2.5 liveness pre-check。
+6. **若 pattern 没命中**：criterion 真的未实现，正常生成 `Milestone §M<N>` bullet。
+
+**Example**（来自 M1 二次 draft 结果）：
+
+- criterion 2 "绑定持久化"（prose grep "Clip 有持久字段承载 consistency binding"）—— prose 不严格，但 `Clip.sourceBinding` 是显然匹配；§M 无法 auto-tick 但 intent 已满足 → **不生成 bullet**，在 commit body 的 auto-evidence 段 cite `core/domain/Clip.kt:27` + `AIGC tool 在 folded.appliedNodeIds 赋值点`（GenerateImageTool.kt:241 等）。
+- criterion 3 "绑定反查"（grep "consistency_bound_clips 或 binding_reverse"）—— 例子 slug 都没命中，但 `project_query(select=clips_for_source)` 是 intent 的同义实现；同上，**不生成 bullet**，auto-evidence 段 cite `ProjectQueryTool.kt:262` + `ClipsForSourceQuery.kt`。
+- criterion 4 "Kind 可扩证明"（grep "ALL 大小 ≥ 4"）—— grep 到 `ConsistencyKinds.ALL` 定义处但需要看 size，不严格，check 到 `size == 3` 时**生成 bullet**（对应 db5f5d2f 的实现）。
+
+**成本**：每条 criterion ≤ 30 秒的 grep；全套 M1（6 criteria）≈ 3 分钟。对比 draft→skip-close 浪费的 1 整 cycle，性价比是 1:100。
+
+**怎么记 auto-evidence**：在 `docs(backlog): repopulate N tasks` commit body 的末尾 append：
+
+```
+## M<N> criteria auto-evidence (from R.0 pre-check)
+
+- criterion 2 (绑定持久化): Clip.sourceBinding persists bindings —
+  core/domain/Clip.kt:27; populated by GenerateImageTool.kt:241 et al.
+- criterion 3 (绑定反查): project_query(select=clips_for_source) —
+  ProjectQueryTool.kt:262; ClipsForSourceQuery.kt:25.
+```
+
+下 cycle 的 §M 手动 audit 一看就知道哪些 criterion 是"intent 满足但 grep 不严"要手动 tick、哪些是真的 open。
+
 ### R.5 技术债扫描（repopulate 必做）
 
 技术债**信号类别**和"债与 feature gap 竞争同一优先级窗口"的原则由 VISION §5.6 定义；本节给出 skill 层的**扫描命令 + 严重度阈值 + 配额强制 + 监控曲线约定**。
