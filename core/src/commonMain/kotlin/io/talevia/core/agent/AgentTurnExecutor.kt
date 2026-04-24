@@ -3,14 +3,9 @@ package io.talevia.core.agent
 import io.talevia.core.CallId
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
-import io.talevia.core.SessionId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
-import io.talevia.core.logging.Loggers
-import io.talevia.core.logging.info
-import io.talevia.core.logging.warn
 import io.talevia.core.metrics.MetricsRegistry
-import io.talevia.core.permission.PermissionRequest
 import io.talevia.core.permission.PermissionService
 import io.talevia.core.provider.LlmEvent
 import io.talevia.core.provider.LlmProvider
@@ -22,9 +17,7 @@ import io.talevia.core.session.Part
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.TokenUsage
 import io.talevia.core.session.ToolState
-import io.talevia.core.tool.RegisteredTool
 import io.talevia.core.tool.ToolAvailabilityContext
-import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collect
@@ -32,9 +25,7 @@ import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
-import kotlinx.datetime.Instant
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -57,58 +48,6 @@ internal data class TurnResult(
 
 /** Bookkeeping for a tool call whose arguments are still streaming in. */
 internal data class PendingToolCall(val partId: PartId, val toolId: String)
-
-/**
- * Prepend a two-line identity banner ("Current project" + "Current session")
- * to the configured system prompt so every turn reminds the model of the
- * session's current binding (VISION §5.4) *and* the session id it should pass
- * to tools that require one (switch_project, fork_session, etc.). Without the
- * session line the model tends to invent ids like "current" or
- * "session-unknown", which every session-scoped tool correctly rejects.
- *
- * The project line comes first so existing `startsWith("Current project: …")`
- * assertions keep matching. A null project renders explicitly so the agent
- * knows to pick one before dispatching timeline tools rather than guessing.
- *
- * When [projectIsGreenfield] is true **and** the project is bound, the
- * onboarding lane from [io.talevia.core.agent.prompt.PROMPT_ONBOARDING_LANE]
- * is inserted between the banner and the base prompt. The lane primes the
- * model to scaffold a `style_bible` + genre-specific source nodes before
- * dispatching any AIGC tool — otherwise greenfield traces tend to skip
- * straight to `generate_image` and produce output that can't participate in
- * `find_stale_clips` later. The lane disappears as soon as the project has
- * any track or source node, so the token cost is paid only while it's
- * actually load-bearing.
- *
- * Pure function — package-private so both [Agent] and [AgentTurnExecutor] can
- * reach it without exposing it on the public surface.
- */
-internal fun buildSystemPrompt(
-    base: String?,
-    currentProjectId: ProjectId?,
-    sessionId: SessionId?,
-    projectIsGreenfield: Boolean = false,
-): String? {
-    val projectLine = if (currentProjectId != null) {
-        "Current project: ${currentProjectId.value} (from session binding; call switch_project to change)"
-    } else {
-        "Current project: <none> (session not yet bound; call list_projects / create_project / switch_project before running timeline tools)"
-    }
-    val sessionLine = sessionId?.let {
-        "Current session: ${it.value} (pass this exact id as `sessionId` whenever a tool requires one; never invent one)"
-    }
-    val banner = listOfNotNull(projectLine, sessionLine).joinToString("\n")
-    val head = if (projectIsGreenfield && currentProjectId != null) {
-        banner + "\n\n" + io.talevia.core.agent.prompt.PROMPT_ONBOARDING_LANE
-    } else {
-        banner
-    }
-    return when {
-        base == null -> head
-        base.isBlank() -> head
-        else -> "$head\n\n$base"
-    }
-}
 
 /**
  * Drives a single provider turn plus the tool dispatches it fans out.
@@ -152,7 +91,6 @@ internal class AgentTurnExecutor(
 
     /** Chain size — Agent's retry loop uses this to know when fallback is exhausted. */
     val providerCount: Int get() = providers.size
-    private val log = Loggers.get("agent")
 
     @OptIn(ExperimentalUuidApi::class)
     suspend fun streamTurn(
@@ -230,7 +168,9 @@ internal class AgentTurnExecutor(
                 when (event) {
                     is LlmEvent.TextStart -> {
                         emittedContent = true
-                        upsertEmptyText(asstMsg, event.partId)
+                        store.upsertPart(
+                            Part.Text(event.partId, asstMsg.id, asstMsg.sessionId, clock.now(), text = ""),
+                        )
                     }
                     is LlmEvent.TextDelta -> bus.publish(
                         BusEvent.PartDelta(asstMsg.sessionId, asstMsg.id, event.partId, "text", event.text),
@@ -279,7 +219,13 @@ internal class AgentTurnExecutor(
                                 pending[event.callId] = it
                             }
                         dispatchJobs += launch {
-                            dispatchTool(
+                            dispatchToolCall(
+                                registry = registry,
+                                permissions = permissions,
+                                store = store,
+                                bus = bus,
+                                clock = clock,
+                                metrics = metrics,
                                 asstMsg = asstMsg,
                                 history = history,
                                 input = input,
@@ -345,139 +291,6 @@ internal class AgentTurnExecutor(
             retriable = retriable,
             retryAfterMs = retryAfterMs,
             emittedContent = emittedContent,
-        )
-    }
-
-    private suspend fun upsertEmptyText(asstMsg: Message.Assistant, partId: PartId) {
-        store.upsertPart(
-            Part.Text(partId, asstMsg.id, asstMsg.sessionId, clock.now(), text = ""),
-        )
-    }
-
-    private suspend fun dispatchTool(
-        asstMsg: Message.Assistant,
-        history: List<MessageWithParts>,
-        input: RunInput,
-        event: LlmEvent.ToolCallReady,
-        handle: PendingToolCall,
-        currentProjectId: ProjectId?,
-        spendCapCents: Long?,
-        permissionMutex: Mutex,
-        retryAttempt: Int? = null,
-    ) {
-        val tool: RegisteredTool? = registry[event.toolId]
-        val baseTime: Instant = clock.now()
-        val basePart = Part.Tool(
-            id = handle.partId,
-            messageId = asstMsg.id,
-            sessionId = asstMsg.sessionId,
-            createdAt = baseTime,
-            callId = event.callId,
-            toolId = event.toolId,
-            state = ToolState.Running(event.input),
-        )
-        store.upsertPart(basePart)
-        // Coarse run-state: the Agent is suspended on a tool call. Fine-grained
-        // per-call progress still flows through PartUpdated on the tool part.
-        bus.publish(
-            BusEvent.AgentRunStateChanged(asstMsg.sessionId, AgentRunState.AwaitingTool, retryAttempt = retryAttempt),
-        )
-
-        if (tool == null) {
-            store.upsertPart(basePart.copy(state = ToolState.Failed(event.input, "Unknown tool: ${event.toolId}")))
-            bus.publish(
-                BusEvent.AgentRunStateChanged(
-                    asstMsg.sessionId,
-                    AgentRunState.Generating,
-                    retryAttempt = retryAttempt,
-                ),
-            )
-            return
-        }
-
-        val inputJson = event.input.toString()
-        val pattern = tool.permission.patternFrom(inputJson)
-        val resolvedPermission = tool.permission.permissionFrom(inputJson)
-        // Serialise permission checks across concurrent dispatches so
-        // interactive prompts (ask-once-per-tool) never race for the same
-        // terminal. The tool body itself still runs concurrently.
-        val decision = permissionMutex.withLock {
-            permissions.check(
-                rules = input.permissionRules,
-                request = PermissionRequest(
-                    sessionId = asstMsg.sessionId,
-                    permission = resolvedPermission,
-                    pattern = pattern,
-                    metadata = mapOf("toolId" to event.toolId),
-                ),
-            )
-        }
-        if (!decision.granted) {
-            store.upsertPart(
-                basePart.copy(
-                    state = ToolState.Failed(event.input, "Permission denied: $resolvedPermission"),
-                ),
-            )
-            return
-        }
-
-        val ctx = ToolContext(
-            sessionId = asstMsg.sessionId,
-            messageId = asstMsg.id,
-            callId = event.callId,
-            askPermission = { req -> permissions.check(input.permissionRules, req) },
-            emitPart = { p -> store.upsertPart(p) },
-            messages = history,
-            // A tool dispatched inside the same turn that `switch_project`
-            // ran will observe the updated binding because we re-read the
-            // session before each turn, not mid-turn; the next turn's
-            // first tool call picks up the switch.
-            currentProjectId = currentProjectId,
-            publishEvent = { e -> bus.publish(e) },
-            spendCapCents = spendCapCents,
-        )
-
-        val toolStart = clock.now()
-        val outcome = runCatching { tool.dispatch(event.input, ctx) }
-        val toolMs = (clock.now() - toolStart).inWholeMilliseconds
-        metrics?.observe("tool.${event.toolId}.ms", toolMs)
-        outcome.fold(
-            onSuccess = { result ->
-                val data = tool.encodeOutput(result)
-                store.upsertPart(
-                    basePart.copy(
-                        state = ToolState.Completed(
-                            input = event.input,
-                            outputForLlm = result.outputForLlm,
-                            data = data,
-                            estimatedTokens = result.estimatedTokens,
-                        ),
-                        title = result.title,
-                    ),
-                )
-                log.info("tool.ok", "tool" to event.toolId, "callId" to event.callId.value, "ms" to toolMs)
-            },
-            onFailure = { e ->
-                store.upsertPart(
-                    basePart.copy(
-                        state = ToolState.Failed(event.input, e.message ?: e::class.simpleName ?: "tool error"),
-                    ),
-                )
-                log.warn(
-                    "tool.fail",
-                    "tool" to event.toolId,
-                    "callId" to event.callId.value,
-                    "ms" to toolMs,
-                    "error" to (e.message ?: e::class.simpleName),
-                    cause = e,
-                )
-            },
-        )
-        // Tool dispatch (success or failure) hands control back to the LLM —
-        // next turn re-enters Generating. The terminal run-state is published
-        // in run()'s outer try/finally.
-        bus.publish(
-            BusEvent.AgentRunStateChanged(asstMsg.sessionId, AgentRunState.Generating, retryAttempt = retryAttempt),
         )
     }
 }

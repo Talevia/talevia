@@ -13,8 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **debt-split-agent-turn-executor** — `AgentTurnExecutor.kt` 483 LOC（Core 第 3 长文件）。`buildSystemPrompt` + onboarding-lane 合成 + tool-spec 组装 + `streamTurn` 流控 + LlmEvent 路由全塞在一个 class。下一批 lane 或 event 新增会推过 500 阈值。**方向：** 抽 `SystemPromptComposer`（base + lanes + snapshot → String）+ `TurnEventRouter`（LlmEvent → assistant Part + store upserts）；`AgentTurnExecutor` 主流程收到 < 300 LOC。Rubric §5.6。Milestone §later.
-
 ## P1 — 中优，做完 P0 再排
 
 - **m2-provider-second-impl** — M2 criterion 2："provider 多元"。`ImageGenEngine` / `VideoGenEngine` / `MusicGenEngine` / `TtsEngine` 4 个接口每个都只有 1 个 prod impl（grep 印证：OpenAI 图/视/语音 + Replicate 音乐/放大，各 1 家）。**方向：** 任一 engine 长出第二个非 stub 生产 impl（如 `AnthropicImageGenEngine` 若 Claude 上线图像、`ElevenLabsTtsEngine`、`StabilityImageGenEngine`、`LocalMLXTtsEngine`）。需要专有 API key + 产品抉择，待用户决定。Rubric §5.7 / §5.2。Milestone §M2. · skipped 2026-04-24: 需专有 API key + vendor 决策 (跨 3 个 repopulate 周期的老约束).
