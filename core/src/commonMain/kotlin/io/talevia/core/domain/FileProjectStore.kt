@@ -4,14 +4,12 @@ import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
-import io.talevia.core.domain.render.ClipRenderCache
 import io.talevia.core.logging.Loggers
 import io.talevia.core.logging.warn
 import io.talevia.core.platform.BundleLocker
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import okio.FileSystem
 import okio.IOException
@@ -25,14 +23,16 @@ import okio.Path.Companion.toPath
  *   talevia.json              # StoredProject envelope: title + slim Project
  *   .gitignore                # ".talevia-cache/\n"
  *   media/                    # bundle-local assets — AIGC products + small imports
+ *   source-history/           # per-node body audit JSONL (cycle-45)
  *   .talevia-cache/           # machine-local — gitignored
  *     clip-render-cache.json  # ClipRenderCache (mezzanine paths are local)
  * ```
  *
  * The bundle is a directory the user owns. Talevia writes only `talevia.json`,
- * `.gitignore`, `media/`, and `.talevia-cache/`; users may add their own files
- * (e.g. README.md). [delete] with `deleteFiles = true` removes only the
- * Talevia-owned files and rmdirs the directory only if empty afterwards.
+ * `.gitignore`, `media/`, `source-history/`, and `.talevia-cache/`; users may
+ * add their own files (e.g. README.md). [delete] with `deleteFiles = true`
+ * removes only the Talevia-owned files and rmdirs the directory only if empty
+ * afterwards.
  *
  * Identity: each bundle has a stable [ProjectId] inside its `talevia.json`.
  * Path is per-machine (registered in the [RecentsRegistry]). Cloning the
@@ -48,6 +48,12 @@ import okio.Path.Companion.toPath
  * the second process sees `IllegalStateException("Bundle is locked by another
  * Talevia process")` rather than silently racing. Default [BundleLocker.Noop]
  * keeps this store usable in single-process mobile + test rigs.
+ *
+ * Code layout: this class is the `ProjectStore` facade. Internal I/O helpers
+ * live in sibling files — envelope read/write in `FileProjectStoreEnvelopeIO.kt`,
+ * source-history persistence in `FileProjectStoreSourceHistoryIO.kt`. Split
+ * landed cycle-49 per `debt-split-file-project-store` decision (per-
+ * persistence-role axis).
  */
 class FileProjectStore(
     private val registry: RecentsRegistry,
@@ -80,11 +86,11 @@ class FileProjectStore(
 
     override suspend fun openAt(path: Path): Project = mutex.withLock {
         val resolved = resolveBundlePath(path)
-        val project = readBundle(resolved)
+        val project = readBundle(fs, resolved, json)
         registry.upsert(
             id = project.id,
             path = resolved,
-            title = readTitle(resolved) ?: project.id.value,
+            title = readTitle(fs, resolved, json) ?: project.id.value,
             lastOpenedAtEpochMs = clock.now().toEpochMilliseconds(),
         )
         maybeEmitValidationWarning(project)
@@ -130,7 +136,7 @@ class FileProjectStore(
             )
             // Recency stamp the brand-new project so per-clip/track/asset stamps land at `now`.
             val stamped = ProjectRecencyStamper.stamp(project, prior = null, now = now)
-            writeBundleLocked(path, title, stamped, createdAtEpochMs = now)
+            writeBundleLocked(fs, path, title, stamped, createdAtEpochMs = now, json = json)
             registry.upsert(newId, path, title, lastOpenedAtEpochMs = now)
             stamped
         }
@@ -142,7 +148,7 @@ class FileProjectStore(
         if (!fs.exists(path.resolve(TALEVIA_JSON))) {
             return null
         }
-        val project = readBundle(path)
+        val project = readBundle(fs, path, json)
         maybeEmitValidationWarning(project)
         maybeEmitMissingAssets(project)
         project
@@ -150,7 +156,7 @@ class FileProjectStore(
 
     override suspend fun list(): List<Project> = registry.list().mapNotNull { entry ->
         val path = entry.path.toPath()
-        runCatching { mutex.withLock { readBundle(path) } }.getOrNull()
+        runCatching { mutex.withLock { readBundle(fs, path, json) } }.getOrNull()
     }
 
     override suspend fun upsert(title: String, project: Project): Unit = mutex.withLock {
@@ -159,7 +165,7 @@ class FileProjectStore(
 
         withBundleLock(path) {
             val existingStored = if (fs.exists(path.resolve(TALEVIA_JSON))) {
-                runCatching { decodeStored(path) }.getOrNull()
+                runCatching { decodeStored(fs, path, json) }.getOrNull()
             } else {
                 null
             }
@@ -169,7 +175,7 @@ class FileProjectStore(
             // stamps it. A read of a pre-field bundle (createdAt == 0) heals on
             // first upsert by adopting `now` rather than perpetuating the zero.
             val createdAt = existingStored?.createdAtEpochMs?.takeIf { it > 0L } ?: now
-            writeBundleLocked(path, title, stamped, createdAtEpochMs = createdAt)
+            writeBundleLocked(fs, path, title, stamped, createdAtEpochMs = createdAt, json = json)
             registry.upsert(project.id, path, title, lastOpenedAtEpochMs = now)
         }
     }
@@ -180,9 +186,9 @@ class FileProjectStore(
         require(fs.exists(path.resolve(TALEVIA_JSON))) { "Project ${id.value} bundle missing at $path" }
         withBundleLock(path) {
             // Read envelope, rewrite with new title — project body + createdAt untouched.
-            val stored = decodeStored(path)
+            val stored = decodeStored(fs, path, json)
             val now = clock.now().toEpochMilliseconds()
-            writeStoredEnvelope(path, stored.copy(title = title))
+            writeStoredEnvelope(fs, path, stored.copy(title = title), json)
             registry.setTitle(id, title, updatedAtEpochMs = now)
         }
     }
@@ -195,8 +201,8 @@ class FileProjectStore(
         val path = entry.path.toPath()
         val taleviaJson = path.resolve(TALEVIA_JSON)
         if (!fs.exists(taleviaJson)) return null
-        val stored = decodeStored(path)
-        val (createdFromFs, updated) = bundleTimestamps(taleviaJson, fallback = entry.lastOpenedAtEpochMs)
+        val stored = decodeStored(fs, path, json)
+        val (createdFromFs, updated) = bundleTimestamps(fs, taleviaJson, fallback = entry.lastOpenedAtEpochMs)
         ProjectSummary(
             id = id.value,
             title = stored.title,
@@ -209,8 +215,8 @@ class FileProjectStore(
         val path = entry.path.toPath()
         val taleviaJson = path.resolve(TALEVIA_JSON)
         if (!fs.exists(taleviaJson)) return@mapNotNull null
-        val stored = runCatching { mutex.withLock { decodeStored(path) } }.getOrNull() ?: return@mapNotNull null
-        val (createdFromFs, updated) = bundleTimestamps(taleviaJson, fallback = entry.lastOpenedAtEpochMs)
+        val stored = runCatching { mutex.withLock { decodeStored(fs, path, json) } }.getOrNull() ?: return@mapNotNull null
+        val (createdFromFs, updated) = bundleTimestamps(fs, taleviaJson, fallback = entry.lastOpenedAtEpochMs)
         ProjectSummary(
             id = entry.id,
             title = stored.title,
@@ -224,13 +230,13 @@ class FileProjectStore(
         val path = entry.path.toPath()
         require(fs.exists(path.resolve(TALEVIA_JSON))) { "Project ${id.value} bundle missing at $path" }
         withBundleLock(path) {
-            val stored = decodeStored(path)
-            val current = readBundle(path)
+            val stored = decodeStored(fs, path, json)
+            val current = readBundle(fs, path, json)
             val updated = block(current)
             val now = clock.now().toEpochMilliseconds()
             val createdAt = resolvedCreatedAt(stored, fallback = now)
             val stamped = ProjectRecencyStamper.stamp(updated, prior = current, now = now)
-            writeBundleLocked(path, stored.title, stamped, createdAtEpochMs = createdAt)
+            writeBundleLocked(fs, path, stored.title, stamped, createdAtEpochMs = createdAt, json = json)
             registry.upsert(id, path, stored.title, lastOpenedAtEpochMs = now)
             stamped
         }
@@ -257,6 +263,9 @@ class FileProjectStore(
 
             val mediaDir = root.resolve(MEDIA_DIR)
             if (fs.exists(mediaDir)) fs.deleteRecursively(mediaDir)
+
+            val historyDir = root.resolve(SOURCE_HISTORY_DIR)
+            if (fs.exists(historyDir)) fs.deleteRecursively(historyDir)
         }
         // Delete the cache dir (including the lock sidecar) outside the lock
         // scope — the handle was released on exit, and a concurrent acquire
@@ -288,29 +297,7 @@ class FileProjectStore(
         runCatching {
             mutex.withLock {
                 val path = registry.get(id)?.path?.toPath() ?: return@withLock
-                val historyDir = path.resolve(SOURCE_HISTORY_DIR)
-                fs.createDirectories(historyDir)
-                val file = historyDir.resolve("${nodeId.value}.jsonl")
-                // JSONL demands one object per line, so use the compact Json
-                // (NOT this store's pretty-print [json], which would span
-                // multiple lines per entry and break per-line splitting at
-                // read time).
-                val line = io.talevia.core.JsonConfig.default.encodeToString(
-                    io.talevia.core.domain.source.BodyRevision.serializer(),
-                    revision,
-                )
-                // Read-append-atomicWrite instead of appendingSink().use so
-                // this path compiles on Kotlin/Native (Okio's Sink is not
-                // java.lang.AutoCloseable; stdlib's `use` extension isn't
-                // wired for it, and `fs.appendingSink` isn't uniformly
-                // available across targets). One-line-per-revision means
-                // rewriting the whole file per append is still trivial.
-                val existing = if (fs.exists(file)) fs.read(file) { readUtf8() } else ""
-                atomicWrite(file) {
-                    writeUtf8(existing)
-                    writeUtf8(line)
-                    writeUtf8("\n")
-                }
+                appendSourceNodeHistoryFile(fs, path, nodeId, revision)
             }
         }
     }
@@ -321,18 +308,7 @@ class FileProjectStore(
         limit: Int,
     ): List<io.talevia.core.domain.source.BodyRevision> = mutex.withLock {
         val path = registry.get(id)?.path?.toPath() ?: return@withLock emptyList()
-        val file = path.resolve(SOURCE_HISTORY_DIR).resolve("${nodeId.value}.jsonl")
-        if (!fs.exists(file)) return@withLock emptyList()
-        val text = fs.read(file) { readUtf8() }
-        val lines = text.lineSequence().filter { it.isNotBlank() }.toList()
-        // JSONL is append-order (oldest first). Return newest-first, capped
-        // at limit — callers (source_query) want the most recent N states.
-        lines.asReversed().asSequence().take(limit).map {
-            io.talevia.core.JsonConfig.default.decodeFromString(
-                io.talevia.core.domain.source.BodyRevision.serializer(),
-                it,
-            )
-        }.toList()
+        listSourceNodeHistoryFile(fs, path, nodeId, limit)
     }
 
     // -- private helpers --
@@ -357,79 +333,6 @@ class FileProjectStore(
         } finally {
             handle.release()
         }
-    }
-
-    private fun readBundle(path: Path): Project {
-        val stored = decodeStored(path)
-        val cachePath = path.resolve(CACHE_DIR).resolve(CLIP_RENDER_CACHE_FILE)
-        val cache = if (fs.exists(cachePath)) {
-            runCatching {
-                json.decodeFromString(ClipRenderCache.serializer(), fs.read(cachePath) { readUtf8() })
-            }.getOrDefault(ClipRenderCache.EMPTY)
-        } else {
-            ClipRenderCache.EMPTY
-        }
-        return stored.project.copy(clipRenderCache = cache)
-    }
-
-    private fun decodeStored(path: Path): StoredProject {
-        val text = fs.read(path.resolve(TALEVIA_JSON)) { readUtf8() }
-        return json.decodeFromString(StoredProject.serializer(), text)
-    }
-
-    private fun readTitle(path: Path): String? = runCatching {
-        decodeStored(path).title
-    }.getOrNull()
-
-    /**
-     * Writes the bundle: `talevia.json` (project minus clipRenderCache),
-     * `.gitignore` (idempotent), and `.talevia-cache/clip-render-cache.json`.
-     * Caller holds [mutex].
-     */
-    private fun writeBundleLocked(path: Path, title: String, project: Project, createdAtEpochMs: Long) {
-        fs.createDirectories(path)
-        fs.createDirectories(path.resolve(MEDIA_DIR))
-        fs.createDirectories(path.resolve(CACHE_DIR))
-
-        // Auto-write .gitignore once.
-        val gitignore = path.resolve(GITIGNORE)
-        if (!fs.exists(gitignore)) {
-            atomicWrite(gitignore) { writeUtf8(AUTO_GITIGNORE_BODY) }
-        }
-
-        // talevia.json carries everything except the (machine-local) clip render cache.
-        val slim = project.copy(clipRenderCache = ClipRenderCache.EMPTY)
-        val stored = StoredProject(title = title, createdAtEpochMs = createdAtEpochMs, project = slim)
-        writeStoredEnvelope(path, stored)
-
-        // Cache lives separately so updates to clip render mezzanines don't
-        // touch talevia.json (and so the cache can be gitignored without
-        // silently amputating the project model).
-        val cachePath = path.resolve(CACHE_DIR).resolve(CLIP_RENDER_CACHE_FILE)
-        atomicWrite(cachePath) {
-            writeUtf8(json.encodeToString(ClipRenderCache.serializer(), project.clipRenderCache))
-        }
-    }
-
-    private fun writeStoredEnvelope(path: Path, stored: StoredProject) {
-        atomicWrite(path.resolve(TALEVIA_JSON)) {
-            writeUtf8(json.encodeToString(StoredProject.serializer(), stored))
-        }
-    }
-
-    private fun atomicWrite(target: Path, write: okio.BufferedSink.() -> Unit) {
-        target.parent?.let { fs.createDirectories(it) }
-        val tmp = target.parent?.resolve("${target.name}.tmp.${randomSuffix()}")
-            ?: "${target}.tmp.${randomSuffix()}".toPath()
-        fs.write(tmp) { write() }
-        fs.atomicMove(tmp, target)
-    }
-
-    private fun bundleTimestamps(taleviaJson: Path, fallback: Long): Pair<Long, Long> {
-        val meta = runCatching { fs.metadata(taleviaJson) }.getOrNull()
-        val created = meta?.createdAtMillis ?: fallback
-        val updated = meta?.lastModifiedAtMillis ?: fallback
-        return created to updated
     }
 
     private suspend fun maybeEmitValidationWarning(project: Project) {
@@ -476,9 +379,6 @@ class FileProjectStore(
         publisher.publish(BusEvent.AssetsMissing(project.id, missing))
     }
 
-    private fun randomSuffix(): String =
-        kotlin.random.Random.nextLong().toString(radix = 36).removePrefix("-")
-
     /** Bundle id-as-default-dir-name only — accepts arbitrary user-picked paths. */
     private fun String.requireSafeFilename(): String {
         require(matches(SAFE_ID)) {
@@ -520,26 +420,3 @@ class FileProjectStore(
         private fun generateProjectId(): String = kotlin.uuid.Uuid.random().toString()
     }
 }
-
-/**
- * Bundle envelope written to `talevia.json`. Keeps title + schema separate
- * from the [Project] body so adding envelope-level metadata later doesn't
- * require touching the Project model.
- */
-@Serializable
-data class StoredProject(
-    val schemaVersion: Int = 1,
-    val title: String,
-    /**
-     * Epoch-millis when this bundle was first written. Preserved across
-     * subsequent [FileProjectStore.upsert] calls so `summary().createdAtEpochMs`
-     * reports a stable value even after the file is overwritten by an atomic
-     * move (which would otherwise reset filesystem-level creation time on
-     * many platforms / fake filesystems).
-     *
-     * Defaults to 0 for back-compat when decoding bundles that predate the
-     * field; the store fills it in on the first upsert after read.
-     */
-    val createdAtEpochMs: Long = 0L,
-    val project: Project,
-)

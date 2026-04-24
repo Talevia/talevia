@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **debt-split-file-project-store** — `FileProjectStore.kt` grew to 545 lines after cycle-45's source-history methods (~70 LOC added). Mixes bundle I/O + source-history persistence + recents integration + lock management + gitignore / cache housekeeping in one class. **方向：** split into per-role internal siblings (`BundleIO` for `talevia.json` + `media/`, `SourceNodeHistoryIO` for the JSONL lane, `CatalogIntegration` for recents-registry sync, `BundleLockIO` for the `.lock` file). `FileProjectStore` stays the `ProjectStore` facade — internal restructure, no API churn. Axis: per-persistence-role (the next 70-LOC addition to the same role re-triggers a re-split, not a generic "file too long"). Rubric §5.6.
 - **agent-failure-diagnostics-query** — When `Agent.run` terminates with `AgentRunState.Failed(cause)`, the `cause` is a single string. Operators can't programmatically retrieve the structured trace: retry attempts, fallback chain, per-provider error reasons. All the raw data exists on the session (`AgentRetryScheduled`, `AgentProviderFallback`, `Part.StepFinish(ERROR)`), just not aggregated. **方向：** `session_query(select=run_failure, messageId=X)` returns `{terminalCause, retryTrace: [{attempt, providerId, reason, waitMs}], fallbackChain: [{from, to, reason}]}`. Pure read-side — reconstructs from already-persisted parts + bus-driven trackers. Rubric §5.4.
 
 ## P1 — 中优，做完 P0 再排
