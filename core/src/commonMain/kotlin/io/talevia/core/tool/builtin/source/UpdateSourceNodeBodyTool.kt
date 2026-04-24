@@ -5,6 +5,7 @@ import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.AutoRegenHint
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.autoRegenHint
+import io.talevia.core.domain.source.BodyRevision
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.domain.source.replaceNode
 import io.talevia.core.permission.PermissionSpec
@@ -12,6 +13,7 @@ import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import kotlinx.datetime.Clock
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -67,6 +69,7 @@ import kotlinx.serialization.serializer
  */
 class UpdateSourceNodeBodyTool(
     private val projects: ProjectStore,
+    private val clock: Clock = Clock.System,
 ) : Tool<UpdateSourceNodeBodyTool.Input, UpdateSourceNodeBodyTool.Output> {
 
     @Serializable data class Input(
@@ -197,6 +200,7 @@ class UpdateSourceNodeBodyTool(
         val nodeId = SourceNodeId(input.nodeId)
 
         var previousHash = ""
+        var previousBody: JsonElement = JsonObject(emptyMap())
         var newHash = ""
         var kindSeen = ""
         var boundClipCount = 0
@@ -208,8 +212,25 @@ class UpdateSourceNodeBodyTool(
                         "Call source_query(select=nodes) or describe_source_node to discover available ids.",
                 )
             previousHash = existing.contentHash
+            previousBody = existing.body
             kindSeen = existing.kind
             source.replaceNode(nodeId) { node -> node.copy(body = input.body) }
+        }
+
+        // Append the pre-edit body to the per-node history log AFTER the
+        // mutation lands, so a crashed mutate can't leave a false-positive
+        // revision. Best-effort — ProjectStore swallows FS failures (see
+        // FileProjectStore.appendSourceNodeHistory) because history is an
+        // audit log, not canonical state.
+        if (previousBody != input.body) {
+            projects.appendSourceNodeHistory(
+                pid,
+                nodeId,
+                BodyRevision(
+                    body = previousBody,
+                    overwrittenAtEpochMs = clock.now().toEpochMilliseconds(),
+                ),
+            )
         }
 
         newHash = updated.source.byId[nodeId]!!.contentHash

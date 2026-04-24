@@ -7,6 +7,7 @@ import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.source.query.BodyRevisionRow
 import io.talevia.core.tool.builtin.source.query.DagSummaryRow
 import io.talevia.core.tool.builtin.source.query.DotRow
 import io.talevia.core.tool.builtin.source.query.NodeRow
@@ -14,6 +15,7 @@ import io.talevia.core.tool.builtin.source.query.runAncestorsQuery
 import io.talevia.core.tool.builtin.source.query.runDagSummaryQuery
 import io.talevia.core.tool.builtin.source.query.runDescendantsQuery
 import io.talevia.core.tool.builtin.source.query.runDotQuery
+import io.talevia.core.tool.builtin.source.query.runHistoryQuery
 import io.talevia.core.tool.builtin.source.query.runNodesAllProjectsQuery
 import io.talevia.core.tool.builtin.source.query.runNodesQuery
 import io.talevia.core.tool.query.QueryDispatcher
@@ -60,7 +62,8 @@ class SourceQueryTool(
 
     @Serializable data class Input(
         /** One of [SELECT_NODES] / [SELECT_DAG_SUMMARY] / [SELECT_DOT] /
-         *  [SELECT_DESCENDANTS] / [SELECT_ANCESTORS] (case-insensitive). */
+         *  [SELECT_DESCENDANTS] / [SELECT_ANCESTORS] / [SELECT_HISTORY]
+         *  (case-insensitive). */
         val select: String,
         /**
          * Target project. Required when `scope == "project"` (default) or unset.
@@ -98,11 +101,13 @@ class SourceQueryTool(
         val hotspotLimit: Int? = null,
         // ---- descendants / ancestors filters ----
         /**
-         * Source node id to traverse from. Required for `select=descendants`
-         * and `select=ancestors`; rejected for other selects. Walks the reverse-
-         * parent index (descendants) or the per-node `parents` list (ancestors),
-         * BFS, cycle-safe. Unknown id fails loud with a `source_query(select=nodes)`
-         * hint.
+         * Source node id to traverse from. Required for `select=descendants`,
+         * `select=ancestors`, and `select=history`; rejected for other
+         * selects. Descendants / ancestors walk the DAG BFS (cycle-safe);
+         * history reads `<bundle>/source-history/<root>.jsonl`. Unknown id
+         * fails loud with a `source_query(select=nodes)` hint (descendants /
+         * ancestors) or returns an empty set (history — a never-updated node
+         * legitimately has no revisions).
          */
         val root: String? = null,
         /**
@@ -150,10 +155,13 @@ class SourceQueryTool(
             "  • descendants — BFS downstream from root; rows carry depthFromRoot (0=root). " +
             "requires root. Optional depth cap (null/negative=unbounded). Cycle-safe.\n" +
             "  • ancestors — BFS upstream from root; same shape as descendants.\n" +
+            "  • history — past body snapshots overwritten by update_source_node_body, " +
+            "newest-first. requires root. Default limit 20. Empty set when the node never " +
+            "had its body updated.\n" +
             "Common: projectId (required unless scope='all_projects'), limit, offset (nodes/" +
-            "descendants/ancestors only). scope='all_projects' (select=nodes only) " +
-            "enumerates every project and tags rows with projectId. Filter-on-wrong-select " +
-            "fails loud. describe_source_node handles single-entity deep views."
+            "descendants/ancestors/history only; history ignores offset). scope='all_projects' " +
+            "(select=nodes only) enumerates every project and tags rows with projectId. Filter-" +
+            "on-wrong-select fails loud. describe_source_node handles single-entity deep views."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.read")
@@ -166,7 +174,8 @@ class SourceQueryTool(
                 put("type", "string")
                 put(
                     "description",
-                    "What to query: nodes | dag_summary | dot | descendants | ancestors (case-insensitive).",
+                    "What to query: nodes | dag_summary | dot | descendants | ancestors | history " +
+                        "(case-insensitive).",
                 )
             }
             putJsonObject("projectId") {
@@ -248,7 +257,7 @@ class SourceQueryTool(
                 put(
                     "description",
                     "Source node id to traverse from. Required for select=descendants / " +
-                        "select=ancestors; rejected elsewhere.",
+                        "select=ancestors / select=history; rejected elsewhere.",
                 )
             }
             putJsonObject("depth") {
@@ -281,6 +290,7 @@ class SourceQueryTool(
         SELECT_NODES, SELECT_DESCENDANTS, SELECT_ANCESTORS -> NodeRow.serializer()
         SELECT_DAG_SUMMARY -> DagSummaryRow.serializer()
         SELECT_DOT -> DotRow.serializer()
+        SELECT_HISTORY -> BodyRevisionRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
 
@@ -308,13 +318,16 @@ class SourceQueryTool(
             SELECT_DOT -> runDotQuery(project)
             SELECT_DESCENDANTS -> runDescendantsQuery(project, input)
             SELECT_ANCESTORS -> runAncestorsQuery(project, input)
+            SELECT_HISTORY -> runHistoryQuery(projects, project, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
 
     private fun rejectIncompatibleFilters(select: String, input: Input, scope: String) {
         val isRelativesSelect = select == SELECT_DESCENDANTS || select == SELECT_ANCESTORS
-        val isPaginatedSelect = select == SELECT_NODES || isRelativesSelect
+        val isRootAnchoredSelect = isRelativesSelect || select == SELECT_HISTORY
+        // history takes limit (for capping revision count) but not offset.
+        val isPaginatedSelect = select == SELECT_NODES || isRelativesSelect || select == SELECT_HISTORY
         val misapplied = buildList {
             if (select != SELECT_NODES) {
                 if (input.kind != null) add("kind (select=nodes only)")
@@ -326,19 +339,29 @@ class SourceQueryTool(
             }
             // includeBody is useful for both nodes and the relatives selects — someone
             // auditing "what's in my character_ref's downstream" will want full bodies.
-            if (select != SELECT_NODES && !isRelativesSelect && input.includeBody != null) {
+            // history always includes the full body (that's its point), so ignore the
+            // field on that select rather than rejecting (lenient default).
+            if (select != SELECT_NODES && !isRelativesSelect && select != SELECT_HISTORY && input.includeBody != null) {
                 add("includeBody (select=nodes / descendants / ancestors only)")
             }
             if (!isPaginatedSelect) {
-                if (input.limit != null) add("limit (select=nodes / descendants / ancestors only)")
+                if (input.limit != null) add("limit (select=nodes / descendants / ancestors / history only)")
                 if (input.offset != null) add("offset (select=nodes / descendants / ancestors only)")
+            }
+            // history ignores offset explicitly — the JSONL is small, no need for
+            // pagination beyond the `limit` cap.
+            if (select == SELECT_HISTORY && input.offset != null) {
+                add("offset (select=nodes / descendants / ancestors only — history caps via limit, not offset)")
             }
             if (select != SELECT_DAG_SUMMARY && input.hotspotLimit != null) {
                 add("hotspotLimit (select=dag_summary only)")
             }
-            if (!isRelativesSelect) {
-                if (input.root != null) add("root (select=descendants / ancestors only)")
+            if (!isRootAnchoredSelect) {
+                if (input.root != null) add("root (select=descendants / ancestors / history only)")
                 if (input.depth != null) add("depth (select=descendants / ancestors only)")
+            }
+            if (select == SELECT_HISTORY && input.depth != null) {
+                add("depth (select=descendants / ancestors only — history is a flat revision log)")
             }
         }
         if (misapplied.isNotEmpty()) {
@@ -365,9 +388,10 @@ class SourceQueryTool(
         const val SELECT_DOT = "dot"
         const val SELECT_DESCENDANTS = "descendants"
         const val SELECT_ANCESTORS = "ancestors"
+        const val SELECT_HISTORY = "history"
         internal val ALL_SELECTS = setOf(
             SELECT_NODES, SELECT_DAG_SUMMARY, SELECT_DOT,
-            SELECT_DESCENDANTS, SELECT_ANCESTORS,
+            SELECT_DESCENDANTS, SELECT_ANCESTORS, SELECT_HISTORY,
         )
 
         const val SCOPE_PROJECT = "project"

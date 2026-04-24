@@ -277,6 +277,64 @@ class FileProjectStore(
 
     override suspend fun pathOf(id: ProjectId): Path? = registry.get(id)?.path?.toPath()
 
+    override suspend fun appendSourceNodeHistory(
+        id: ProjectId,
+        nodeId: io.talevia.core.SourceNodeId,
+        revision: io.talevia.core.domain.source.BodyRevision,
+    ) {
+        // Best-effort: filesystem failure must not block the enclosing
+        // update_source_node_body dispatch. History is an audit log; a
+        // dropped entry is a soft loss, a dropped body update is hard loss.
+        runCatching {
+            mutex.withLock {
+                val path = registry.get(id)?.path?.toPath() ?: return@withLock
+                val historyDir = path.resolve(SOURCE_HISTORY_DIR)
+                fs.createDirectories(historyDir)
+                val file = historyDir.resolve("${nodeId.value}.jsonl")
+                // JSONL demands one object per line, so use the compact Json
+                // (NOT this store's pretty-print [json], which would span
+                // multiple lines per entry and break per-line splitting at
+                // read time).
+                val line = io.talevia.core.JsonConfig.default.encodeToString(
+                    io.talevia.core.domain.source.BodyRevision.serializer(),
+                    revision,
+                )
+                // Read-append-atomicWrite instead of appendingSink().use so
+                // this path compiles on Kotlin/Native (Okio's Sink is not
+                // java.lang.AutoCloseable; stdlib's `use` extension isn't
+                // wired for it, and `fs.appendingSink` isn't uniformly
+                // available across targets). One-line-per-revision means
+                // rewriting the whole file per append is still trivial.
+                val existing = if (fs.exists(file)) fs.read(file) { readUtf8() } else ""
+                atomicWrite(file) {
+                    writeUtf8(existing)
+                    writeUtf8(line)
+                    writeUtf8("\n")
+                }
+            }
+        }
+    }
+
+    override suspend fun listSourceNodeHistory(
+        id: ProjectId,
+        nodeId: io.talevia.core.SourceNodeId,
+        limit: Int,
+    ): List<io.talevia.core.domain.source.BodyRevision> = mutex.withLock {
+        val path = registry.get(id)?.path?.toPath() ?: return@withLock emptyList()
+        val file = path.resolve(SOURCE_HISTORY_DIR).resolve("${nodeId.value}.jsonl")
+        if (!fs.exists(file)) return@withLock emptyList()
+        val text = fs.read(file) { readUtf8() }
+        val lines = text.lineSequence().filter { it.isNotBlank() }.toList()
+        // JSONL is append-order (oldest first). Return newest-first, capped
+        // at limit — callers (source_query) want the most recent N states.
+        lines.asReversed().asSequence().take(limit).map {
+            io.talevia.core.JsonConfig.default.decodeFromString(
+                io.talevia.core.domain.source.BodyRevision.serializer(),
+                it,
+            )
+        }.toList()
+    }
+
     // -- private helpers --
 
     /**
@@ -448,6 +506,14 @@ class FileProjectStore(
         const val CLIP_RENDER_CACHE_FILE = "clip-render-cache.json"
         const val LOCK_FILE = ".lock"
         const val AUTO_GITIGNORE_BODY = ".talevia-cache/\n"
+        /**
+         * Per-source-node body history — one JSONL file per node, append-only,
+         * newest-last. Lives inside the bundle (NOT gitignored) so history
+         * travels with `git push`. Read by
+         * [listSourceNodeHistory], written by [appendSourceNodeHistory]; the
+         * agent surfaces it via `source_query(select=history)`.
+         */
+        const val SOURCE_HISTORY_DIR = "source-history"
         private val SAFE_ID = Regex("[A-Za-z0-9_.-]{1,200}")
 
         @OptIn(kotlin.uuid.ExperimentalUuidApi::class)

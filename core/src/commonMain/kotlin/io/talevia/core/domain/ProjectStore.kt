@@ -1,6 +1,8 @@
 package io.talevia.core.domain
 
 import io.talevia.core.ProjectId
+import io.talevia.core.SourceNodeId
+import io.talevia.core.domain.source.BodyRevision
 import kotlinx.serialization.Serializable
 
 /**
@@ -89,4 +91,34 @@ interface ProjectStore {
      * filesystem can stay silent.
      */
     suspend fun pathOf(id: ProjectId): okio.Path? = null
+
+    /**
+     * Append a [BodyRevision] snapshot for a source node's body edit, persisting it
+     * alongside the bundle (JSONL append). Emitted by `update_source_node_body` so
+     * past body states are auditable via `source_query(select=history, nodeId=X)` —
+     * `update_*` otherwise overwrites silently and drafts are lost.
+     *
+     * Default is a no-op so in-memory / test [ProjectStore] fakes without a
+     * filesystem don't have to implement body history; only [FileProjectStore]
+     * persists it. Best-effort: a filesystem write failure is swallowed rather
+     * than failing the enclosing tool dispatch (history is an audit log, not
+     * canonical state).
+     */
+    suspend fun appendSourceNodeHistory(
+        id: ProjectId,
+        nodeId: SourceNodeId,
+        revision: BodyRevision,
+    ): Unit = Unit
+
+    /**
+     * Return up to [limit] most-recent [BodyRevision] entries for a source node's
+     * body, newest-first. Called by `source_query(select=history)`.
+     * Default returns empty so fakes without a filesystem report "no history"
+     * cleanly; only [FileProjectStore] actually reads the JSONL stream.
+     */
+    suspend fun listSourceNodeHistory(
+        id: ProjectId,
+        nodeId: SourceNodeId,
+        limit: Int = 20,
+    ): List<BodyRevision> = emptyList()
 }

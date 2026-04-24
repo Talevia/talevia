@@ -315,6 +315,84 @@ class UpdateSourceNodeBodyToolTest {
         assertEquals("Where are we?", body["dialogue"]!!.toString().trim('"'))
     }
 
+    @Test fun appendsBodyHistoryRevisionOnUpdate() = runTest {
+        // source-node-history-query §5.5 — every update_source_node_body call
+        // must preserve the pre-edit body as a BodyRevision so
+        // source_query(select=history) can surface lost drafts.
+        val rig = rig()
+        seedShot(
+            rig.store,
+            rig.pid,
+            "shot-1",
+            body = buildJsonObject { put("framing", JsonPrimitive("wide")) },
+        )
+
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value,
+                nodeId = "shot-1",
+                body = buildJsonObject { put("framing", JsonPrimitive("close-up")) },
+            ),
+            rig.ctx,
+        )
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value,
+                nodeId = "shot-1",
+                body = buildJsonObject { put("framing", JsonPrimitive("medium")) },
+            ),
+            rig.ctx,
+        )
+
+        val history = rig.store.listSourceNodeHistory(rig.pid, SourceNodeId("shot-1"), limit = 10)
+        assertEquals(
+            2,
+            history.size,
+            "two updates → two past revisions (pre-edit bodies), not three — seed call didn't run the tool",
+        )
+        // Newest-first contract: most recently overwritten body appears first.
+        val newest = history.first().body as kotlinx.serialization.json.JsonObject
+        val oldest = history.last().body as kotlinx.serialization.json.JsonObject
+        assertEquals(
+            "close-up",
+            newest["framing"]!!.toString().trim('"'),
+            "newest history entry = body overwritten by the last update",
+        )
+        assertEquals(
+            "wide",
+            oldest["framing"]!!.toString().trim('"'),
+            "oldest history entry = the original seed body",
+        )
+    }
+
+    @Test fun noHistoryAppendWhenBodyUnchanged() = runTest {
+        // §3a #9 bounded-edge: a redundant update that writes the same body
+        // shouldn't pollute history with a no-op revision.
+        val rig = rig()
+        seedShot(
+            rig.store,
+            rig.pid,
+            "shot-1",
+            body = buildJsonObject { put("framing", JsonPrimitive("wide")) },
+        )
+
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value,
+                nodeId = "shot-1",
+                body = buildJsonObject { put("framing", JsonPrimitive("wide")) },
+            ),
+            rig.ctx,
+        )
+
+        val history = rig.store.listSourceNodeHistory(rig.pid, SourceNodeId("shot-1"), limit = 10)
+        assertEquals(
+            0,
+            history.size,
+            "identical-body update must not append a history entry",
+        )
+    }
+
     @Test fun nestedBodyShapePassesThrough() = runTest {
         // The transform must not interfere with the correct shape either.
         val rig = rig()
