@@ -7,11 +7,13 @@ import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.source.query.AsciiTreeRow
 import io.talevia.core.tool.builtin.source.query.BodyRevisionRow
 import io.talevia.core.tool.builtin.source.query.DagSummaryRow
 import io.talevia.core.tool.builtin.source.query.DotRow
 import io.talevia.core.tool.builtin.source.query.NodeRow
 import io.talevia.core.tool.builtin.source.query.runAncestorsQuery
+import io.talevia.core.tool.builtin.source.query.runAsciiTreeQuery
 import io.talevia.core.tool.builtin.source.query.runDagSummaryQuery
 import io.talevia.core.tool.builtin.source.query.runDescendantsQuery
 import io.talevia.core.tool.builtin.source.query.runDotQuery
@@ -46,6 +48,10 @@ import kotlinx.serialization.serializer
  *    `{dot: String}`; caller pipes into `dot -Tsvg` externally to render.
  *    Expert path for "eyeball why this character_ref isn't feeding that clip"
  *    — we don't take a Graphviz dependency, just emit text.
+ *  - `ascii_tree` — same DAG as an indented ASCII tree (box-drawing
+ *    `├─` / `└─`). Dependency-free: read it straight in a terminal.
+ *    Multi-parent nodes print under each parent with a `(dup)` marker
+ *    after the first expansion so the output stays linear.
  *
  * `describe_source_node` stays as a separate tool — it's single-entity deep
  * inspection (body + parents + children + bindings), not projection. Same
@@ -160,6 +166,8 @@ class SourceQueryTool(
             "  • dag_summary — {nodeCount, nodesByKind, rootNodeIds, leafNodeIds, maxDepth, " +
             "hotspots, orphanedNodeIds, summaryText}. filter: hotspotLimit (default 5).\n" +
             "  • dot — whole DAG as Graphviz DOT (unbound-downstream nodes dashed). No filters.\n" +
+            "  • ascii_tree — whole DAG as an indented ASCII tree (box-drawing, orphan / dup " +
+            "markers). Dependency-free; reads straight in a terminal. No filters.\n" +
             "  • descendants — BFS downstream from root; rows carry depthFromRoot (0=root). " +
             "requires root. Optional depth cap (null/negative=unbounded). Cycle-safe.\n" +
             "  • ancestors — BFS upstream from root; same shape as descendants.\n" +
@@ -182,8 +190,8 @@ class SourceQueryTool(
                 put("type", "string")
                 put(
                     "description",
-                    "What to query: nodes | dag_summary | dot | descendants | ancestors | history " +
-                        "(case-insensitive).",
+                    "What to query: nodes | dag_summary | dot | ascii_tree | descendants | " +
+                        "ancestors | history (case-insensitive).",
                 )
             }
             putJsonObject("projectId") {
@@ -302,6 +310,7 @@ class SourceQueryTool(
         SELECT_NODES, SELECT_DESCENDANTS, SELECT_ANCESTORS -> NodeRow.serializer()
         SELECT_DAG_SUMMARY -> DagSummaryRow.serializer()
         SELECT_DOT -> DotRow.serializer()
+        SELECT_ASCII_TREE -> AsciiTreeRow.serializer()
         SELECT_HISTORY -> BodyRevisionRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
@@ -328,6 +337,7 @@ class SourceQueryTool(
             SELECT_NODES -> runNodesQuery(project, input)
             SELECT_DAG_SUMMARY -> runDagSummaryQuery(project, input)
             SELECT_DOT -> runDotQuery(project)
+            SELECT_ASCII_TREE -> runAsciiTreeQuery(project)
             SELECT_DESCENDANTS -> runDescendantsQuery(project, input)
             SELECT_ANCESTORS -> runAncestorsQuery(project, input)
             SELECT_HISTORY -> runHistoryQuery(projects, project, input)
@@ -399,11 +409,12 @@ class SourceQueryTool(
         const val SELECT_NODES = "nodes"
         const val SELECT_DAG_SUMMARY = "dag_summary"
         const val SELECT_DOT = "dot"
+        const val SELECT_ASCII_TREE = "ascii_tree"
         const val SELECT_DESCENDANTS = "descendants"
         const val SELECT_ANCESTORS = "ancestors"
         const val SELECT_HISTORY = "history"
         internal val ALL_SELECTS = setOf(
-            SELECT_NODES, SELECT_DAG_SUMMARY, SELECT_DOT,
+            SELECT_NODES, SELECT_DAG_SUMMARY, SELECT_DOT, SELECT_ASCII_TREE,
             SELECT_DESCENDANTS, SELECT_ANCESTORS, SELECT_HISTORY,
         )
 
