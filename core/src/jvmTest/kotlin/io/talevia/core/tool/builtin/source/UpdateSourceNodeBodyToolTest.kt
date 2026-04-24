@@ -393,6 +393,194 @@ class UpdateSourceNodeBodyToolTest {
         )
     }
 
+    @Test fun restoreFromRevisionIndexRollsBackBody() = runTest {
+        // source-node-body-restore-from-history §5.5 happy path. Two
+        // updates land two past revisions; restoring index=0 brings the
+        // body back to the most-recent historical state (pre-v3), and
+        // the pre-restore body enters history as a NEW entry so the
+        // audit trail marches forward (no rewriting the past).
+        val rig = rig()
+        seedShot(
+            rig.store,
+            rig.pid,
+            "shot-1",
+            body = buildJsonObject { put("framing", JsonPrimitive("v0-seed")) },
+        )
+
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value,
+                nodeId = "shot-1",
+                body = buildJsonObject { put("framing", JsonPrimitive("v1-medium")) },
+            ),
+            rig.ctx,
+        )
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value,
+                nodeId = "shot-1",
+                body = buildJsonObject { put("framing", JsonPrimitive("v2-close-up")) },
+            ),
+            rig.ctx,
+        )
+        // At this point: current = v2-close-up; history (newest-first) = [v1-medium, v0-seed].
+
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value,
+                nodeId = "shot-1",
+                restoreFromRevisionIndex = 0,
+            ),
+            rig.ctx,
+        )
+
+        // Current body is now v1-medium (index=0 of history).
+        val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("shot-1")]!!
+        val current = node.body as kotlinx.serialization.json.JsonObject
+        assertEquals("v1-medium", current["framing"]!!.toString().trim('"'))
+
+        // History now carries the pre-restore v2-close-up as the new
+        // most-recent entry (audit trail marches forward).
+        val history = rig.store.listSourceNodeHistory(rig.pid, SourceNodeId("shot-1"), limit = 10)
+        val newest = history.first().body as kotlinx.serialization.json.JsonObject
+        assertEquals(
+            "v2-close-up",
+            newest["framing"]!!.toString().trim('"'),
+            "pre-restore body must be appended to history (forward arrow of time)",
+        )
+        assertEquals(
+            3,
+            history.size,
+            "history grows from 2 (v1, v0) → 3 (v2, v1, v0) after the restore adds its pre-restore state",
+        )
+    }
+
+    @Test fun restoreRejectsBothBodyAndRevisionIndex() = runTest {
+        // §3a #9 exactly-one-of edge: supplying both is ambiguous; the tool
+        // fails loud rather than silently picking one.
+        val rig = rig()
+        seedShot(rig.store, rig.pid, "shot-1")
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                UpdateSourceNodeBodyTool.Input(
+                    projectId = rig.pid.value,
+                    nodeId = "shot-1",
+                    body = buildJsonObject { put("framing", JsonPrimitive("boom")) },
+                    restoreFromRevisionIndex = 0,
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("exactly one"),
+            "error must name the exactly-one-of contract: ${ex.message}",
+        )
+    }
+
+    @Test fun restoreRejectsNeitherBodyNorRevisionIndex() = runTest {
+        val rig = rig()
+        seedShot(rig.store, rig.pid, "shot-1")
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                UpdateSourceNodeBodyTool.Input(
+                    projectId = rig.pid.value,
+                    nodeId = "shot-1",
+                    // both null
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("requires either"),
+            "error must explain both options: ${ex.message}",
+        )
+    }
+
+    @Test fun restoreFromEmptyHistoryFailsLoud() = runTest {
+        // §3a #9 bounded-edge: a never-updated node has no history entries
+        // to restore. Operator gets a clear error + a source_query hint,
+        // not a silent no-op.
+        val rig = rig()
+        seedShot(rig.store, rig.pid, "shot-1")
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                UpdateSourceNodeBodyTool.Input(
+                    projectId = rig.pid.value,
+                    nodeId = "shot-1",
+                    restoreFromRevisionIndex = 0,
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("no body-history entries"),
+            "error must surface the empty-history cause: ${ex.message}",
+        )
+    }
+
+    @Test fun restoreOutOfRangeFailsLoudWithTrueCount() = runTest {
+        // §3a #9 bounded-edge: asking for revision 5 when only 2 exist
+        // must name the true count, not silently clamp.
+        val rig = rig()
+        seedShot(rig.store, rig.pid, "shot-1")
+
+        // Populate exactly 2 revisions.
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value,
+                nodeId = "shot-1",
+                body = buildJsonObject { put("framing", JsonPrimitive("v1")) },
+            ),
+            rig.ctx,
+        )
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value,
+                nodeId = "shot-1",
+                body = buildJsonObject { put("framing", JsonPrimitive("v2")) },
+            ),
+            rig.ctx,
+        )
+
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                UpdateSourceNodeBodyTool.Input(
+                    projectId = rig.pid.value,
+                    nodeId = "shot-1",
+                    restoreFromRevisionIndex = 5,
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("out of range"),
+            "error must flag out-of-range: ${ex.message}",
+        )
+        assertTrue(
+            "2" in ex.message!!,
+            "error must name true history size (2): ${ex.message}",
+        )
+    }
+
+    @Test fun restoreNegativeIndexFailsLoud() = runTest {
+        val rig = rig()
+        seedShot(rig.store, rig.pid, "shot-1")
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                UpdateSourceNodeBodyTool.Input(
+                    projectId = rig.pid.value,
+                    nodeId = "shot-1",
+                    restoreFromRevisionIndex = -1,
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("non-negative"),
+            "error must name the sign-violation: ${ex.message}",
+        )
+    }
+
     @Test fun nestedBodyShapePassesThrough() = runTest {
         // The transform must not interfere with the correct shape either.
         val rig = rig()

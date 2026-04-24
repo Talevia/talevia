@@ -75,8 +75,24 @@ class UpdateSourceNodeBodyTool(
     @Serializable data class Input(
         val projectId: String,
         val nodeId: String,
-        /** Full replacement. Every field the caller wants to keep must appear in this object. */
-        val body: JsonObject,
+        /**
+         * Full replacement. Every field the caller wants to keep must appear here.
+         * Nullable so callers who want to restore a past revision (see
+         * [restoreFromRevisionIndex]) don't have to pass a dummy body. Exactly
+         * one of [body] / [restoreFromRevisionIndex] must be set.
+         */
+        val body: JsonObject? = null,
+        /**
+         * Restore an earlier body from this node's history — 0 = most-recent
+         * overwritten revision, 1 = the one before that, and so on. The
+         * restored body replaces the current body; the *previous* (pre-
+         * restore) current body is appended to history by the existing
+         * post-mutate hook, so the audit log keeps a forward arrow of time
+         * (no rewriting the past). Out-of-range and empty-history cases fail
+         * loud with a hint directing to `source_query(select=history)`.
+         * Mutually exclusive with [body].
+         */
+        val restoreFromRevisionIndex: Int? = null,
     )
 
     /**
@@ -102,14 +118,23 @@ class UpdateSourceNodeBodyTool(
         override fun transformDeserialize(element: JsonElement): JsonElement {
             val obj = element as? JsonObject ?: return element
             if (obj["body"] is JsonObject) return element
+            // Restore-by-index calls legitimately pass no `body`; don't fold
+            // whatever other top-level keys happen to be there into a
+            // synthesized body in that case — that's how the rescue fires a
+            // false positive. Only synthesize when at least one non-reserved
+            // top-level key exists (the "flattened body" shape).
+            val reserved = setOf("projectId", "nodeId", "body", "restoreFromRevisionIndex")
+            val flatKeys = obj.keys - reserved
+            if (flatKeys.isEmpty()) return element
             val body = buildJsonObject {
                 obj.forEach { (k, v) ->
-                    if (k != "projectId" && k != "nodeId" && k != "body") put(k, v)
+                    if (k !in reserved) put(k, v)
                 }
             }
             return buildJsonObject {
                 obj["projectId"]?.let { put("projectId", it) }
                 obj["nodeId"]?.let { put("nodeId", it) }
+                obj["restoreFromRevisionIndex"]?.let { put("restoreFromRevisionIndex", it) }
                 put("body", body)
             }
         }
@@ -141,7 +166,8 @@ class UpdateSourceNodeBodyTool(
             "set_source_node_parents), or id (use rename_source_node). Bumps contentHash " +
             "→ bound clips go stale; run find_stale_clips after. Workflow: describe_source_" +
             "node first to read current body, mutate client-side (keep every field you want — " +
-            "this is not a patch), pass complete object as `body`. Empty body is rejected."
+            "this is not a patch), pass complete object as `body`. Empty body is rejected. " +
+            "Rollback: restoreFromRevisionIndex=N (0=newest) restores from history."
     override val inputSerializer: KSerializer<Input> = InputCompatSerializer
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.write")
@@ -159,12 +185,8 @@ class UpdateSourceNodeBodyTool(
                 put("type", "object")
                 put(
                     "description",
-                    "Required. The COMPLETE new body JSON object — this is a full replacement, " +
-                        "not a partial patch. Every field you want to keep must appear here; " +
-                        "omitted fields are dropped. Workflow: describe_source_node → mutate the " +
-                        "returned body locally → pass the whole thing back as this argument. Must " +
-                        "not be null or {}. Kind and parents are preserved automatically; " +
-                        "contentHash is recomputed.",
+                    "Complete new body — full replacement, not a partial patch. Required " +
+                        "unless restoreFromRevisionIndex is set (mutually exclusive).",
                 )
                 put("minProperties", 1)
                 put("additionalProperties", true)
@@ -181,15 +203,19 @@ class UpdateSourceNodeBodyTool(
                     },
                 )
             }
+            putJsonObject("restoreFromRevisionIndex") {
+                put("type", "integer")
+                put("minimum", 0)
+                put(
+                    "description",
+                    "Restore body from history (0=newest). Mutually exclusive with body.",
+                )
+            }
         }
         put(
             "required",
             JsonArray(
-                listOf(
-                    JsonPrimitive("projectId"),
-                    JsonPrimitive("nodeId"),
-                    JsonPrimitive("body"),
-                ),
+                listOf(JsonPrimitive("projectId"), JsonPrimitive("nodeId")),
             ),
         )
         put("additionalProperties", false)
@@ -198,6 +224,69 @@ class UpdateSourceNodeBodyTool(
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         val pid = ProjectId(input.projectId)
         val nodeId = SourceNodeId(input.nodeId)
+
+        // Exactly-one-of validation: either supply a body, or supply a
+        // revision index to restore. Both means "which one wins?" — fail
+        // loud. Neither is an obviously-broken call — same.
+        val hasBody = input.body != null
+        val hasRestore = input.restoreFromRevisionIndex != null
+        if (hasBody && hasRestore) {
+            error(
+                "update_source_node_body takes exactly one of `body` / " +
+                    "`restoreFromRevisionIndex` (got both). Drop one; restore picks the body " +
+                    "from history, body passes an explicit new state.",
+            )
+        }
+        if (!hasBody && !hasRestore) {
+            error(
+                "update_source_node_body requires either `body` (full replacement) or " +
+                    "`restoreFromRevisionIndex` (past revision index, 0=newest historical). " +
+                    "Call source_query(select=history, root=${nodeId.value}) to discover " +
+                    "available indices.",
+            )
+        }
+
+        // Resolve the effective new body. For restore: fetch history,
+        // bounds-check the index, return the historical body. For direct
+        // body: pass through unchanged.
+        val effectiveNewBody: JsonElement = if (hasRestore) {
+            val idx = input.restoreFromRevisionIndex!!
+            if (idx < 0) {
+                error(
+                    "restoreFromRevisionIndex must be non-negative (got $idx). " +
+                        "0 = newest historical revision; larger N goes further back.",
+                )
+            }
+            // Fetch a window large enough to cover the requested index. The
+            // store caps at 100 internally; we pass idx+1 so a legitimate
+            // index==0 doesn't round-trip the full 20-default window.
+            val window = projects.listSourceNodeHistory(pid, nodeId, limit = idx + 1)
+            if (window.isEmpty()) {
+                error(
+                    "Source node ${nodeId.value} has no body-history entries — nothing to " +
+                        "restore. Either this node was never updated, or the bundle was " +
+                        "created before body-history tracking landed. Call source_query" +
+                        "(select=history, root=${nodeId.value}) to confirm.",
+                )
+            }
+            if (idx >= window.size) {
+                // window.size reflects the capped fetch; re-fetch a wider
+                // window to report the true ceiling accurately, but only
+                // when the initial fetch maxed out (else window.size IS
+                // the truth).
+                val trueWindow = if (window.size >= idx + 1) window else
+                    projects.listSourceNodeHistory(pid, nodeId, limit = 100)
+                error(
+                    "restoreFromRevisionIndex=$idx is out of range for node ${nodeId.value} " +
+                        "(only ${trueWindow.size} historical revision(s) available; valid " +
+                        "indices 0..${trueWindow.size - 1}). Call source_query(select=history, " +
+                        "root=${nodeId.value}) to see all revisions.",
+                )
+            }
+            window[idx].body
+        } else {
+            input.body!!
+        }
 
         var previousHash = ""
         var previousBody: JsonElement = JsonObject(emptyMap())
@@ -214,7 +303,19 @@ class UpdateSourceNodeBodyTool(
             previousHash = existing.contentHash
             previousBody = existing.body
             kindSeen = existing.kind
-            source.replaceNode(nodeId) { node -> node.copy(body = input.body) }
+            source.replaceNode(nodeId) { node ->
+                // Only JsonObject bodies fit SourceNode.body's runtime contract
+                // (the type is JsonElement but every kind-handler expects an
+                // object today). A restored BodyRevision may technically be
+                // any JsonElement; guard-cast here so a malformed restore
+                // fails loud instead of silently corrupting downstream.
+                val bodyAsObject = effectiveNewBody as? JsonObject
+                    ?: error(
+                        "restored body is not a JSON object (got ${effectiveNewBody::class.simpleName}). " +
+                            "History entry is corrupt or was written by an older schema.",
+                    )
+                node.copy(body = bodyAsObject)
+            }
         }
 
         // Append the pre-edit body to the per-node history log AFTER the
@@ -222,7 +323,13 @@ class UpdateSourceNodeBodyTool(
         // revision. Best-effort — ProjectStore swallows FS failures (see
         // FileProjectStore.appendSourceNodeHistory) because history is an
         // audit log, not canonical state.
-        if (previousBody != input.body) {
+        //
+        // Restore calls still append: the pre-restore current body is the
+        // new "most-recent overwritten" revision, so audit log keeps a
+        // forward arrow of time. Compare vs. `effectiveNewBody` (not
+        // `input.body`, which is null on restore) to catch no-op restores
+        // where the current body equals the restored revision.
+        if (previousBody != effectiveNewBody) {
             projects.appendSourceNodeHistory(
                 pid,
                 nodeId,

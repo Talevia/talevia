@@ -57,6 +57,15 @@ class RegisteredToolsContractTest {
             "apps/server/src/main/kotlin/io/talevia/server/ServerContainer.kt",
             "apps/android/src/main/kotlin/io/talevia/android/AndroidAppContainer.kt",
             "apps/ios/Talevia/Platform/AppContainer.swift",
+            // Shared JVM-side registration extensions — cycle-37 extracted
+            // most per-area `register(FooTool(...))` calls here; CLI /
+            // Desktop / Server / Android now call these extensions (see
+            // cycle-46 `debt-desktop-android-container-inline-to-extension-call`).
+            // Without this file in the search, every tool inside a
+            // `registerXxxTools(...)` function surfaces as "not registered
+            // in any AppContainer", which is a false positive — the JVM
+            // platforms do register them transitively.
+            "core/src/commonMain/kotlin/io/talevia/core/tool/builtin/DefaultBuiltinRegistrations.kt",
         ).map { repoRoot.resolve(it) }
         containers.forEach { require(it.isFile) { "container file not found: $it" } }
         val mergedRegistrationText = containers.joinToString("\n") { it.readText() }
