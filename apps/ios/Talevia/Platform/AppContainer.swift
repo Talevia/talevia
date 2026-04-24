@@ -167,7 +167,6 @@ final class AppContainer {
         registry.register(tool: ExportSourceNodeTool(projects: self.projects))
         registry.register(tool: SourceNodeActionTool(projects: self.projects))
         registry.register(tool: SetSourceNodeParentsTool(projects: self.projects))
-        registry.register(tool: RenameSourceNodeTool(projects: self.projects))
         registry.register(tool: UpdateSourceNodeBodyTool(projects: self.projects))
         self.tools = registry
 

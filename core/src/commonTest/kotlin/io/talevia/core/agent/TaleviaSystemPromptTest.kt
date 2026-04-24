@@ -92,7 +92,7 @@ class TaleviaSystemPromptTest {
         // Import — closes the VISION §3.4 "可组合" leg (cross-project source-node reuse).
         "import_source_node",
         // Atomic source-id refactor — rewrites node, parent-refs, clip bindings, lockfile.
-        "rename_source_node",
+        "source_node_action(action=\"rename\"",
         // Generic body editor — kind-agnostic body replace for genre / imported nodes.
         "update_source_node_body",
         // Traditional color grading — LUT enforcement on style_bible.lutReference

@@ -86,17 +86,18 @@ descendant's hash and makes dependent clips stale. Keep parent chains shallow
 and meaningful — don't add parents "for documentation" when there's no real
 derivation relationship.
 
-`rename_source_node(projectId, oldId, newId)` atomically refactors a source-node
-id: the node itself, every descendant's parent-ref, every clip's `sourceBinding`
-set, and every lockfile entry's binding + content-hash keys are rewritten in one
-mutation. Use it when the user wants a better name ("rename `character-mei` to
-`mei`") instead of `source_node_action(action="remove")` + a fresh
-`source_node_action(action="add")`, which would drop all those references. The node's own contentHash survives the rename (it's
-a hash of `(kind, body, parents)`, not `id`); descendant nodes whose parent-ref
-changed do get a new hash, which correctly invalidates any AIGC render that
-consumed the old ref. `newId` must match the slug shape (lowercase letters /
-digits / `-`), must not collide with an existing node, and same-id is a no-op.
-The rename does NOT rewrite string ids embedded inside typed bodies (e.g. a
+`source_node_action(action="rename", oldId, newId)` atomically refactors a
+source-node id: the node itself, every descendant's parent-ref, every clip's
+`sourceBinding` set, and every lockfile entry's binding + content-hash keys are
+rewritten in one mutation. Use it when the user wants a better name ("rename
+`character-mei` to `mei`") instead of `source_node_action(action="remove")` +
+a fresh `source_node_action(action="add")`, which would drop all those
+references. The node's own contentHash survives the rename (it's a hash of
+`(kind, body, parents)`, not `id`); descendant nodes whose parent-ref changed
+do get a new hash, which correctly invalidates any AIGC render that consumed
+the old ref. `newId` must match the slug shape (lowercase letters / digits /
+`-`), must not collide with an existing node, and same-id is a no-op. The
+rename does NOT rewrite string ids embedded inside typed bodies (e.g. a
 `narrative.shot.body.sceneId`) — update those separately via
 `update_source_node_body`.
 
@@ -106,7 +107,8 @@ tutorial.*, ad.*, or any hand-authored / imported node. The `body` argument is a
 full replacement JSON object: read the current body with `describe_source_node`,
 mutate client-side, write it back (keep every field you want to retain). Does
 NOT touch `kind` (rebuild the node if the kind must change), `parents` (use
-`set_source_node_parents`), or `id` (use `rename_source_node`). Bumps
+`set_source_node_parents`), or `id` (use `source_node_action(action="rename")`).
+Bumps
 `contentHash` so bound clips go stale — run `find_stale_clips` after editing.
 
 When the user changes a consistency node and you need to regenerate everything

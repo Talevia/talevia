@@ -73,7 +73,6 @@ import io.talevia.core.tool.builtin.source.DescribeSourceNodeTool
 import io.talevia.core.tool.builtin.source.DiffSourceNodesTool
 import io.talevia.core.tool.builtin.source.ExportSourceNodeTool
 import io.talevia.core.tool.builtin.source.ImportSourceNodeTool
-import io.talevia.core.tool.builtin.source.RenameSourceNodeTool
 import io.talevia.core.tool.builtin.source.SetSourceNodeParentsTool
 import io.talevia.core.tool.builtin.source.SourceNodeActionTool
 import io.talevia.core.tool.builtin.source.SourceQueryTool
@@ -261,7 +260,6 @@ fun ToolRegistry.registerSourceNodeTools(projects: ProjectStore) {
     register(ExportSourceNodeTool(projects))
     register(SourceNodeActionTool(projects))
     register(SetSourceNodeParentsTool(projects))
-    register(RenameSourceNodeTool(projects))
     register(UpdateSourceNodeBodyTool(projects))
 }
 

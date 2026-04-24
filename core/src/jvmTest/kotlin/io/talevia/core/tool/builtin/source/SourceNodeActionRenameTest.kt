@@ -42,11 +42,20 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-class RenameSourceNodeToolTest {
+/**
+ * `action="rename"` branch of [SourceNodeActionTool] — reshaped from the
+ * pre-fold `RenameSourceNodeToolTest` (2026-04-23, `debt-source-rename-evaluate`).
+ * The structural rewrite mechanics (DAG parent-refs, clip bindings, lockfile
+ * keys) now live as pure helpers in `domain.source.SourceIdRewrites`; this test
+ * exercises them via the consolidated tool's orchestration: input validation,
+ * collision detection, same-id no-op, snapshot emission, and cross-action
+ * payload rejection.
+ */
+class SourceNodeActionRenameTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: RenameSourceNodeTool,
+        val tool: SourceNodeActionTool,
         val ctx: ToolContext,
         val pid: ProjectId,
         val emitted: MutableList<Part>,
@@ -64,7 +73,7 @@ class RenameSourceNodeToolTest {
             emitPart = { emitted += it },
             messages = emptyList(),
         )
-        return Rig(store, RenameSourceNodeTool(store), ctx, project.id, emitted)
+        return Rig(store, SourceNodeActionTool(store), ctx, project.id, emitted)
     }
 
     private suspend fun seedShot(
@@ -85,6 +94,17 @@ class RenameSourceNodeToolTest {
         }
     }
 
+    private fun renameInput(
+        pid: ProjectId,
+        oldId: String,
+        newId: String,
+    ) = SourceNodeActionTool.Input(
+        projectId = pid.value,
+        action = "rename",
+        oldId = oldId,
+        newId = newId,
+    )
+
     // 1. Happy path: rename a standalone node, verify node id changed and no side
     // effects (no other parents, no clips, no lockfile entries touched).
     @Test fun renamesStandaloneNode() = runTest {
@@ -98,27 +118,25 @@ class RenameSourceNodeToolTest {
         val hashBefore = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("character-mei")]!!.contentHash
 
         val out = rig.tool.execute(
-            RenameSourceNodeTool.Input(
-                projectId = rig.pid.value,
-                oldId = "character-mei",
-                newId = "character-mei-v2",
-            ),
+            renameInput(rig.pid, oldId = "character-mei", newId = "character-mei-v2"),
             rig.ctx,
         ).data
 
-        assertEquals("character-mei", out.oldId)
-        assertEquals("character-mei-v2", out.newId)
-        assertEquals(0, out.parentsRewrittenCount)
-        assertEquals(0, out.clipsRewrittenCount)
-        assertEquals(0, out.lockfileEntriesRewrittenCount)
+        assertEquals("rename", out.action)
+        val renamed = out.renamed.single()
+        assertEquals("character-mei", renamed.oldId)
+        assertEquals("character-mei-v2", renamed.newId)
+        assertEquals(0, renamed.parentsRewrittenCount)
+        assertEquals(0, renamed.clipsRewrittenCount)
+        assertEquals(0, renamed.lockfileEntriesRewrittenCount)
 
         val after = rig.store.get(rig.pid)!!.source
         assertNull(after.byId[SourceNodeId("character-mei")])
-        val renamed = after.byId[SourceNodeId("character-mei-v2")]
-        assertNotNull(renamed)
+        val renamedNode = after.byId[SourceNodeId("character-mei-v2")]
+        assertNotNull(renamedNode)
         // contentHash is over (kind, body, parents) — none of those changed for the
         // renamed node itself, so the numeric value must survive the rename.
-        assertEquals(hashBefore, renamed.contentHash)
+        assertEquals(hashBefore, renamedNode.contentHash)
     }
 
     // 2. Rename updates SourceNode.parents on descendant nodes, and the descendants'
@@ -139,15 +157,11 @@ class RenameSourceNodeToolTest {
             rig.store.get(rig.pid)!!.source.byId[SourceNodeId("shot-unrelated")]!!.contentHash
 
         val out = rig.tool.execute(
-            RenameSourceNodeTool.Input(
-                projectId = rig.pid.value,
-                oldId = "style-warm",
-                newId = "style-cozy",
-            ),
+            renameInput(rig.pid, oldId = "style-warm", newId = "style-cozy"),
             rig.ctx,
         ).data
 
-        assertEquals(2, out.parentsRewrittenCount) // shot-1 and shot-2
+        assertEquals(2, out.renamed.single().parentsRewrittenCount) // shot-1 and shot-2
 
         val after = rig.store.get(rig.pid)!!.source
         assertEquals(
@@ -233,14 +247,10 @@ class RenameSourceNodeToolTest {
         }
 
         val out = rig.tool.execute(
-            RenameSourceNodeTool.Input(
-                projectId = rig.pid.value,
-                oldId = "mei",
-                newId = "mei-prime",
-            ),
+            renameInput(rig.pid, oldId = "mei", newId = "mei-prime"),
             rig.ctx,
         ).data
-        assertEquals(3, out.clipsRewrittenCount) // c1 + a1 + t1
+        assertEquals(3, out.renamed.single().clipsRewrittenCount) // c1 + a1 + t1
 
         val after = rig.store.get(rig.pid)!!.timeline
         val allClips = after.tracks.flatMap { it.clips }
@@ -305,14 +315,10 @@ class RenameSourceNodeToolTest {
         }
 
         val out = rig.tool.execute(
-            RenameSourceNodeTool.Input(
-                projectId = rig.pid.value,
-                oldId = "mei",
-                newId = "mei-prime",
-            ),
+            renameInput(rig.pid, oldId = "mei", newId = "mei-prime"),
             rig.ctx,
         ).data
-        assertEquals(1, out.lockfileEntriesRewrittenCount)
+        assertEquals(1, out.renamed.single().lockfileEntriesRewrittenCount)
 
         val after = rig.store.get(rig.pid)!!.lockfile
         val touched = after.entries.first { it.inputHash == "hash-1" }
@@ -340,16 +346,13 @@ class RenameSourceNodeToolTest {
         val before = rig.store.get(rig.pid)!!
 
         val out = rig.tool.execute(
-            RenameSourceNodeTool.Input(
-                projectId = rig.pid.value,
-                oldId = "mei",
-                newId = "mei",
-            ),
+            renameInput(rig.pid, oldId = "mei", newId = "mei"),
             rig.ctx,
         ).data
-        assertEquals(0, out.parentsRewrittenCount)
-        assertEquals(0, out.clipsRewrittenCount)
-        assertEquals(0, out.lockfileEntriesRewrittenCount)
+        val renamed = out.renamed.single()
+        assertEquals(0, renamed.parentsRewrittenCount)
+        assertEquals(0, renamed.clipsRewrittenCount)
+        assertEquals(0, renamed.lockfileEntriesRewrittenCount)
 
         val after = rig.store.get(rig.pid)!!
         // Whole-project equality — confirms no revision bump, no mutation.
@@ -371,11 +374,7 @@ class RenameSourceNodeToolTest {
 
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                RenameSourceNodeTool.Input(
-                    projectId = rig.pid.value,
-                    oldId = "does-not-exist",
-                    newId = "fresh",
-                ),
+                renameInput(rig.pid, oldId = "does-not-exist", newId = "fresh"),
                 rig.ctx,
             )
         }
@@ -404,11 +403,7 @@ class RenameSourceNodeToolTest {
 
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                RenameSourceNodeTool.Input(
-                    projectId = rig.pid.value,
-                    oldId = "mei",
-                    newId = "kai",
-                ),
+                renameInput(rig.pid, oldId = "mei", newId = "kai"),
                 rig.ctx,
             )
         }
@@ -432,11 +427,7 @@ class RenameSourceNodeToolTest {
         for (bad in listOf("", " ", "Has Spaces", "has/slash", "UPPER", "-leading", "trailing-")) {
             val ex = assertFailsWith<IllegalArgumentException> {
                 rig.tool.execute(
-                    RenameSourceNodeTool.Input(
-                        projectId = rig.pid.value,
-                        oldId = "mei",
-                        newId = bad,
-                    ),
+                    renameInput(rig.pid, oldId = "mei", newId = bad),
                     rig.ctx,
                 )
             }
@@ -480,11 +471,7 @@ class RenameSourceNodeToolTest {
             )
         }
         rigWithClip.tool.execute(
-            RenameSourceNodeTool.Input(
-                projectId = rigWithClip.pid.value,
-                oldId = "mei",
-                newId = "mei-prime",
-            ),
+            renameInput(rigWithClip.pid, oldId = "mei", newId = "mei-prime"),
             rigWithClip.ctx,
         )
         assertEquals(1, rigWithClip.emitted.count { it is Part.TimelineSnapshot })
@@ -498,13 +485,81 @@ class RenameSourceNodeToolTest {
             )
         }
         rigNoClip.tool.execute(
-            RenameSourceNodeTool.Input(
-                projectId = rigNoClip.pid.value,
-                oldId = "mei",
-                newId = "mei-prime",
-            ),
+            renameInput(rigNoClip.pid, oldId = "mei", newId = "mei-prime"),
             rigNoClip.ctx,
         )
         assertEquals(0, rigNoClip.emitted.count { it is Part.TimelineSnapshot })
+    }
+
+    // 10. Rejects cross-action payload leak — e.g. rename with `nodeId` or `body`.
+    @Test fun rejectsCrossActionPayloadFields() = runTest {
+        val rig = rig()
+        rig.store.mutateSource(rig.pid) {
+            it.addCharacterRef(
+                SourceNodeId("mei"),
+                CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
+            )
+        }
+
+        val bases = listOf(
+            SourceNodeActionTool.Input(
+                projectId = rig.pid.value,
+                action = "rename",
+                oldId = "mei",
+                newId = "mei-prime",
+                nodeId = "leak",
+            ),
+            SourceNodeActionTool.Input(
+                projectId = rig.pid.value,
+                action = "rename",
+                oldId = "mei",
+                newId = "mei-prime",
+                kind = "narrative.shot",
+            ),
+            SourceNodeActionTool.Input(
+                projectId = rig.pid.value,
+                action = "rename",
+                oldId = "mei",
+                newId = "mei-prime",
+                sourceNodeId = "mei",
+            ),
+        )
+        for (bad in bases) {
+            val ex = assertFailsWith<IllegalArgumentException> {
+                rig.tool.execute(bad, rig.ctx)
+            }
+            assertTrue(
+                ex.message!!.contains("rejects add/remove/fork payload fields"),
+                "unexpected message for $bad: ${ex.message}",
+            )
+        }
+    }
+
+    // 11. Rejects missing oldId / newId on action=rename.
+    @Test fun rejectsMissingRenameFields() = runTest {
+        val rig = rig()
+        val noOld = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                SourceNodeActionTool.Input(
+                    projectId = rig.pid.value,
+                    action = "rename",
+                    newId = "mei-prime",
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(noOld.message!!.contains("requires `oldId`"), noOld.message)
+
+        val noNew = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                SourceNodeActionTool.Input(
+                    projectId = rig.pid.value,
+                    action = "rename",
+                    oldId = "mei",
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(noNew.message!!.contains("requires `newId`"), noNew.message)
     }
 }

@@ -34,8 +34,8 @@ fun slugifyId(name: String, prefix: String): String {
  * this check. Permissive enough for hand-authored ids (`shot-1`, `scene-a`, `mei`)
  * without admitting whitespace, underscores, path separators, or empty strings.
  *
- * Used by [RenameSourceNodeTool] to reject pathological `newId` values before
- * mutating.
+ * Used by `SourceNodeActionTool(action="rename")` to reject pathological `newId`
+ * values before mutating.
  */
 internal fun isValidSourceNodeIdSlug(id: String): Boolean {
     if (id.isBlank()) return false

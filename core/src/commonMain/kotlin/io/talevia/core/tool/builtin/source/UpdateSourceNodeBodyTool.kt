@@ -50,7 +50,7 @@ import kotlinx.serialization.serializer
  *  - `parents` is not editable here. Use `set_source_node_parents` — keeping the
  *    two verbs orthogonal matches the existing update_* contracts (which accept
  *    `parentIds` only because they already take structured body input).
- *  - `id` is not editable here. Use `rename_source_node` for atomic id refactors.
+ *  - `id` is not editable here. Use `source_node_action(action="rename")` for atomic id refactors.
  *
  * **contentHash cascade.** `SourceNode.contentHash` is `(kind, body, parents)`, so
  * the edited node's hash changes. Descendants whose `parents` list contained this
@@ -164,7 +164,8 @@ class UpdateSourceNodeBodyTool(
     override val helpText: String =
         "Replace a source node's body wholesale (full replacement, no partial-patch). " +
             "Kind-agnostic. Does NOT touch kind (rebuild if kind must change), parents (use " +
-            "set_source_node_parents), or id (use rename_source_node). Bumps contentHash " +
+            "set_source_node_parents), or id (use source_node_action(action=\"rename\")). " +
+            "Bumps contentHash " +
             "→ bound clips go stale; run find_stale_clips after. Workflow: describe_source_" +
             "node first to read current body, mutate client-side (keep every field you want — " +
             "this is not a patch), pass complete object as `body`. Empty body is rejected. " +
