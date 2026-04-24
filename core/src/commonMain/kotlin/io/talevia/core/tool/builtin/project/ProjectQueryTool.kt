@@ -12,6 +12,7 @@ import io.talevia.core.tool.builtin.project.query.ClipForAssetRow
 import io.talevia.core.tool.builtin.project.query.ClipForSourceRow
 import io.talevia.core.tool.builtin.project.query.ClipRow
 import io.talevia.core.tool.builtin.project.query.ConsistencyPropagationRow
+import io.talevia.core.tool.builtin.project.query.LockfileCacheStatsRow
 import io.talevia.core.tool.builtin.project.query.LockfileEntryDetailRow
 import io.talevia.core.tool.builtin.project.query.LockfileEntryRow
 import io.talevia.core.tool.builtin.project.query.ProjectMetadataRow
@@ -26,6 +27,7 @@ import io.talevia.core.tool.builtin.project.query.runClipDetailQuery
 import io.talevia.core.tool.builtin.project.query.runClipsForAssetQuery
 import io.talevia.core.tool.builtin.project.query.runClipsForSourceQuery
 import io.talevia.core.tool.builtin.project.query.runConsistencyPropagationQuery
+import io.talevia.core.tool.builtin.project.query.runLockfileCacheStatsQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileEntriesQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileEntryDetailQuery
 import io.talevia.core.tool.builtin.project.query.runProjectMetadataQuery
@@ -217,6 +219,7 @@ class ProjectQueryTool(
         SELECT_PROJECT_METADATA -> ProjectMetadataRow.serializer()
         SELECT_CONSISTENCY_PROPAGATION -> ConsistencyPropagationRow.serializer()
         SELECT_SPEND -> SpendSummaryRow.serializer()
+        SELECT_LOCKFILE_CACHE_STATS -> LockfileCacheStatsRow.serializer()
         SELECT_SNAPSHOTS -> SnapshotRow.serializer()
         SELECT_TIMELINE_DIFF -> TimelineDiffRow.serializer()
         else -> error("No row serializer registered for select='$select'")
@@ -246,6 +249,7 @@ class ProjectQueryTool(
             SELECT_PROJECT_METADATA -> runProjectMetadataQuery(project, projects, input)
             SELECT_CONSISTENCY_PROPAGATION -> runConsistencyPropagationQuery(project, input, limit, offset)
             SELECT_SPEND -> runSpendQuery(project)
+            SELECT_LOCKFILE_CACHE_STATS -> runLockfileCacheStatsQuery(project)
             SELECT_SNAPSHOTS -> runSnapshotsQuery(project, input, clock)
             SELECT_TIMELINE_DIFF -> runTimelineDiffQuery(project, input)
             else -> error("unreachable — select validated above: '$select'")
@@ -265,6 +269,7 @@ class ProjectQueryTool(
         const val SELECT_PROJECT_METADATA = "project_metadata"
         const val SELECT_CONSISTENCY_PROPAGATION = "consistency_propagation"
         const val SELECT_SPEND = "spend"
+        const val SELECT_LOCKFILE_CACHE_STATS = "lockfile_cache_stats"
         const val SELECT_SNAPSHOTS = "snapshots"
         const val SELECT_TIMELINE_DIFF = "timeline_diff"
         internal val ALL_SELECTS = setOf(
@@ -272,7 +277,8 @@ class ProjectQueryTool(
             SELECT_TRANSITIONS, SELECT_LOCKFILE_ENTRIES,
             SELECT_CLIPS_FOR_ASSET, SELECT_CLIPS_FOR_SOURCE,
             SELECT_CLIP, SELECT_LOCKFILE_ENTRY, SELECT_PROJECT_METADATA,
-            SELECT_CONSISTENCY_PROPAGATION, SELECT_SPEND, SELECT_SNAPSHOTS,
+            SELECT_CONSISTENCY_PROPAGATION, SELECT_SPEND,
+            SELECT_LOCKFILE_CACHE_STATS, SELECT_SNAPSHOTS,
             SELECT_TIMELINE_DIFF,
         )
 

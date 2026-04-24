@@ -46,6 +46,10 @@ internal val PROJECT_QUERY_HELP_TEXT: String =
         "  • project_metadata — single-row aggregate across tracks/clips/source/lockfile/snapshots.\n" +
         "  • snapshots — filter: maxAgeDays. Newest first. Default limit 50, max 500.\n" +
         "  • spend — single-row AIGC cost aggregate; breaks down by toolId and sessionId.\n" +
+        "  • lockfile_cache_stats — single-row AIGC cache-hit aggregate. totalExports = " +
+        "memoized whole-timeline export count; hits/misses = current-timeline clips whose " +
+        "assetId does/doesn't match a lockfile entry; perModelBreakdown groups hits by " +
+        "(providerId, modelId). No filters.\n" +
         "  • timeline_diff — filter: fromSnapshotId, toSnapshotId (≥1 required). Tracks/clips " +
         "added/removed/changed + totalChanges. Same-project only.\n" +
         "Common: limit (default 100, clamped 1..500), offset (default 0). Filter-on-wrong-select " +
@@ -68,7 +72,8 @@ internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
                 "What to query: tracks | timeline_clips | assets | transitions | " +
                     "lockfile_entries | clips_for_asset | clips_for_source | " +
                     "clip | lockfile_entry | project_metadata | consistency_propagation | " +
-                    "spend | snapshots | timeline_diff (case-insensitive).",
+                    "spend | lockfile_cache_stats | snapshots | timeline_diff " +
+                    "(case-insensitive).",
             )
         }
         putJsonObject("trackKind") {
