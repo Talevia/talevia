@@ -22,7 +22,7 @@ import kotlinx.serialization.serializer
 /**
  * Roll the project's timeline back to an earlier [Part.TimelineSnapshot].
  *
- * Every mutating tool (add_clip, split_clip, apply_filter, add_subtitles,
+ * Every mutating tool (clip_action, apply_filter, add_subtitles,
  * add_transition, and this tool itself) emits a `TimelineSnapshot` part after
  * it commits and surfaces the new snapshot's id in its `outputForLlm` text.
  *

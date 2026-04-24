@@ -92,7 +92,6 @@ import io.talevia.core.tool.builtin.video.ExtractFrameTool
 import io.talevia.core.tool.builtin.video.FadeAudioClipTool
 import io.talevia.core.tool.builtin.video.FilterActionTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
-import io.talevia.core.tool.builtin.video.MoveClipTool
 import io.talevia.core.tool.builtin.video.RelinkAssetTool
 import io.talevia.core.tool.builtin.video.ReorderTracksTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
@@ -100,10 +99,8 @@ import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import io.talevia.core.tool.builtin.video.SetClipSourceBindingTool
 import io.talevia.core.tool.builtin.video.SetClipTransformTool
 import io.talevia.core.tool.builtin.video.SetClipVolumeTool
-import io.talevia.core.tool.builtin.video.SplitClipTool
 import io.talevia.core.tool.builtin.video.TrackActionTool
 import io.talevia.core.tool.builtin.video.TransitionActionTool
-import io.talevia.core.tool.builtin.video.TrimClipTool
 import io.talevia.core.tool.builtin.web.WebFetchTool
 import io.talevia.core.tool.builtin.web.WebSearchTool
 
@@ -205,10 +202,7 @@ fun ToolRegistry.registerClipAndTrackTools(
 ) {
     register(ClipActionTool(projects))
     register(ReplaceClipTool(projects))
-    register(SplitClipTool(projects))
-    register(MoveClipTool(projects))
     register(SetClipSourceBindingTool(projects))
-    register(TrimClipTool(projects))
     register(SetClipVolumeTool(projects))
     register(FadeAudioClipTool(projects))
     register(SetClipTransformTool(projects))

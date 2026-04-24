@@ -24,18 +24,23 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
-class SplitClipToolTest {
+/**
+ * Exercises `ClipActionTool(action="split")` — reshaped from the legacy
+ * `SplitClipToolTest` as part of `debt-video-clip-consolidate-verbs-phase-2`.
+ * Every semantic case from the old suite is preserved.
+ */
+class ClipActionSplitTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: SplitClipTool,
+        val tool: ClipActionTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
     )
 
     private fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val tool = SplitClipTool(store)
+        val tool = ClipActionTool(store)
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),
@@ -56,9 +61,10 @@ class SplitClipToolTest {
             assetId = AssetId("a-$id"),
         )
 
-    private fun single(clipId: String, atTimelineSeconds: Double) = SplitClipTool.Input(
+    private fun single(clipId: String, atTimelineSeconds: Double) = ClipActionTool.Input(
         projectId = "p",
-        items = listOf(SplitClipTool.Item(clipId, atTimelineSeconds)),
+        action = "split",
+        splitItems = listOf(ClipActionTool.SplitItem(clipId, atTimelineSeconds)),
     )
 
     @Test fun splitAtMidpointPartitionsSourceRange() = runTest {
@@ -69,13 +75,15 @@ class SplitClipToolTest {
         )
         val rig = newRig(project)
 
-        val out = rig.tool.execute(single("c1", 5.0), rig.ctx).data.results.single()
+        val out = rig.tool.execute(single("c1", 5.0), rig.ctx).data
+        assertEquals("split", out.action)
+        val only = out.split.single()
         val refreshed = rig.store.get(rig.projectId)!!
         val clips = refreshed.timeline.tracks.single().clips.filterIsInstance<Clip.Video>().sortedBy { it.timeRange.start }
         assertEquals(2, clips.size)
         val (left, right) = clips[0] to clips[1]
-        assertEquals(out.leftClipId, left.id.value)
-        assertEquals(out.rightClipId, right.id.value)
+        assertEquals(only.leftClipId, left.id.value)
+        assertEquals(only.rightClipId, right.id.value)
         assertEquals(Duration.ZERO, left.timeRange.start)
         assertEquals(5.seconds, left.timeRange.duration)
         assertEquals(5.seconds, right.timeRange.start)
@@ -98,16 +106,17 @@ class SplitClipToolTest {
             ),
         )
         val out = rig.tool.execute(
-            SplitClipTool.Input(
+            ClipActionTool.Input(
                 projectId = "p",
-                items = listOf(
-                    SplitClipTool.Item("c1", 5.0),
-                    SplitClipTool.Item("c2", 15.0),
+                action = "split",
+                splitItems = listOf(
+                    ClipActionTool.SplitItem("c1", 5.0),
+                    ClipActionTool.SplitItem("c2", 15.0),
                 ),
             ),
             rig.ctx,
         ).data
-        assertEquals(2, out.results.size)
+        assertEquals(2, out.split.size)
         val refreshed = rig.store.get(rig.projectId)!!
         assertEquals(4, refreshed.timeline.tracks.single().clips.size)
     }
@@ -123,11 +132,12 @@ class SplitClipToolTest {
         val before = rig.store.get(rig.projectId)!!
         assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                SplitClipTool.Input(
+                ClipActionTool.Input(
                     projectId = "p",
-                    items = listOf(
-                        SplitClipTool.Item("c1", 5.0),
-                        SplitClipTool.Item("ghost", 3.0),
+                    action = "split",
+                    splitItems = listOf(
+                        ClipActionTool.SplitItem("c1", 5.0),
+                        ClipActionTool.SplitItem("ghost", 3.0),
                     ),
                 ),
                 rig.ctx,
@@ -223,5 +233,22 @@ class SplitClipToolTest {
         assertTrue(ex.message!!.contains("not found"), ex.message)
         val refreshed = rig.store.get(rig.projectId)!!
         assertEquals(1, refreshed.timeline.tracks.single().clips.size)
+    }
+
+    @Test fun splitRejectsConflictingPayloadFields() = runTest {
+        val c1 = videoClip("c1", start = Duration.ZERO, duration = 5.seconds)
+        val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline(tracks = listOf(Track.Video(TrackId("t"), listOf(c1))))))
+        val ex = assertFailsWith<IllegalArgumentException> {
+            rig.tool.execute(
+                ClipActionTool.Input(
+                    projectId = "p",
+                    action = "split",
+                    splitItems = listOf(ClipActionTool.SplitItem("c1", 2.0)),
+                    clipIds = listOf("c1"),
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("rejects"), ex.message)
     }
 }

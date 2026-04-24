@@ -71,7 +71,7 @@ class ForkProjectTool(
          * Optional variant spec — when set, applies a post-fork reshape to
          * the forked project's timeline + output profile. Used by
          * VISION §6 "30s / 竖版 variant" flows: instead of
-         * `fork + set_output_profile + trim_clips`, the caller passes a
+         * `fork + set_output_profile + clip_action(trim)`, the caller passes a
          * `variantSpec` and the tool does the reshape in one step.
          * `null` → verbatim fork (no reshape, identical to pre-variant
          * behavior).

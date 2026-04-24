@@ -15,6 +15,7 @@ import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -27,52 +28,46 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * Three-way clip edit verb — the consolidated action-dispatched form that
- * replaces the previous `AddClipTool` + `RemoveClipTool` + `DuplicateClipTool`
- * trio (`debt-video-clip-consolidate-verbs-phase-1`, 2026-04-23, following
- * `TransitionActionTool` / `SessionActionTool` precedent).
+ * Six-way clip edit verb — consolidates `AddClipTool` + `RemoveClipTool` +
+ * `DuplicateClipTool` (phase-1, 2026-04-23) AND `MoveClipTool` +
+ * `SplitClipTool` + `TrimClipTool` (phase-2, this iteration).
  *
- * The three clip verbs collapsed here share a shape — each takes a
- * `projectId?` + a per-action batch payload and mutates the timeline
- * atomically under `ProjectStore.mutate`. Folding them into one `Tool`
- * cuts two top-level LLM tool-spec entries (≈ 600 tokens per turn
- * saved) without losing any behavioural surface. Phase 2 (Move / Split
- * / Trim / Replace / FadeAudio) and the Set family (SetClipTransform /
- * SetClipVolume / SetClipSourceBinding) stay as separate bullets so
- * each cycle's diff remains bounded.
+ * Phase 2 was originally scoped to fold five legacy tools (Move / Split /
+ * Trim plus Replace + FadeAudio). The naive consolidation landed at
+ * 1,285 LOC, past the "land above 950 → step back" ceiling. This
+ * iteration keeps the three simplest verbs (Move / Split / Trim — their
+ * shapes line up cleanly with the phase-1 pattern) and defers
+ * `ReplaceClipTool` + `FadeAudioClipTool` to phase-3
+ * (`debt-video-clip-consolidate-verbs-phase-3`). Phase 3 will also need
+ * to decide whether to split ClipActionTool by axis first — see the
+ * commit body for the budget analysis.
  *
- * Action-specific payload fields are nullable-per-action, same pattern
- * `TransitionActionTool` uses — kotlinx.serialization sealed-class
- * variants would blow up the JSON Schema surface that the LLM reads
- * without buying anything the per-action validation in `execute()`
- * doesn't already provide.
+ * The six clip verbs share a shape: each takes a `projectId?` + a
+ * per-action batch payload and mutates the timeline atomically under
+ * `ProjectStore.mutate`. Folding them into one `Tool` cuts five
+ * top-level LLM tool-spec entries from the turn budget without losing
+ * any behavioural surface. The Set family (SetClipTransform /
+ * SetClipVolume / SetClipSourceBinding) stays separate
+ * (`debt-video-clip-consolidate-set-family`).
  *
- * Atomic semantics preserved per action: any mid-batch validation
- * failure aborts the whole call and leaves `talevia.json` untouched.
- * Each call emits exactly one `Part.TimelineSnapshot` so
- * `revert_timeline` walks back the whole batch in one step.
+ * Action-specific payload fields are nullable-per-action, matching the
+ * `TransitionActionTool` precedent. Per-action validation in `execute()`
+ * rejects foreign fields loudly; atomic all-or-nothing batch semantics
+ * preserved per verb; each call emits exactly one
+ * `Part.TimelineSnapshot` so `revert_timeline` walks back the whole
+ * batch in one step.
  *
- * ## Actions
- *
- * - `action="add"` + `addItems` — append one or many video clips to the
- *   timeline. Per-item: `assetId`, optional `timelineStartSeconds`
- *   (omit to append after the last clip on the target track),
- *   `sourceStartSeconds`, `durationSeconds`, `trackId`. Within a batch
- *   subsequent appends see each other's clips so N append-style items
- *   lay end-to-end.
- * - `action="remove"` + `clipIds` + optional `ripple` — delete one or
- *   many clips. `ripple=true` closes each gap on the removed clip's
- *   track by shifting every later non-overlapping clip left by the
- *   removed clip's duration; default `false` leaves gaps so
- *   transitions / subtitles aligned to specific timestamps don't
- *   drift. Overlapping clips on the same track (PiP) are never shifted;
- *   other tracks are never touched. Ripple cascades within the batch.
- * - `action="duplicate"` + `duplicateItems` — clone one or many clips
- *   to new timeline positions, preserving every attached field except
- *   the id and start time. Optional per-item `trackId` moves the
- *   duplicate to another track of the same kind (Video→Video,
- *   Audio→Audio, Text→Subtitle or Effect). Cross-kind moves rejected
- *   loudly.
+ * Per-action contract summary (details in the legacy docstring on the
+ * tool each branch replaced; git-blame points there):
+ * - `add` / `remove` / `duplicate` — phase-1 shapes, unchanged.
+ * - `move` + `moveItems` (clipId, timelineStartSeconds?, toTrackId?;
+ *   at least one of the latter two): same-track and/or cross-track
+ *   reposition; target track kind must match clip kind.
+ * - `split` + `splitItems` (clipId, atTimelineSeconds): split point
+ *   must lie strictly inside the clip.
+ * - `trim` + `trimItems` (clipId, newSourceStartSeconds?,
+ *   newDurationSeconds?): retrim video/audio clips preserving filters;
+ *   `timeRange.start` is preserved; text clips rejected.
  */
 @OptIn(ExperimentalUuidApi::class)
 class ClipActionTool(
@@ -95,6 +90,26 @@ class ClipActionTool(
         val trackId: String? = null,
     )
 
+    /** One move request. Mirrors the legacy `MoveClipTool.Item`. */
+    @Serializable data class MoveItem(
+        val clipId: String,
+        val timelineStartSeconds: Double? = null,
+        val toTrackId: String? = null,
+    )
+
+    /** One split request. Mirrors the legacy `SplitClipTool.Item`. */
+    @Serializable data class SplitItem(
+        val clipId: String,
+        val atTimelineSeconds: Double,
+    )
+
+    /** One trim request. Mirrors the legacy `TrimClipTool.Item`. */
+    @Serializable data class TrimItem(
+        val clipId: String,
+        val newSourceStartSeconds: Double? = null,
+        val newDurationSeconds: Double? = null,
+    )
+
     @Serializable data class Input(
         /**
          * Optional — omit to default to the session's current project binding
@@ -102,7 +117,10 @@ class ClipActionTool(
          * unbound; fail loud points the agent at `switch_project`.
          */
         val projectId: String? = null,
-        /** `"add"`, `"remove"`, or `"duplicate"`. Case-sensitive. */
+        /**
+         * One of `"add"`, `"remove"`, `"duplicate"`, `"move"`, `"split"`,
+         * `"trim"`. Case-sensitive.
+         */
         val action: String,
         /** Required when `action="add"`. Clips to insert. */
         val addItems: List<AddItem>? = null,
@@ -112,6 +130,12 @@ class ClipActionTool(
         val ripple: Boolean = false,
         /** Required when `action="duplicate"`. Clones to produce. */
         val duplicateItems: List<DuplicateItem>? = null,
+        /** Required when `action="move"`. Clips to reposition. */
+        val moveItems: List<MoveItem>? = null,
+        /** Required when `action="split"`. Clips to split. */
+        val splitItems: List<SplitItem>? = null,
+        /** Required when `action="trim"`. Clips to re-trim. */
+        val trimItems: List<TrimItem>? = null,
     )
 
     @Serializable data class AddResult(
@@ -137,6 +161,29 @@ class ClipActionTool(
         val timelineEndSeconds: Double,
     )
 
+    @Serializable data class MoveResult(
+        val clipId: String,
+        val fromTrackId: String,
+        val toTrackId: String,
+        val oldStartSeconds: Double,
+        val newStartSeconds: Double,
+        val changedTrack: Boolean,
+    )
+
+    @Serializable data class SplitResult(
+        val originalClipId: String,
+        val leftClipId: String,
+        val rightClipId: String,
+    )
+
+    @Serializable data class TrimResult(
+        val clipId: String,
+        val trackId: String,
+        val newSourceStartSeconds: Double,
+        val newDurationSeconds: Double,
+        val newTimelineEndSeconds: Double,
+    )
+
     @Serializable data class Output(
         val projectId: String,
         val action: String,
@@ -147,22 +194,32 @@ class ClipActionTool(
         val removed: List<RemoveResult> = emptyList(),
         /** Populated when `action="duplicate"`. */
         val duplicated: List<DuplicateResult> = emptyList(),
+        /** Populated when `action="move"`. */
+        val moved: List<MoveResult> = emptyList(),
+        /** Populated when `action="split"`. */
+        val split: List<SplitResult> = emptyList(),
+        /** Populated when `action="trim"`. */
+        val trimmed: List<TrimResult> = emptyList(),
         /** `action="remove"` only — echoes the input `ripple` flag. */
         val rippled: Boolean = false,
     )
 
     override val id: String = "clip_action"
     override val helpText: String =
-        "Three-way clip edit verb dispatching on `action`: " +
-            "`action=\"add\"` + `addItems` (each: assetId, timelineStartSeconds?, sourceStartSeconds?, " +
-            "durationSeconds?, trackId?) appends one or many video clips; omitted " +
-            "timelineStartSeconds means 'append after the last clip on the target track'. " +
-            "`action=\"remove\"` + `clipIds` + optional `ripple` (default false) deletes clips; " +
-            "ripple=true closes the gap on each removed clip's track (overlapping clips and " +
-            "other tracks stay put). `action=\"duplicate\"` + `duplicateItems` (each: clipId, " +
-            "timelineStartSeconds, trackId?) clones clips preserving filters, transforms, source " +
-            "bindings, audio envelope, and text style to a new timeline position with a fresh id; " +
-            "cross-kind trackId rejected. All-or-nothing per call; one timeline snapshot per call."
+        "Six-way clip edit verb dispatching on `action`: " +
+            "`add` + `addItems` (assetId, timelineStartSeconds?, sourceStartSeconds?, " +
+            "durationSeconds?, trackId?) appends clips. " +
+            "`remove` + `clipIds` + optional `ripple` (default false) deletes clips; " +
+            "ripple closes the gap on the removed clip's track. " +
+            "`duplicate` + `duplicateItems` (clipId, timelineStartSeconds, trackId?) clones " +
+            "clips preserving all attached state; cross-kind trackId rejected. " +
+            "`move` + `moveItems` (clipId, timelineStartSeconds?, toTrackId?, at least one) " +
+            "repositions clips in time and/or across same-kind tracks. " +
+            "`split` + `splitItems` (clipId, atTimelineSeconds) splits each clip at the given " +
+            "timeline position; split point must lie strictly inside the clip. " +
+            "`trim` + `trimItems` (clipId, newSourceStartSeconds?, newDurationSeconds?) " +
+            "retrims video/audio clips preserving filters; text clips rejected. " +
+            "All-or-nothing per call; one timeline snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")
@@ -173,51 +230,23 @@ class ClipActionTool(
         putJsonObject("properties") {
             putJsonObject("projectId") {
                 put("type", "string")
-                put(
-                    "description",
-                    "Optional — omit to use the session's current project (set via switch_project).",
-                )
+                put("description", "Optional — omit to use the session's current project (set via switch_project).")
             }
             putJsonObject("action") {
                 put("type", "string")
-                put("description", "`add` to insert clips, `remove` to delete, `duplicate` to clone.")
+                put("description", "One of: add, remove, duplicate, move, split, trim.")
                 put(
                     "enum",
-                    JsonArray(
-                        listOf(
-                            JsonPrimitive("add"),
-                            JsonPrimitive("remove"),
-                            JsonPrimitive("duplicate"),
-                        ),
-                    ),
+                    JsonArray(listOf("add", "remove", "duplicate", "move", "split", "trim").map(::JsonPrimitive)),
                 )
             }
             putJsonObject("addItems") {
-                put("type", "array")
-                put("description", "Required when action=add. Clips to append; at least one.")
-                putJsonObject("items") {
-                    put("type", "object")
-                    putJsonObject("properties") {
-                        putJsonObject("assetId") { put("type", "string") }
-                        putJsonObject("timelineStartSeconds") {
-                            put("type", "number")
-                            put("description", "If omitted, append after the last clip on the target track.")
-                        }
-                        putJsonObject("sourceStartSeconds") {
-                            put("type", "number")
-                            put("description", "Trim offset into the source media.")
-                        }
-                        putJsonObject("durationSeconds") {
-                            put("type", "number")
-                            put("description", "If omitted, use the asset's full remaining duration.")
-                        }
-                        putJsonObject("trackId") {
-                            put("type", "string")
-                            put("description", "Optional track; defaults to the first Video track (created if absent).")
-                        }
-                    }
-                    put("required", JsonArray(listOf(JsonPrimitive("assetId"))))
-                    put("additionalProperties", false)
+                itemArray("Required when action=add. Clips to append; at least one.", required = listOf("assetId")) {
+                    stringProp("assetId")
+                    numberProp("timelineStartSeconds", "If omitted, append after the last clip on the target track.")
+                    numberProp("sourceStartSeconds", "Trim offset into the source media.")
+                    numberProp("durationSeconds", "If omitted, use the asset's full remaining duration.")
+                    stringProp("trackId", "Optional track; defaults to the first Video track (created if absent).")
                 }
             }
             putJsonObject("clipIds") {
@@ -227,40 +256,60 @@ class ClipActionTool(
             }
             putJsonObject("ripple") {
                 put("type", "boolean")
-                put(
-                    "description",
-                    "action=remove only. Close the gap on each removed clip's track. Default false.",
-                )
+                put("description", "action=remove only. Close the gap on each removed clip's track. Default false.")
             }
             putJsonObject("duplicateItems") {
-                put("type", "array")
-                put("description", "Required when action=duplicate. Clones to produce; at least one.")
-                putJsonObject("items") {
-                    put("type", "object")
-                    putJsonObject("properties") {
-                        putJsonObject("clipId") { put("type", "string") }
-                        putJsonObject("timelineStartSeconds") {
-                            put("type", "number")
-                            put("description", "New timeline start position in seconds (must be >= 0).")
-                        }
-                        putJsonObject("trackId") {
-                            put("type", "string")
-                            put(
-                                "description",
-                                "Optional target track id of the same kind. Defaults to the source clip's track.",
-                            )
-                        }
-                    }
-                    put(
-                        "required",
-                        JsonArray(
-                            listOf(
-                                JsonPrimitive("clipId"),
-                                JsonPrimitive("timelineStartSeconds"),
-                            ),
-                        ),
+                itemArray(
+                    "Required when action=duplicate. Clones to produce; at least one.",
+                    required = listOf("clipId", "timelineStartSeconds"),
+                ) {
+                    stringProp("clipId")
+                    numberProp("timelineStartSeconds", "New timeline start position in seconds (must be >= 0).")
+                    stringProp("trackId", "Optional target track id of the same kind. Defaults to the source clip's track.")
+                }
+            }
+            putJsonObject("moveItems") {
+                itemArray(
+                    "Required when action=move. Reposition operations; at least one.",
+                    required = listOf("clipId"),
+                ) {
+                    stringProp("clipId")
+                    numberProp(
+                        "timelineStartSeconds",
+                        "New timeline start position in seconds (>= 0). Omit to keep current (valid only when toTrackId is set).",
                     )
-                    put("additionalProperties", false)
+                    stringProp(
+                        "toTrackId",
+                        "Optional target track id. Omit for same-track reposition. Must be same kind as the clip.",
+                    )
+                }
+            }
+            putJsonObject("splitItems") {
+                itemArray(
+                    "Required when action=split. Split operations; at least one.",
+                    required = listOf("clipId", "atTimelineSeconds"),
+                ) {
+                    stringProp("clipId")
+                    numberProp(
+                        "atTimelineSeconds",
+                        "Absolute timeline position to split at (strictly between clip's start and end).",
+                    )
+                }
+            }
+            putJsonObject("trimItems") {
+                itemArray(
+                    "Required when action=trim. Trim operations; at least one.",
+                    required = listOf("clipId"),
+                ) {
+                    stringProp("clipId")
+                    numberProp(
+                        "newSourceStartSeconds",
+                        "New trim offset into the source media (>= 0). Omit to keep current.",
+                    )
+                    numberProp(
+                        "newDurationSeconds",
+                        "New duration in seconds (> 0). Applied to both timeRange and sourceRange. Omit to keep current.",
+                    )
                 }
             }
         }
@@ -274,9 +323,30 @@ class ClipActionTool(
             "add" -> executeAdd(pid, input, ctx)
             "remove" -> executeRemove(pid, input, ctx)
             "duplicate" -> executeDuplicate(pid, input, ctx)
+            "move" -> executeMove(pid, input, ctx)
+            "split" -> executeSplit(pid, input, ctx)
+            "trim" -> executeTrim(pid, input, ctx)
             else -> error(
-                "unknown action '${input.action}'; accepted: add, remove, duplicate",
+                "unknown action '${input.action}'; accepted: add, remove, duplicate, move, split, trim",
             )
+        }
+    }
+
+    /**
+     * Ensure only the fields for [action] are present; reject the others loudly.
+     * Central shared validator for all six action branches.
+     */
+    private fun rejectForeign(action: String, input: Input) {
+        val foreign = buildList {
+            if (action != "add" && input.addItems != null) add("addItems")
+            if (action != "remove" && input.clipIds != null) add("clipIds")
+            if (action != "duplicate" && input.duplicateItems != null) add("duplicateItems")
+            if (action != "move" && input.moveItems != null) add("moveItems")
+            if (action != "split" && input.splitItems != null) add("splitItems")
+            if (action != "trim" && input.trimItems != null) add("trimItems")
+        }
+        require(foreign.isEmpty()) {
+            "action=$action rejects ${foreign.joinToString(" / ")} — use this action's own payload field"
         }
     }
 
@@ -285,11 +355,8 @@ class ClipActionTool(
         input: Input,
         ctx: ToolContext,
     ): ToolResult<Output> {
-        val items = input.addItems
-            ?: error("action=add requires `addItems` (omit `clipIds` / `duplicateItems`)")
-        require(input.clipIds == null && input.duplicateItems == null) {
-            "action=add rejects `clipIds` / `duplicateItems` — use `addItems`"
-        }
+        val items = input.addItems ?: error("action=add requires `addItems`")
+        rejectForeign("add", input)
         require(items.isNotEmpty()) { "addItems must not be empty" }
         items.forEachIndexed { idx, item ->
             require(item.sourceStartSeconds >= 0.0) {
@@ -351,8 +418,7 @@ class ClipActionTool(
                     trackId = newTrack.id.value,
                 )
             }
-            val duration = tracks.flatMap { it.clips }.maxOfOrNull { it.timeRange.end } ?: Duration.ZERO
-            project.copy(timeline = project.timeline.copy(tracks = tracks, duration = duration))
+            project.copy(timeline = project.timeline.copy(tracks = tracks, duration = recomputeDuration(tracks)))
         }
 
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
@@ -373,11 +439,8 @@ class ClipActionTool(
         input: Input,
         ctx: ToolContext,
     ): ToolResult<Output> {
-        val clipIds = input.clipIds
-            ?: error("action=remove requires `clipIds` (omit `addItems` / `duplicateItems`)")
-        require(input.addItems == null && input.duplicateItems == null) {
-            "action=remove rejects `addItems` / `duplicateItems` — use `clipIds`"
-        }
+        val clipIds = input.clipIds ?: error("action=remove requires `clipIds`")
+        rejectForeign("remove", input)
         require(clipIds.isNotEmpty()) { "clipIds must not be empty" }
 
         val results = mutableListOf<RemoveResult>()
@@ -408,12 +471,7 @@ class ClipActionTool(
                         } else {
                             keep
                         }
-                        when (track) {
-                            is Track.Video -> track.copy(clips = shiftedClips)
-                            is Track.Audio -> track.copy(clips = shiftedClips)
-                            is Track.Subtitle -> track.copy(clips = shiftedClips)
-                            is Track.Effect -> track.copy(clips = shiftedClips)
-                        }
+                        withClips(track, shiftedClips)
                     }
                 }
                 if (foundTrackId == null) {
@@ -453,11 +511,8 @@ class ClipActionTool(
         input: Input,
         ctx: ToolContext,
     ): ToolResult<Output> {
-        val items = input.duplicateItems
-            ?: error("action=duplicate requires `duplicateItems` (omit `addItems` / `clipIds`)")
-        require(input.addItems == null && input.clipIds == null) {
-            "action=duplicate rejects `addItems` / `clipIds` — use `duplicateItems`"
-        }
+        val items = input.duplicateItems ?: error("action=duplicate requires `duplicateItems`")
+        rejectForeign("duplicate", input)
         require(items.isNotEmpty()) { "duplicateItems must not be empty" }
         items.forEachIndexed { idx, item ->
             require(item.timelineStartSeconds >= 0.0) {
@@ -496,8 +551,7 @@ class ClipActionTool(
 
                 tracks = tracks.map { t ->
                     if (t.id == targetTrack.id) {
-                        val newClips = (t.clips + cloned).sortedBy { it.timeRange.start }
-                        withClips(t, newClips)
+                        withClips(t, (t.clips + cloned).sortedBy { it.timeRange.start })
                     } else {
                         t
                     }
@@ -511,8 +565,7 @@ class ClipActionTool(
                     timelineEndSeconds = newEndSeconds,
                 )
             }
-            val duration = tracks.flatMap { it.clips }.maxOfOrNull { it.timeRange.end } ?: Duration.ZERO
-            project.copy(timeline = project.timeline.copy(tracks = tracks, duration = duration))
+            project.copy(timeline = project.timeline.copy(tracks = tracks, duration = recomputeDuration(tracks)))
         }
 
         val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
@@ -528,6 +581,247 @@ class ClipActionTool(
         )
     }
 
+    private suspend fun executeMove(
+        pid: io.talevia.core.ProjectId,
+        input: Input,
+        ctx: ToolContext,
+    ): ToolResult<Output> {
+        val items = input.moveItems ?: error("action=move requires `moveItems`")
+        rejectForeign("move", input)
+        require(items.isNotEmpty()) { "moveItems must not be empty" }
+        items.forEachIndexed { idx, item ->
+            if (item.timelineStartSeconds == null && item.toTrackId == null) {
+                error("moveItems[$idx] (${item.clipId}): at least one of timelineStartSeconds / toTrackId must be set")
+            }
+            item.timelineStartSeconds?.let {
+                if (it < 0.0) error("moveItems[$idx] (${item.clipId}): timelineStartSeconds must be >= 0 (got $it)")
+            }
+        }
+
+        val results = mutableListOf<MoveResult>()
+
+        val updated = store.mutate(pid) { project ->
+            var tracks = project.timeline.tracks
+            items.forEachIndexed { idx, item ->
+                val sourceHit = tracks
+                    .firstNotNullOfOrNull { t -> t.clips.firstOrNull { it.id.value == item.clipId }?.let { t to it } }
+                    ?: error("moveItems[$idx]: clip ${item.clipId} not found in project ${pid.value}")
+                val (sourceTrack, clip) = sourceHit
+
+                val targetTrack: Track = when {
+                    item.toTrackId == null || item.toTrackId == sourceTrack.id.value -> sourceTrack
+                    else -> tracks.firstOrNull { it.id.value == item.toTrackId }
+                        ?: error("moveItems[$idx] (${item.clipId}): target track ${item.toTrackId} not found")
+                }
+
+                if (targetTrack.id != sourceTrack.id && !isKindCompatible(clip, targetTrack)) {
+                    error(
+                        "moveItems[$idx] (${item.clipId}): cannot move ${clipKindOf(clip)} clip onto " +
+                            "${trackKindOf(targetTrack)} track ${targetTrack.id.value}.",
+                    )
+                }
+
+                val oldStartSeconds = clip.timeRange.start.toDouble(DurationUnit.SECONDS)
+                val newStart: Duration = item.timelineStartSeconds?.seconds ?: clip.timeRange.start
+                val moved = withTimeRange(clip, TimeRange(newStart, clip.timeRange.duration))
+
+                tracks = if (targetTrack.id == sourceTrack.id) {
+                    tracks.map { track ->
+                        if (track.id != sourceTrack.id) track else replaceClip(track, moved)
+                    }
+                } else {
+                    tracks.map { track ->
+                        when (track.id) {
+                            sourceTrack.id -> withClips(track, track.clips.filterNot { it.id.value == clip.id.value })
+                            targetTrack.id -> withClips(track, (track.clips + moved).sortedBy { it.timeRange.start })
+                            else -> track
+                        }
+                    }
+                }
+
+                results += MoveResult(
+                    clipId = item.clipId,
+                    fromTrackId = sourceTrack.id.value,
+                    toTrackId = targetTrack.id.value,
+                    oldStartSeconds = oldStartSeconds,
+                    newStartSeconds = newStart.toDouble(DurationUnit.SECONDS),
+                    changedTrack = sourceTrack.id.value != targetTrack.id.value,
+                )
+            }
+            project.copy(timeline = project.timeline.copy(tracks = tracks, duration = recomputeDuration(tracks)))
+        }
+
+        val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
+        return ToolResult(
+            title = "move ${results.size} clip(s)",
+            outputForLlm = "Moved ${results.size} clip(s). Snapshot: ${snapshotId.value}",
+            data = Output(
+                projectId = pid.value,
+                action = "move",
+                snapshotId = snapshotId.value,
+                moved = results,
+            ),
+        )
+    }
+
+    private suspend fun executeSplit(
+        pid: io.talevia.core.ProjectId,
+        input: Input,
+        ctx: ToolContext,
+    ): ToolResult<Output> {
+        val items = input.splitItems ?: error("action=split requires `splitItems`")
+        rejectForeign("split", input)
+        require(items.isNotEmpty()) { "splitItems must not be empty" }
+
+        val results = mutableListOf<SplitResult>()
+
+        val updated = store.mutate(pid) { project ->
+            var tracks = project.timeline.tracks
+            items.forEachIndexed { idx, item ->
+                var found = false
+                var leftId: ClipId? = null
+                var rightId: ClipId? = null
+                val splitAt = item.atTimelineSeconds.seconds
+                tracks = tracks.map { track ->
+                    val target = track.clips.firstOrNull { it.id.value == item.clipId }
+                        ?: return@map track
+                    found = true
+                    if (splitAt <= target.timeRange.start || splitAt >= target.timeRange.end) {
+                        error(
+                            "splitItems[$idx] (${item.clipId}): split point ${item.atTimelineSeconds}s " +
+                                "is outside clip ${target.timeRange.start}..${target.timeRange.end}",
+                        )
+                    }
+                    val offset = splitAt - target.timeRange.start
+                    val (l, r) = splitClip(target, offset)
+                    leftId = l.id
+                    rightId = r.id
+                    withClips(
+                        track,
+                        (track.clips.filter { it.id != target.id } + listOf(l, r)).sortedBy { it.timeRange.start },
+                    )
+                }
+                if (!found) error("splitItems[$idx]: clip ${item.clipId} not found in project ${pid.value}")
+                results += SplitResult(
+                    originalClipId = item.clipId,
+                    leftClipId = leftId!!.value,
+                    rightClipId = rightId!!.value,
+                )
+            }
+            project.copy(timeline = project.timeline.copy(tracks = tracks))
+        }
+
+        val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
+        return ToolResult(
+            title = "split × ${results.size}",
+            outputForLlm = "Split ${results.size} clip(s). Snapshot: ${snapshotId.value}",
+            data = Output(
+                projectId = pid.value,
+                action = "split",
+                snapshotId = snapshotId.value,
+                split = results,
+            ),
+        )
+    }
+
+    private suspend fun executeTrim(
+        pid: io.talevia.core.ProjectId,
+        input: Input,
+        ctx: ToolContext,
+    ): ToolResult<Output> {
+        val items = input.trimItems ?: error("action=trim requires `trimItems`")
+        rejectForeign("trim", input)
+        require(items.isNotEmpty()) { "trimItems must not be empty" }
+        items.forEachIndexed { idx, item ->
+            if (item.newSourceStartSeconds == null && item.newDurationSeconds == null) {
+                error(
+                    "trimItems[$idx] (${item.clipId}): at least one of newSourceStartSeconds / newDurationSeconds required",
+                )
+            }
+            item.newSourceStartSeconds?.let {
+                require(it >= 0.0) {
+                    "trimItems[$idx] (${item.clipId}): newSourceStartSeconds must be >= 0 (got $it)"
+                }
+            }
+            item.newDurationSeconds?.let {
+                require(it > 0.0) {
+                    "trimItems[$idx] (${item.clipId}): newDurationSeconds must be > 0 (got $it)"
+                }
+            }
+        }
+
+        val results = mutableListOf<TrimResult>()
+
+        val updated = store.mutate(pid) { project ->
+            var tracks = project.timeline.tracks
+            items.forEachIndexed { idx, item ->
+                val hit = tracks.firstNotNullOfOrNull { t ->
+                    t.clips.firstOrNull { it.id.value == item.clipId }?.let { t to it }
+                } ?: error("trimItems[$idx]: clip ${item.clipId} not found in project ${pid.value}")
+                val (track, clip) = hit
+
+                val (assetId, currentSourceRange) = when (clip) {
+                    is Clip.Video -> clip.assetId to clip.sourceRange
+                    is Clip.Audio -> clip.assetId to clip.sourceRange
+                    is Clip.Text -> error(
+                        "trimItems[$idx] (${item.clipId}): action=trim cannot trim a text/subtitle clip; " +
+                            "use add_subtitles to reset its time range.",
+                    )
+                }
+                val newSourceStart: Duration = item.newSourceStartSeconds?.seconds ?: currentSourceRange.start
+                val newDuration: Duration = item.newDurationSeconds?.seconds ?: currentSourceRange.duration
+                val assetDuration = project.assets.firstOrNull { it.id == assetId }?.metadata?.duration
+                    ?: error(
+                        "trimItems[$idx] (${item.clipId}): asset ${assetId.value} bound to clip not found in project " +
+                            "${pid.value} — import it (or restore the clip's source binding) first.",
+                    )
+                require(newSourceStart < assetDuration) {
+                    "trimItems[$idx] (${item.clipId}): newSourceStartSeconds " +
+                        "${newSourceStart.toDouble(DurationUnit.SECONDS)} exceeds asset duration " +
+                        "${assetDuration.toDouble(DurationUnit.SECONDS)}s."
+                }
+                require(newSourceStart + newDuration <= assetDuration) {
+                    "trimItems[$idx] (${item.clipId}): trim window (start=" +
+                        "${newSourceStart.toDouble(DurationUnit.SECONDS)}s + duration=" +
+                        "${newDuration.toDouble(DurationUnit.SECONDS)}s) extends past asset duration " +
+                        "${assetDuration.toDouble(DurationUnit.SECONDS)}s."
+                }
+                val timelineRange = TimeRange(clip.timeRange.start, newDuration)
+                val sourceRange = TimeRange(newSourceStart, newDuration)
+                val trimmed = withTrim(clip, timelineRange, sourceRange)
+                tracks = tracks.map { t ->
+                    if (t.id == track.id) {
+                        withClips(t, t.clips.map { if (it.id == clip.id) trimmed else it }.sortedBy { it.timeRange.start })
+                    } else {
+                        t
+                    }
+                }
+                results += TrimResult(
+                    clipId = item.clipId,
+                    trackId = track.id.value,
+                    newSourceStartSeconds = newSourceStart.toDouble(DurationUnit.SECONDS),
+                    newDurationSeconds = newDuration.toDouble(DurationUnit.SECONDS),
+                    newTimelineEndSeconds = timelineRange.end.toDouble(DurationUnit.SECONDS),
+                )
+            }
+            project.copy(timeline = project.timeline.copy(tracks = tracks, duration = recomputeDuration(tracks)))
+        }
+
+        val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
+        return ToolResult(
+            title = "trim ${results.size} clip(s)",
+            outputForLlm = "Trimmed ${results.size} clip(s). Snapshot: ${snapshotId.value}",
+            data = Output(
+                projectId = pid.value,
+                action = "trim",
+                snapshotId = snapshotId.value,
+                trimmed = results,
+            ),
+        )
+    }
+
+    // --- helpers -------------------------------------------------------------
+
     private fun pickVideoTrack(tracks: List<Track>, requestedId: String?): Track.Video {
         val match = if (requestedId != null) {
             val requested = tracks.firstOrNull { it.id.value == requestedId }
@@ -542,26 +836,47 @@ class ClipActionTool(
         return match as? Track.Video ?: Track.Video(TrackId(Uuid.random().toString()))
     }
 
-    private fun cloneClip(original: Clip, newId: ClipId, newStart: Duration): Clip = when (original) {
-        is Clip.Video -> original.copy(
-            id = newId,
-            timeRange = TimeRange(newStart, original.timeRange.duration),
-        )
-        is Clip.Audio -> original.copy(
-            id = newId,
-            timeRange = TimeRange(newStart, original.timeRange.duration),
-        )
-        is Clip.Text -> original.copy(
-            id = newId,
-            timeRange = TimeRange(newStart, original.timeRange.duration),
-        )
+    private fun cloneClip(original: Clip, newId: ClipId, newStart: Duration): Clip {
+        val r = TimeRange(newStart, original.timeRange.duration)
+        return when (original) {
+            is Clip.Video -> original.copy(id = newId, timeRange = r)
+            is Clip.Audio -> original.copy(id = newId, timeRange = r)
+            is Clip.Text -> original.copy(id = newId, timeRange = r)
+        }
+    }
+
+    private fun splitClip(c: Clip, offset: Duration): Pair<Clip, Clip> {
+        val leftId = ClipId(Uuid.random().toString())
+        val rightId = ClipId(Uuid.random().toString())
+        val lt = TimeRange(c.timeRange.start, offset)
+        val rt = TimeRange(c.timeRange.start + offset, c.timeRange.duration - offset)
+        return when (c) {
+            is Clip.Video -> {
+                val ls = TimeRange(c.sourceRange.start, offset)
+                val rs = TimeRange(c.sourceRange.start + offset, c.sourceRange.duration - offset)
+                c.copy(id = leftId, timeRange = lt, sourceRange = ls) to c.copy(id = rightId, timeRange = rt, sourceRange = rs)
+            }
+            is Clip.Audio -> {
+                val ls = TimeRange(c.sourceRange.start, offset)
+                val rs = TimeRange(c.sourceRange.start + offset, c.sourceRange.duration - offset)
+                c.copy(id = leftId, timeRange = lt, sourceRange = ls) to c.copy(id = rightId, timeRange = rt, sourceRange = rs)
+            }
+            is Clip.Text -> c.copy(id = leftId, timeRange = lt) to c.copy(id = rightId, timeRange = rt)
+        }
     }
 
     private fun trackKindOf(track: Track): String = when (track) {
-        is Track.Video -> "video"
-        is Track.Audio -> "audio"
-        is Track.Subtitle -> "subtitle"
-        is Track.Effect -> "effect"
+        is Track.Video -> "video"; is Track.Audio -> "audio"; is Track.Subtitle -> "subtitle"; is Track.Effect -> "effect"
+    }
+
+    private fun clipKindOf(clip: Clip): String = when (clip) {
+        is Clip.Video -> "video"; is Clip.Audio -> "audio"; is Clip.Text -> "text"
+    }
+
+    private fun isKindCompatible(clip: Clip, track: Track): Boolean = when (clip) {
+        is Clip.Video -> track is Track.Video
+        is Clip.Audio -> track is Track.Audio
+        is Clip.Text -> track is Track.Subtitle
     }
 
     private fun withClips(track: Track, clips: List<Clip>): Track = when (track) {
@@ -571,12 +886,53 @@ class ClipActionTool(
         is Track.Effect -> track.copy(clips = clips)
     }
 
-    private fun Clip.shiftStart(delta: Duration): Clip {
-        val newRange = timeRange.copy(start = timeRange.start + delta)
-        return when (this) {
-            is Clip.Video -> copy(timeRange = newRange)
-            is Clip.Audio -> copy(timeRange = newRange)
-            is Clip.Text -> copy(timeRange = newRange)
-        }
+    private fun withTimeRange(clip: Clip, range: TimeRange): Clip = when (clip) {
+        is Clip.Video -> clip.copy(timeRange = range)
+        is Clip.Audio -> clip.copy(timeRange = range)
+        is Clip.Text -> clip.copy(timeRange = range)
+    }
+
+    private fun withTrim(c: Clip, timelineRange: TimeRange, sourceRange: TimeRange): Clip = when (c) {
+        is Clip.Video -> c.copy(timeRange = timelineRange, sourceRange = sourceRange)
+        is Clip.Audio -> c.copy(timeRange = timelineRange, sourceRange = sourceRange)
+        is Clip.Text -> error("action=trim cannot trim a text clip")
+    }
+
+    private fun replaceClip(track: Track, replacement: Clip): Track = withClips(
+        track,
+        track.clips.map { if (it.id == replacement.id) replacement else it }.sortedBy { it.timeRange.start },
+    )
+
+    private fun Clip.shiftStart(delta: Duration): Clip =
+        withTimeRange(this, timeRange.copy(start = timeRange.start + delta))
+
+    private fun recomputeDuration(tracks: List<Track>): Duration =
+        tracks.flatMap { it.clips }.maxOfOrNull { it.timeRange.end } ?: Duration.ZERO
+}
+
+/** DSL helpers for the JSON Schema builder — keep the schema block compact. */
+private fun JsonObjectBuilder.stringProp(name: String, description: String? = null) = putJsonObject(name) {
+    put("type", "string")
+    if (description != null) put("description", description)
+}
+
+private fun JsonObjectBuilder.numberProp(name: String, description: String? = null) = putJsonObject(name) {
+    put("type", "number")
+    if (description != null) put("description", description)
+}
+
+/** `type=array` + `items=object(properties, required, additionalProperties=false)` — one shape per *Items payload. */
+private fun JsonObjectBuilder.itemArray(
+    description: String,
+    required: List<String>,
+    props: JsonObjectBuilder.() -> Unit,
+) {
+    put("type", "array")
+    put("description", description)
+    putJsonObject("items") {
+        put("type", "object")
+        putJsonObject("properties", props)
+        put("required", JsonArray(required.map(::JsonPrimitive)))
+        put("additionalProperties", false)
     }
 }

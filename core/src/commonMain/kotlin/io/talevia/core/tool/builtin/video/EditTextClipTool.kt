@@ -31,7 +31,7 @@ import kotlinx.serialization.serializer
  *   - `""` on `backgroundColor` → clear (set to null).
  *
  * Works on text clips on any track kind (Subtitle or Effect). `timeRange`
- * is not touched — use `move_clips` / `trim_clips` for positional edits.
+ * is not touched — use `clip_action(action=move|trim)` for positional edits.
  * All-or-nothing; one snapshot per call.
  */
 class EditTextClipTool(
