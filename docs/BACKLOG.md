@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **m3-greenfield-onboarding-system-prompt** — M2 卡在 6/7 可能长期不解锁，M3 候选 §4 小白路径可并行起步。系统 prompt 当前预设用户已 `project_query(select=project_metadata)` 能看到 timeline，但零素材 / 第一次打开的 greenfield session 会让 LLM 直接跳 `generate_image` 而漏掉 "先 define source_node（character/style_bible）"。`Prompts.kt` 没有 onboarding lane 区分 empty-project vs populated-project。**方向：** `PromptScaffold` 检测 `project.timeline.tracks.isEmpty() && project.sources.isEmpty()`，切到"greenfield onboarding"分支提示 agent 先询问 "你想做哪种视频？" 或直接提出 source-first workflow；在 `PromptAigcLane` 相邻加 `PromptOnboardingLane`。Rubric §5.4。Milestone §later.
 - **debt-add-benchmark-agent-loop** — R.6 #4 scan：`core/agent` / `core/tool` dispatch / `ExportTool` / `FileProjectStore.openAt` 零 `*Benchmark*.kt` / `*Perf*.kt` / `*Latency*.kt` 文件。关键路径没有回归守护，未来 compaction / fallback / lockfile lookup 的 perf 劣化无人发现。强制 P0 per R.6 "核心路径零 benchmark"。**方向：** 新增 `core/src/jvmTest/kotlin/io/talevia/core/bench/AgentLoopBenchmark.kt` 用 `kotlin.time.measureTime` 跑固定 synthetic session（stub provider + 5 tool turn）+ assert wall-time < budget（初版 budget 仅 warning，不 fail），同目录加 `LockfileLookupBenchmark` 覆盖 500-entry cache hit。Rubric §5.7。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排

@@ -70,6 +70,16 @@ internal data class PendingToolCall(val partId: PartId, val toolId: String)
  * assertions keep matching. A null project renders explicitly so the agent
  * knows to pick one before dispatching timeline tools rather than guessing.
  *
+ * When [projectIsGreenfield] is true **and** the project is bound, the
+ * onboarding lane from [io.talevia.core.agent.prompt.PROMPT_ONBOARDING_LANE]
+ * is inserted between the banner and the base prompt. The lane primes the
+ * model to scaffold a `style_bible` + genre-specific source nodes before
+ * dispatching any AIGC tool — otherwise greenfield traces tend to skip
+ * straight to `generate_image` and produce output that can't participate in
+ * `find_stale_clips` later. The lane disappears as soon as the project has
+ * any track or source node, so the token cost is paid only while it's
+ * actually load-bearing.
+ *
  * Pure function — package-private so both [Agent] and [AgentTurnExecutor] can
  * reach it without exposing it on the public surface.
  */
@@ -77,6 +87,7 @@ internal fun buildSystemPrompt(
     base: String?,
     currentProjectId: ProjectId?,
     sessionId: SessionId?,
+    projectIsGreenfield: Boolean = false,
 ): String? {
     val projectLine = if (currentProjectId != null) {
         "Current project: ${currentProjectId.value} (from session binding; call switch_project to change)"
@@ -87,10 +98,15 @@ internal fun buildSystemPrompt(
         "Current session: ${it.value} (pass this exact id as `sessionId` whenever a tool requires one; never invent one)"
     }
     val banner = listOfNotNull(projectLine, sessionLine).joinToString("\n")
+    val head = if (projectIsGreenfield && currentProjectId != null) {
+        banner + "\n\n" + io.talevia.core.agent.prompt.PROMPT_ONBOARDING_LANE
+    } else {
+        banner
+    }
     return when {
-        base == null -> banner
-        base.isBlank() -> banner
-        else -> "$banner\n\n$base"
+        base == null -> head
+        base.isBlank() -> head
+        else -> "$head\n\n$base"
     }
 }
 
@@ -157,8 +173,15 @@ internal class AgentTurnExecutor(
          */
         retryAttempt: Int? = null,
     ): TurnResult {
-        val projectHasAssets = currentProjectId != null &&
-            projects?.get(currentProjectId)?.assets?.isNotEmpty() == true
+        val projectSnapshot = currentProjectId?.let { projects?.get(it) }
+        val projectHasAssets = projectSnapshot?.assets?.isNotEmpty() == true
+        // Greenfield = no authored structure yet (no tracks, no source nodes).
+        // Imported assets alone don't disqualify — the onboarding lane's
+        // advice (scaffold a style_bible first) still applies when the user
+        // has imported raw footage but hasn't yet declared creative intent.
+        val projectIsGreenfield = projectSnapshot != null &&
+            projectSnapshot.timeline.tracks.isEmpty() &&
+            projectSnapshot.source.nodes.isEmpty()
         val request = LlmRequest(
             model = input.model,
             messages = history,
@@ -169,7 +192,12 @@ internal class AgentTurnExecutor(
                     disabledToolIds = disabledToolIds,
                 ),
             ),
-            systemPrompt = buildSystemPrompt(systemPrompt, currentProjectId, input.sessionId),
+            systemPrompt = buildSystemPrompt(
+                base = systemPrompt,
+                currentProjectId = currentProjectId,
+                sessionId = input.sessionId,
+                projectIsGreenfield = projectIsGreenfield,
+            ),
             // Seed the OpenAI cache-routing hint from the session id so every
             // turn in a session hits the same replica — unless the caller
             // already picked a key.
