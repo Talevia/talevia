@@ -55,14 +55,18 @@ import kotlin.time.Duration.Companion.seconds
  * misses), 5 of 10 (half), 10 of 10 (full hit) — should show a monotone
  * decrease in `perClipExport` time as `preCachedClips` climbs.
  *
- * Engine is [CountingPerClipEngine] which supports the per-clip path +
- * records render dispatches without doing any real work. Result shape
- * matches `ExportTool`'s existing per-clip contract
- * (`renderClip` → `concatMezzanines`), so the orchestration cost is real
- * while the ffmpeg-kernel cost is zero. The parameter sweeps the
- * `ClipRenderCache` pre-seed: entries pre-populated for the first N of 10
- * clips using the authoritative `clipMezzanineFingerprint` so
- * `ExportTool` sees them as legitimate hits.
+ * Engine is [CountingPerClipEngine], whose `renderClip` sleeps
+ * [SIMULATED_RENDER_MS] per call — NOT a no-op. Cycle-38's full benchmark
+ * run exposed the no-op variant as monotonically-SLOWER with more pre-
+ * cached clips (0→1.360, 5→1.606, 10→1.920 ms/op) — the opposite of the
+ * claim — because `ClipRenderCache.findByFingerprint` is an O(N) linear
+ * scan and, with zero render savings, lookup cost dominated. A tiny
+ * simulated render cost (2 ms/clip is ~10× an ffmpeg kernel dispatch for
+ * a trivial clip; still two orders of magnitude shy of a real transcode)
+ * restores the cache-hit-dominates ratio real callers experience, so the
+ * curve's expected direction matches the production invariant being
+ * proved. See
+ * `docs/decisions/2026-04-23-debt-perclip-benchmark-inverted-scaling-under-stub-engine.md`.
  *
  * Cache-hit detection also needs `engine.mezzaninePresent(path)` to
  * return true for the seeded mezzanines — the benchmark's fake engine
@@ -188,8 +192,11 @@ class PerClipRenderCacheBenchmark {
 /**
  * Per-clip-capable fake engine for the cache-hit-ratio benchmark.
  * `supportsPerClipCache=true` routes `ExportTool` through the per-clip
- * path; `renderClip` + `concatMezzanines` record dispatches in constant
- * time without filesystem or ffmpeg work; `mezzaninePresent` answers from
+ * path; `renderClip` sleeps [SIMULATED_RENDER_MS] per dispatch to
+ * simulate a small-but-non-zero transcode cost (see class KDoc on
+ * [PerClipRenderCacheBenchmark] for rationale); `concatMezzanines`
+ * remains a no-op because the benchmark's signal of interest is the
+ * render-miss count, not concat cost; `mezzaninePresent` answers from
  * a pre-seeded set populated at setup time so cache-hit paths are
  * realistic (the `runPerClipRender` guard requires both "fingerprint in
  * cache" AND "mezzanine file on disk").
@@ -225,6 +232,14 @@ private class CountingPerClipEngine : VideoEngine {
         mezzaninePath: String,
         resolver: MediaPathResolver?,
     ) {
+        // Simulated render cost. A no-op here was the root cause of cycle-38's
+        // inverted curve — with zero render savings, the O(N) linear-scan cost
+        // of `ClipRenderCache.findByFingerprint` dominated and more-cached
+        // runs became slower. This tiny delay is not a regression gate on
+        // ffmpeg throughput (that's [io.talevia.platform.ffmpeg.FfmpegVideoEngine]'s
+        // job, not a benchmark harness's); it exists so the ratio of render-
+        // cost to cache-lookup-cost mirrors production.
+        kotlinx.coroutines.delay(SIMULATED_RENDER_MS)
         // Record that this path now exists, so subsequent same-bench-run
         // lookups (none expected today but cheap) would see it as present.
         preSeededPaths += mezzaninePath
@@ -246,3 +261,16 @@ private class CountingPerClipEngine : VideoEngine {
         time: Duration,
     ): ByteArray = ByteArray(0)
 }
+
+/**
+ * Per-renderClip simulated latency for [CountingPerClipEngine]. Small
+ * enough (2 ms ≈ 10× an ffmpeg kernel-dispatch floor for a trivial clip)
+ * that 10 clips × 3 param values × N iterations stays well under JMH's
+ * per-param budget, but larger than the nanoseconds-scale cost of
+ * `ClipRenderCache.findByFingerprint` so the cache-hit win dominates the
+ * lookup cost in the measured curve. Production FFmpeg render time per
+ * clip is 100–1000× this; the benchmark isn't trying to model that — it's
+ * trying to prove "cache hits save the render cost, and the saving
+ * scales linearly with miss count".
+ */
+private const val SIMULATED_RENDER_MS: Long = 2L
