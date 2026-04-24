@@ -20,7 +20,6 @@ import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
 import io.talevia.core.session.SessionStore
-import io.talevia.core.session.ToolState
 import io.talevia.core.tool.ToolRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -270,7 +269,7 @@ class Agent(
             return result
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
-                finalizeCancelled(handle, e.message)
+                finalizeCancelled(store, handle.currentAssistantId, e.message)
                 bus.publish(BusEvent.SessionCancelled(input.sessionId))
                 bus.publish(
                     BusEvent.AgentRunStateChanged(
@@ -294,49 +293,6 @@ class Agent(
         } finally {
             metrics?.observe("agent.run.ms", (clock.now() - runStart).inWholeMilliseconds)
             inflightMutex.withLock { inflight.remove(input.sessionId) }
-        }
-    }
-
-    private suspend fun finalizeCancelled(handle: RunHandle, reason: String?) {
-        val mid = handle.currentAssistantId ?: return
-        val existing = runCatching { store.getMessage(mid) }.getOrNull() as? Message.Assistant ?: return
-        // Avoid overwriting a finish that already landed (race with streamTurn).
-        if (existing.finish != null) return
-        val cancelled = existing.copy(
-            finish = FinishReason.CANCELLED,
-            error = reason ?: "cancelled",
-        )
-        runCatching { store.updateMessage(cancelled) }
-
-        // Any Tool part the LLM started streaming but didn't complete before
-        // the cancel lands here stamped Pending or Running. Without this pass
-        // the part would stay "in progress" forever in the session log —
-        // misleading any post-mortem query (run_failure, listMessagesWithParts)
-        // about what actually happened. Stamp them Failed with a "cancelled"
-        // message so the audit trail matches the message-level finish.
-        //
-        // Using the existing `ToolState.Failed` variant rather than adding a
-        // new `Cancelled` variant keeps the schema stable — 47 `when (state)`
-        // call sites across providers / serialisers / UI don't have to learn
-        // a 5th case. The "cancelled: <reason>" prefix lets audit tools
-        // distinguish tool-level failure from run-level cancel when they
-        // care.
-        val msg = reason ?: "cancelled"
-        runCatching {
-            val parts = store.listSessionParts(existing.sessionId, includeCompacted = true)
-            for (part in parts) {
-                if (part !is Part.Tool || part.messageId != mid) continue
-                val state = part.state
-                val input = when (state) {
-                    is ToolState.Running -> state.input
-                    ToolState.Pending, is ToolState.Completed, is ToolState.Failed -> null
-                }
-                if (state !is ToolState.Pending && state !is ToolState.Running) continue
-                val updated = part.copy(
-                    state = ToolState.Failed(input = input, message = "cancelled: $msg"),
-                )
-                runCatching { store.upsertPart(updated) }
-            }
         }
     }
 
