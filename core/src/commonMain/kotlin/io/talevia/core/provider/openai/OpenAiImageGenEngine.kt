@@ -59,8 +59,15 @@ class OpenAiImageGenEngine(
 
     override val providerId: String = "openai"
 
-    override suspend fun generate(request: ImageGenRequest): ImageGenResult {
+    override suspend fun generate(request: ImageGenRequest): ImageGenResult =
+        generate(request, onWarmup = { })
+
+    override suspend fun generate(
+        request: ImageGenRequest,
+        onWarmup: suspend (io.talevia.core.bus.BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): ImageGenResult {
         val wireBody = buildWireBody(request)
+        onWarmup(io.talevia.core.bus.BusEvent.ProviderWarmup.Phase.Starting)
         val response: HttpResponse = httpClient.post("$baseUrl/v1/images/generations") {
             bearerAuth(apiKey)
             contentType(ContentType.Application.Json)
@@ -70,6 +77,9 @@ class OpenAiImageGenEngine(
             val errBody = runCatching { response.bodyAsText() }.getOrNull().orEmpty()
             error("OpenAI images request failed: ${response.status} $errBody")
         }
+        // First successful response byte = provider accepted the request + is
+        // returning payload; the cold-start window has ended.
+        onWarmup(io.talevia.core.bus.BusEvent.ProviderWarmup.Phase.Ready)
 
         val payload = json.parseToJsonElement(response.bodyAsText()).jsonObject
         val data = payload["data"]?.jsonArray ?: error("OpenAI images response missing `data`")

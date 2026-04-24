@@ -1,5 +1,6 @@
 package io.talevia.core.platform
 
+import io.talevia.core.bus.BusEvent
 import kotlinx.serialization.Serializable
 
 /**
@@ -21,6 +22,18 @@ interface TtsEngine {
     val providerId: String
 
     suspend fun synthesize(request: TtsRequest): TtsResult
+
+    /**
+     * Warmup-aware variant mirroring [MusicGenEngine.generate]'s
+     * [onWarmup]. Engines invoke [onWarmup] with `Starting` right
+     * before the provider HTTP call and `Ready` after the first
+     * successful response byte. Default delegates to [synthesize] so
+     * existing impls + tests keep working unchanged.
+     */
+    suspend fun synthesize(
+        request: TtsRequest,
+        onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): TtsResult = synthesize(request)
 }
 
 /**

@@ -1,5 +1,6 @@
 package io.talevia.core.platform
 
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.domain.source.consistency.LoraPin
 import kotlinx.serialization.Serializable
 
@@ -22,6 +23,19 @@ interface ImageGenEngine {
     val providerId: String
 
     suspend fun generate(request: ImageGenRequest): ImageGenResult
+
+    /**
+     * Warmup-aware variant mirroring [MusicGenEngine.generate]'s
+     * [onWarmup]. Engines that want to surface the provider's cold-
+     * start lag (see [BusEvent.ProviderWarmup]) call [onWarmup] with
+     * `Starting` right before the provider HTTP call and `Ready` after
+     * the first successful response byte. Default delegates to the
+     * plain [generate] so existing impls + tests keep working.
+     */
+    suspend fun generate(
+        request: ImageGenRequest,
+        onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): ImageGenResult = generate(request)
 }
 
 /**

@@ -53,8 +53,15 @@ class OpenAiTtsEngine(
 
     override val providerId: String = "openai"
 
-    override suspend fun synthesize(request: TtsRequest): TtsResult {
+    override suspend fun synthesize(request: TtsRequest): TtsResult =
+        synthesize(request, onWarmup = { })
+
+    override suspend fun synthesize(
+        request: TtsRequest,
+        onWarmup: suspend (io.talevia.core.bus.BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): TtsResult {
         val body = buildRequestBody(request)
+        onWarmup(io.talevia.core.bus.BusEvent.ProviderWarmup.Phase.Starting)
         val response: HttpResponse = httpClient.post("$baseUrl/v1/audio/speech") {
             bearerAuth(apiKey)
             contentType(ContentType.Application.Json)
@@ -64,6 +71,7 @@ class OpenAiTtsEngine(
             val errBody = runCatching { response.bodyAsText() }.getOrNull().orEmpty()
             error("OpenAI TTS request failed: ${response.status} $errBody")
         }
+        onWarmup(io.talevia.core.bus.BusEvent.ProviderWarmup.Phase.Ready)
         val audioBytes = response.readRawBytes()
         if (audioBytes.isEmpty()) error("OpenAI TTS returned empty audio body")
 

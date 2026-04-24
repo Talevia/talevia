@@ -78,8 +78,15 @@ class OpenAiSoraVideoGenEngine(
 
     override val providerId: String = "openai"
 
-    override suspend fun generate(request: VideoGenRequest): VideoGenResult {
+    override suspend fun generate(request: VideoGenRequest): VideoGenResult =
+        generate(request, onWarmup = { })
+
+    override suspend fun generate(
+        request: VideoGenRequest,
+        onWarmup: suspend (io.talevia.core.bus.BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): VideoGenResult {
         val wireBody = buildWireBody(request)
+        onWarmup(io.talevia.core.bus.BusEvent.ProviderWarmup.Phase.Starting)
         val createResp: HttpResponse = httpClient.post("$baseUrl/v1/videos") {
             bearerAuth(apiKey)
             contentType(ContentType.Application.Json)
@@ -93,6 +100,12 @@ class OpenAiSoraVideoGenEngine(
         val createJson = json.parseToJsonElement(createResp.bodyAsText()).jsonObject
         val jobId = createJson["id"]?.jsonPrimitive?.content
             ?: error("OpenAI videos response missing `id`")
+        // Submit accepted → provider's cold-start window has ended. For
+        // Sora the real wait is the poll loop that follows, but the user-
+        // facing "warming up" surface exists to convey "the POST came back,
+        // we're now waiting on the queue" → a Ready emit here is correct
+        // per the contract in [BusEvent.ProviderWarmup].
+        onWarmup(io.talevia.core.bus.BusEvent.ProviderWarmup.Phase.Ready)
 
         val finalJob = pollUntilTerminal(jobId)
         val finalStatus = finalJob["status"]?.jsonPrimitive?.content

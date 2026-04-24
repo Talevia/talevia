@@ -20,6 +20,7 @@ import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import kotlinx.datetime.Clock
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -237,7 +238,16 @@ class SynthesizeSpeechTool(
             jobId = "tts-${inputHash.take(8)}",
             startMessage = "synthesising speech (${input.text.length} chars) with ${input.model}",
         ) {
-            synthesizeWithFallback(engines, request)
+            synthesizeWithFallback(engines, request) { phase, providerId ->
+                ctx.publishEvent(
+                    BusEvent.ProviderWarmup(
+                        sessionId = ctx.sessionId,
+                        providerId = providerId,
+                        phase = phase,
+                        epochMs = Clock.System.now().toEpochMilliseconds(),
+                    ),
+                )
+            }
         }
 
         val newAssetId = AssetId(Uuid.random().toString())
@@ -332,11 +342,12 @@ class SynthesizeSpeechTool(
     private suspend fun synthesizeWithFallback(
         engines: List<TtsEngine>,
         request: TtsRequest,
+        onWarmup: suspend (BusEvent.ProviderWarmup.Phase, String) -> Unit = { _, _ -> },
     ): TtsResult {
         val failures = mutableListOf<Pair<String, Throwable>>()
         for (engine in engines) {
             try {
-                return engine.synthesize(request)
+                return engine.synthesize(request) { phase -> onWarmup(phase, engine.providerId) }
             } catch (t: Throwable) {
                 // CancellationException should not be swallowed — it's how a
                 // supervising coroutine signals "stop this work". Propagate

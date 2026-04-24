@@ -1,5 +1,6 @@
 package io.talevia.core.platform
 
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.domain.source.consistency.LoraPin
 import kotlinx.serialization.Serializable
 
@@ -22,6 +23,19 @@ interface VideoGenEngine {
     val providerId: String
 
     suspend fun generate(request: VideoGenRequest): VideoGenResult
+
+    /**
+     * Warmup-aware variant mirroring [MusicGenEngine.generate]'s
+     * [onWarmup]. Emits `Starting` right before the submit call and
+     * `Ready` after the first poll response with status `queued` /
+     * `processing` so the LLM's user sees a "warming up sora…" hint
+     * during the 5-30s job-submit latency. Default delegates to
+     * [generate] so existing impls + tests keep working unchanged.
+     */
+    suspend fun generate(
+        request: VideoGenRequest,
+        onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): VideoGenResult = generate(request)
 }
 
 /**
