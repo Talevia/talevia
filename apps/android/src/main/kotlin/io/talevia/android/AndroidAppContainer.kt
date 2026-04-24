@@ -9,6 +9,7 @@ import io.talevia.core.agent.AgentProviderFallbackTracker
 import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
+import io.talevia.core.compaction.PerModelCompactionBudget
 import io.talevia.core.compaction.PerModelCompactionThreshold
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.FileProjectStore
@@ -185,6 +186,11 @@ class AndroidAppContainer(context: Context) {
         PerModelCompactionThreshold.fromRegistry(providers)
     }
 
+    /** Per-model compaction-budget resolver — complements [compactionThreshold]. */
+    private val compactionBudget: PerModelCompactionBudget = kotlinx.coroutines.runBlocking {
+        PerModelCompactionBudget.fromRegistry(providers)
+    }
+
     fun agentFor(providerId: String): Agent? {
         val provider: LlmProvider = providers.get(providerId) ?: return null
         return agents.getOrPut(providerId) {
@@ -194,7 +200,7 @@ class AndroidAppContainer(context: Context) {
                 store = sessions,
                 permissions = permissions,
                 bus = bus,
-                compactor = Compactor(provider, sessions, bus),
+                compactor = Compactor(provider, sessions, bus, budgetResolver = compactionBudget),
                 compactionThreshold = compactionThreshold,
                 fallbackProviders = providers.all().filter { it.id != provider.id },
             )

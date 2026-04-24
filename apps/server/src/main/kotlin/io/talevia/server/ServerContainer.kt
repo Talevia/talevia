@@ -9,6 +9,7 @@ import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.agent.SessionTitler
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
+import io.talevia.core.compaction.PerModelCompactionBudget
 import io.talevia.core.compaction.PerModelCompactionThreshold
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.db.TaleviaDbFactory
@@ -345,6 +346,7 @@ class ServerContainer(
                 provider = provider,
                 store = sessions,
                 bus = bus,
+                budgetResolver = compactionBudget,
             ),
             compactionThreshold = compactionThreshold,
             titler = SessionTitler(provider = provider, store = sessions),
@@ -358,6 +360,11 @@ class ServerContainer(
      */
     private val compactionThreshold: PerModelCompactionThreshold = kotlinx.coroutines.runBlocking {
         PerModelCompactionThreshold.fromRegistry(providers)
+    }
+
+    /** Per-model compaction-budget resolver — complements [compactionThreshold]. */
+    private val compactionBudget: PerModelCompactionBudget = kotlinx.coroutines.runBlocking {
+        PerModelCompactionBudget.fromRegistry(providers)
     }
 
     /**

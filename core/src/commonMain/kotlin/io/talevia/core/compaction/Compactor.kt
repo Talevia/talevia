@@ -44,9 +44,32 @@ class Compactor(
     private val store: SessionStore,
     private val bus: EventBus,
     private val clock: Clock = Clock.System,
-    private val protectUserTurns: Int = 2,
-    private val pruneProtectTokens: Int = 40_000,
+    protectUserTurns: Int = CompactionBudget.DEFAULT.protectUserTurns,
+    pruneProtectTokens: Int = CompactionBudget.DEFAULT.pruneKeepTokens,
+    /**
+     * Per-model budget resolver. Defaults to a constant budget built from
+     * the two Int params above, so pre-cycle callers (tests, iOS bridge)
+     * see unchanged numbers. Production containers inject
+     * [PerModelCompactionBudget] so a session on a 64k-window model
+     * doesn't try to keep a 40k budget (which leaves ~zero room for the
+     * next turn).
+     */
+    private val budgetResolver: (ModelRef) -> CompactionBudget = constantBudgetResolver(
+        protectUserTurns = protectUserTurns,
+        pruneKeepTokens = pruneProtectTokens,
+    ),
 ) {
+    /**
+     * Backstop budget used by the no-arg [prune] overload — mirrors the
+     * pre-cycle `(protectUserTurns, pruneProtectTokens)` fields so tests
+     * that exercise `prune(history)` with explicit ctor knobs continue
+     * to see the configured numbers. Production [process] uses
+     * [budgetResolver] directly with the live session's model.
+     */
+    private val defaultBudget: CompactionBudget = CompactionBudget(
+        protectUserTurns = protectUserTurns,
+        pruneKeepTokens = pruneProtectTokens,
+    )
 
     /**
      * Serialises concurrent [process] calls for the same session. The
@@ -94,14 +117,15 @@ class Compactor(
             return Result.Skipped("compaction already in progress for session ${sessionId.value}")
         }
         try {
-            val prunedIds = prune(history)
+            val budget = budgetResolver(model)
+            val prunedIds = prune(history, budget)
             val now = clock.now()
             prunedIds.forEach { store.markPartCompacted(it, now) }
 
             val survivors = history.map { mwp ->
                 mwp.copy(parts = mwp.parts.filter { it.id !in prunedIds })
             }
-            if (prunedIds.isEmpty() && survivors.tokens() < pruneProtectTokens) {
+            if (prunedIds.isEmpty() && survivors.tokens() < budget.pruneKeepTokens) {
                 return Result.Skipped("nothing to compact")
             }
 
@@ -154,12 +178,15 @@ class Compactor(
      *     token budget ([ToolResult.estimatedTokens] lets big tools
      *     self-identify).
      */
-    internal fun prune(history: List<MessageWithParts>): Set<PartId> {
+    internal fun prune(
+        history: List<MessageWithParts>,
+        budget: CompactionBudget = defaultBudget,
+    ): Set<PartId> {
         val userTurnIndices = history.mapIndexedNotNull { i, m ->
             if (m.message is Message.User) i else null
         }
-        if (userTurnIndices.size <= protectUserTurns) return emptySet()
-        val protectFromIndex = userTurnIndices[userTurnIndices.size - protectUserTurns]
+        if (userTurnIndices.size <= budget.protectUserTurns) return emptySet()
+        val protectFromIndex = userTurnIndices[userTurnIndices.size - budget.protectUserTurns]
 
         // Protected-window token cost — always kept.
         var fixedTokens = 0
@@ -187,7 +214,7 @@ class Compactor(
         val drop = mutableSetOf<PartId>()
         var kept = candidates.sumOf { it.cost }
         for (c in candidates.sortedByDescending { it.cost }) {
-            if (fixedTokens + kept <= pruneProtectTokens) break
+            if (fixedTokens + kept <= budget.pruneKeepTokens) break
             drop += c.id
             kept -= c.cost
         }

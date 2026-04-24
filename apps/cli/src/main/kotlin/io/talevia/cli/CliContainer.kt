@@ -9,6 +9,7 @@ import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.agent.SessionTitler
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
+import io.talevia.core.compaction.PerModelCompactionBudget
 import io.talevia.core.compaction.PerModelCompactionThreshold
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.db.TaleviaDbFactory
@@ -298,6 +299,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
                 provider = provider,
                 store = sessions,
                 bus = bus,
+                budgetResolver = compactionBudget,
             ),
             compactionThreshold = compactionThreshold,
             titler = SessionTitler(provider = provider, store = sessions),
@@ -314,6 +316,17 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
      */
     private val compactionThreshold: PerModelCompactionThreshold = kotlinx.coroutines.runBlocking {
         PerModelCompactionThreshold.fromRegistry(providers)
+    }
+
+    /**
+     * Per-model compaction-budget resolver — complements
+     * [compactionThreshold]. Threshold decides **when** to compact (85 %
+     * of the model's context window); budget decides **how aggressively**
+     * to compact (keep 30 % after the pass). Both scale per-model so a
+     * 64k-context session doesn't try to keep the 40k legacy default.
+     */
+    private val compactionBudget: PerModelCompactionBudget = kotlinx.coroutines.runBlocking {
+        PerModelCompactionBudget.fromRegistry(providers)
     }
 
     /**
