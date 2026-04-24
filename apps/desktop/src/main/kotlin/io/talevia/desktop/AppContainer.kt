@@ -295,7 +295,7 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
         register(ForkSessionTool(sessions))
         register(SetSessionSpendCapTool(sessions))
         register(SetToolEnabledTool(sessions))
-        register(SwitchProjectTool(sessions, projects, bus = bus))
+        register(SwitchProjectTool(sessions, projects, bus = bus, agentStates = agentStates))
         register(RevertSessionTool(sessions, projects, bus))
         register(SessionActionTool(sessions))
         register(ReadPartTool(sessions))

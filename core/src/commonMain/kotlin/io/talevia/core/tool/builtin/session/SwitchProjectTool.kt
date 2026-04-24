@@ -1,6 +1,8 @@
 package io.talevia.core.tool.builtin.session
 
 import io.talevia.core.ProjectId
+import io.talevia.core.agent.AgentRunState
+import io.talevia.core.agent.AgentRunStateTracker
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.domain.ProjectStore
@@ -50,6 +52,17 @@ class SwitchProjectTool(
      * Android / iOS) all pass the app's bus.
      */
     private val bus: EventBus? = null,
+    /**
+     * Optional agent-run state tracker. When provided, the tool rejects a
+     * project-binding change while the target session's agent is in a
+     * non-terminal state (Generating / AwaitingTool / Compacting) — the
+     * mid-run context would otherwise see a surprise-rebind on its next turn
+     * and render confused state. Null (test rigs / legacy compositions) skips
+     * the guard, preserving the pre-guard behaviour. Production composition
+     * roots (CLI / Desktop / Server / Android) all pass the tracker.
+     * (`session-project-rebind-mid-run-guard` — VISION §5.6.)
+     */
+    private val agentStates: AgentRunStateTracker? = null,
 ) : Tool<SwitchProjectTool.Input, SwitchProjectTool.Output> {
 
     @Serializable data class Input(
@@ -143,6 +156,22 @@ class SwitchProjectTool(
                     "project ids, or create_project to make a new one.",
             )
 
+        // Mid-run guard (VISION §5.6): reject a rebind while the agent is still
+        // working on the session — the next turn's ToolContext.currentProjectId
+        // would otherwise change under its feet. Terminal states
+        // (Idle / Cancelled / Failed) and null (no run has started yet) all
+        // pass. The same-id no-op path above already returned, so a gate-trip
+        // here is always a genuine state change.
+        agentStates?.currentState(sid)?.let { state ->
+            val runTag = agentRunStateSlug(state)
+            if (runTag != null) {
+                error(
+                    "Cannot switch_project while agent is $runTag on session ${sid.value}. " +
+                        "Wait for the current run to finish, or cancel it first, before rebinding.",
+                )
+            }
+        }
+
         sessions.updateSession(
             session.copy(
                 currentProjectId = pid,
@@ -170,5 +199,18 @@ class SwitchProjectTool(
                 changed = true,
             ),
         )
+    }
+
+    /**
+     * Returns a human slug for non-terminal run states, or null for terminal
+     * ones (Idle / Cancelled / Failed) — those mean "no in-flight run", so the
+     * rebind is safe. The three mid-run states all return a short tag suitable
+     * for embedding in the error message.
+     */
+    private fun agentRunStateSlug(state: AgentRunState): String? = when (state) {
+        is AgentRunState.Generating -> "generating"
+        is AgentRunState.AwaitingTool -> "awaiting_tool"
+        is AgentRunState.Compacting -> "compacting"
+        is AgentRunState.Idle, is AgentRunState.Cancelled, is AgentRunState.Failed -> null
     }
 }
