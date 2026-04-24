@@ -22,7 +22,7 @@ internal val SOURCE_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
             put("type", "string")
             put(
                 "description",
-                "What to query: nodes | dag_summary | dot | ascii_tree | orphans | " +
+                "What to query: nodes | dag_summary | dot | ascii_tree | orphans | leaves | " +
                     "descendants | ancestors | history (case-insensitive).",
             )
         }

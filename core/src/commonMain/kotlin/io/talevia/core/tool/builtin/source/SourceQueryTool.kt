@@ -11,6 +11,7 @@ import io.talevia.core.tool.builtin.source.query.AsciiTreeRow
 import io.talevia.core.tool.builtin.source.query.BodyRevisionRow
 import io.talevia.core.tool.builtin.source.query.DagSummaryRow
 import io.talevia.core.tool.builtin.source.query.DotRow
+import io.talevia.core.tool.builtin.source.query.LeafRow
 import io.talevia.core.tool.builtin.source.query.NodeRow
 import io.talevia.core.tool.builtin.source.query.OrphanRow
 import io.talevia.core.tool.builtin.source.query.runAncestorsQuery
@@ -19,6 +20,7 @@ import io.talevia.core.tool.builtin.source.query.runDagSummaryQuery
 import io.talevia.core.tool.builtin.source.query.runDescendantsQuery
 import io.talevia.core.tool.builtin.source.query.runDotQuery
 import io.talevia.core.tool.builtin.source.query.runHistoryQuery
+import io.talevia.core.tool.builtin.source.query.runLeavesQuery
 import io.talevia.core.tool.builtin.source.query.runNodesAllProjectsQuery
 import io.talevia.core.tool.builtin.source.query.runNodesQuery
 import io.talevia.core.tool.builtin.source.query.runOrphansQuery
@@ -55,6 +57,11 @@ import kotlinx.serialization.serializer
  *    parentCount, childCount}`, sorted by id. Dedicated surface so
  *    cleanup workflows skip the `nodes` + O(N) `clips_for_source`
  *    crosschecks needed to derive the same set from `select=nodes`.
+ *  - `leaves` — every DAG node with no children (no other node lists
+ *    them as parent). Rows: `{id, kind, revision, parentCount}`,
+ *    sorted by id. Symmetric companion to `select=nodes&hasParent=false`
+ *    (roots) — the downstream tip of a chain. Natural regenerate-after-
+ *    edit targets.
  *
  * `describe_source_node` stays as a separate tool — it's single-entity deep
  * inspection (body + parents + children + bindings), not projection. Same
@@ -174,6 +181,9 @@ class SourceQueryTool(
             "  • orphans — rows: {id, kind, revision, parentCount, childCount}. Every node no " +
             "clip binds to (same semantics as dag_summary.orphanedNodeIds). Sorted by id. " +
             "No filters; dedicated to cleanup workflows.\n" +
+            "  • leaves — rows: {id, kind, revision, parentCount}. Every node with no children " +
+            "(downstream tip of a chain). Sorted by id. No filters; pairs with select=nodes&" +
+            "hasParent=false (roots) for the symmetric DAG-tip view.\n" +
             "  • descendants — BFS downstream from root; rows carry depthFromRoot (0=root). " +
             "requires root. Optional depth cap (null/negative=unbounded). Cycle-safe.\n" +
             "  • ancestors — BFS upstream from root; same shape as descendants.\n" +
@@ -199,6 +209,7 @@ class SourceQueryTool(
         SELECT_DOT -> DotRow.serializer()
         SELECT_ASCII_TREE -> AsciiTreeRow.serializer()
         SELECT_ORPHANS -> OrphanRow.serializer()
+        SELECT_LEAVES -> LeafRow.serializer()
         SELECT_HISTORY -> BodyRevisionRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
@@ -227,6 +238,7 @@ class SourceQueryTool(
             SELECT_DOT -> runDotQuery(project)
             SELECT_ASCII_TREE -> runAsciiTreeQuery(project)
             SELECT_ORPHANS -> runOrphansQuery(project)
+            SELECT_LEAVES -> runLeavesQuery(project)
             SELECT_DESCENDANTS -> runDescendantsQuery(project, input)
             SELECT_ANCESTORS -> runAncestorsQuery(project, input)
             SELECT_HISTORY -> runHistoryQuery(projects, project, input)
@@ -300,12 +312,13 @@ class SourceQueryTool(
         const val SELECT_DOT = "dot"
         const val SELECT_ASCII_TREE = "ascii_tree"
         const val SELECT_ORPHANS = "orphans"
+        const val SELECT_LEAVES = "leaves"
         const val SELECT_DESCENDANTS = "descendants"
         const val SELECT_ANCESTORS = "ancestors"
         const val SELECT_HISTORY = "history"
         internal val ALL_SELECTS = setOf(
             SELECT_NODES, SELECT_DAG_SUMMARY, SELECT_DOT, SELECT_ASCII_TREE,
-            SELECT_ORPHANS, SELECT_DESCENDANTS, SELECT_ANCESTORS, SELECT_HISTORY,
+            SELECT_ORPHANS, SELECT_LEAVES, SELECT_DESCENDANTS, SELECT_ANCESTORS, SELECT_HISTORY,
         )
 
         const val SCOPE_PROJECT = "project"
