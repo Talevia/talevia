@@ -63,11 +63,56 @@ bullet 打 tag；现有 bullet 不手动 backfill。
   的随机边界契约真的锁住了
   （grep: e2e test 运行 generate_image 两次 → assertEquals assetIds；
   `ReplayLockfileTool` 参与验证） — cycle 2026-04-24 e1adea8f
-- [ ] Milestone 退出总结：在本文件 M2 block 末尾 append `### M2 exit summary`
+- [x] Milestone 退出总结：在本文件 M2 block 末尾 append `### M2 exit summary`
   小段，列剩余的 §3.1 gap（如 GPU-inference 本地跑 / 预算硬 cap 触发 /
   多 provider cost arbitrage / cold-start 优化 / cache invalidation
   latency 等）以便 M3 / M4 接力 —
-  *必须手动 tick（段落存在 + 三条以上具体 gap）*
+  *必须手动 tick（段落存在 + 三条以上具体 gap）* — cycle 2026-04-24 4ee6a08b
+
+### M2 exit summary
+
+M2 关起门来证明了**AIGC 驯服产品化的 5/7 轴已落地**：lockfile 完整性
+(criterion 1, 3fde671a / c30ecbb1) + pin 命中率可见 (criterion 3, 08223ac3)
++ 成本可见 (criterion 4, 7862ce7d) + fallback 生产回归测试 (criterion 5,
+c3bad022) + seed 复现证明 (criterion 6, e1adea8f)。这五条是 "AIGC 从黑盒
+变 deterministic compiler" 的工程学基石。
+
+**criterion 2（provider 多元）依旧 `[ ]`，M2 stalls at 6/7 pending user
+unblock**。ImageGen / VideoGen / MusicGen / TtsEngine 产品路径除 Replicate
+外零非-stub 第二 impl。上手需要 vendor 选型（OpenAI DALL-E / Anthropic 未
+公开 / Stable Diffusion self-hosted / ElevenLabs 等）+ 专有 API key，零提问
+约束禁止自选——等用户把 vendor 决策和 key 拿进来再激活
+(`m2-provider-second-impl` P1 bullet 仍在 queue skip-tagged)。这是 milestone
+机制下的诚实状态：auto-promote 不会触发，M2 永远保留为 "5 done + 1 ticked
+exit + 1 blocked" 的形状直到用户解锁。
+
+**§3.1 完整愿景里 M2+ 接力的 gap**（超出本 milestone 的工程学跑道，列给
+M3 / M4 / 未来 M）：
+
+1. **GPU-inference 本地跑**：`ImageGenEngine` / `VideoGenEngine` 现在全走
+   Replicate 云端。本地 SD / local ComfyUI / MLX-diffusion 这类路径缺
+   `LocalGpuImageGenEngine` impl + GPU-availability probing + fallback-
+   to-cloud 策略。对 data-sensitive 创作者（不愿把素材传云）是必需品。
+2. **预算硬 cap 触发**：`session_query(select=spend_summary)` 给了读口，
+   但没有写口——session.metadata 里没有 `spendCapUsdCents: Long?` 字段，
+   `Agent.run` 不在 AIGC tool 分发前检查 "this session spent > cap,
+   refuse". `SessionRateLimits` 有骨架但不消费 spend_summary 数据。
+3. **多 provider cost arbitrage**：已有 `provider_query(select=cost_compare)`
+   答 "same prompt across providers — cheapest"；但 `AgentProviderFallbackTracker`
+   只按 registry 顺序选 provider，不按 cost 挑。需要 `ProviderRoutingPolicy`
+   抽象 + cost-aware fallback chain 排序。
+4. **cold-start 优化**：首次 AIGC 调用 provider connection setup / model
+   warmup / seed-pinning handshake 不可见。Session 起步第一个 image 生成会
+   比后续慢很多，用户会以为卡死。需要 progress event（`BusEvent.ProviderWarmup`）
+   + CLI/Desktop 对其的 UI surface。
+5. **cache invalidation latency**：`project.lockfile` cache hit 检测走
+   in-memory `byInputHash` map；跨 session 打开同一 project 会重建这个
+   map 从 disk，但 JSON decode on large `entries` list (>500 items on
+   a mature project) takes O(N) per open — profile 数据没收集。未来 perf
+   bullet 可能要 `lockfile.jsonl` 分文件 + 增量加载。
+
+前四条都指向 M3/M4/M5 的不同赌注；第五条是 §5.7 perf 轴的独立 backlog
+项。M2 至此可以"功能上 ready，产品层等 vendor 选型"。
 
 ### 亚军 milestones（未正式启动，仅作排序参考）
 
