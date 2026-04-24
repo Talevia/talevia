@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **debt-add-benchmark-agent-loop** — R.6 #4 scan：`core/agent` / `core/tool` dispatch / `ExportTool` / `FileProjectStore.openAt` 零 `*Benchmark*.kt` / `*Perf*.kt` / `*Latency*.kt` 文件。关键路径没有回归守护，未来 compaction / fallback / lockfile lookup 的 perf 劣化无人发现。强制 P0 per R.6 "核心路径零 benchmark"。**方向：** 新增 `core/src/jvmTest/kotlin/io/talevia/core/bench/AgentLoopBenchmark.kt` 用 `kotlin.time.measureTime` 跑固定 synthetic session（stub provider + 5 tool turn）+ assert wall-time < budget（初版 budget 仅 warning，不 fail），同目录加 `LockfileLookupBenchmark` 覆盖 500-entry cache hit。Rubric §5.7。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排
 
