@@ -241,7 +241,7 @@ rubric 前 5 节驱动**新增**，这一节驱动**收敛**。Core 只做加法
 
 每轮迭代的流程：
 
-1. **先校准"现状"再打分**：读最近 ~20 个 `docs/decisions/` 文件（`ls docs/decisions | sort -r | head -20`）+ `git log --oneline -30` + `CLAUDE.md` 的 "Known incomplete" 小节。这一步是为了避免把**刚合入的能力**或**已承认的非回归项**再次列为 gap —— 系统最贵的误报就是"反复发现同一个已经解决的缺口"。
+1. **先校准"现状"再打分**：读 `git log --oneline -60` + `git log --grep '^feat\|^refactor\|^fix' -30 --format='%h %s%n%n%b'`（commit body 里的 rationale 是 context / decision / alternatives / coverage / registration 六段）+ `CLAUDE.md` 的 "Known incomplete" 小节。这一步是为了避免把**刚合入的能力**或**已承认的非回归项**再次列为 gap —— 系统最贵的误报就是"反复发现同一个已经解决的缺口"。
 
 2. **逐轴打分**：对照 §5.1–§5.7 每一节的判断题，读当前代码（`core/domain`, `core/tool/builtin`, `core/agent`, `core/session`, `core/compaction`, `core/permission`, `core/provider`, `core/bus`, 各 app 装配点）+ 现有运行时度量（`core.metrics`、`session_query` 暴露的 budget 类 select、benchmark 测试）打 有 / 部分 / 无。§5.6 的技术债条目和 §5.7 的运行时预算条目与前 5 节 feature gap 一视同仁进入候选池。另外跑一次 OpenCode 对照（见本节开头"两条 gap-source 并行"）作为独立候选来源。
 
@@ -255,7 +255,7 @@ rubric 前 5 节驱动**新增**，这一节驱动**收敛**。Core 只做加法
 
    经过这 5 道过滤后剩下的 2–3 条就是本轮实现任务。
 
-4. **实现并归档 rubric delta**：每条候选对应的决策文件里写明本次动了哪个 rubric 轴、打分从什么变到什么（例："§5.1 source-layer 序列化 无 → 部分"）。rubric delta 是**可 grep 的系统演进曲线** —— 不留这条就没人能看出系统真在朝北极星收敛，还是在原地打转。
+4. **实现并归档 rubric delta**：每条候选对应的 commit message body 里写明本次动了哪个 rubric 轴、打分从什么变到什么（例："§5.1 source-layer 序列化 无 → 部分"）。rubric delta 是**可 grep 的系统演进曲线**（`git log --grep 'rubric §5'` / `git log -S '无 → 部分'`）—— 不留这条就没人能看出系统真在朝北极星收敛，还是在原地打转。
 
 5. **回到 §1 北极星重读一遍，校准方向没跑偏**。特别注意 §4 双用户张力 —— 本轮是不是无意中为某一类用户做了第二套管道。
 

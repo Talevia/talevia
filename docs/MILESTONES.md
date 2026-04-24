@@ -3,12 +3,15 @@
 > **Current: M1 — 跨镜头一致性 e2e 闭环**
 
 迭代聚焦的粗粒度指针。每个 milestone 对应 `docs/VISION.md` §3 的一个**核心赌注**。
-机制与 media-engine 差异见 `docs/decisions/2026-04-23-milestone-mechanism.md`：
-**软优先级**（当前 M 的 bullet 同档内靠前，不降非当前 M）、**evidence 能 grep 才
-自动 tick**、纯主观 criterion 必须有决策文件才能勾。
+机制参考 media-engine 的 `docs/MILESTONES.md` + 三处本地化：**软优先级**（当前 M
+的 bullet 同档内靠前，不降非当前 M）、**evidence 能 grep 才自动 tick**、纯主观
+criterion 必须配 milestone exit append 段落才能勾。rationale 随引入该机制的
+commit 一起落盘（`git log --grep 'milestone mechanism'`）。
 
 `iterate-gap` skill 的 `§M` 步骤自动读取本文件、tick 可验证 criteria、全勾后
-auto-promote 下一个 M 并写 `milestone-advance-m<N+1>.md` 决策文件。
+auto-promote 下一个 M 并在本文件尾部 append `## Completed — M<N>` 段落
+（含每条 criterion 对应的 commit shorthash + M<N+1> 目标 + criteria 起草逻辑），
+和触发该 promotion 的 feat commit 同 commit 落盘。
 
 Milestone 不装任务 —— 任务仍在 `docs/BACKLOG.md`，每条 bullet 用
 `Milestone §M<N>` / `Milestone §later` tag 分类。下一次 repopulate 自动为新
@@ -45,9 +48,10 @@ bullet 打 tag；现有 bullet 不手动 backfill。
 - [ ] 语义回归测试：改 `character_ref` 的可见字段（如 `name` / `appearance`）
   → 下游 clip stale → re-export 后产物 prompt 确实包含新值（grep: e2e test 带
   `character_ref` 字段改 → export → prompt 断言链条）
-- [ ] Milestone 退出决策：总结剩余的 §3.3 gap（LoRA fine-tune 产物持久化 / 多
-  character 交互一致性 / 音视频跨模态一致性 等）以便 M2 / M3 接力 —
-  *必须手动 tick，对应文件 `docs/decisions/<date>-milestone-m1-exit.md`*
+- [ ] Milestone 退出总结：在本文件 M1 block 末尾 append `### M1 exit summary`
+  小段，列剩余的 §3.3 gap（LoRA fine-tune 产物持久化 / 多 character 交互
+  一致性 / 音视频跨模态一致性 等）以便 M2 / M3 接力 —
+  *必须手动 tick（段落存在 + 三条以上具体 gap）*
 
 ### 亚军 milestones（未正式启动，仅作排序参考）
 
@@ -59,5 +63,6 @@ bullet 打 tag；现有 bullet 不手动 backfill。
 
 ---
 
-（已完成的 milestone 在 promote 时由 `iterate-gap` 的 §M 步骤倒序 append 到本文件
-底部，保留 criteria checkbox + commit shorthash 作为历史快照。）
+（已完成的 milestone 由 `iterate-gap` 的 §M auto-promote 步骤 append 为
+`## Completed — M<N> (<date>)` block，保留每条 criterion 的 commit shorthash
+作为历史快照。最近完成的放最上面。）
