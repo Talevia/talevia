@@ -15,6 +15,8 @@ import io.talevia.core.session.Part
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.ToolState
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
@@ -47,52 +49,92 @@ class Compactor(
 ) {
 
     /**
+     * Serialises concurrent [process] calls for the same session. The
+     * prune → summary → upsertPart sequence isn't atomic at the
+     * [SessionStore] layer (each write is mutex-guarded on its own but the
+     * triple is not), so two racing passes could double-drop the same
+     * candidate set + spawn two `Part.Compaction` entries summarising
+     * overlapping ranges — wastes a provider call and leaves an ambiguous
+     * "which compaction described the range?" trace for later readers.
+     *
+     * Single-mutex + [inflightSessions] is preferred over a per-session
+     * `MutableMap<SessionId, Mutex>` because: (a) compaction is infrequent
+     * (auto-trigger at ~85 % context + rare manual `/compact`), so
+     * contention on one mutex for map lookups is nil, and (b) per-session
+     * mutexes would accumulate forever without a GC pass, one per session
+     * ever compacted.
+     *
+     * Second concurrent call returns [Result.Skipped] immediately rather
+     * than queueing — a user-pressed `/compact` landing during an already-
+     * running auto-compaction shouldn't spawn a redundant summary pass on
+     * history that's about to change under it.
+     */
+    private val inflightMutex = Mutex()
+    private val inflightSessions = mutableSetOf<SessionId>()
+
+    /**
      * @return [Result.Compacted] with the new compaction summary, or [Result.Skipped]
-     * when there's nothing to drop.
+     * when there's nothing to drop or another pass for the same session is already
+     * in flight.
      */
     suspend fun process(
         sessionId: SessionId,
         history: List<MessageWithParts>,
         model: ModelRef,
     ): Result {
-        val prunedIds = prune(history)
-        val now = clock.now()
-        prunedIds.forEach { store.markPartCompacted(it, now) }
-
-        val survivors = history.map { mwp ->
-            mwp.copy(parts = mwp.parts.filter { it.id !in prunedIds })
+        val acquired = inflightMutex.withLock {
+            if (sessionId in inflightSessions) {
+                false
+            } else {
+                inflightSessions.add(sessionId)
+                true
+            }
         }
-        if (prunedIds.isEmpty() && survivors.tokens() < pruneProtectTokens) {
-            return Result.Skipped("nothing to compact")
+        if (!acquired) {
+            return Result.Skipped("compaction already in progress for session ${sessionId.value}")
         }
+        try {
+            val prunedIds = prune(history)
+            val now = clock.now()
+            prunedIds.forEach { store.markPartCompacted(it, now) }
 
-        val summary = summarise(provider, survivors, model)
-            ?: return Result.Skipped("provider returned no summary")
+            val survivors = history.map { mwp ->
+                mwp.copy(parts = mwp.parts.filter { it.id !in prunedIds })
+            }
+            if (prunedIds.isEmpty() && survivors.tokens() < pruneProtectTokens) {
+                return Result.Skipped("nothing to compact")
+            }
 
-        val targetMessageId = survivors.lastOrNull { it.message is Message.Assistant }?.message?.id
-            ?: survivors.last().message.id
-        val firstId = history.first().message.id
-        val lastId = history.last().message.id
-        val compactionPart = Part.Compaction(
-            id = PartId(Uuid.random().toString()),
-            messageId = targetMessageId,
-            sessionId = sessionId,
-            createdAt = clock.now(),
-            replacedFromMessageId = firstId,
-            replacedToMessageId = lastId,
-            summary = summary,
-        )
-        store.upsertPart(compactionPart)
+            val summary = summarise(provider, survivors, model)
+                ?: return Result.Skipped("provider returned no summary")
 
-        bus.publish(
-            BusEvent.SessionCompacted(
+            val targetMessageId = survivors.lastOrNull { it.message is Message.Assistant }?.message?.id
+                ?: survivors.last().message.id
+            val firstId = history.first().message.id
+            val lastId = history.last().message.id
+            val compactionPart = Part.Compaction(
+                id = PartId(Uuid.random().toString()),
+                messageId = targetMessageId,
                 sessionId = sessionId,
-                prunedCount = prunedIds.size,
-                summaryLength = summary.length,
-            ),
-        )
+                createdAt = clock.now(),
+                replacedFromMessageId = firstId,
+                replacedToMessageId = lastId,
+                summary = summary,
+            )
+            store.upsertPart(compactionPart)
 
-        return Result.Compacted(prunedIds.size, summary, compactionPart.id)
+            bus.publish(
+                BusEvent.SessionCompacted(
+                    sessionId = sessionId,
+                    prunedCount = prunedIds.size,
+                    summaryLength = summary.length,
+                ),
+            )
+
+            return Result.Compacted(prunedIds.size, summary, compactionPart.id)
+        } finally {
+            inflightMutex.withLock { inflightSessions.remove(sessionId) }
+        }
     }
 
     /**

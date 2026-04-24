@@ -11,6 +11,9 @@ import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.provider.LlmEvent
+import io.talevia.core.provider.LlmProvider
+import io.talevia.core.provider.LlmRequest
+import io.talevia.core.provider.ModelInfo
 import io.talevia.core.session.FinishReason
 import io.talevia.core.session.Message
 import io.talevia.core.session.MessageWithParts
@@ -20,8 +23,12 @@ import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.session.TokenUsage
 import io.talevia.core.session.ToolState
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -374,6 +381,171 @@ class CompactorTest {
             MessageWithParts(u2, listOf(u2Text)),
             MessageWithParts(a2, listOf(recentTool)),
         )
+    }
+
+    /**
+     * Gated provider: calls to [stream] suspend on [startLatch] until
+     * [release] is called, then emit a canned success turn. Lets a test
+     * launch a second concurrent `process()` while the first one is
+     * parked mid-summary — simulates the "manual `/compact` fires during
+     * an auto-compaction pass" race the bullet names.
+     */
+    private class GatedSummaryProvider(
+        private val startLatch: CompletableDeferred<Unit>,
+        private val summaryBody: String,
+    ) : LlmProvider {
+        override val id: String = "gated-fake"
+        override suspend fun listModels(): List<ModelInfo> = emptyList()
+        override fun stream(request: LlmRequest): Flow<LlmEvent> = flow {
+            startLatch.await()
+            emit(LlmEvent.TextStart(PartId("gated-summary")))
+            emit(LlmEvent.TextEnd(PartId("gated-summary"), summaryBody))
+            emit(LlmEvent.StepFinish(FinishReason.END_TURN, TokenUsage(input = 10, output = 10)))
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun concurrentProcessOnSameSessionWinsOnceAndSkipsOthers() = runTest {
+        // Regression guard for debt-compactor-concurrent-process-audit
+        // (Rubric §5.6). The prune → summarise → upsertPart triple is not
+        // atomic at the SessionStore layer, so two racing passes could
+        // double-drop candidates, double-bill the provider summary call, and
+        // spawn two `Part.Compaction` entries with overlapping replaced-
+        // from/to ranges. The guard: a process() running for the same
+        // session serialises the second caller to `Result.Skipped("… already
+        // in progress …")` so exactly one summary + part lands.
+        val (store, bus) = inMemoryStore()
+        val sid = SessionId("s-race")
+        val now = Clock.System.now()
+        store.createSession(Session(sid, ProjectId("p"), title = "x", createdAt = now, updatedAt = now))
+        val history = buildHistory(sid, now)
+        history.forEach { mwp ->
+            store.appendMessage(mwp.message)
+            mwp.parts.forEach { store.upsertPart(it) }
+        }
+
+        val gate = CompletableDeferred<Unit>()
+        val compactor = Compactor(
+            provider = GatedSummaryProvider(gate, "Goal: raced but only one pass landed"),
+            store = store,
+            bus = bus,
+            protectUserTurns = 1,
+            pruneProtectTokens = 100,
+        )
+
+        // Kick off process1 on the test scope; it will suspend on `gate` in
+        // the middle of summarise() because the gated provider parks there.
+        val first = async { compactor.process(sid, history, ModelRef("fake", "test")) }
+        // Let process1 advance far enough to acquire the inflight guard and
+        // hit the provider.stream().collect{} — runTest's single-thread
+        // scheduler means one advanceUntilIdle after launch drains every
+        // non-suspended step.
+        advanceUntilIdle()
+
+        // Now fire the second pass — it must see `sid in inflightSessions`
+        // and short-circuit to Skipped without touching the provider.
+        val second = async { compactor.process(sid, history, ModelRef("fake", "test")) }
+        advanceUntilIdle()
+
+        // Release the gate so first can finish.
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        val r1 = first.await()
+        val r2 = second.await()
+
+        // Exactly one Compacted result.
+        val compactedCount = listOf(r1, r2).count { it is Compactor.Result.Compacted }
+        val skippedCount = listOf(r1, r2).count { it is Compactor.Result.Skipped }
+        assertEquals(
+            1,
+            compactedCount,
+            "exactly one process() must win Compacted; got r1=$r1, r2=$r2",
+        )
+        assertEquals(
+            1,
+            skippedCount,
+            "the losing process() must return Skipped; got r1=$r1, r2=$r2",
+        )
+
+        // The Skipped reason must name the in-progress state so operators can
+        // distinguish "nothing to do" from "another pass holds the lock".
+        val loser = listOf(r1, r2).filterIsInstance<Compactor.Result.Skipped>().single()
+        assertTrue(
+            loser.reason.contains("already in progress"),
+            "Skipped reason must name in-progress state; got '${loser.reason}'",
+        )
+
+        // Exactly one Part.Compaction persisted — if the guard had failed,
+        // both racers would upsertPart two separate Compaction rows.
+        val compactionParts = store.listSessionParts(sid).filterIsInstance<Part.Compaction>()
+        assertEquals(
+            1,
+            compactionParts.size,
+            "exactly one Part.Compaction must land; got ${compactionParts.size}",
+        )
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun inflightGuardReleasesAfterSuccessfulProcess() = runTest {
+        // §3a #9 bounded-edge: after a winning pass finishes, the session
+        // must clear out of `inflightSessions` so a follow-up compaction
+        // (next overflow trigger, some minutes later) isn't permanently
+        // skipped as "already in progress". Without the finally-release,
+        // the first run would succeed but every subsequent call would skip.
+        val (store, bus) = inMemoryStore()
+        val sid = SessionId("s-release")
+        val now = Clock.System.now()
+        store.createSession(Session(sid, ProjectId("p"), title = "x", createdAt = now, updatedAt = now))
+        val history = buildHistory(sid, now)
+        history.forEach { mwp ->
+            store.appendMessage(mwp.message)
+            mwp.parts.forEach { store.upsertPart(it) }
+        }
+
+        val summaryBody = "Goal: release-after-success check"
+        val summaryTurn = listOf(
+            LlmEvent.TextStart(PartId("s1")),
+            LlmEvent.TextEnd(PartId("s1"), summaryBody),
+            LlmEvent.StepFinish(FinishReason.END_TURN, TokenUsage(input = 10, output = 10)),
+        )
+        // Second call's provider — the first is already consumed by the
+        // first run; the FakeProvider is exhausted-on-reuse so we build a
+        // fresh script.
+        val summary2 = "Goal: second pass also ran"
+        val summaryTurn2 = listOf(
+            LlmEvent.TextStart(PartId("s2")),
+            LlmEvent.TextEnd(PartId("s2"), summary2),
+            LlmEvent.StepFinish(FinishReason.END_TURN, TokenUsage(input = 10, output = 10)),
+        )
+        val compactor = Compactor(
+            provider = FakeProvider(listOf(summaryTurn, summaryTurn2)),
+            store = store,
+            bus = bus,
+            protectUserTurns = 1,
+            pruneProtectTokens = 100,
+        )
+
+        val r1 = compactor.process(sid, history, ModelRef("fake", "test"))
+        assertTrue(r1 is Compactor.Result.Compacted, "first call must compact; got $r1")
+
+        // Second call after first finishes — guard must be released. Using
+        // the same stale `history` is fine for this test: the prune code
+        // re-evaluates against the passed-in list, and our fixture has
+        // enough drop candidates to produce a second successful pass.
+        val r2 = compactor.process(sid, history, ModelRef("fake", "test"))
+        assertTrue(
+            r2 is Compactor.Result.Compacted || r2 is Compactor.Result.Skipped,
+            "second call after release must NOT claim 'already in progress'; got $r2",
+        )
+        if (r2 is Compactor.Result.Skipped) {
+            assertTrue(
+                !r2.reason.contains("already in progress"),
+                "after release, the in-progress reason must not surface; got '${r2.reason}'",
+            )
+        }
     }
 
     private fun inMemoryStore(): Pair<SqlDelightSessionStore, EventBus> {
