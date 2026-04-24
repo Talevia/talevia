@@ -1,8 +1,5 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.AssetId
-import io.talevia.core.ProjectId
-import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
@@ -22,17 +19,10 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.datetime.Clock
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 import okio.FileSystem
-import okio.Path.Companion.toPath
 import kotlin.time.DurationUnit
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 
 /**
  * Register a local file as a project asset: probes the media metadata, builds
@@ -188,52 +178,17 @@ class ImportMediaTool(
     // agent can always get to a binding before trying to import.
     override val applicability: ToolApplicability = ToolApplicability.RequiresProjectBinding
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("path") {
-                put("type", "string")
-                put(
-                    "description",
-                    "Absolute path to a single media file. Mutually exclusive with `paths`; exactly one " +
-                        "of the two must be supplied.",
-                )
-            }
-            putJsonObject("paths") {
-                put("type", "array")
-                put(
-                    "description",
-                    "Absolute paths for a batch import. Each path is probed concurrently; per-path " +
-                        "failures land in Output.failed without aborting the batch. Mutually " +
-                        "exclusive with `path`. Must be non-empty and pairwise distinct.",
-                )
-                putJsonObject("items") { put("type", "string") }
-            }
-            putJsonObject("projectId") {
-                put("type", "string")
-                put(
-                    "description",
-                    "Optional — omit to import into the session's current project (set via switch_project).",
-                )
-            }
-            putJsonObject("copy_into_bundle") {
-                put("type", "boolean")
-                put(
-                    "description",
-                    "Tri-state (omit for auto). `true` forces bundle-copy (bytes travel with " +
-                        "`git push`). `false` forces reference-by-path (bytes stay in place). " +
-                        "Omit entirely for size-based auto: files ≤50 MiB are copied into the " +
-                        "bundle, larger files are referenced by absolute path. Auto is the " +
-                        "sensible default — explicit values are for overrides.",
-                )
-            }
-        }
-        // No hard-required field at the schema level: `path` xor `paths` is enforced in execute().
-        put("required", JsonArray(emptyList()))
-        put("additionalProperties", false)
-    }
+    override val inputSchema: JsonObject = IMPORT_MEDIA_INPUT_SCHEMA
 
-    @OptIn(ExperimentalUuidApi::class)
+    private val probe: MediaImportProbe = MediaImportProbe(
+        engine = engine,
+        proxyGenerator = proxyGenerator,
+        fs = fs,
+        bundleBlobWriter = bundleBlobWriter,
+        clock = clock,
+        autoInBundleThresholdBytes = autoInBundleThresholdBytes,
+    )
+
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         // Exactly one of path / paths must be supplied.
         val pathsToImport: List<String> = when {
@@ -284,7 +239,7 @@ class ImportMediaTool(
         // bad clip doesn't lose the other 39.
         val results: List<ProbeResult> = coroutineScope {
             pathsToImport.map { p ->
-                async { probeOne(p, bundleRoot, input.copy_into_bundle, pid) }
+                async { probe.probe(p, bundleRoot, input.copy_into_bundle, pid) }
             }.awaitAll()
         }
 
@@ -373,103 +328,8 @@ class ImportMediaTool(
         )
     }
 
-    private sealed interface ProbeResult {
-        val path: String
-        data class Success(override val path: String, val asset: MediaAsset) : ProbeResult
-        data class Failure(override val path: String, val message: String) : ProbeResult
-    }
-
-    /**
-     * Probe + proxy-generate a single path, returning the stamped asset or a
-     * captured failure. Never throws — every exception maps to
-     * [ProbeResult.Failure] so the caller's batch aggregation stays in one
-     * straight-line code path.
-     *
-     * Copy-into-bundle decision per [copyChoice]:
-     * - `true` → copy when [bundleRoot] is non-null (explicit-true without a
-     *   bundle path already errored out in execute before reaching here).
-     * - `false` → reference-by-path.
-     * - `null` (auto) → copy when [bundleRoot] is non-null AND the file is ≤
-     *   [autoInBundleThresholdBytes]; else reference.
-     *
-     * When copying, bytes land at `<bundleRoot>/media/<assetId>.<ext>` and the
-     * asset's source is [MediaSource.BundleFile]. Otherwise [MediaSource.File].
-     */
-    @OptIn(ExperimentalUuidApi::class)
-    private suspend fun probeOne(
-        path: String,
-        bundleRoot: okio.Path?,
-        copyChoice: Boolean?,
-        projectId: ProjectId,
-    ): ProbeResult = runCatching {
-        val metadata = engine.probe(MediaSource.File(path))
-        val newAssetId = AssetId(Uuid.random().toString())
-        val sourcePath: String
-        val shouldCopy = when (copyChoice) {
-            true -> bundleRoot != null
-            false -> false
-            null -> bundleRoot != null && shouldAutoCopy(path)
-        }
-        val source: MediaSource = if (!shouldCopy) {
-            sourcePath = path
-            MediaSource.File(path)
-        } else {
-            requireNotNull(bundleRoot) { "bundleRoot must be non-null when shouldCopy is true" }
-            val ext = path.substringAfterLast('.', missingDelimiterValue = "bin")
-                .ifBlank { "bin" }
-            // Stream through BundleBlobWriter so the tmpfile + atomicMove
-            // logic lives in exactly one place (shared with AIGC byte-path
-            // writes via the same primitive). Bytes flow Source → sink
-            // without materialising in a ByteArray — bundle copies of
-            // 500 MB footage don't peak RSS.
-            val bundleSource = bundleBlobWriter.writeBlobStreaming(
-                projectId = projectId,
-                assetId = newAssetId,
-                source = fs.source(path.toPath()),
-                format = ext,
-            )
-            sourcePath = bundleRoot.resolve(bundleSource.relativePath).toString()
-            bundleSource
-        }
-        val asset = MediaAsset(id = newAssetId, source = source, metadata = metadata)
-        val proxies = runCatching { proxyGenerator.generate(asset, sourcePath) }.getOrDefault(emptyList())
-        val stamped = asset.copy(
-            proxies = (asset.proxies + proxies).deduplicateProxies(),
-            updatedAtEpochMs = clock.now().toEpochMilliseconds(),
-        )
-        ProbeResult.Success(path = path, asset = stamped)
-    }.getOrElse { t ->
-        ProbeResult.Failure(
-            path = path,
-            message = t.message ?: t::class.simpleName ?: "unknown",
-        )
-    }
-
-    /**
-     * Auto-mode size gate. True ⇒ file is small enough to copy into the bundle.
-     * When metadata is unavailable (okio returned null or the stat failed), we
-     * err on the side of "reference" — auto mode is meant to be the
-     * conservative default, and we'd rather leave a 0-byte file untouched
-     * than blow up a bundle with an opaque gigabyte.
-     */
-    private fun shouldAutoCopy(path: String): Boolean {
-        val size = runCatching { fs.metadata(path.toPath()).size }.getOrNull() ?: return false
-        return size <= autoInBundleThresholdBytes
-    }
-
     companion object {
         /** Auto-copy threshold — 50 MiB. Matches the bullet spec. */
         const val DEFAULT_AUTO_IN_BUNDLE_THRESHOLD_BYTES: Long = 50L * 1024L * 1024L
     }
-}
-
-/**
- * De-dupe proxies by `(purpose, source)` so a repeated import doesn't
- * accumulate stale thumbnails when the generator re-runs on an already-
- * imported asset. Preserves insertion order — newer entries overwrite
- * same-key older ones via the `associateBy { … }.values` idiom.
- */
-private fun List<io.talevia.core.domain.ProxyAsset>.deduplicateProxies(): List<io.talevia.core.domain.ProxyAsset> {
-    if (isEmpty()) return this
-    return associateBy { it.purpose to it.source }.values.toList()
 }
