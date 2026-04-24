@@ -58,6 +58,7 @@ internal suspend fun runNodesAllProjectsQuery(
             .filter { input.id == null || it.id.value == input.id }
             .filter { input.kind == null || it.kind == input.kind }
             .filter { input.kindPrefix == null || it.kind.startsWith(input.kindPrefix) }
+            .filter { input.hasParent == null || it.parents.isNotEmpty() == input.hasParent }
             .toList()
 
         if (needle == null) {

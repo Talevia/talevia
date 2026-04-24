@@ -205,6 +205,92 @@ class SourceQueryToolTest {
         assertTrue(ex.message!!.contains("Invalid sortBy"), ex.message)
     }
 
+    @Test fun nodesHasParentFalseReturnsRootsOnly() = runTest {
+        // source-query-roots-filter §5.1. Three nodes: two roots + one child;
+        // hasParent=false must return only the two roots.
+        val rig = rig(
+            SourceNode(SourceNodeId("root-a"), "test.generic", JsonObject(emptyMap())),
+            SourceNode(SourceNodeId("root-b"), "test.generic", JsonObject(emptyMap())),
+            SourceNode(
+                SourceNodeId("child"),
+                "test.generic",
+                JsonObject(emptyMap()),
+                parents = listOf(SourceRef(SourceNodeId("root-a"))),
+            ),
+        )
+        val out = SourceQueryTool(rig.store).execute(
+            SourceQueryTool.Input(select = "nodes", projectId = rig.pid.value, hasParent = false),
+            rig.ctx,
+        ).data
+        assertEquals(2, out.total, "only 2 roots match hasParent=false")
+        val rows = out.rows.decodeRowsAs(NodeRow.serializer())
+        assertEquals(setOf("root-a", "root-b"), rows.map { it.id }.toSet())
+    }
+
+    @Test fun nodesHasParentTrueReturnsChildrenOnly() = runTest {
+        // Symmetric case: hasParent=true returns every node with ≥1 parent.
+        val rig = rig(
+            SourceNode(SourceNodeId("root"), "test.generic", JsonObject(emptyMap())),
+            SourceNode(
+                SourceNodeId("child-1"),
+                "test.generic",
+                JsonObject(emptyMap()),
+                parents = listOf(SourceRef(SourceNodeId("root"))),
+            ),
+            SourceNode(
+                SourceNodeId("child-2"),
+                "test.generic",
+                JsonObject(emptyMap()),
+                parents = listOf(SourceRef(SourceNodeId("root"))),
+            ),
+        )
+        val out = SourceQueryTool(rig.store).execute(
+            SourceQueryTool.Input(select = "nodes", projectId = rig.pid.value, hasParent = true),
+            rig.ctx,
+        ).data
+        assertEquals(2, out.total)
+        val rows = out.rows.decodeRowsAs(NodeRow.serializer())
+        assertEquals(setOf("child-1", "child-2"), rows.map { it.id }.toSet())
+    }
+
+    @Test fun nodesHasParentNullDefaultReturnsAll() = runTest {
+        // §3a #9: the null default must be backwards-compatible — omitting the
+        // filter returns every node unchanged from pre-cycle-51 behaviour.
+        val rig = rig(
+            SourceNode(SourceNodeId("root"), "test.generic", JsonObject(emptyMap())),
+            SourceNode(
+                SourceNodeId("child"),
+                "test.generic",
+                JsonObject(emptyMap()),
+                parents = listOf(SourceRef(SourceNodeId("root"))),
+            ),
+        )
+        val out = SourceQueryTool(rig.store).execute(
+            SourceQueryTool.Input(select = "nodes", projectId = rig.pid.value),
+            rig.ctx,
+        ).data
+        assertEquals(2, out.total)
+    }
+
+    @Test fun nodesHasParentRejectedOnIncompatibleSelect() = runTest {
+        // §3a #9 cross-select mixing edge.
+        val rig = rig(node("n1"))
+        val ex = assertFailsWith<IllegalStateException> {
+            SourceQueryTool(rig.store).execute(
+                SourceQueryTool.Input(
+                    select = "dag_summary",
+                    projectId = rig.pid.value,
+                    hasParent = false,
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("hasParent"),
+            "reject matrix must name the offending filter: ${ex.message}",
+        )
+    }
+
     @Test fun nodesLimitAndOffsetPage() = runTest {
         val rig = rig(node("a"), node("b"), node("c"), node("d"), node("e"))
         val page1 = SourceQueryTool(rig.store).execute(

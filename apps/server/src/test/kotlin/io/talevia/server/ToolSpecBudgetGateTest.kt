@@ -72,13 +72,21 @@ class ToolSpecBudgetGateTest {
      *     create_project_from_template / import_media /
      *     project_maintenance_action / update_source_node_body /
      *     todowrite). -1_911 tokens / -7.8%.
-     *   - 22_600 (this cycle, cycle-39): 22_518 measured. +18 tokens
-     *     above prior ceiling; load-bearing addition of
+     *   - 22_600 (cycle-39): 22_518 measured. +18 tokens above prior
+     *     ceiling; load-bearing addition of
      *     `provider_query(select=cost_compare)` per
      *     `docs/decisions/2026-04-23-core-provider-cost-compare-query.md`.
      *     Cost-compare is a new LLM-facing select that answers
      *     "cheapest model for this request?" — high-value surface no
      *     consolidation path shrinks further. ~0.4% buffer.
+     *   - 22_700 (this cycle, cycle-51): 22_623 measured. +23 tokens
+     *     above prior ceiling; load-bearing addition of
+     *     `source_query(select=nodes)` new `hasParent` filter per
+     *     `docs/decisions/2026-04-23-source-query-roots-filter.md`.
+     *     hasParent is the DAG-position filter that turns
+     *     `dag_summary.rootNodeIds` from a one-off snapshot into a
+     *     first-class `nodes` filter; no consolidation path shrinks
+     *     this further. ~0.3% buffer.
      *   - 20_000 (next target, R.6 P0 threshold): requires either
      *     deleting ~10 more tools or moving per-action details to a
      *     `list_tools(select=tool_detail)` sidecar so the live spec
@@ -92,7 +100,7 @@ class ToolSpecBudgetGateTest {
      * decision file in `docs/decisions/` alongside the ceiling bump
      * explaining why this number increased.
      */
-    private val CEILING_TOKENS: Int = 22_600
+    private val CEILING_TOKENS: Int = 22_700
 
     @Test
     fun registeredToolSpecsFitWithinCeiling() {

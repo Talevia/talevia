@@ -96,6 +96,14 @@ class SourceQueryTool(
         val includeBody: Boolean? = null,
         /** `"id"` | `"kind"` | `"revision-desc"`. `select=nodes` only. Default `"id"`. */
         val sortBy: String? = null,
+        /**
+         * Filter by DAG position. `true` returns only nodes with ≥1 parent
+         * (children-of-something); `false` returns only roots (no parents);
+         * `null` (default) returns all. `select=nodes` only. Rubric §5.1
+         * follow-up to `dag_summary.rootNodeIds` — lets a caller iterate
+         * roots or leaves as regular `NodeRow`s without a second dispatch.
+         */
+        val hasParent: Boolean? = null,
         // ---- dag_summary filters ----
         /** Max hotspots to return. `select=dag_summary` only. Default 5. */
         val hotspotLimit: Int? = null,
@@ -147,7 +155,7 @@ class SourceQueryTool(
         "Unified read-only query over a project's Source DAG. Pick one `select`:\n" +
             "  • nodes — rows: {id, kind, revision, contentHash, parentIds, summary, body?, " +
             "snippet?, matchOffset?}. filter: kind, kindPrefix, contentSubstring " +
-            "(case-insensitive default), id (exact). sortBy: id|kind|revision-desc. " +
+            "(case-insensitive default), id (exact), hasParent. sortBy: id|kind|revision-desc. " +
             "includeBody=true for full JSON. Default limit 100 (clamped 1..500).\n" +
             "  • dag_summary — {nodeCount, nodesByKind, rootNodeIds, leafNodeIds, maxDepth, " +
             "hotspots, orphanedNodeIds, summaryText}. filter: hotspotLimit (default 5).\n" +
@@ -245,6 +253,10 @@ class SourceQueryTool(
                     "Sort key — id (default), kind, revision-desc. select=nodes only.",
                 )
             }
+            putJsonObject("hasParent") {
+                put("type", "boolean")
+                put("description", "true=children, false=roots. select=nodes.")
+            }
             putJsonObject("hotspotLimit") {
                 put("type", "integer")
                 put(
@@ -336,6 +348,7 @@ class SourceQueryTool(
                 if (input.caseSensitive != null) add("caseSensitive (select=nodes only)")
                 if (input.id != null) add("id (select=nodes only)")
                 if (input.sortBy != null) add("sortBy (select=nodes only)")
+                if (input.hasParent != null) add("hasParent (select=nodes only)")
             }
             // includeBody is useful for both nodes and the relatives selects — someone
             // auditing "what's in my character_ref's downstream" will want full bodies.

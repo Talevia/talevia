@@ -36,6 +36,7 @@ internal fun runNodesQuery(
         .filter { input.id == null || it.id.value == input.id }
         .filter { input.kind == null || it.kind == input.kind }
         .filter { input.kindPrefix == null || it.kind.startsWith(input.kindPrefix) }
+        .filter { input.hasParent == null || it.parents.isNotEmpty() == input.hasParent }
         .toList()
 
     // Apply contentSubstring filter separately so matching rows can carry snippet + offset.
@@ -81,6 +82,7 @@ internal fun runNodesQuery(
         input.kindPrefix?.let { add("kindPrefix=$it") }
         input.id?.let { add("id=$it") }
         needle?.let { add("contentSubstring='$it'") }
+        input.hasParent?.let { add(if (it) "hasParent=true (children)" else "hasParent=false (roots)") }
     }
     val scopeLabel = if (scopeParts.isEmpty()) "" else " (${scopeParts.joinToString(", ")})"
     return ToolResult(
