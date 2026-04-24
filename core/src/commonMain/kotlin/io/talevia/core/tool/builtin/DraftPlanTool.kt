@@ -306,35 +306,23 @@ class DraftPlanTool(private val clock: Clock = Clock.System) : Tool<DraftPlanToo
         )
 
         private val HELP_TEXT = """
-            Record a structured pre-commit plan of tool dispatches the agent intends to run.
-            Emits a `Part.Plan` onto the active turn for user review; does NOT dispatch the
-            listed steps — execution is a follow-up agent-loop pass once the user approves.
+            Record a structured pre-commit plan (tool dispatches the agent intends to run).
+            Emits a `Part.Plan` for user review; does NOT dispatch — execution is a
+            follow-up pass after user approval.
 
-            Use this when:
-              - The user's request spans 3+ consequential tool calls (AIGC, external state
-                mutations, project edits) and you want them to ratify the batch up-front.
-              - A single wrong step would be expensive or destructive (TTS burn, timeline
-                reshuffle, cross-project asset copy).
-              - The user explicitly asks "what are you going to do?" / "show me the plan".
+            Use when: request spans 3+ consequential calls (AIGC, timeline mutations,
+            cross-project copies), or any single wrong step would be expensive/destructive,
+            or the user asks "what are you going to do?". Prefer `todowrite` for
+            free-text scratchpads — `draft_plan` is structured (toolName + inputSummary
+            per step) because the user needs to see the actual dispatch.
 
-            Prefer `todowrite` for lightweight free-text scratchpads. `draft_plan` carries
-            (toolName, inputSummary) per step so the user sees the actual dispatch; that
-            structure is the whole point — don't use `draft_plan` for informational lists.
+            Workflow: (1) call with approvalStatus=pending_approval and wait. (2) on
+            approve → re-emit with approved / approved_with_edits, then dispatch in order.
+            (3) per step: re-emit with status=in_progress → completed (or failed+note).
+            (4) on reject → re-emit with rejected and drop the batch.
 
-            Workflow:
-              1. Call `draft_plan(goalDescription, steps[])` with approvalStatus=pending_approval.
-              2. Wait for the user's next turn. Do not dispatch any step yet.
-              3. If the user approves, re-emit the plan with approvalStatus=approved
-                 (or approved_with_edits if they changed steps), then begin dispatching
-                 the underlying tool calls in order.
-              4. As you dispatch each step, re-emit the plan with that step's status
-                 flipped to in_progress → completed (or failed with a note).
-              5. If the user rejects, re-emit with approvalStatus=rejected and drop the
-                 batch — don't retry silently.
-
-            Each new call fully replaces the previous plan shown in the UI (it becomes the
-            most recent `Part.Plan`). Step numbering is assigned server-side from list order
-            — callers don't supply `step`.
+            Each call fully replaces the previous Part.Plan. Step numbering is
+            server-assigned from list order — don't supply `step`.
         """.trimIndent()
     }
 }

@@ -131,15 +131,12 @@ class ProjectMaintenanceActionTool(
 
     override val id: String = "project_maintenance_action"
     override val helpText: String =
-        "Project-state maintenance sweeps in one tool: `action=\"prune-lockfile\"` drops " +
-            "lockfile rows whose assetId is no longer in project.assets (orphan sweep); " +
-            "`action=\"gc-lockfile\"` runs policy-based GC on the lockfile (optional " +
-            "maxAgeDays + keepLatestPerTool, both AND; pinned rows always rescued; " +
-            "preserveLiveAssets=true rescues rows whose asset is still referenced); " +
-            "`action=\"gc-render-cache\"` runs policy-based GC on the per-clip mezzanine " +
-            "cache (optional maxAgeDays + keepLastN, both AND) and deletes the underlying " +
-            ".mp4 files via the video engine. All actions support dryRun=true for preview. " +
-            "Both-null policy args on the gc-* actions are a no-op."
+        "Project-state maintenance: action=prune-lockfile drops lockfile rows whose " +
+            "assetId isn't in project.assets. action=gc-lockfile policy GC (maxAgeDays + " +
+            "keepLatestPerTool both AND; pinned always kept; preserveLiveAssets=true keeps " +
+            "rows whose asset is referenced). action=gc-render-cache policy GC on mezzanine " +
+            "cache (maxAgeDays + keepLastN both AND) + deletes .mp4 via engine. All actions " +
+            "support dryRun=true. Both-null policy args on gc-* is no-op."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.write")

@@ -115,14 +115,11 @@ class FilterActionTool(
 
     override val id: String = "filter_action"
     override val helpText: String =
-        "Apply or remove named filters on video clips in one atomic batch. " +
-            "Pick `action=\"apply\"` + `filterName` (brightness, saturation, blur, vignette, lut, …) " +
-            "with exactly one selector — `clipIds` (explicit list, single-clip = 1-element), " +
-            "`trackId` (every clip on one track), or `allVideoClips=true`. Non-video clips skipped " +
-            "silently; missing clipIds reported in `skipped`. Pick `action=\"remove\"` + " +
-            "`filterName` + required `clipIds` to drop every filter with that name from each clip " +
-            "— idempotent per clip (zero matches is fine) but unresolvable / non-video clipIds " +
-            "abort the whole batch. Both actions emit one timeline snapshot per call."
+        "Apply or remove named filters on video clips atomically. " +
+            "action=apply + filterName (brightness|saturation|blur|vignette|lut|…) + exactly one " +
+            "selector (clipIds | trackId | allVideoClips=true); non-video clips skipped, missing " +
+            "clipIds reported in `skipped`. action=remove + filterName + required clipIds; " +
+            "idempotent per clip but unresolvable/non-video clipIds abort. One snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")

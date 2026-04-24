@@ -114,14 +114,10 @@ class TrackActionTool(
 
     override val id: String = "track_action"
     override val helpText: String =
-        "Add or remove tracks on the timeline atomically. " +
-            "Pick `action=\"add\"` + `trackKind` (video / audio / subtitle / effect) to create an " +
-            "empty track before authoring clips — enables picture-in-picture, multi-stem audio, " +
-            "localised subtitles; defaults a fresh UUID or respects a passed `trackId`. " +
-            "Pick `action=\"remove\"` + required `trackIds` to drop one or many tracks; non-empty " +
-            "tracks require `force=true` (every clip on them is discarded), otherwise the whole " +
-            "batch aborts with the offending clip count. One timeline snapshot per call so " +
-            "`revert_timeline` walks each action back in one step."
+        "Add or remove tracks atomically. action=add + trackKind (video|audio|subtitle|effect) " +
+            "+ optional trackId (defaults to fresh UUID). action=remove + trackIds + optional " +
+            "force=true (drops clips on non-empty tracks; otherwise batch aborts with clip count). " +
+            "One snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec(

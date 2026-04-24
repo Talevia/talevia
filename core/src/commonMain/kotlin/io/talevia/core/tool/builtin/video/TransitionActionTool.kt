@@ -100,14 +100,11 @@ class TransitionActionTool(
 
     override val id: String = "transition_action"
     override val helpText: String =
-        "Insert or remove transitions between adjacent clip pairs in one atomic batch. " +
-            "Pick `action=\"add\"` and pass `items` (each: fromClipId, toClipId, optional " +
-            "transitionName default 'fade', durationSeconds default 0.5; pairs must be on the same " +
-            "track and already adjacent) to insert. Pick `action=\"remove\"` and pass " +
-            "`transitionClipIds` (ids returned by a prior add) to delete — strictly scoped to " +
-            "transitions (effect-track clips with the `transition:` sentinel assetId). " +
-            "All-or-nothing per call: any item that fails validation aborts the whole batch. " +
-            "Emits one timeline snapshot per call so revert_timeline walks the batch back in one step."
+        "Insert or remove transitions between adjacent clip pairs atomically. " +
+            "action=add + items (each: fromClipId, toClipId, transitionName default 'fade', " +
+            "durationSeconds default 0.5; pairs must be on same track + adjacent). " +
+            "action=remove + transitionClipIds (ids from a prior add); scoped to effect-track " +
+            "clips with the `transition:` sentinel assetId. All-or-nothing; one snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")

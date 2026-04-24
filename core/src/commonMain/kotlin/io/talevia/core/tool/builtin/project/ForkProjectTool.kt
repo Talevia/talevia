@@ -174,19 +174,16 @@ class ForkProjectTool(
 
     override val id: String = "fork_project"
     override val helpText: String =
-        "Branch a project into a new one (closes VISION \u00a73.4 \"\u53ef\u5206\u652f\"). " +
-            "By default forks from the source project's current state; pass snapshotId to fork " +
-            "from a previously-saved snapshot instead. The new project has a fresh id, an empty " +
-            "snapshots list, and otherwise inherits everything (timeline, source, lockfile, " +
-            "render cache, assets, output profile). Asset bytes are not duplicated — both " +
-            "projects reference the same AssetIds in shared media storage. " +
-            "Pass variantSpec={aspectRatio?, durationSecondsMax?, language?} to reshape the fork " +
-            "in one step (VISION §6 \"30s / vertical variant\"): aspectRatio remaps resolution " +
-            "(presets: 16:9, 9:16, 1:1, 4:5, 21:9); durationSecondsMax caps the timeline (drops " +
-            "tail clips, truncates straddlers); language (ISO-639-1) dispatches synthesize_speech " +
-            "per non-blank text clip and surfaces (clipId, assetId, cacheHit) in " +
-            "languageRegeneratedClips — the caller chains replace_clip to swap existing audio. " +
-            "The fork's parentProjectId points at the source so variants form a lineage."
+        "Branch a project into a new one. Defaults to forking the source's current state; " +
+            "pass snapshotId to fork a prior snapshot. New project has fresh id, empty " +
+            "snapshots list, inherits timeline/source/lockfile/render-cache/assets/output-" +
+            "profile. Asset bytes are not duplicated — shared AssetIds. " +
+            "variantSpec={aspectRatio?, durationSecondsMax?, language?} reshapes in one " +
+            "step: aspectRatio presets 16:9|9:16|1:1|4:5|21:9 remap resolution; " +
+            "durationSecondsMax caps the timeline (drops tail clips, truncates straddlers); " +
+            "language (ISO-639-1) dispatches synthesize_speech per non-blank text clip, " +
+            "surfaces (clipId, assetId, cacheHit) in languageRegeneratedClips. " +
+            "parentProjectId points at the source so variants form a lineage."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.write")

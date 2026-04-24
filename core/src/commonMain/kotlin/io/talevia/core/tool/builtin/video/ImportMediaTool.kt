@@ -175,14 +175,11 @@ class ImportMediaTool(
 
     override val id = "import_media"
     override val helpText =
-        "Import a media file by path: probes its metadata and appends the asset to the current " +
-            "project's inventory. Returns the new assetId so you can `add_clip(assetId=…)` " +
-            "immediately after. Defaults projectId from the session binding — pass it only when " +
-            "importing into a non-current project. `copy_into_bundle` is tri-state: omit (default) " +
-            "for auto — small files (≤50 MiB) are copied into the bundle so they travel with " +
-            "`git push`; larger files are referenced by absolute path. Pass `true` to force copy " +
-            "regardless of size (LUTs / fonts / reference images where size-based auto is wrong), " +
-            "or `false` to force reference (raw 4K footage that must NOT inflate the bundle)."
+        "Import a media file: probes metadata + appends to project.assets. Returns assetId. " +
+            "projectId defaults from session binding. copy_into_bundle tri-state: omit = auto " +
+            "(≤50 MiB copied so git-push ships them; larger referenced by absolute path); " +
+            "true = force copy (LUTs/fonts/refs where auto is wrong); false = force reference " +
+            "(raw 4K footage that must not inflate bundle)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("media.import")

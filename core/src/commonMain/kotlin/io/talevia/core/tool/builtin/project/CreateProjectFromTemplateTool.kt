@@ -106,14 +106,11 @@ class CreateProjectFromTemplateTool(
 
     override val id: String = "create_project_from_template"
     override val helpText: String =
-        "Create a new project and seed its source DAG with a genre template so the " +
-            "agent doesn't start from zero nodes. Templates: narrative / vlog / ad / " +
-            "musicmv / tutorial. Pass template='auto' plus an `intent` string to let " +
-            "the tool classify the genre from keywords (novice path — one call, " +
-            "source DAG pre-populated). All seeded nodes use TODO placeholders — fill " +
-            "them in via update_source_node_body before the first AIGC call. The " +
-            "musicmv template does not seed a musicmv.track node (needs an imported " +
-            "music asset first). Resolution + fps options same as create_project."
+        "Create a project + seed the source DAG from a genre template. Templates: " +
+            "narrative|vlog|ad|musicmv|tutorial. template='auto' + intent classifies genre " +
+            "from keywords. Seeded nodes use TODO placeholders — fill via update_source_" +
+            "node_body before first AIGC call. musicmv skips seeding musicmv.track " +
+            "(needs imported music). Resolution + fps same as create_project."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.write")

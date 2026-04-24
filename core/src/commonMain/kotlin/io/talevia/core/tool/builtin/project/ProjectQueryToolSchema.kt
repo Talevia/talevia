@@ -27,52 +27,29 @@ import kotlinx.serialization.json.putJsonObject
  * before the extraction — every description sentence is preserved verbatim.
  */
 internal val PROJECT_QUERY_HELP_TEXT: String =
-    "Unified read-only query over a project (replaces list_tracks / list_timeline_clips / " +
-        "list_assets / list_transitions / list_lockfile_entries / list_clips_bound_to_asset / " +
-        "list_clips_for_source). Pick one `select`:\n" +
-        "  • tracks — filter: trackKind, onlyNonEmpty. sortBy: index (default) | clipCount | span | " +
-        "recent.\n" +
-        "  • timeline_clips — filter: trackKind, trackId, fromSeconds, toSeconds, onlySourceBound, " +
-        "onlyPinned. sortBy: startSeconds (default) | durationSeconds | recent.\n" +
-        "  • assets — filter: kind (video|audio|image|all), onlyUnused, onlyReferenced. sortBy: " +
-        "insertion (default) | duration | duration-asc | id | recent.\n" +
-        "  sortBy=\"recent\" orders by most-recently-mutated entity first (null stamps — pre-recency " +
-        "blobs — sort last, stable tie-break by id).\n" +
-        "  • transitions — filter: onlyOrphaned. Chronological order.\n" +
-        "  • lockfile_entries — filter: toolId (e.g. generate_image), onlyPinned, " +
-        "sourceNodeId (entries bound to one source node — \"this character's " +
-        "generation history\"), sinceEpochMs (created at or after). Most-recent first.\n" +
-        "  • clips_for_asset — required: assetId. Every clip referencing the asset.\n" +
-        "  • clips_for_source — required: sourceNodeId. Every clip bound to that source node " +
-        "(directly or transitively).\n" +
-        "  • consistency_propagation — required: sourceNodeId. Audits whether the node's " +
-        "body string values actually made it into bound clips' AIGC prompts. Returns rows " +
-        "(clipId, aigcEntryFound, keywordsInBody, keywordsMatchedInPrompt, " +
-        "promptContainsKeywords). Use to answer \"did my character_ref really influence shot-3?\".\n" +
-        "  • clip — required: clipId. Single-row drill-down replacing describe_clip " +
-        "(timeRange, sourceRange, transforms, per-kind fields, derived lockfile ref).\n" +
-        "  • lockfile_entry — required: inputHash. Single-row drill-down replacing " +
-        "describe_lockfile_entry (provenance, source-binding drift, baseInputs, clip refs).\n" +
-        "  • project_metadata — single-row drill-down replacing describe_project " +
-        "(compact aggregate across tracks / clips / source / lockfile / snapshots plus " +
-        "pre-rendered summaryText).\n" +
-        "  • snapshots — saved snapshots on the project, newest-first. filter: " +
-        "maxAgeDays (drop snapshots older than now - N days). Default limit 50, max 500. " +
-        "Replaces the deleted list_project_snapshots tool.\n" +
-        "  • spend — single-row AIGC cost aggregate across the lockfile. Sums " +
-        "`costCents` per entry (null = unknown pricing, counted separately), breaks " +
-        "down by toolId and sessionId. Use to answer \"how much has this project " +
-        "burned\".\n" +
-        "  • timeline_diff — single-row timeline-only diff between two snapshot-or-" +
-        "current states (filter: fromSnapshotId, toSnapshotId; at least one must be " +
-        "a snapshot id — both null is usage error). Returns tracks/clips added / " +
-        "removed / changed, plus identical + totalChanges. Use when you only need " +
-        "the timeline delta and want to save tokens vs diff_projects, which also " +
-        "emits source + lockfile sections. Same-project only — cross-project diff " +
-        "stays on diff_projects.\n" +
-        "Common: limit (default 100, clamped 1..500), offset (default 0). Setting a filter " +
-        "that doesn't apply to the chosen select fails loud so typos surface instead of silently " +
-        "returning an empty list."
+    "Unified read-only query over a project. Pick one `select`:\n" +
+        "  • tracks — filter: trackKind, onlyNonEmpty. sortBy: index|clipCount|span|recent.\n" +
+        "  • timeline_clips — filter: trackKind, trackId, fromSeconds, toSeconds, " +
+        "onlySourceBound, onlyPinned. sortBy: startSeconds|durationSeconds|recent.\n" +
+        "  • assets — filter: kind (video|audio|image|all), onlyUnused, onlyReferenced. " +
+        "sortBy: insertion|duration|duration-asc|id|recent. sortBy=recent orders by " +
+        "most-recently-mutated first (null stamps sort last).\n" +
+        "  • transitions — filter: onlyOrphaned. Chronological.\n" +
+        "  • lockfile_entries — filter: toolId, onlyPinned, sourceNodeId, sinceEpochMs. " +
+        "Most-recent first.\n" +
+        "  • clips_for_asset — required: assetId.\n" +
+        "  • clips_for_source — required: sourceNodeId. Transitive closure.\n" +
+        "  • consistency_propagation — required: sourceNodeId. Audits whether node body " +
+        "values reach bound clips' AIGC prompts.\n" +
+        "  • clip — required: clipId. Drill-down.\n" +
+        "  • lockfile_entry — required: inputHash. Drill-down.\n" +
+        "  • project_metadata — single-row aggregate across tracks/clips/source/lockfile/snapshots.\n" +
+        "  • snapshots — filter: maxAgeDays. Newest first. Default limit 50, max 500.\n" +
+        "  • spend — single-row AIGC cost aggregate; breaks down by toolId and sessionId.\n" +
+        "  • timeline_diff — filter: fromSnapshotId, toSnapshotId (≥1 required). Tracks/clips " +
+        "added/removed/changed + totalChanges. Same-project only.\n" +
+        "Common: limit (default 100, clamped 1..500), offset (default 0). Filter-on-wrong-select " +
+        "fails loud."
 
 internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
     put("type", "object")

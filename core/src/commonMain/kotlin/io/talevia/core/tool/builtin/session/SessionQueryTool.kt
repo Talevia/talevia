@@ -148,55 +148,32 @@ class SessionQueryTool(
 
     override val id: String = "session_query"
     override val helpText: String =
-        "Unified read-only query over sessions + messages + parts + forks (replaces list_sessions / " +
-            "list_messages / list_parts / list_session_forks / list_session_ancestors / " +
-            "list_tool_calls). Pick one `select`:\n" +
-            "  • sessions — filter: projectId, includeArchived. Most-recent first by updatedAt. " +
-            "Defaults limit 100.\n" +
-            "  • messages — filter: role (user|assistant). requires sessionId. Most-recent first.\n" +
-            "  • parts — filter: kind (text, reasoning, tool, media, timeline-snapshot, " +
-            "render-progress, step-start, step-finish, compaction, todos), includeCompacted. " +
-            "requires sessionId. Most-recent first.\n" +
+        "Unified read-only query over sessions + messages + parts + forks. Pick one `select`:\n" +
+            "  • sessions — filter: projectId, includeArchived. Most-recent by updatedAt.\n" +
+            "  • messages — filter: role (user|assistant). requires sessionId.\n" +
+            "  • parts — filter: kind (text|reasoning|tool|media|timeline-snapshot|" +
+            "render-progress|step-start|step-finish|compaction|todos), includeCompacted. " +
+            "requires sessionId.\n" +
             "  • forks — immediate child sessions (one hop). requires sessionId. Oldest first.\n" +
-            "  • ancestors — parent chain up to root (child→root). requires sessionId. Depth-bounded.\n" +
-            "  • tool_calls — Part.Tool only. filter: toolId, includeCompacted. requires sessionId. " +
-            "Most-recent first.\n" +
-            "  • compactions — Part.Compaction aggregate view, most-recent first. Each row " +
-            "carries from/to messageId + full summaryText + compactedAtEpochMs. requires " +
-            "sessionId. Use this instead of parts(kind=compaction) when you need the full summary " +
-            "plus message-range metadata.\n" +
-            "  • status — snapshot of the agent's most recent run state + compaction progress. " +
-            "Each row carries (state, cause?, neverRan, estimatedTokens, compactionThreshold, " +
-            "percent) so UI can render both a state badge and a threshold progress bar. " +
-            "State is one of (idle | generating | " +
-            "awaiting_tool | compacting | cancelled | failed). requires sessionId. neverRan=true " +
-            "means the tracker has not seen any run on this session yet.\n" +
-            "  • session_metadata — single-row drill-down replacing the old describe_session " +
-            "tool. Returns session metadata + aggregate counts (message counts, summed token " +
-            "usage, compaction presence, permission-rule count, latest-message timestamp). " +
+            "  • ancestors — parent chain to root. requires sessionId. Depth-bounded.\n" +
+            "  • tool_calls — Part.Tool only. filter: toolId, includeCompacted. " +
             "requires sessionId.\n" +
-            "  • message — single-row drill-down replacing the old describe_message tool. " +
-            "Returns message metadata + per-part summaries. requires messageId (rejected " +
-            "elsewhere).\n" +
-            "  • spend — single-row AIGC cost aggregate for this session (walks the " +
-            "session's bound project lockfile, sums `costCents` for entries stamped with " +
-            "sessionId). Unknown-cost entries (no pricing rule) are counted separately. " +
-            "requires sessionId. Scoped to the session's CURRENT project only — sessions " +
-            "that switched projects mid-run report partial totals.\n" +
-            "  • context_pressure — single-row snapshot of token footprint vs the " +
-            "auto-compaction threshold. Returns (currentEstimate, threshold, ratio, " +
-            "marginTokens, overThreshold, messageCount). ratio is un-clamped so the " +
-            "over-threshold case reads > 1.0; marginTokens is negative when over. Use " +
-            "before issuing a big-context operation to decide whether to compact first. " +
+            "  • compactions — Part.Compaction aggregate (from/to messageId + full summary + " +
+            "compactedAtEpochMs). requires sessionId.\n" +
+            "  • status — agent run state + compaction progress: (state, cause?, neverRan, " +
+            "estimatedTokens, compactionThreshold, percent). state: " +
+            "idle|generating|awaiting_tool|compacting|cancelled|failed. requires sessionId.\n" +
+            "  • session_metadata — single-row drill-down (message counts, token usage, " +
+            "compaction presence, permission-rule count). requires sessionId.\n" +
+            "  • message — single-row drill-down + per-part summaries. requires messageId.\n" +
+            "  • spend — single-row AIGC cost aggregate for this session's current project. " +
             "requires sessionId.\n" +
-            "  • tool_spec_budget — single-row registry-wide snapshot of how many tokens " +
-            "the registered tool specs cost the LLM per turn. Returns (toolCount, " +
-            "estimatedTokens, specBytes, registryResolved, topByTokens[5]). Session-" +
-            "independent — sessionId is rejected. Use to decide whether to consolidate " +
-            "near-duplicate tools before they inflate the per-turn context cost.\n" +
-            "Common: limit (default 100, clamped 1..1000), offset (default 0). Setting a filter " +
-            "that doesn't apply to the chosen select fails loud so typos surface instead of silently " +
-            "returning an empty list."
+            "  • context_pressure — (currentEstimate, threshold, ratio, marginTokens, " +
+            "overThreshold, messageCount); ratio un-clamped > 1.0 when over. requires sessionId.\n" +
+            "  • tool_spec_budget — registry-wide (toolCount, estimatedTokens, specBytes, " +
+            "registryResolved, topByTokens[5]). Session-independent — sessionId rejected.\n" +
+            "Common: limit (default 100, clamped 1..1000), offset (default 0). Filter-on-" +
+            "wrong-select fails loud."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.read")

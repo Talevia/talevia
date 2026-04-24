@@ -75,12 +75,10 @@ class AddSubtitlesTool(
 
     override val id = "add_subtitles"
     override val helpText =
-        "Place one or more subtitle segments on the subtitle track in a single atomic edit. " +
-            "Single-subtitle is a 1-element list. All segments in one call share the same " +
-            "style (fontSize / color / backgroundColor). Intended pair for transcribe_asset: " +
-            "convert its segments[] to {text, timelineStartSeconds, durationSeconds} and pass. " +
-            "Emits one timeline snapshot per batch so revert_timeline walks back the whole " +
-            "ingestion in one step."
+        "Place subtitle segments on the subtitle track atomically. Single-subtitle is a " +
+            "1-element list. All segments share style (fontSize / color / backgroundColor). " +
+            "Pairs with transcribe_asset: convert its segments[] to {text, timelineStart" +
+            "Seconds, durationSeconds}. One snapshot per batch."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission = PermissionSpec.fixed("timeline.write")

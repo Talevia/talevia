@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **debt-shrink-tool-spec-surface-to-22500** — 2026-04-23 cycle-24 budget gate landed 25_000 ceiling with 24_384 tokens measured; target per `2026-04-23-debt-tool-spec-budget-ratchet-step-20k.md` is 20_000 via helpText trimming on the action-dispatched tools. Next step 22_500 (budget drop ≥ 1_500 tokens). **方向：** trim `*ActionTool` helpText narrative — move per-action caveats to `list_tools(select=tool_detail)` output, keep LLM-visible spec terse. Ratchet ceiling 25_000 → 22_500 in `ToolSpecBudgetGateTest`. Rubric §5.7.
 - **session-project-rebind-mid-run-guard** — `switch_project(sid, newPid)` accepts rebind at any time; if called mid-run (Agent in Generating / AwaitingTool / Compacting) the next turn sees surprise state. `AgentRunStateTracker.currentState(sid)` exposes the guard signal but `SwitchProjectTool` doesn't consult it. **方向：** `SwitchProjectTool.execute` rejects (or asks permission tier upgrade) when tracker reports non-Idle for the target session; test covers: generate → switch_project is rejected; idle → switch_project succeeds. Rubric §5.6.
 
 ## P1 — 中优，做完 P0 再排

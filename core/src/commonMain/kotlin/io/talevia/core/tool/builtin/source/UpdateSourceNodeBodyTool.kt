@@ -133,16 +133,12 @@ class UpdateSourceNodeBodyTool(
 
     override val id: String = "update_source_node_body"
     override val helpText: String =
-        "Replace a source node's body wholesale (full replacement — no partial-patch). Kind-agnostic: " +
-            "works on any node kind (core.consistency.character_ref / style_bible / brand_palette, " +
-            "narrative.shot, vlog.raw_footage, musicmv.*, tutorial.*, ad.*, or any imported / " +
-            "hand-authored node). Does NOT touch kind (rebuild the node if the kind must change), " +
-            "parents (use set_source_node_parents), or id (use rename_source_node). Bumps " +
-            "contentHash so bound clips go stale — run find_stale_clips after editing to surface " +
-            "them. Required workflow: call describe_source_node first to read the current body, " +
-            "mutate the JsonObject client-side (keep every field you want to retain — this is " +
-            "NOT a patch), then pass the complete new object as `body`. Never call with `body` " +
-            "missing or empty; there is no partial-update fallback."
+        "Replace a source node's body wholesale (full replacement, no partial-patch). " +
+            "Kind-agnostic. Does NOT touch kind (rebuild if kind must change), parents (use " +
+            "set_source_node_parents), or id (use rename_source_node). Bumps contentHash " +
+            "→ bound clips go stale; run find_stale_clips after. Workflow: describe_source_" +
+            "node first to read current body, mutate client-side (keep every field you want — " +
+            "this is not a patch), pass complete object as `body`. Empty body is rejected."
     override val inputSerializer: KSerializer<Input> = InputCompatSerializer
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.write")

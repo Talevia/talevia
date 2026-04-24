@@ -139,36 +139,21 @@ class SourceQueryTool(
 
     override val id: String = "source_query"
     override val helpText: String =
-        "Unified read-only query over a project's Source DAG (replaces list_source_nodes / " +
-            "search_source_nodes / describe_source_dag). Pick one `select`:\n" +
+        "Unified read-only query over a project's Source DAG. Pick one `select`:\n" +
             "  • nodes — rows: {id, kind, revision, contentHash, parentIds, summary, body?, " +
-            "snippet?, matchOffset?}. filter: kind, kindPrefix, contentSubstring (case-insensitive " +
-            "by default; set caseSensitive=true for brand / code lookups), id (exact). sortBy: id " +
-            "(default) | kind | revision-desc. includeBody=true for the full JSON. Default limit 100 " +
-            "(clamped 1..500).\n" +
-            "  • dag_summary — one row: {nodeCount, nodesByKind, rootNodeIds, leafNodeIds, " +
-            "maxDepth, hotspots (ranked by downstream-clip count), orphanedNodeIds, summaryText}. " +
-            "filter: hotspotLimit (default 5). No limit/offset — always one row.\n" +
-            "  • dot — one row: {dot}. Emits the whole Source DAG as a Graphviz DOT document so " +
-            "you can pipe it into `dot -Tsvg` externally for a one-glance view (nodes with no " +
-            "downstream clip binding render dashed). No filters — the point of the view is the " +
-            "whole graph; use select=nodes for subsets.\n" +
-            "  • descendants — BFS from `root` through the reverse-parent index, returning every " +
-            "node transitively reachable downstream (children, grandchildren, …). Each row " +
-            "carries a `depthFromRoot` hop count (0 = root itself, 1 = direct children). " +
-            "requires root. Optional depth caps the walk (null or negative = unbounded; 0 = " +
-            "root only). Cycle-safe. Unknown root id fails loud.\n" +
-            "  • ancestors — BFS upstream from `root` via each node's parents, returning every " +
-            "node the root ultimately derives from. Row shape + depth semantics mirror " +
-            "descendants. Use these two selects when you need to reason about propagation " +
-            "(\"what depends on this character_ref?\") or provenance (\"what did this shot " +
-            "fold in from upstream?\").\n" +
-            "Common: projectId (required unless scope='all_projects'), limit, offset " +
-            "(select=nodes / descendants / ancestors only). scope='all_projects' (select=nodes " +
-            "only) enumerates every registered project and tags each row with its owning " +
-            "projectId — use for \"find all character_refs across my projects like cyberpunk\" " +
-            "flows. Setting a filter that doesn't apply to the chosen select fails loud. " +
-            "describe_source_node stays as a separate tool for single-entity deep views."
+            "snippet?, matchOffset?}. filter: kind, kindPrefix, contentSubstring " +
+            "(case-insensitive default), id (exact). sortBy: id|kind|revision-desc. " +
+            "includeBody=true for full JSON. Default limit 100 (clamped 1..500).\n" +
+            "  • dag_summary — {nodeCount, nodesByKind, rootNodeIds, leafNodeIds, maxDepth, " +
+            "hotspots, orphanedNodeIds, summaryText}. filter: hotspotLimit (default 5).\n" +
+            "  • dot — whole DAG as Graphviz DOT (unbound-downstream nodes dashed). No filters.\n" +
+            "  • descendants — BFS downstream from root; rows carry depthFromRoot (0=root). " +
+            "requires root. Optional depth cap (null/negative=unbounded). Cycle-safe.\n" +
+            "  • ancestors — BFS upstream from root; same shape as descendants.\n" +
+            "Common: projectId (required unless scope='all_projects'), limit, offset (nodes/" +
+            "descendants/ancestors only). scope='all_projects' (select=nodes only) " +
+            "enumerates every project and tags rows with projectId. Filter-on-wrong-select " +
+            "fails loud. describe_source_node handles single-entity deep views."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.read")

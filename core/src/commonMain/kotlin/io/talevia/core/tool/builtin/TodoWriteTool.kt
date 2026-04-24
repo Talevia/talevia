@@ -158,24 +158,14 @@ class TodoWriteTool(private val clock: Clock = Clock.System) : Tool<TodoWriteToo
             Maintain a structured todo list for multi-step work. Each call fully
             replaces the prior list.
 
-            Use this proactively when:
-              1. The user's request needs 3+ distinct steps.
-              2. The task is non-trivial — multiple source edits, AIGC regenerations,
-                 an export at the end.
-              3. The user explicitly asks you to track progress.
+            Use when: request needs 3+ steps, or task is non-trivial (multiple source
+            edits, AIGC regens, export), or user asks to track progress. Skip for
+            single-call tasks or Q&A.
 
-            Do NOT use for single-call tasks ("add this clip"), informational Q&A,
-            or anything that's already a one-shot tool invocation.
-
-            Workflow:
-              - Mark exactly one item `in_progress` at a time.
-              - Flip an item to `completed` immediately after it's done; don't batch.
-              - Use `cancelled` for items that became irrelevant — don't silently
-                drop them.
-              - Priorities (`high` / `medium` / `low`) are optional; default medium.
-
-            The current todo list is persisted as a `Part.Todos` on this turn and is
-            visible to every subsequent UI / CLI consumer of the session.
+            Workflow: exactly one item in_progress at a time; flip to completed
+            immediately (don't batch); use cancelled for items that became irrelevant
+            (don't silently drop). Priorities (high|medium|low) optional; default medium.
+            Persists as Part.Todos on this turn.
         """.trimIndent()
     }
 }
