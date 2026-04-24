@@ -107,6 +107,22 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
 
+    /**
+     * In-process metrics registry. Counters are fed from the bus via
+     * [io.talevia.core.metrics.EventBusMetricsSink]; histograms (tool /
+     * agent wall-times) are populated by the Agent when it's given a
+     * reference to this same registry. Exposed so `/metrics` can dump the
+     * contents on demand — CLI has no HTTP endpoint so the slash command
+     * is the only read surface.
+     */
+    val metrics: io.talevia.core.metrics.MetricsRegistry =
+        io.talevia.core.metrics.MetricsRegistry()
+
+    private val metricsSink: io.talevia.core.metrics.EventBusMetricsSink =
+        io.talevia.core.metrics.EventBusMetricsSink(bus, metrics).also {
+            it.attach(CoroutineScope(SupervisorJob() + Dispatchers.Default))
+        }
+
     val sessions = SqlDelightSessionStore(db, bus)
 
     /**
@@ -305,6 +321,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
             titler = SessionTitler(provider = provider, store = sessions),
             fallbackProviders = providers.all().filter { it.id != provider.id },
             projects = projects,
+            metrics = metrics,
         )
     }
 

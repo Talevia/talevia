@@ -109,6 +109,7 @@ internal class SlashCommandDispatcher(
             }
             "cost" -> renderer.println(costSummary(currentSession))
             "spend" -> renderer.println(spendSummary(currentSession))
+            "metrics" -> renderer.println(metricsSummary())
             "todos" -> renderer.println(todosSummary(currentSession))
             "status" -> renderer.println(statusLine(projectId, currentSession, currentModel))
             "history" -> renderer.println(historyTable(currentSession))
@@ -405,6 +406,20 @@ internal class SlashCommandDispatcher(
         }
 
         return formatSpendSummary(row)
+    }
+
+    /**
+     * `/metrics` renders the in-process `MetricsRegistry` — counters
+     * grouped by dotted-prefix, latency histograms (P50/P95/P99) for any
+     * observed timer. Mirrors the server's `/metrics` endpoint content
+     * minus the Prometheus text format: CLI operators want human-
+     * readable, not scrape-friendly, so we ship the tree form that makes
+     * eyeball reading tolerable.
+     */
+    private suspend fun metricsSummary(): String {
+        val counters = container.metrics.snapshot()
+        val histograms = container.metrics.histogramSnapshot()
+        return formatMetricsSummary(counters, histograms)
     }
 
     private suspend fun costSummary(sessionId: SessionId): String {

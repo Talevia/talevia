@@ -76,6 +76,11 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         category = SlashCategory.MODEL,
     ),
     SlashCommandSpec(
+        "/metrics",
+        "dump in-process counters + wall-time histograms (ops visibility)",
+        category = SlashCategory.MODEL,
+    ),
+    SlashCommandSpec(
         "/todos",
         "show the agent's current todo list for this session",
         category = SlashCategory.MODEL,
