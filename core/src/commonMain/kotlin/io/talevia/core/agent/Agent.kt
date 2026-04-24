@@ -148,6 +148,16 @@ class Agent(
      */
     private class RunHandle(val job: Job) {
         @Volatile var currentAssistantId: MessageId? = null
+
+        /**
+         * Most recent retry attempt number scheduled during this run, or null
+         * until the first retry fires. Read by [Agent.run]'s terminal
+         * [BusEvent.AgentRunStateChanged] emits so subscribers can correlate
+         * the terminal state with the preceding retry. Set by [runLoop] after
+         * publishing [BusEvent.AgentRetryScheduled]; monotonically
+         * non-decreasing across steps and provider fallbacks within one run.
+         */
+        @Volatile var lastRetryAttempt: Int? = null
     }
 
     private val inflightMutex = Mutex()
@@ -216,13 +226,21 @@ class Agent(
                 "error" to result.error,
             )
             val terminal = if (result.error != null) AgentRunState.Failed(result.error!!) else AgentRunState.Idle
-            bus.publish(BusEvent.AgentRunStateChanged(input.sessionId, terminal))
+            bus.publish(
+                BusEvent.AgentRunStateChanged(input.sessionId, terminal, retryAttempt = handle.lastRetryAttempt),
+            )
             return result
         } catch (e: CancellationException) {
             withContext(NonCancellable) {
                 finalizeCancelled(handle, e.message)
                 bus.publish(BusEvent.SessionCancelled(input.sessionId))
-                bus.publish(BusEvent.AgentRunStateChanged(input.sessionId, AgentRunState.Cancelled))
+                bus.publish(
+                    BusEvent.AgentRunStateChanged(
+                        input.sessionId,
+                        AgentRunState.Cancelled,
+                        retryAttempt = handle.lastRetryAttempt,
+                    ),
+                )
             }
             log.info("run.cancelled", "session" to input.sessionId.value, "reason" to e.message)
             throw e
@@ -231,6 +249,7 @@ class Agent(
                 BusEvent.AgentRunStateChanged(
                     input.sessionId,
                     AgentRunState.Failed(t.message ?: t::class.simpleName ?: "unknown"),
+                    retryAttempt = handle.lastRetryAttempt,
                 ),
             )
             throw t
@@ -316,10 +335,22 @@ class Agent(
                             thresholdTokens = compactionTokenThreshold,
                         ),
                     )
-                    bus.publish(BusEvent.AgentRunStateChanged(input.sessionId, AgentRunState.Compacting))
+                    bus.publish(
+                        BusEvent.AgentRunStateChanged(
+                            input.sessionId,
+                            AgentRunState.Compacting,
+                            retryAttempt = handle.lastRetryAttempt,
+                        ),
+                    )
                     compactor.process(input.sessionId, history, input.model)
                     history = store.listMessagesWithParts(input.sessionId, includeCompacted = false)
-                    bus.publish(BusEvent.AgentRunStateChanged(input.sessionId, AgentRunState.Generating))
+                    bus.publish(
+                        BusEvent.AgentRunStateChanged(
+                            input.sessionId,
+                            AgentRunState.Generating,
+                            retryAttempt = handle.lastRetryAttempt,
+                        ),
+                    )
                 }
             }
 
@@ -351,6 +382,7 @@ class Agent(
 
                 turnResult = executor.streamTurn(
                     asstMsg, history, input, currentProjectId, providerIndex, spendCapCents, disabledToolIds,
+                    retryAttempt = handle.lastRetryAttempt,
                 )
 
                 // Only retry when the turn failed and nothing useful was streamed.
@@ -408,6 +440,13 @@ class Agent(
                         reason = reason,
                     ),
                 )
+                // Stamp the handle so subsequent AgentRunStateChanged emits
+                // (inside executor.streamTurn, the compaction transitions, and
+                // the terminal Idle/Failed/Cancelled in run()) can correlate
+                // their state with this retry attempt. Monotonic across steps
+                // and provider fallbacks within one run — resetting would hide
+                // "retry #N succeeded after 2 steps" from the terminal emit.
+                handle.lastRetryAttempt = attempt
                 // Wipe the failed assistant message (+ its StepFinish(ERROR) part)
                 // so the retry produces a clean single message per turn.
                 runCatching { store.deleteMessage(asstMsg.id) }

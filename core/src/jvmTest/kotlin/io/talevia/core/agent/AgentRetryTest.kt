@@ -190,6 +190,149 @@ class AgentRetryTest {
     }
 
     @Test
+    fun retryAttemptPropagatesToTerminalRunStateChanged() = runTest {
+        // Terminal Idle after a successful retry must carry the attempt number
+        // so SSE / CLI subscribers can answer "did retry #N succeed?" from
+        // the terminal event alone — no wall-clock log-joining needed.
+        //
+        // We assert on the terminal (last captured) event, not the initial
+        // Generating: the initial run-start transition fires very close to
+        // Agent.run entry and can race the Dispatchers.Default collector
+        // installation (a documented flakiness source for bus tests). The
+        // no-retry control test below covers the null-default pin.
+        val (store, bus) = newStore()
+        val sessionId = primeSession(store)
+
+        val failing = listOf(
+            LlmEvent.Error(message = "anthropic HTTP 503 overloaded", retriable = true),
+            LlmEvent.StepFinish(FinishReason.ERROR, TokenUsage.ZERO),
+        )
+        val partId = PartId("ok-1")
+        val success = listOf(
+            LlmEvent.TextStart(partId),
+            LlmEvent.TextEnd(partId, "after-retry"),
+            LlmEvent.StepFinish(FinishReason.END_TURN, TokenUsage(input = 1, output = 1)),
+        )
+
+        val stateEvents = mutableListOf<BusEvent.AgentRunStateChanged>()
+        val collectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val collectorJob = collectorScope.launch {
+            bus.events.filterIsInstance<BusEvent.AgentRunStateChanged>().collect { stateEvents += it }
+        }
+        yield()
+
+        val provider = FakeProvider(listOf(failing, success))
+        val agent = Agent(
+            provider = provider,
+            registry = ToolRegistry(),
+            store = store,
+            permissions = AllowAllPermissionService(),
+            bus = bus,
+            retryPolicy = RetryPolicy(maxAttempts = 4, initialDelayMs = 0, maxDelayNoHeadersMs = 0),
+        )
+
+        agent.run(RunInput(sessionId, "hi", ModelRef("fake", "test")))
+        yield()
+        collectorJob.cancel()
+        collectorScope.cancel()
+
+        assertTrue(stateEvents.isNotEmpty(), "expected at least one AgentRunStateChanged")
+        val terminal = stateEvents.last()
+        assertTrue(
+            terminal.state is AgentRunState.Idle,
+            "terminal state expected Idle after successful retry; got ${terminal.state}",
+        )
+        assertEquals(
+            1,
+            terminal.retryAttempt,
+            "terminal transition must echo the most recent retry attempt (1)",
+        )
+    }
+
+    @Test
+    fun retryAttemptRemainsNullWhenNoRetryFired() = runTest {
+        // Symmetric guard: a clean run that never retried must leave the
+        // terminal state's retryAttempt null, matching the documented default.
+        val (store, bus) = newStore()
+        val sessionId = primeSession(store)
+        val partId = PartId("ok-1")
+        val cleanTurn = listOf(
+            LlmEvent.TextStart(partId),
+            LlmEvent.TextEnd(partId, "clean"),
+            LlmEvent.StepFinish(FinishReason.END_TURN, TokenUsage(input = 1, output = 1)),
+        )
+
+        val stateEvents = mutableListOf<BusEvent.AgentRunStateChanged>()
+        val collectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val collectorJob = collectorScope.launch {
+            bus.events.filterIsInstance<BusEvent.AgentRunStateChanged>().collect { stateEvents += it }
+        }
+        yield()
+
+        val provider = FakeProvider(listOf(cleanTurn))
+        val agent = Agent(
+            provider = provider,
+            registry = ToolRegistry(),
+            store = store,
+            permissions = AllowAllPermissionService(),
+            bus = bus,
+        )
+        agent.run(RunInput(sessionId, "hi", ModelRef("fake", "test")))
+        yield()
+        collectorJob.cancel()
+        collectorScope.cancel()
+
+        assertTrue(
+            stateEvents.all { it.retryAttempt == null },
+            "clean run must never stamp retryAttempt; got ${stateEvents.map { it.state to it.retryAttempt }}",
+        )
+    }
+
+    @Test
+    fun retryAttemptBumpsMonotonicallyAcrossMultipleRetries() = runTest {
+        // Two consecutive retries must bump the counter to 2 on subsequent
+        // transitions. If the terminal Idle said retryAttempt=1 we'd have
+        // lost the "2nd retry succeeded" distinction.
+        val (store, bus) = newStore()
+        val sessionId = primeSession(store)
+        val failing = listOf(
+            LlmEvent.Error(message = "HTTP 503 overloaded", retriable = true),
+            LlmEvent.StepFinish(FinishReason.ERROR, TokenUsage.ZERO),
+        )
+        val partId = PartId("ok-1")
+        val success = listOf(
+            LlmEvent.TextStart(partId),
+            LlmEvent.TextEnd(partId, "finally"),
+            LlmEvent.StepFinish(FinishReason.END_TURN, TokenUsage(input = 1, output = 1)),
+        )
+
+        val stateEvents = mutableListOf<BusEvent.AgentRunStateChanged>()
+        val collectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val collectorJob = collectorScope.launch {
+            bus.events.filterIsInstance<BusEvent.AgentRunStateChanged>().collect { stateEvents += it }
+        }
+        yield()
+
+        val provider = FakeProvider(listOf(failing, failing, success))
+        val agent = Agent(
+            provider = provider,
+            registry = ToolRegistry(),
+            store = store,
+            permissions = AllowAllPermissionService(),
+            bus = bus,
+            retryPolicy = RetryPolicy(maxAttempts = 4, initialDelayMs = 0, maxDelayNoHeadersMs = 0),
+        )
+        agent.run(RunInput(sessionId, "hi", ModelRef("fake", "test")))
+        yield()
+        collectorJob.cancel()
+        collectorScope.cancel()
+
+        val terminal = stateEvents.last()
+        assertTrue(terminal.state is AgentRunState.Idle)
+        assertEquals(2, terminal.retryAttempt, "third attempt succeeded → retry counter at 2")
+    }
+
+    @Test
     fun noneDisablesRetry() = runTest {
         val (store, bus) = newStore()
         val sessionId = primeSession(store)

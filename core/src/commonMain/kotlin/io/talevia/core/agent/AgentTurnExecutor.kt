@@ -147,6 +147,15 @@ internal class AgentTurnExecutor(
         providerIndex: Int = 0,
         spendCapCents: Long? = null,
         disabledToolIds: Set<String> = emptySet(),
+        /**
+         * Most-recent retry attempt number that fired during the enclosing
+         * `Agent.run` (see `RunHandle.lastRetryAttempt`), or null if no retry
+         * has fired yet. Threaded onto every [BusEvent.AgentRunStateChanged]
+         * this turn emits so SSE / CLI subscribers can pair the coarse
+         * `Generating → AwaitingTool → Generating` sequence with the retry
+         * that preceded it.
+         */
+        retryAttempt: Int? = null,
     ): TurnResult {
         val projectHasAssets = currentProjectId != null &&
             projects?.get(currentProjectId)?.assets?.isNotEmpty() == true
@@ -251,6 +260,7 @@ internal class AgentTurnExecutor(
                                 currentProjectId = currentProjectId,
                                 spendCapCents = spendCapCents,
                                 permissionMutex = permissionMutex,
+                                retryAttempt = retryAttempt,
                             )
                         }
                     }
@@ -325,6 +335,7 @@ internal class AgentTurnExecutor(
         currentProjectId: ProjectId?,
         spendCapCents: Long?,
         permissionMutex: Mutex,
+        retryAttempt: Int? = null,
     ) {
         val tool: RegisteredTool? = registry[event.toolId]
         val baseTime: Instant = clock.now()
@@ -340,11 +351,19 @@ internal class AgentTurnExecutor(
         store.upsertPart(basePart)
         // Coarse run-state: the Agent is suspended on a tool call. Fine-grained
         // per-call progress still flows through PartUpdated on the tool part.
-        bus.publish(BusEvent.AgentRunStateChanged(asstMsg.sessionId, AgentRunState.AwaitingTool))
+        bus.publish(
+            BusEvent.AgentRunStateChanged(asstMsg.sessionId, AgentRunState.AwaitingTool, retryAttempt = retryAttempt),
+        )
 
         if (tool == null) {
             store.upsertPart(basePart.copy(state = ToolState.Failed(event.input, "Unknown tool: ${event.toolId}")))
-            bus.publish(BusEvent.AgentRunStateChanged(asstMsg.sessionId, AgentRunState.Generating))
+            bus.publish(
+                BusEvent.AgentRunStateChanged(
+                    asstMsg.sessionId,
+                    AgentRunState.Generating,
+                    retryAttempt = retryAttempt,
+                ),
+            )
             return
         }
 
@@ -429,6 +448,8 @@ internal class AgentTurnExecutor(
         // Tool dispatch (success or failure) hands control back to the LLM —
         // next turn re-enters Generating. The terminal run-state is published
         // in run()'s outer try/finally.
-        bus.publish(BusEvent.AgentRunStateChanged(asstMsg.sessionId, AgentRunState.Generating))
+        bus.publish(
+            BusEvent.AgentRunStateChanged(asstMsg.sessionId, AgentRunState.Generating, retryAttempt = retryAttempt),
+        )
     }
 }

@@ -141,6 +141,14 @@ data class BusEventDto(
     val runState: String? = null,
     /** Message-ish cause; set when `runState == "failed"`. */
     val runStateCause: String? = null,
+    /**
+     * Set on `agent.run.state.changed` once the Agent has scheduled at least
+     * one retry during this run; null for runs that never retried. Pairs the
+     * terminal `idle / failed` transition with the most recent retry attempt
+     * number, so subscribers can answer "did retry #N succeed?" by reading
+     * this field on the terminal DTO. Monotonic within one run.
+     */
+    val runStateRetryAttempt: Int? = null,
     /** Human-readable DAG issues. Set for `project.validation.warning`. */
     val validationIssues: List<String>? = null,
     /** Set for `agent.provider.fallback` — provider the chain is leaving. */
@@ -220,6 +228,7 @@ data class BusEventDto(
                 BusEventDto(
                     "agent.run.state.changed", e.sessionId.value,
                     runState = tag.first, runStateCause = tag.second,
+                    runStateRetryAttempt = e.retryAttempt,
                 )
             }
             is BusEvent.SessionProjectBindingChanged -> BusEventDto(

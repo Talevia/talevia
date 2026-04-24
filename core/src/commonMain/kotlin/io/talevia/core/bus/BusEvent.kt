@@ -217,10 +217,22 @@ sealed interface BusEvent {
      * `Generating → Compacting` edge, `AgentRetryScheduled` for transient-
      * error retries — still fire independently. This event is the
      * "what high-level phase is the agent in?" coarse signal.
+     *
+     * @property retryAttempt Null until the Agent has scheduled at least one
+     *   retry during this run; thereafter echoes the most recent
+     *   [AgentRetryScheduled.attempt] and persists through every subsequent
+     *   state transition for the rest of the run. Pairs each follow-up
+     *   `Generating / AwaitingTool / Idle / Failed` transition with the retry
+     *   that preceded it, so subscribers can answer "did retry #N succeed?"
+     *   by watching the terminal transition's `retryAttempt` — no wall-clock
+     *   log-joining required. The counter monotonically increases; provider
+     *   fallbacks do NOT reset it (the companion [AgentProviderFallback] event
+     *   carries per-provider boundary info for subscribers that care).
      */
     data class AgentRunStateChanged(
         override val sessionId: SessionId,
         val state: AgentRunState,
+        val retryAttempt: Int? = null,
     ) : SessionEvent
 
     /**
