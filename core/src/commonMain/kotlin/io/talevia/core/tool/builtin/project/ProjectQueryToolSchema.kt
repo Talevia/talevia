@@ -50,6 +50,10 @@ internal val PROJECT_QUERY_HELP_TEXT: String =
         "memoized whole-timeline export count; hits/misses = current-timeline clips whose " +
         "assetId does/doesn't match a lockfile entry; perModelBreakdown groups hits by " +
         "(providerId, modelId). No filters.\n" +
+        "  • lockfile_orphans — lockfile entries whose assetId is no longer referenced by any " +
+        "clip on the timeline (gc candidates). Rows: {assetId, inputHash, toolId, providerId, " +
+        "modelId, costCents, createdAtEpochMs, pinned}. Sorted unpinned-first, newest-first; " +
+        "pinned entries still appear for audit but at the tail. No filters beyond limit/offset.\n" +
         "  • timeline_diff — filter: fromSnapshotId, toSnapshotId (≥1 required). Tracks/clips " +
         "added/removed/changed + totalChanges. Same-project only.\n" +
         "Common: limit (default 100, clamped 1..500), offset (default 0). Filter-on-wrong-select " +
@@ -72,7 +76,7 @@ internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
                 "What to query: tracks | timeline_clips | assets | transitions | " +
                     "lockfile_entries | clips_for_asset | clips_for_source | " +
                     "clip | lockfile_entry | project_metadata | consistency_propagation | " +
-                    "spend | lockfile_cache_stats | snapshots | timeline_diff " +
+                    "spend | lockfile_cache_stats | lockfile_orphans | snapshots | timeline_diff " +
                     "(case-insensitive).",
             )
         }
