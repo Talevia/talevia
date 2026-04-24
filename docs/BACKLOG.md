@@ -13,8 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **m2-seed-reproducibility-test** — M2 criterion 6："seed 复现证明"。缺 e2e test 证明 seed + inputs 相同 → 产 bit-identical assetId 或 lockfile cache-hit。**方向：** jvmTest 加 e2e："generate_image with seed=42 twice, assert same assetId or cache-hit"；复用 `RefactorLoopE2ETest` 的 `CountingImageEngine` 引入 "deterministic-stub" mode（相同 seed → 相同 bytes）。Rubric §5.7。Milestone §M2.
-
 ## P1 — 中优，做完 P0 再排
 
 - **m2-fallback-regression-test** — M2 criterion 5："fallback 生产回归测试"。`AgentProviderFallbackTrackerTest` + `AgentProviderFallbackTest` 存在但覆盖 tracker 状态管理，不是 "provider A fail → provider B 产物落地" 的完整 e2e。**方向：** jvmTest 加 e2e：2 个 stub providers，A 抛 `ProviderError`，B 正常返回；assert `assetId / provenance.providerId == B`；assert tracker 记录 A→B chain。§M 无法 auto-tick，需 manual 决议。Rubric §5.7 / §5.2。Milestone §M2.

@@ -58,11 +58,11 @@ bullet 打 tag；现有 bullet 不手动 backfill。
   `AgentProviderFallbackTracker` 切 provider B → 产物仍正确落地"
   （grep: jvmTest 里有 `ProviderFallback` / `FallbackChain` 相关测试 +
   `assertEquals` 断言最终 assetId / provenance.providerId 是 B）
-- [ ] Seed 复现证明：seed + inputs 相同时重跑 `generate_image` 得到 bit-identical
+- [x] Seed 复现证明：seed + inputs 相同时重跑 `generate_image` 得到 bit-identical
   `GenerationProvenance` + 同 assetId（或 lockfile cache-hit）——验证 Talevia
   的随机边界契约真的锁住了
   （grep: e2e test 运行 generate_image 两次 → assertEquals assetIds；
-  `ReplayLockfileTool` 参与验证）
+  `ReplayLockfileTool` 参与验证） — cycle 2026-04-24 e1adea8f
 - [ ] Milestone 退出总结：在本文件 M2 block 末尾 append `### M2 exit summary`
   小段，列剩余的 §3.1 gap（如 GPU-inference 本地跑 / 预算硬 cap 触发 /
   多 provider cost arbitrage / cold-start 优化 / cache invalidation
