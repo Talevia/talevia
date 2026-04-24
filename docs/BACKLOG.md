@@ -16,8 +16,6 @@
 ## P1 — 中优，做完 P0 再排
 
 - **m2-provider-second-impl** — M2 criterion 2："provider 多元"。`ImageGenEngine` / `VideoGenEngine` / `MusicGenEngine` / `TtsEngine` 4 个接口每个都只有 1 个 prod impl（grep 印证：OpenAI 图/视/语音 + Replicate 音乐/放大，各 1 家）。**方向：** 任一 engine 长出第二个非 stub 生产 impl（如 `AnthropicImageGenEngine` 若 Claude 上线图像、`ElevenLabsTtsEngine`、`StabilityImageGenEngine`、`LocalMLXTtsEngine`）。需要专有 API key + 产品抉择，待用户决定。Rubric §5.7 / §5.2。Milestone §M2. · skipped 2026-04-24: 需专有 API key + vendor 决策 (跨 3 个 repopulate 周期的老约束).
-- **agent-mid-turn-cancel** — `agent.run()` 一旦启动要等 turn 结束才能响应用户二次输入。OpenCode `session/prompt.ts` 有 `cancel(sessionId)` 中断正在运行的 turn，同时 mark 输出为 canceled。当前用户 Ctrl-C 只能杀整进程。**方向：** `agent.cancel(runId)` 取消 inflight provider SSE + 跳出 retry loop + upsert `Part.Cancellation` + emit `BusEvent.AgentRunStateChanged(Cancelled)`；CLI REPL 的 Ctrl-C 挂这条。Rubric §5.4。Milestone §later.
-
 ## P2 — 记债 / 观望
 
 - **debt-consolidate-pin-tools** — `SetClipAssetPinnedTool` + `SetLockfileEntryPinnedTool` + `SetOutputProfileTool` 三个工具同一 shape："set single field on project sub-entity"；tool 数 85 的主要膨胀源之一，且后续 pin / unpin / toggle 语义会叠加更多。**方向：** `project_set_action(field=clip_pinned|lockfile_pinned|output_profile, target, value)` 套 `ClipSetActionTool(field=...)` 模板，一次 -200 LOC。**触发条件：** 第 4 个 set-field 工具出现。Rubric §5.6。Milestone §later.

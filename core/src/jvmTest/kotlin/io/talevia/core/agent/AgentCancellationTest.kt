@@ -1,6 +1,8 @@
 package io.talevia.core.agent
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
+import io.talevia.core.CallId
+import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.EventBus
@@ -13,8 +15,10 @@ import io.talevia.core.provider.ModelInfo
 import io.talevia.core.session.FinishReason
 import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
+import io.talevia.core.session.Part
 import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
+import io.talevia.core.session.ToolState
 import io.talevia.core.tool.ToolRegistry
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -99,6 +103,61 @@ class AgentCancellationTest {
         driver.close()
     }
 
+    @Test
+    fun cancelStampsInFlightToolPartsAsFailedWithCancelledMessage() = runTest {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY).also { TaleviaDb.Schema.create(it) }
+        val db = TaleviaDb(driver)
+        val bus = EventBus()
+        val store = SqlDelightSessionStore(db, bus)
+
+        val sid = SessionId("cancel-mid-tool")
+        val now = Clock.System.now()
+        store.createSession(
+            Session(
+                id = sid,
+                projectId = ProjectId("p"),
+                title = "t",
+                createdAt = now,
+                updatedAt = now,
+            ),
+        )
+
+        val started = CompletableDeferred<Unit>()
+        val provider = HangingToolProvider(started)
+
+        val agent = Agent(
+            provider = provider,
+            registry = ToolRegistry(),
+            store = store,
+            permissions = AllowAllPermissionService(),
+            bus = bus,
+        )
+
+        val runJob = async { agent.run(RunInput(sid, "hi", ModelRef("fake", "x"))) }
+        started.await()
+        assertTrue(agent.isRunning(sid))
+
+        assertTrue(agent.cancel(sid))
+        assertFailsWith<CancellationException> { runJob.await() }
+
+        // The provider emitted ToolCallStart (Pending) + ToolCallInputDelta
+        // + ToolCallReady (Running via dispatch launch) before hanging.
+        // The dispatch launched inside supervisorScope is also cancelled by
+        // the parent, so the Tool part may remain Pending or Running — either
+        // way finalizeCancelled must stamp it Failed with "cancelled".
+        val toolParts = store.listSessionParts(sid).filterIsInstance<Part.Tool>()
+        assertTrue(toolParts.isNotEmpty(), "provider should have emitted a tool part before cancel")
+        toolParts.forEach { part ->
+            val state = part.state
+            assertTrue(
+                state is ToolState.Failed && state.message.startsWith("cancelled"),
+                "every in-flight tool part must be stamped Failed/cancelled after cancel; got $state",
+            )
+        }
+
+        driver.close()
+    }
+
     /** Provider whose stream signals when it starts and then suspends forever. */
     private class HangingProvider(private val started: CompletableDeferred<Unit>) : LlmProvider {
         override val id = "hanging"
@@ -107,6 +166,30 @@ class AgentCancellationTest {
             started.complete(Unit)
             // Yield once so the caller observes `isRunning = true` before we suspend forever.
             yield()
+            awaitCancellation()
+        }
+    }
+
+    /**
+     * Provider that emits a Tool call start + ready (leaving the part in
+     * Running state from dispatchToolCall) and then suspends forever inside
+     * the tool dispatch itself. Unknown toolId makes the dispatcher mark it
+     * Failed("Unknown tool") immediately — instead we emit a `ToolCallReady`
+     * for a tool that isn't in the registry, which lands it as
+     * `ToolState.Failed`... Still distinct from the "stays Pending forever"
+     * case. For the "stays Pending" case we only emit `ToolCallStart` then
+     * hang, so no `ToolCallReady` arrives and the dispatch for that call
+     * never launches — the part stays Pending.
+     */
+    private class HangingToolProvider(private val started: CompletableDeferred<Unit>) : LlmProvider {
+        override val id = "hanging-tool"
+        override suspend fun listModels(): List<ModelInfo> = emptyList()
+        override fun stream(request: LlmRequest): Flow<LlmEvent> = flow {
+            emit(LlmEvent.ToolCallStart(PartId("tool-mid"), CallId("call-mid"), "dummy_tool"))
+            emit(LlmEvent.ToolCallInputDelta(PartId("tool-mid"), CallId("call-mid"), "{\"x\":"))
+            started.complete(Unit)
+            yield()
+            // Never emit ToolCallReady — the part stays Pending.
             awaitCancellation()
         }
     }
