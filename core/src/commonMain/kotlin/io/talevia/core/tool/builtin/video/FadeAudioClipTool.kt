@@ -21,8 +21,8 @@ import kotlin.time.DurationUnit
 
 /**
  * Set fade-in / fade-out ramps on one or many audio clips atomically. The sibling
- * of [SetClipVolumeTool]: `set_clip_volumes` controls steady-state level; this
- * controls the attack/release envelope.
+ * of [ClipSetActionTool] with `field="volume"`: that controls steady-state level;
+ * this controls the attack/release envelope.
  *
  * Per-item shape — each entry carries its own clipId + fadeIn/fadeOut so one
  * call can "2s fade-in on the music, 1s fade-out on the ambience" in a single

@@ -83,6 +83,7 @@ import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
 import io.talevia.core.tool.builtin.video.ClearTimelineTool
 import io.talevia.core.tool.builtin.video.ClipActionTool
+import io.talevia.core.tool.builtin.video.ClipSetActionTool
 import io.talevia.core.tool.builtin.video.ConsolidateMediaIntoBundleTool
 import io.talevia.core.tool.builtin.video.DuplicateTrackTool
 import io.talevia.core.tool.builtin.video.EditTextClipTool
@@ -96,9 +97,6 @@ import io.talevia.core.tool.builtin.video.RelinkAssetTool
 import io.talevia.core.tool.builtin.video.ReorderTracksTool
 import io.talevia.core.tool.builtin.video.ReplaceClipTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
-import io.talevia.core.tool.builtin.video.SetClipSourceBindingTool
-import io.talevia.core.tool.builtin.video.SetClipTransformTool
-import io.talevia.core.tool.builtin.video.SetClipVolumeTool
 import io.talevia.core.tool.builtin.video.TrackActionTool
 import io.talevia.core.tool.builtin.video.TransitionActionTool
 import io.talevia.core.tool.builtin.web.WebFetchTool
@@ -202,10 +200,8 @@ fun ToolRegistry.registerClipAndTrackTools(
 ) {
     register(ClipActionTool(projects))
     register(ReplaceClipTool(projects))
-    register(SetClipSourceBindingTool(projects))
-    register(SetClipVolumeTool(projects))
+    register(ClipSetActionTool(projects))
     register(FadeAudioClipTool(projects))
-    register(SetClipTransformTool(projects))
     register(FilterActionTool(projects))
     register(ApplyLutTool(projects))
     register(AddSubtitlesTool(projects))

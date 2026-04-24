@@ -165,7 +165,7 @@ private fun isNonDefaultTransform(t: Transform): Boolean =
 /**
  * Inline quick-action row shown on expanded clip inspector:
  *  - Video clips: filter preset buttons (apply_filter with pre-set params).
- *  - Audio clips: a volume slider (set_clip_volume on release).
+ *  - Audio clips: a volume slider (clip_set_action(field="volume") on release).
  *
  * Intentionally minimal — the full `apply_filter` parameter space is
  * better authored via chat when the user wants to tweak knobs. These

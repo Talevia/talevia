@@ -283,11 +283,18 @@ fun TimelinePanel(
                         },
                         onSetVolume = { v ->
                             dispatch(
-                                "set_clip_volume",
+                                "clip_set_action",
                                 buildJsonObject {
                                     put("projectId", projectId.value)
-                                    put("clipId", clip.id.value)
-                                    put("volume", v)
+                                    put("field", "volume")
+                                    putJsonArray("volumeItems") {
+                                        add(
+                                            buildJsonObject {
+                                                put("clipId", clip.id.value)
+                                                put("volume", v)
+                                            },
+                                        )
+                                    }
                                 },
                                 "volume ${"%.2f".format(v)} on ${clip.id.value.take(6)}",
                             )

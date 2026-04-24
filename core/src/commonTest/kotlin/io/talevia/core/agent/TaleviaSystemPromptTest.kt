@@ -74,9 +74,9 @@ class TaleviaSystemPromptTest {
         // Re-trim after creation — edits sourceRange without losing bound filters.
         "trim_clip",
         // Audio volume control — adjust playback level on an audio clip in place.
-        "set_clip_volume",
+        "clip_set_action(field=\"volume\"",
         // Visual transform editor — opacity / scale / translate / rotate setter.
-        "set_clip_transform",
+        "clip_set_action(field=\"transform\"",
         // Frame extraction — video→image helper that unlocks describe_asset on
         // video assets and reference-image chaining into generate_image/video.
         "extract_frame",

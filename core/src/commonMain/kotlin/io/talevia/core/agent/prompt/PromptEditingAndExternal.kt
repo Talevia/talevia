@@ -128,8 +128,8 @@ a timeline snapshot so `revert_timeline` can undo.
 
 # Clip transforms (opacity / scale / translate / rotate)
 
-`set_clip_transform` edits a clip's visual transform in place — the
-setter that previously had no tool even though `Clip.transforms` has
+`clip_set_action(field="transform")` edits clips' visual transforms in place
+— the setter that previously had no tool even though `Clip.transforms` has
 always been part of the data model. Reach for it on requests like
 "fade the watermark" (`opacity`), "make the title smaller"
 (`scaleX` / `scaleY`), "move the logo to the top-right corner for
@@ -142,7 +142,9 @@ alone. Clamps: `opacity ∈ [0, 1]`, `scaleX` / `scaleY > 0`. The tool
 normalizes `transforms` to a single-element list — v1 models "the
 clip's transform" as one record, not a stack. Works on video and text
 clips (visible layers); calling it on an audio clip writes the
-transform field but has no effect at render time. Emits a timeline
+transform field but has no effect at render time. Pass `transformItems`
+as a list of `{clipId, any subset of translate/scale/rotation/opacity}`
+so a single call edits several clips atomically. Emits a timeline
 snapshot so `revert_timeline` can undo.
 
 # Frame extraction
@@ -161,28 +163,30 @@ duration=0 so it's distinguishable from a video asset downstream.
 
 # Audio volume
 
-`set_clip_volume` adjusts the playback volume of an audio clip already on
-the timeline (the missing knob behind requests like "lower the music to
-30%" or "mute the second vocal take"). Volume is an absolute multiplier
-in [0, 4]: `0.0` mutes the clip without removing it (so a future fade
-tool can bring it back), `1.0` is unchanged, values up to `4.0` amplify.
-Audio clips only — applying it to a video or text clip fails loud
-because those have no `volume` field today. Preserves clip id and every
-other attached field (sourceRange, sourceBinding, transforms). Emits a
-timeline snapshot so `revert_timeline` can undo.
+`clip_set_action(field="volume")` adjusts the playback volume of audio clips
+already on the timeline (the missing knob behind requests like "lower the
+music to 30%" or "mute the second vocal take"). Volume is an absolute
+multiplier in [0, 4]: `0.0` mutes the clip without removing it (so a
+future fade tool can bring it back), `1.0` is unchanged, values up to
+`4.0` amplify. Audio clips only — applying it to a video or text clip
+fails loud because those have no `volume` field today. Preserves clip id
+and every other attached field (sourceRange, sourceBinding, transforms).
+Pass `volumeItems` as a list of `{clipId, volume}` so one call can dim
+some clips and boost others atomically. Emits a timeline snapshot so
+`revert_timeline` can undo.
 
 `fade_audio_clip` sets the fade-in / fade-out envelope on an audio clip
-— the attack/release sibling of `set_clip_volume`'s steady-state level.
-Use it for "fade the music in over 2s", "2s fade-out at the end", or the
-combined "swell in, dip for dialogue, fade out" pattern. Each field is
-optional; at least one must be set. `0.0` disables that side; unspecified
-fields keep the clip's current value so a new fade-in doesn't clobber an
-existing fade-out. `fadeInSeconds + fadeOutSeconds` must not exceed the
-clip's timeline duration. Audio clips only. Note: the rendered envelope
-is not yet in the FFmpeg / AVFoundation / Media3 engines today — the
-field captures intent in Project state, engines will honour it in a
-follow-up pass (same "compiler captures, renderer catches up" shape as
-`set_clip_volume` and `set_clip_transform`).
+— the attack/release sibling of `clip_set_action(field="volume")`'s
+steady-state level. Use it for "fade the music in over 2s", "2s fade-out
+at the end", or the combined "swell in, dip for dialogue, fade out"
+pattern. Each field is optional; at least one must be set. `0.0` disables
+that side; unspecified fields keep the clip's current value so a new
+fade-in doesn't clobber an existing fade-out. `fadeInSeconds + fadeOutSeconds`
+must not exceed the clip's timeline duration. Audio clips only. Note: the
+rendered envelope is not yet in the FFmpeg / AVFoundation / Media3 engines
+today — the field captures intent in Project state, engines will honour
+it in a follow-up pass (same "compiler captures, renderer catches up"
+shape as `clip_set_action(field="volume"|"transform")`).
 
 # External files (fs tools)
 

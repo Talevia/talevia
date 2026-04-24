@@ -27,11 +27,11 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-class SetClipTransformToolTest {
+class ClipSetActionTransformTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: SetClipTransformTool,
+        val tool: ClipSetActionTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
         val emittedParts: MutableList<Part>,
@@ -39,7 +39,7 @@ class SetClipTransformToolTest {
 
     private suspend fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val tool = SetClipTransformTool(store)
+        val tool = ClipSetActionTool(store)
         val parts = mutableListOf<Part>()
         val ctx = ToolContext(
             sessionId = SessionId("s"),
@@ -81,10 +81,11 @@ class SetClipTransformToolTest {
         scaleY: Float? = null,
         rotationDeg: Float? = null,
         opacity: Float? = null,
-    ) = SetClipTransformTool.Input(
+    ) = ClipSetActionTool.Input(
         projectId = "p",
-        items = listOf(
-            SetClipTransformTool.Item(clipId, translateX, translateY, scaleX, scaleY, rotationDeg, opacity),
+        field = "transform",
+        transformItems = listOf(
+            ClipSetActionTool.TransformItem(clipId, translateX, translateY, scaleX, scaleY, rotationDeg, opacity),
         ),
     )
 
@@ -98,11 +99,12 @@ class SetClipTransformToolTest {
             ),
         )
         val out = rig.tool.execute(single("c1", opacity = 0.5f), rig.ctx).data
-        val only = out.results.single()
+        val only = out.transformResults.single()
         assertEquals(Transform(), only.oldTransform)
         assertEquals(0.5f, only.newTransform.opacity)
         assertEquals(1f, only.newTransform.scaleX)
         assertEquals(0f, only.newTransform.translateX)
+        assertEquals("transform", out.field)
 
         val refreshed = rig.store.get(rig.projectId)!!
         val updated = refreshed.timeline.tracks.single().clips.single() as Clip.Video
@@ -196,11 +198,12 @@ class SetClipTransformToolTest {
             ),
         )
         rig.tool.execute(
-            SetClipTransformTool.Input(
+            ClipSetActionTool.Input(
                 projectId = "p",
-                items = listOf(
-                    SetClipTransformTool.Item("c1", opacity = 0.3f),
-                    SetClipTransformTool.Item("c2", scaleX = 2f, scaleY = 2f),
+                field = "transform",
+                transformItems = listOf(
+                    ClipSetActionTool.TransformItem("c1", opacity = 0.3f),
+                    ClipSetActionTool.TransformItem("c2", scaleX = 2f, scaleY = 2f),
                 ),
             ),
             rig.ctx,
@@ -226,11 +229,12 @@ class SetClipTransformToolTest {
             ),
         )
         rig.tool.execute(
-            SetClipTransformTool.Input(
+            ClipSetActionTool.Input(
                 projectId = "p",
-                items = listOf(
-                    SetClipTransformTool.Item("c1", opacity = 0.3f),
-                    SetClipTransformTool.Item("c2", scaleX = 2f),
+                field = "transform",
+                transformItems = listOf(
+                    ClipSetActionTool.TransformItem("c1", opacity = 0.3f),
+                    ClipSetActionTool.TransformItem("c2", scaleX = 2f),
                 ),
             ),
             rig.ctx,
@@ -256,11 +260,12 @@ class SetClipTransformToolTest {
         val before = rig.store.get(rig.projectId)!!
         assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                SetClipTransformTool.Input(
+                ClipSetActionTool.Input(
                     projectId = "p",
-                    items = listOf(
-                        SetClipTransformTool.Item("c1", opacity = 0.3f),
-                        SetClipTransformTool.Item("ghost", opacity = 0.3f),
+                    field = "transform",
+                    transformItems = listOf(
+                        ClipSetActionTool.TransformItem("c1", opacity = 0.3f),
+                        ClipSetActionTool.TransformItem("ghost", opacity = 0.3f),
                     ),
                 ),
                 rig.ctx,
@@ -358,5 +363,28 @@ class SetClipTransformToolTest {
             rig.tool.execute(single("ghost", opacity = 0.5f), rig.ctx)
         }
         assertTrue("ghost" in ex.message!!, ex.message)
+    }
+
+    @Test fun rejectsForeignPayload() = runTest {
+        val rig = newRig(
+            Project(
+                id = ProjectId("p"),
+                timeline = Timeline(
+                    tracks = listOf(Track.Video(TrackId("v1"), listOf(videoClip("c1")))),
+                ),
+            ),
+        )
+        val ex = assertFailsWith<IllegalArgumentException> {
+            rig.tool.execute(
+                ClipSetActionTool.Input(
+                    projectId = "p",
+                    field = "transform",
+                    transformItems = listOf(ClipSetActionTool.TransformItem("c1", opacity = 0.3f)),
+                    volumeItems = listOf(ClipSetActionTool.VolumeItem("c1", 0.5f)),
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue("volumeItems" in ex.message!!, ex.message)
     }
 }

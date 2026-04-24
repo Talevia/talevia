@@ -29,7 +29,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-class SetClipSourceBindingToolTest {
+class ClipSetActionSourceBindingTest {
 
     private fun ctx(parts: MutableList<Part>): ToolContext = ToolContext(
         sessionId = SessionId("s"),
@@ -99,20 +99,22 @@ class SetClipSourceBindingToolTest {
     }
 
     private fun single(clipId: String, sourceBinding: List<String>) =
-        SetClipSourceBindingTool.Input(
+        ClipSetActionTool.Input(
             projectId = "p",
-            items = listOf(SetClipSourceBindingTool.Item(clipId, sourceBinding)),
+            field = "sourceBinding",
+            sourceBindingItems = listOf(ClipSetActionTool.SourceBindingItem(clipId, sourceBinding)),
         )
 
     @Test fun replacesBindingOnVideoClip() = runTest {
         val (store, pid) = fixture()
-        val out = SetClipSourceBindingTool(store).execute(
+        val out = ClipSetActionTool(store).execute(
             single("c-video", listOf("node-b", "node-c")),
             ctx(mutableListOf()),
         ).data
-        val only = out.results.single()
+        val only = out.sourceBindingResults.single()
         assertEquals(listOf("node-a"), only.previousBinding)
         assertEquals(listOf("node-b", "node-c"), only.newBinding)
+        assertEquals("sourceBinding", out.field)
         val clip = store.get(pid)!!.timeline.tracks
             .filterIsInstance<Track.Video>().single()
             .clips.filterIsInstance<Clip.Video>().single()
@@ -123,11 +125,11 @@ class SetClipSourceBindingToolTest {
 
     @Test fun replacesBindingOnAudioClip() = runTest {
         val (store, pid) = fixture()
-        val out = SetClipSourceBindingTool(store).execute(
+        val out = ClipSetActionTool(store).execute(
             single("c-audio", listOf("node-c")),
             ctx(mutableListOf()),
         ).data
-        assertEquals(listOf("node-c"), out.results.single().newBinding)
+        assertEquals(listOf("node-c"), out.sourceBindingResults.single().newBinding)
         val clip = store.get(pid)!!.timeline.tracks
             .filterIsInstance<Track.Audio>().single()
             .clips.filterIsInstance<Clip.Audio>().single()
@@ -137,7 +139,7 @@ class SetClipSourceBindingToolTest {
 
     @Test fun replacesBindingOnTextClip() = runTest {
         val (store, pid) = fixture()
-        SetClipSourceBindingTool(store).execute(
+        ClipSetActionTool(store).execute(
             single("c-text", listOf("node-b")),
             ctx(mutableListOf()),
         )
@@ -150,11 +152,11 @@ class SetClipSourceBindingToolTest {
 
     @Test fun emptyListClearsBinding() = runTest {
         val (store, pid) = fixture()
-        val out = SetClipSourceBindingTool(store).execute(
+        val out = ClipSetActionTool(store).execute(
             single("c-video", emptyList()),
             ctx(mutableListOf()),
         ).data
-        val only = out.results.single()
+        val only = out.sourceBindingResults.single()
         assertEquals(listOf("node-a"), only.previousBinding)
         assertEquals(emptyList<String>(), only.newBinding)
         val clip = store.get(pid)!!.timeline.tracks
@@ -165,13 +167,14 @@ class SetClipSourceBindingToolTest {
 
     @Test fun batchRebindsDifferentClipsAtomically() = runTest {
         val (store, pid) = fixture()
-        SetClipSourceBindingTool(store).execute(
-            SetClipSourceBindingTool.Input(
+        ClipSetActionTool(store).execute(
+            ClipSetActionTool.Input(
                 projectId = pid.value,
-                items = listOf(
-                    SetClipSourceBindingTool.Item("c-video", listOf("node-b")),
-                    SetClipSourceBindingTool.Item("c-audio", listOf("node-c")),
-                    SetClipSourceBindingTool.Item("c-text", emptyList()),
+                field = "sourceBinding",
+                sourceBindingItems = listOf(
+                    ClipSetActionTool.SourceBindingItem("c-video", listOf("node-b")),
+                    ClipSetActionTool.SourceBindingItem("c-audio", listOf("node-c")),
+                    ClipSetActionTool.SourceBindingItem("c-text", emptyList()),
                 ),
             ),
             ctx(mutableListOf()),
@@ -192,12 +195,13 @@ class SetClipSourceBindingToolTest {
         val (store, pid) = fixture()
         val before = store.get(pid)!!
         assertFailsWith<IllegalArgumentException> {
-            SetClipSourceBindingTool(store).execute(
-                SetClipSourceBindingTool.Input(
+            ClipSetActionTool(store).execute(
+                ClipSetActionTool.Input(
                     projectId = pid.value,
-                    items = listOf(
-                        SetClipSourceBindingTool.Item("c-video", listOf("node-b")),
-                        SetClipSourceBindingTool.Item("c-audio", listOf("nope")),
+                    field = "sourceBinding",
+                    sourceBindingItems = listOf(
+                        ClipSetActionTool.SourceBindingItem("c-video", listOf("node-b")),
+                        ClipSetActionTool.SourceBindingItem("c-audio", listOf("nope")),
                     ),
                 ),
                 ctx(mutableListOf()),
@@ -209,7 +213,7 @@ class SetClipSourceBindingToolTest {
     @Test fun rejectsUnknownSourceNodeId() = runTest {
         val (store, pid) = fixture()
         val ex = assertFailsWith<IllegalArgumentException> {
-            SetClipSourceBindingTool(store).execute(
+            ClipSetActionTool(store).execute(
                 single("c-video", listOf("node-b", "nope-1", "nope-2")),
                 ctx(mutableListOf()),
             )
@@ -223,9 +227,9 @@ class SetClipSourceBindingToolTest {
     }
 
     @Test fun rejectsMissingClip() = runTest {
-        val (store, pid) = fixture()
+        val (store, _) = fixture()
         val ex = assertFailsWith<IllegalStateException> {
-            SetClipSourceBindingTool(store).execute(
+            ClipSetActionTool(store).execute(
                 single("does-not-exist", listOf("node-b")),
                 ctx(mutableListOf()),
             )
@@ -236,16 +240,35 @@ class SetClipSourceBindingToolTest {
     @Test fun emitsExactlyOneTimelineSnapshot() = runTest {
         val (store, pid) = fixture()
         val parts = mutableListOf<Part>()
-        SetClipSourceBindingTool(store).execute(
-            SetClipSourceBindingTool.Input(
+        ClipSetActionTool(store).execute(
+            ClipSetActionTool.Input(
                 projectId = pid.value,
-                items = listOf(
-                    SetClipSourceBindingTool.Item("c-video", listOf("node-b")),
-                    SetClipSourceBindingTool.Item("c-audio", listOf("node-c")),
+                field = "sourceBinding",
+                sourceBindingItems = listOf(
+                    ClipSetActionTool.SourceBindingItem("c-video", listOf("node-b")),
+                    ClipSetActionTool.SourceBindingItem("c-audio", listOf("node-c")),
                 ),
             ),
             ctx(parts),
         )
         assertEquals(1, parts.count { it is Part.TimelineSnapshot })
+    }
+
+    @Test fun rejectsForeignPayload() = runTest {
+        val (store, _) = fixture()
+        val ex = assertFailsWith<IllegalArgumentException> {
+            ClipSetActionTool(store).execute(
+                ClipSetActionTool.Input(
+                    projectId = "p",
+                    field = "sourceBinding",
+                    sourceBindingItems = listOf(
+                        ClipSetActionTool.SourceBindingItem("c-video", listOf("node-b")),
+                    ),
+                    volumeItems = listOf(ClipSetActionTool.VolumeItem("c-video", 0.5f)),
+                ),
+                ctx(mutableListOf()),
+            )
+        }
+        assertTrue("volumeItems" in ex.message!!, ex.message)
     }
 }
