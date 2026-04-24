@@ -65,6 +65,30 @@ class ConsistencyNodeTest {
         assertTrue(nodes.any { it.kind == ConsistencyKinds.STYLE_BIBLE })
     }
 
+    @Test fun locationRefRoundTrip() {
+        val body = LocationRefBody(
+            name = "rainy Parisian café",
+            description = "zinc counter, pressed-tin ceiling, overcast afternoon light through tall windows",
+            referenceAssetIds = listOf(AssetId("asset-cafe-1"), AssetId("asset-cafe-2")),
+        )
+        val src = Source.EMPTY.addLocationRef(SourceNodeId("cafe"), body)
+        val decoded = json.decodeFromString(Source.serializer(), json.encodeToString(Source.serializer(), src))
+        val node = assertNotNull(decoded.byId[SourceNodeId("cafe")])
+        assertEquals(ConsistencyKinds.LOCATION_REF, node.kind)
+        assertEquals(body, node.asLocationRef())
+        assertNull(node.asCharacterRef())
+        assertNull(node.asStyleBible())
+        assertNull(node.asBrandPalette())
+    }
+
+    @Test fun allConsistencyKindsIsFourMembers() {
+        // M1 criterion 4: mechanism proven extensible — ALL.size ≥ 4, with every member
+        // actually dispatched by PromptFolding. Keeping this test pinned so a future
+        // accidental removal of a kind gets caught.
+        assertEquals(4, ConsistencyKinds.ALL.size)
+        assertTrue(ConsistencyKinds.LOCATION_REF in ConsistencyKinds.ALL)
+    }
+
     @Test fun resolveBindingsSilentlyDropsNonConsistencyIds() {
         val src = Source.EMPTY
             .addCharacterRef(SourceNodeId("mei"), CharacterRefBody("Mei", "desc"))

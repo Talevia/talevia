@@ -16,7 +16,8 @@ object ConsistencyKinds {
     const val CHARACTER_REF = "core.consistency.character_ref"
     const val STYLE_BIBLE = "core.consistency.style_bible"
     const val BRAND_PALETTE = "core.consistency.brand_palette"
+    const val LOCATION_REF = "core.consistency.location_ref"
 
     /** All consistency kinds — useful for filtering in folds/resolvers. */
-    val ALL: Set<String> = setOf(CHARACTER_REF, STYLE_BIBLE, BRAND_PALETTE)
+    val ALL: Set<String> = setOf(CHARACTER_REF, STYLE_BIBLE, BRAND_PALETTE, LOCATION_REF)
 }

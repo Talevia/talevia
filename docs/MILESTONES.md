@@ -42,9 +42,9 @@ bullet 打 tag；现有 bullet 不手动 backfill。
 - [ ] 绑定反查：`source_query` 或 `project_query` 能回答"哪些 clip 绑定了这个
   consistency node"（grep: 新 select 名如 `consistency_bound_clips` 或
   `binding_reverse` 注册到 dispatcher 的 ALL_SELECTS）
-- [ ] Kind 可扩证明：`ConsistencyKinds.ALL` 至少出现第 4 个成员（如 `lora_binding`
+- [x] Kind 可扩证明：`ConsistencyKinds.ALL` 至少出现第 4 个成员（如 `lora_binding`
   / `color_palette`）+ 在 `PromptFolding` 的 when-branch 里正式处理（grep: `ALL`
-  大小 ≥ 4）
+  大小 ≥ 4） — cycle 2026-04-24 db5f5d2f
 - [ ] 语义回归测试：改 `character_ref` 的可见字段（如 `name` / `appearance`）
   → 下游 clip stale → re-export 后产物 prompt 确实包含新值（grep: e2e test 带
   `character_ref` 字段改 → export → prompt 断言链条）

@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **consistency-kind-extension** — M1 criterion 4："Kind 可扩证明"。`ConsistencyKinds.ALL` 目前恰好 3 个（`CHARACTER_REF` / `STYLE_BIBLE` / `BRAND_PALETTE`），无第 4 个活例证明机制可扩。**方向：** 落第 4 个 kind（如 `lora_binding` 或 `color_palette`）+ 在 `PromptFolding` when-branch 里正式处理 + `ConsistencyBodies` 定义其 body schema。完整闭合一个最小样例。Rubric §5.5。Milestone §M1.
 
 ## P1 — 中优，做完 P0 再排
 

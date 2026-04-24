@@ -60,6 +60,20 @@ fun Source.addBrandPalette(
         ),
     )
 
+fun Source.addLocationRef(
+    id: SourceNodeId,
+    body: LocationRefBody,
+    parents: List<SourceRef> = emptyList(),
+): Source =
+    addNode(
+        SourceNode(
+            id = id,
+            kind = ConsistencyKinds.LOCATION_REF,
+            body = json.encodeToJsonElement(LocationRefBody.serializer(), body),
+            parents = parents,
+        ),
+    )
+
 // endregion
 
 // region — readers
@@ -81,6 +95,13 @@ fun SourceNode.asStyleBible(): StyleBibleBody? =
 fun SourceNode.asBrandPalette(): BrandPaletteBody? =
     if (kind == ConsistencyKinds.BRAND_PALETTE) {
         json.decodeFromJsonElement(BrandPaletteBody.serializer(), body)
+    } else {
+        null
+    }
+
+fun SourceNode.asLocationRef(): LocationRefBody? =
+    if (kind == ConsistencyKinds.LOCATION_REF) {
+        json.decodeFromJsonElement(LocationRefBody.serializer(), body)
     } else {
         null
     }

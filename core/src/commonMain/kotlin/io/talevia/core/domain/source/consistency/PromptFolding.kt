@@ -19,11 +19,12 @@ data class FoldedPrompt(
 /**
  * Fold consistency nodes into an AIGC prompt. Ordering is deliberate:
  *
- *   [style bibles] [brand palette] [characters] + base prompt
+ *   [style bibles] [brand palette] [locations] [characters] + base prompt
  *
  * Style/brand first so the model reads "global look" before "this shot's subject";
- * character second so the identity signal sits close to the shot-specific text; base
- * prompt last because models pay more attention to the tail.
+ * location next so spatial context frames the subject; character last-but-one so the
+ * identity signal sits close to the shot-specific text; base prompt at the tail because
+ * models pay more attention there.
  *
  * Nodes of unknown kinds are ignored — the caller may pass in the full source node
  * list without pre-filtering. Unsupported node kinds never block a generation.
@@ -49,6 +50,7 @@ fun foldConsistencyIntoPrompt(basePrompt: String, nodes: List<SourceNode>): Fold
     val styleFragments = mutableListOf<String>()
     val negatives = mutableListOf<String>()
     val brandFragments = mutableListOf<String>()
+    val locationFragments = mutableListOf<String>()
     val characterFragments = mutableListOf<String>()
     val applied = mutableListOf<String>()
     val loras = mutableListOf<LoraPin>()
@@ -79,6 +81,14 @@ fun foldConsistencyIntoPrompt(basePrompt: String, nodes: List<SourceNode>): Fold
                     }
                 }
             }
+            ConsistencyKinds.LOCATION_REF -> node.asLocationRef()?.let { loc ->
+                applied += node.id.value
+                locationFragments += buildString {
+                    append("Setting \"").append(loc.name).append("\": ")
+                    append(loc.description)
+                }
+                refs.addAll(loc.referenceAssetIds.map { it.value })
+            }
             ConsistencyKinds.CHARACTER_REF -> node.asCharacterRef()?.let { char ->
                 applied += node.id.value
                 characterFragments += buildString {
@@ -95,6 +105,7 @@ fun foldConsistencyIntoPrompt(basePrompt: String, nodes: List<SourceNode>): Fold
     val effective = buildString {
         styleFragments.forEach { appendLine(it) }
         brandFragments.forEach { appendLine(it) }
+        locationFragments.forEach { appendLine(it) }
         characterFragments.forEach { appendLine(it) }
         if (isNotEmpty() && basePrompt.isNotBlank()) appendLine()
         append(basePrompt)

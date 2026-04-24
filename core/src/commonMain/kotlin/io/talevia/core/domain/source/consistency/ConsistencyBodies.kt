@@ -83,3 +83,32 @@ data class BrandPaletteBody(
     val hexColors: List<String>,
     val typographyHints: List<String> = emptyList(),
 )
+
+/**
+ * A recurring location / setting / environment that should look the same across shots —
+ * the café where two characters keep meeting, the warehouse a product demo films in,
+ * the vlogger's kitchen. Distinct from [CharacterRefBody] (subjects / identity) and
+ * [StyleBibleBody] (global look); a location is a *place* the camera keeps returning to.
+ * Cross-genre by construction: narrative settings, vlog home bases, MV backdrops, product
+ * shoot locations all share the same structural need — "this spatial context must read
+ * as the same place every time we cut to it."
+ *
+ * Kept minimal on purpose. Name + description + reference images mirrors [CharacterRefBody]
+ * minus identity-specific fields (no LoRA pin, no voice). If providers grow
+ * location-specific adapters (e.g. per-location style transfer), they can be added
+ * later without schema churn because the fields are already optional.
+ *
+ * @property name Short handle the LLM references ("the café", "the warehouse").
+ * @property description Natural-language description of the location — architecture,
+ *   lighting, era, signage, any signature spatial features. Folded into AIGC prompts
+ *   as a `Setting:` fragment by [foldConsistencyIntoPrompt].
+ * @property referenceAssetIds Project assets (location photos, establishing shots)
+ *   passed through to image-gen models that accept reference images. Ordered; first is
+ *   the canonical reference.
+ */
+@Serializable
+data class LocationRefBody(
+    val name: String,
+    val description: String,
+    val referenceAssetIds: List<AssetId> = emptyList(),
+)

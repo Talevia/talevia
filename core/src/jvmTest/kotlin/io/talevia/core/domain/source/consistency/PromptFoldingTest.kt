@@ -95,6 +95,53 @@ class PromptFoldingTest {
         assertEquals(0.7f, out.loraPins.first().weight)
     }
 
+    @Test fun locationFoldEmitsSettingFragmentAndSurfacesReferenceAssets() {
+        val src = Source.EMPTY.addLocationRef(
+            SourceNodeId("cafe"),
+            LocationRefBody(
+                name = "rainy Parisian café",
+                description = "zinc counter, tall windows, overcast afternoon",
+                referenceAssetIds = listOf(AssetId("loc-ref-1")),
+            ),
+        )
+        val bound = src.resolveConsistencyBindings(listOf(SourceNodeId("cafe")))
+        val out = foldConsistencyIntoPrompt("two people talking", bound)
+
+        val text = out.effectivePrompt
+        val settingIdx = text.indexOf("Setting \"rainy Parisian café\"")
+        val baseIdx = text.indexOf("two people talking")
+        assertTrue(settingIdx >= 0, "setting fragment must be in the folded prompt")
+        assertTrue(settingIdx < baseIdx, "setting must precede base prompt")
+        assertEquals(listOf("loc-ref-1"), out.referenceAssetIds)
+        assertEquals(listOf("cafe"), out.appliedNodeIds)
+    }
+
+    @Test fun locationSitsBetweenBrandAndCharacterInFoldOrder() {
+        // Fold order guarantee: style → brand → location → character → base.
+        val src = Source.EMPTY
+            .addStyleBible(SourceNodeId("style"), StyleBibleBody("cinematic", "warm"))
+            .addBrandPalette(SourceNodeId("brand"), BrandPaletteBody("acme", listOf("#0A84FF")))
+            .addLocationRef(SourceNodeId("cafe"), LocationRefBody("café", "zinc counter"))
+            .addCharacterRef(SourceNodeId("mei"), CharacterRefBody("Mei", "teal hair"))
+        val bound = src.resolveConsistencyBindings(
+            listOf(SourceNodeId("style"), SourceNodeId("brand"), SourceNodeId("cafe"), SourceNodeId("mei")),
+        )
+        val out = foldConsistencyIntoPrompt("base", bound)
+
+        val text = out.effectivePrompt
+        val styleIdx = text.indexOf("Style:")
+        val brandIdx = text.indexOf("Brand:")
+        val settingIdx = text.indexOf("Setting \"café\"")
+        val charIdx = text.indexOf("Character \"Mei\"")
+        val baseIdx = text.indexOf("\nbase")
+        assertTrue(styleIdx < brandIdx, "style before brand")
+        assertTrue(brandIdx < settingIdx, "brand before setting")
+        assertTrue(settingIdx < charIdx, "setting before character")
+        assertTrue(charIdx < baseIdx, "character before base")
+
+        assertEquals(listOf("style", "brand", "cafe", "mei"), out.appliedNodeIds)
+    }
+
     @Test fun unknownKindsInBindingsAreIgnored() {
         // resolveConsistencyBindings already filters to consistency kinds — even if a
         // caller passes in a raw node list that includes e.g. vlog nodes, they're
