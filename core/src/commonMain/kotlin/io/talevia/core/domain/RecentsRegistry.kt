@@ -52,8 +52,21 @@ class RecentsRegistry(
      * If [id] is already registered at a different path, the path is updated
      * to the new location (the project was moved or cloned). The
      * [lastOpenedAtEpochMs] timestamp is replaced unconditionally.
+     *
+     * [createdAtEpochMs] caches the bundle envelope's `createdAtEpochMs`
+     * so `FileProjectStore.listSummaries` / `summary` can skip the per-
+     * project `talevia.json` decode on the hot path. Default `0L`
+     * preserves legacy callers that don't have the field handy — the
+     * reader fallback re-decodes in that case, same as pre-cache
+     * behaviour.
      */
-    suspend fun upsert(id: ProjectId, path: Path, title: String, lastOpenedAtEpochMs: Long): Unit = mutex.withLock {
+    suspend fun upsert(
+        id: ProjectId,
+        path: Path,
+        title: String,
+        lastOpenedAtEpochMs: Long,
+        createdAtEpochMs: Long = 0L,
+    ): Unit = mutex.withLock {
         val current = loadOrEmpty()
         val others = current.entries.filterNot { it.id == id.value }
         val updated = current.copy(
@@ -62,6 +75,7 @@ class RecentsRegistry(
                 path = path.toString(),
                 title = title,
                 lastOpenedAtEpochMs = lastOpenedAtEpochMs,
+                createdAtEpochMs = createdAtEpochMs,
             ),
         )
         persist(updated)
@@ -119,4 +133,17 @@ data class RecentsEntry(
     val path: String,
     val title: String,
     val lastOpenedAtEpochMs: Long,
+    /**
+     * Bundle envelope's `createdAtEpochMs`, cached here so consumers
+     * that already hit `RecentsRegistry.list()` don't also pay the
+     * per-entry `talevia.json` decode just for the create stamp.
+     *
+     * Default `0L` means "unknown — fall back to the bundle decode".
+     * This keeps pre-cache `recents.json` files decoding cleanly: old
+     * entries omit the field, kotlinx.serialization supplies 0L,
+     * `FileProjectStore.listSummaries` notices and falls back. New
+     * `upsert` / `openAt` / `createAt` calls stamp it. After one
+     * open-per-bundle the field populates naturally.
+     */
+    val createdAtEpochMs: Long = 0L,
 )

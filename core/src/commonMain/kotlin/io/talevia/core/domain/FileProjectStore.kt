@@ -87,11 +87,13 @@ class FileProjectStore(
     override suspend fun openAt(path: Path): Project = mutex.withLock {
         val resolved = resolveBundlePath(path)
         val project = readBundle(fs, resolved, json)
+        val stored = runCatching { decodeStored(fs, resolved, json) }.getOrNull()
         registry.upsert(
             id = project.id,
             path = resolved,
-            title = readTitle(fs, resolved, json) ?: project.id.value,
+            title = stored?.title ?: project.id.value,
             lastOpenedAtEpochMs = clock.now().toEpochMilliseconds(),
+            createdAtEpochMs = stored?.createdAtEpochMs?.takeIf { it > 0L } ?: 0L,
         )
         maybeEmitValidationWarning(project)
         maybeEmitMissingAssets(project)
@@ -137,7 +139,7 @@ class FileProjectStore(
             // Recency stamp the brand-new project so per-clip/track/asset stamps land at `now`.
             val stamped = ProjectRecencyStamper.stamp(project, prior = null, now = now)
             writeBundleLocked(fs, path, title, stamped, createdAtEpochMs = now, json = json)
-            registry.upsert(newId, path, title, lastOpenedAtEpochMs = now)
+            registry.upsert(newId, path, title, lastOpenedAtEpochMs = now, createdAtEpochMs = now)
             stamped
         }
     }
@@ -176,7 +178,7 @@ class FileProjectStore(
             // first upsert by adopting `now` rather than perpetuating the zero.
             val createdAt = existingStored?.createdAtEpochMs?.takeIf { it > 0L } ?: now
             writeBundleLocked(fs, path, title, stamped, createdAtEpochMs = createdAt, json = json)
-            registry.upsert(project.id, path, title, lastOpenedAtEpochMs = now)
+            registry.upsert(project.id, path, title, lastOpenedAtEpochMs = now, createdAtEpochMs = createdAt)
         }
     }
 
@@ -201,6 +203,21 @@ class FileProjectStore(
         val path = entry.path.toPath()
         val taleviaJson = path.resolve(TALEVIA_JSON)
         if (!fs.exists(taleviaJson)) return null
+        // Prefer the cached `entry.createdAtEpochMs` (populated by
+        // `openAt` / `createAt` / `upsert`) so we can skip the
+        // `decodeStored` JSON read entirely when the registry has the
+        // field. Only decode when the cache is zero (legacy recents.json
+        // schema from before this field existed, or a first-open via
+        // `get`/`list` that didn't thread it through).
+        if (entry.createdAtEpochMs > 0L) {
+            val updated = bundleTimestamps(fs, taleviaJson, fallback = entry.lastOpenedAtEpochMs).second
+            return ProjectSummary(
+                id = id.value,
+                title = entry.title,
+                createdAtEpochMs = entry.createdAtEpochMs,
+                updatedAtEpochMs = entry.lastOpenedAtEpochMs.takeIf { it > 0L } ?: updated,
+            )
+        }
         val stored = decodeStored(fs, path, json)
         val (createdFromFs, updated) = bundleTimestamps(fs, taleviaJson, fallback = entry.lastOpenedAtEpochMs)
         ProjectSummary(
@@ -215,6 +232,18 @@ class FileProjectStore(
         val path = entry.path.toPath()
         val taleviaJson = path.resolve(TALEVIA_JSON)
         if (!fs.exists(taleviaJson)) return@mapNotNull null
+        // Same cache-first fast path as `summary(...)` above. Registry
+        // entries created before this field existed fall through to the
+        // decode-from-bundle path, and heal on the next `upsert`.
+        if (entry.createdAtEpochMs > 0L) {
+            val updated = bundleTimestamps(fs, taleviaJson, fallback = entry.lastOpenedAtEpochMs).second
+            return@mapNotNull ProjectSummary(
+                id = entry.id,
+                title = entry.title,
+                createdAtEpochMs = entry.createdAtEpochMs,
+                updatedAtEpochMs = entry.lastOpenedAtEpochMs.takeIf { it > 0L } ?: updated,
+            )
+        }
         val stored = runCatching { mutex.withLock { decodeStored(fs, path, json) } }.getOrNull() ?: return@mapNotNull null
         val (createdFromFs, updated) = bundleTimestamps(fs, taleviaJson, fallback = entry.lastOpenedAtEpochMs)
         ProjectSummary(
