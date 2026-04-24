@@ -331,38 +331,6 @@ class SynthesizeSpeechTool(
         }
     }
 
-    /**
-     * Try [engines] in priority order, returning the first successful
-     * [TtsResult]. Each engine's failure is remembered so the final exception
-     * enumerates every attempt — a mis-wired "OpenAI then ElevenLabs" chain
-     * shouldn't surface as "ElevenLabs failed" while hiding that OpenAI
-     * failed too. Single-engine lists degenerate cleanly: one try, one
-     * failure propagated verbatim.
-     */
-    private suspend fun synthesizeWithFallback(
-        engines: List<TtsEngine>,
-        request: TtsRequest,
-        onWarmup: suspend (BusEvent.ProviderWarmup.Phase, String) -> Unit = { _, _ -> },
-    ): TtsResult {
-        val failures = mutableListOf<Pair<String, Throwable>>()
-        for (engine in engines) {
-            try {
-                return engine.synthesize(request) { phase -> onWarmup(phase, engine.providerId) }
-            } catch (t: Throwable) {
-                // CancellationException should not be swallowed — it's how a
-                // supervising coroutine signals "stop this work". Propagate
-                // immediately so the progress watcher's cancel path fires.
-                if (t is kotlinx.coroutines.CancellationException) throw t
-                failures += engine.providerId to t
-            }
-        }
-        val attempted = failures.joinToString("; ") { (id, t) -> "$id: ${t.message ?: t::class.simpleName}" }
-        error(
-            "All ${engines.size} TTS engine(s) failed for text-to-speech request (model='${request.modelId}', " +
-                "voice='${request.voice}'). Attempts: $attempted",
-        )
-    }
-
     private fun hit(entry: LockfileEntry, input: Input, voice: String, appliedBindings: List<String>): ToolResult<Output> {
         val prov = entry.provenance
         val out = Output(

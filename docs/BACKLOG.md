@@ -16,7 +16,6 @@
 ## P1 — 中优，做完 P0 再排
 
 - **m2-provider-second-impl** — M2 criterion 2："provider 多元"。`ImageGenEngine` / `VideoGenEngine` / `MusicGenEngine` / `TtsEngine` 4 个接口每个都只有 1 个 prod impl（grep 印证：OpenAI 图/视/语音 + Replicate 音乐/放大，各 1 家）。**方向：** 任一 engine 长出第二个非 stub 生产 impl（如 `AnthropicImageGenEngine` 若 Claude 上线图像、`ElevenLabsTtsEngine`、`StabilityImageGenEngine`、`LocalMLXTtsEngine`）。需要专有 API key + 产品抉择，待用户决定。Rubric §5.7 / §5.2。Milestone §M2. · skipped 2026-04-24: 需专有 API key + vendor 决策 (跨 3 个 repopulate 周期的老约束).
-- **provider-chain-warmup-parity** — Provider A warmup → 失败 → fallback 到 B：目前 B 的 warmup event 发射路径没验证（OpenAI impl 的 `onWarmup` 在 try 之前，fallback 链路在不同层）。行为不确定 = agent 收到的 latency 画像可能半盲。**方向：** e2e test 覆盖 A 抛 → B 也触发 `ProviderWarmup(Starting|Ready)` 且 emit 顺序正确；或文档化 "只第一个 provider 上 warmup" 契约。Rubric §5.7 / §5.4。Milestone §M2.
 - **agent-mid-turn-cancel** — `agent.run()` 一旦启动要等 turn 结束才能响应用户二次输入。OpenCode `session/prompt.ts` 有 `cancel(sessionId)` 中断正在运行的 turn，同时 mark 输出为 canceled。当前用户 Ctrl-C 只能杀整进程。**方向：** `agent.cancel(runId)` 取消 inflight provider SSE + 跳出 retry loop + upsert `Part.Cancellation` + emit `BusEvent.AgentRunStateChanged(Cancelled)`；CLI REPL 的 Ctrl-C 挂这条。Rubric §5.4。Milestone §later.
 
 ## P2 — 记债 / 观望
