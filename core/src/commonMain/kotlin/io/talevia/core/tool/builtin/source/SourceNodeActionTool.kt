@@ -1,24 +1,12 @@
 package io.talevia.core.tool.builtin.source
 
-import io.talevia.core.ProjectId
-import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.AutoRegenHint
-import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
-import io.talevia.core.domain.autoRegenHint
-import io.talevia.core.domain.source.SourceNode
-import io.talevia.core.domain.source.SourceRef
-import io.talevia.core.domain.source.addNode
-import io.talevia.core.domain.source.mutateSource
-import io.talevia.core.domain.source.removeNode
-import io.talevia.core.domain.source.rewriteNodeId
-import io.talevia.core.domain.source.rewriteSourceBinding
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
-import io.talevia.core.tool.builtin.video.emitTimelineSnapshot
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -28,8 +16,6 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
-import kotlin.uuid.ExperimentalUuidApi
-import kotlin.uuid.Uuid
 
 /**
  * Four-way source-node verb — the consolidated action-dispatched form that
@@ -83,7 +69,6 @@ import kotlin.uuid.Uuid
  *   embedded inside typed bodies (e.g. `narrative.shot.body.sceneId`) —
  *   that's the genre layer's job via the kind-specific `update_*` tool.
  */
-@OptIn(ExperimentalUuidApi::class)
 class SourceNodeActionTool(
     private val projects: ProjectStore,
 ) : Tool<SourceNodeActionTool.Input, SourceNodeActionTool.Output> {
@@ -286,300 +271,13 @@ class SourceNodeActionTool(
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         return when (input.action) {
-            "add" -> executeAdd(input)
-            "remove" -> executeRemove(input)
-            "fork" -> executeFork(input)
-            "rename" -> executeRename(input, ctx)
+            "add" -> executeSourceAdd(projects, input)
+            "remove" -> executeSourceRemove(projects, input)
+            "fork" -> executeSourceFork(projects, input)
+            "rename" -> executeSourceRename(projects, input, ctx)
             else -> error(
                 "unknown action '${input.action}'; accepted: add, remove, fork, rename",
             )
         }
-    }
-
-    private suspend fun executeAdd(input: Input): ToolResult<Output> {
-        val nodeIdRaw = input.nodeId
-            ?: error("action=add requires `nodeId` (omit `sourceNodeId` / `newNodeId`)")
-        val kind = input.kind
-            ?: error("action=add requires `kind`")
-        require(input.sourceNodeId == null && input.newNodeId == null) {
-            "action=add rejects `sourceNodeId` / `newNodeId` — those are action=fork fields"
-        }
-        require(input.oldId == null && input.newId == null) {
-            "action=add rejects `oldId` / `newId` — those are action=rename fields"
-        }
-        require(kind.isNotBlank()) { "kind must not be blank" }
-        require(nodeIdRaw.isNotBlank()) { "nodeId must not be blank" }
-
-        val body = input.body ?: JsonObject(emptyMap())
-        val parentIds = input.parentIds ?: emptyList()
-
-        val pid = ProjectId(input.projectId)
-        val newId = SourceNodeId(nodeIdRaw)
-        val parentRefs = parentIds.map { SourceRef(SourceNodeId(it)) }
-
-        var finalHash = ""
-        projects.mutateSource(pid) { source ->
-            require(newId !in source.byId) {
-                "Source node $nodeIdRaw already exists in project ${input.projectId}. " +
-                    "Use update_source_node_body to edit its body, or pick a fresh id."
-            }
-            val missing = parentRefs.map { it.nodeId }.filter { it !in source.byId }
-            require(missing.isEmpty()) {
-                "Parent node(s) not found in project ${input.projectId}: " +
-                    "${missing.joinToString(", ") { it.value }}. Create them first or pass an empty parentIds."
-            }
-            val node = SourceNode.create(
-                id = newId,
-                kind = kind,
-                body = body,
-                parents = parentRefs,
-            )
-            val next = source.addNode(node)
-            finalHash = next.byId[newId]!!.contentHash
-            next
-        }
-
-        val parentNote = if (parentRefs.isEmpty()) "" else " parents=[${parentIds.joinToString(",")}]"
-        return ToolResult(
-            title = "add source $kind $nodeIdRaw",
-            outputForLlm = "Added $kind node $nodeIdRaw to ${input.projectId}$parentNote. " +
-                "contentHash=$finalHash. Edit via update_source_node_body.",
-            data = Output(
-                projectId = input.projectId,
-                action = "add",
-                added = listOf(
-                    AddResult(
-                        nodeId = nodeIdRaw,
-                        kind = kind,
-                        contentHash = finalHash,
-                        parentIds = parentIds,
-                    ),
-                ),
-            ),
-        )
-    }
-
-    private suspend fun executeRemove(input: Input): ToolResult<Output> {
-        val nodeIdRaw = input.nodeId
-            ?: error("action=remove requires `nodeId`")
-        require(
-            input.kind == null &&
-                input.body == null &&
-                input.parentIds == null &&
-                input.sourceNodeId == null &&
-                input.newNodeId == null &&
-                input.oldId == null &&
-                input.newId == null,
-        ) {
-            "action=remove rejects add/fork/rename payload fields — only `nodeId` is accepted"
-        }
-
-        val pid = ProjectId(input.projectId)
-        val nodeId = SourceNodeId(nodeIdRaw)
-        var removedKind = ""
-        val updated = projects.mutateSource(pid) { source ->
-            val existing = source.byId[nodeId]
-                ?: error("Source node $nodeIdRaw not found in project ${input.projectId}")
-            removedKind = existing.kind
-            source.removeNode(nodeId)
-        }
-        val hint = updated.autoRegenHint()
-        val regenNudge = if (hint != null) {
-            " autoRegenHint: ${hint.staleClipCount} stale clip(s) — suggested next: ${hint.suggestedTool}."
-        } else {
-            ""
-        }
-        return ToolResult(
-            title = "remove source node $nodeIdRaw",
-            outputForLlm = "Removed $removedKind node $nodeIdRaw. " +
-                "Clips that bound this id will be re-rendered next export.$regenNudge",
-            data = Output(
-                projectId = input.projectId,
-                action = "remove",
-                removed = listOf(RemoveResult(nodeId = nodeIdRaw, removedKind = removedKind)),
-                autoRegenHint = hint,
-            ),
-        )
-    }
-
-    private suspend fun executeFork(input: Input): ToolResult<Output> {
-        val sourceNodeIdRaw = input.sourceNodeId
-            ?: error("action=fork requires `sourceNodeId`")
-        require(
-            input.nodeId == null &&
-                input.kind == null &&
-                input.body == null &&
-                input.parentIds == null &&
-                input.oldId == null &&
-                input.newId == null,
-        ) {
-            "action=fork rejects add/remove/rename payload fields — use `sourceNodeId` + optional `newNodeId`"
-        }
-
-        val pid = ProjectId(input.projectId)
-        projects.get(pid) ?: error("Project ${input.projectId} not found")
-
-        val requestedNewId = input.newNodeId?.trim().takeIf { !it.isNullOrBlank() }
-        require(requestedNewId != sourceNodeIdRaw) {
-            "newNodeId ($sourceNodeIdRaw) equals sourceNodeId — fork must produce a distinct id"
-        }
-        val forkedId = SourceNodeId(requestedNewId ?: Uuid.random().toString())
-
-        var kindOut: String? = null
-        var hashOut: String? = null
-
-        projects.mutateSource(pid) { source ->
-            val original = source.nodes.firstOrNull { it.id.value == sourceNodeIdRaw }
-                ?: error("Source node $sourceNodeIdRaw not found in project ${input.projectId}")
-            if (source.nodes.any { it.id == forkedId }) {
-                error(
-                    "Source node ${forkedId.value} already exists in project ${input.projectId}. " +
-                        "Pick a different newNodeId (or source_node_action(action=remove) first).",
-                )
-            }
-            kindOut = original.kind
-            val forked = SourceNode.create(
-                id = forkedId,
-                kind = original.kind,
-                body = original.body,
-                parents = original.parents,
-            )
-            hashOut = forked.contentHash
-            source.addNode(forked)
-        }
-
-        return ToolResult(
-            title = "fork ${kindOut} ${forkedId.value}",
-            outputForLlm = "Forked source node $sourceNodeIdRaw -> ${forkedId.value} " +
-                "(kind=$kindOut, contentHash=$hashOut). Parents preserved; body copied verbatim. " +
-                "Tweak with update_source_node_body to diverge from the original.",
-            data = Output(
-                projectId = input.projectId,
-                action = "fork",
-                forked = listOf(
-                    ForkResult(
-                        sourceNodeId = sourceNodeIdRaw,
-                        forkedNodeId = forkedId.value,
-                        kind = kindOut!!,
-                        contentHash = hashOut!!,
-                    ),
-                ),
-            ),
-        )
-    }
-
-    private suspend fun executeRename(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val oldIdRaw = input.oldId
-            ?: error("action=rename requires `oldId`")
-        val newIdRaw = input.newId
-            ?: error("action=rename requires `newId`")
-        require(
-            input.nodeId == null &&
-                input.kind == null &&
-                input.body == null &&
-                input.parentIds == null &&
-                input.sourceNodeId == null &&
-                input.newNodeId == null,
-        ) {
-            "action=rename rejects add/remove/fork payload fields — only `oldId` + `newId` are accepted"
-        }
-
-        val pid = ProjectId(input.projectId)
-        val oldId = SourceNodeId(oldIdRaw)
-        val newId = SourceNodeId(newIdRaw)
-
-        // No-op — return without mutating (no revision bump, no snapshot).
-        if (oldId == newId) {
-            return ToolResult(
-                title = "rename $oldIdRaw (no-op)",
-                outputForLlm = "oldId == newId ($oldIdRaw); no-op, project state untouched.",
-                data = Output(
-                    projectId = input.projectId,
-                    action = "rename",
-                    renamed = listOf(
-                        RenameResult(
-                            oldId = oldIdRaw,
-                            newId = newIdRaw,
-                            parentsRewrittenCount = 0,
-                            clipsRewrittenCount = 0,
-                            lockfileEntriesRewrittenCount = 0,
-                        ),
-                    ),
-                ),
-            )
-        }
-
-        require(isValidSourceNodeIdSlug(newIdRaw)) {
-            "newId '$newIdRaw' is not a valid source-node id slug — must be non-empty, " +
-                "lowercase ASCII letters / digits / '-' only, and not start or end with '-'."
-        }
-
-        var parentsRewritten = 0
-        var clipsRewritten = 0
-        var lockfileRewritten = 0
-
-        val updated = projects.mutate(pid) { project ->
-            val source = project.source
-            if (source.byId[oldId] == null) {
-                error(
-                    "Source node $oldIdRaw not found in project ${input.projectId}. " +
-                        "Call source_query(select=nodes) to discover available ids.",
-                )
-            }
-            if (source.byId[newId] != null) {
-                error(
-                    "Source node $newIdRaw already exists in project ${input.projectId}; " +
-                        "rename would collide. Pick a different newId or " +
-                        "source_node_action(action=remove) first.",
-                )
-            }
-
-            val (newSource, parentsTouched) = source.rewriteNodeId(oldId, newId)
-            parentsRewritten = parentsTouched
-
-            val (newTimeline, clipsTouched) = project.timeline.rewriteSourceBinding(oldId, newId)
-            clipsRewritten = clipsTouched
-
-            val (newLockfile, entriesTouched) =
-                project.lockfile.rewriteSourceBinding(oldId, newId)
-            lockfileRewritten = entriesTouched
-
-            project.copy(
-                source = newSource,
-                timeline = newTimeline,
-                lockfile = newLockfile,
-            )
-        }
-
-        // Only emit a snapshot when the timeline actually changed — otherwise
-        // we'd spam `revert_timeline` with a stream of identical snapshots.
-        val snapshotIdNote = if (clipsRewritten > 0) {
-            val partId = emitTimelineSnapshot(ctx, updated.timeline)
-            " Timeline snapshot: ${partId.value}."
-        } else {
-            ""
-        }
-
-        return ToolResult(
-            title = "rename source node $oldIdRaw -> $newIdRaw",
-            outputForLlm = "Renamed source node $oldIdRaw to $newIdRaw. " +
-                "Rewrote $parentsRewritten parent-ref(s), $clipsRewritten clip sourceBinding(s), " +
-                "and $lockfileRewritten lockfile entry binding(s).$snapshotIdNote " +
-                "Note: string ids inside typed bodies (e.g. narrative.shot.sceneId) are NOT touched — " +
-                "update those via the kind-specific update_* tool if needed.",
-            data = Output(
-                projectId = input.projectId,
-                action = "rename",
-                renamed = listOf(
-                    RenameResult(
-                        oldId = oldIdRaw,
-                        newId = newIdRaw,
-                        parentsRewrittenCount = parentsRewritten,
-                        clipsRewrittenCount = clipsRewritten,
-                        lockfileEntriesRewrittenCount = lockfileRewritten,
-                    ),
-                ),
-            ),
-        )
     }
 }
