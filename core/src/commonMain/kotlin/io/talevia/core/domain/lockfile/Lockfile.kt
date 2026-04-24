@@ -120,7 +120,7 @@ data class Lockfile(
  *   those (it can't reconstruct what the agent originally asked for).
  * @property pinned VISION §3.1 "产物可 pin" — user intent "this exact generation is
  *   the hero shot, don't regenerate it even when downstream source changes". Set via
- *   `set_lockfile_entry_pinned(pinned=true)`; cleared via `set_lockfile_entry_pinned(pinned=false)`. When true:
+ *   `project_pin_action(target=lockfile_entry, pinned=true)`; cleared via `project_pin_action(target=lockfile_entry, pinned=false)`. When true:
  *   - `gc_lockfile` policy sweeps skip the entry regardless of age/count verdict,
  *   - `regenerate_stale_clips` skips every clip whose current lockfile entry is
  *     pinned (reason `"pinned"`), leaving the clip stale-but-frozen until the user

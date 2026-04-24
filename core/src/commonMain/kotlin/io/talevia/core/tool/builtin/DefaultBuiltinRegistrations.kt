@@ -49,13 +49,12 @@ import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.project.OpenProjectTool
 import io.talevia.core.tool.builtin.project.ProjectMaintenanceActionTool
+import io.talevia.core.tool.builtin.project.ProjectPinActionTool
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
 import io.talevia.core.tool.builtin.project.ProjectSnapshotActionTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
 import io.talevia.core.tool.builtin.project.RemoveAssetTool
 import io.talevia.core.tool.builtin.project.RenameProjectTool
-import io.talevia.core.tool.builtin.project.SetClipAssetPinnedTool
-import io.talevia.core.tool.builtin.project.SetLockfileEntryPinnedTool
 import io.talevia.core.tool.builtin.project.SetOutputProfileTool
 import io.talevia.core.tool.builtin.project.ValidateProjectTool
 import io.talevia.core.tool.builtin.session.EstimateSessionTokensTool
@@ -235,8 +234,7 @@ fun ToolRegistry.registerProjectTools(
     register(ValidateProjectTool(projects))
     register(RegenerateStaleClipsTool(projects, this))
     register(ProjectMaintenanceActionTool(projects, engine))
-    register(SetLockfileEntryPinnedTool(projects))
-    register(SetClipAssetPinnedTool(projects))
+    register(ProjectPinActionTool(projects))
     register(ProjectSnapshotActionTool(projects))
     register(ForkProjectTool(projects, this))
     register(DiffProjectsTool(projects))
