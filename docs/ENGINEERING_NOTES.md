@@ -421,3 +421,54 @@ Together these two footguns explain why "my subscriber test runs
 green locally but red on first write" is a recurring pattern for
 this codebase — both pitfalls hide under a generic assertion
 failure, not a transport error.
+
+## 2026-04-23 — `SharedFlow.subscriptionCount` through a narrowed accessor
+
+Writing `EventRouterTest`, the natural "wait for all N subscribers to
+install" probe was:
+
+```kotlin
+while (bus.events.subscriptionCount.value < 5) { yield() }
+```
+
+`EventBus.events: SharedFlow<BusEvent>` exposes the flow, and
+`SharedFlow` declares `val subscriptionCount: StateFlow<Int>` in the
+kotlinx-coroutines 1.10 API, so this *should* resolve. But the JVM
+compile tripped with `Unresolved reference 'subscriptionCount'` at
+the `while` — the Kotlin compiler couldn't see the property through
+the narrowed `get()` accessor. Didn't dig far enough to confirm
+whether it's a stdlib / coroutines version interaction, a `get()`
+accessor narrowing quirk, or an import-mechanics issue specific to
+`kotlinx-coroutines` extension-ish properties on a declared interface.
+
+**Workaround** (what landed): `runTest`'s single-thread dispatcher
+drains pending start-up continuations deterministically, so a
+`testScheduler.runCurrent()` + `repeat(8) { yield() }` +
+`testScheduler.runCurrent()` sandwich is a reliable fallback:
+
+```kotlin
+val router = EventRouter(bus, sessions, renderer) { sessionId }
+router.start(backgroundScope)
+testScheduler.runCurrent()
+repeat(8) { yield() }
+testScheduler.runCurrent()
+// publish(...) now safe
+```
+
+This is strictly weaker than the `subscriptionCount` probe (it relies
+on "8 yields is enough" empirical tuning rather than a state flag),
+but it's deterministic under `runTest`'s single dispatcher. Caveat:
+won't work under a multi-threaded dispatcher — if you move a bus
+subscriber test off `runTest`, re-investigate `subscriptionCount`.
+
+**Re-try list** (if this comes up again):
+- Does explicit `import kotlinx.coroutines.flow.SharedFlow` before the
+  access help? (Already present in the failing test — didn't help.)
+- Drop the `get()` accessor on `EventBus.events` and make it a `val`
+  field directly on the class? Cheapest fix if it *is* the narrowing
+  quirk.
+- Is this fixed on a newer coroutines version? 1.10.1 is current.
+
+None of these were urgent enough to block the test cycle — the
+yield-based workaround is ~3 extra lines and documented at the
+callsite. Flagging here so the next author doesn't re-derive it.
