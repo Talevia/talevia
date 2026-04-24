@@ -8,7 +8,6 @@ import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.compaction.Compactor
 import io.talevia.core.compaction.DEFAULT_COMPACTION_TOKEN_THRESHOLD
-import io.talevia.core.compaction.TokenEstimator
 import io.talevia.core.logging.Loggers
 import io.talevia.core.logging.info
 import io.talevia.core.metrics.MetricsRegistry
@@ -29,7 +28,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -164,13 +162,29 @@ class Agent(
         projects = projects,
     )
 
+    private val compactionGate = CompactionGate(
+        compactor = compactor,
+        compactionThreshold = compactionThreshold,
+        store = store,
+        bus = bus,
+    )
+
+    private val retryLoop = RetryLoop(
+        executor = executor,
+        retryPolicy = retryPolicy,
+        store = store,
+        bus = bus,
+        clock = clock,
+        log = log,
+    )
+
     /**
      * Per-session handle tracking an in-flight [run] so [cancel] can reach into
      * the running coroutine and finalise the current assistant message with
      * [FinishReason.CANCELLED] rather than letting it hang at `finish = null`.
      */
-    private class RunHandle(val job: Job) {
-        @Volatile var currentAssistantId: MessageId? = null
+    private class RunHandle(val job: Job) : RetryLoop.Handle {
+        @Volatile override var currentAssistantId: MessageId? = null
 
         /**
          * Most recent retry attempt number scheduled during this run, or null
@@ -180,7 +194,7 @@ class Agent(
          * publishing [BusEvent.AgentRetryScheduled]; monotonically
          * non-decreasing across steps and provider fallbacks within one run.
          */
-        @Volatile var lastRetryAttempt: Int? = null
+        @Volatile override var lastRetryAttempt: Int? = null
     }
 
     private val inflightMutex = Mutex()
@@ -341,42 +355,12 @@ class Agent(
                 "historyMessages" to history.size,
             )
 
-            // Compaction hook: before asking the provider for another turn, estimate
-            // token usage and let the Compactor prune + summarise if we are over budget.
-            // The post-process history is re-read from the store because Compactor
-            // writes a new CompactionPart and marks older parts compacted.
-            if (compactor != null) {
-                val estimated = TokenEstimator.forHistory(history)
-                val perModelThreshold = compactionThreshold(input.model)
-                if (estimated > perModelThreshold) {
-                    // Publish before kicking off compaction — subscribers (UI, SSE clients)
-                    // can render "compacting…" while the summarisation call is in flight,
-                    // instead of watching the next turn look stuck.
-                    bus.publish(
-                        BusEvent.SessionCompactionAuto(
-                            sessionId = input.sessionId,
-                            historyTokensBefore = estimated,
-                            thresholdTokens = perModelThreshold,
-                        ),
-                    )
-                    bus.publish(
-                        BusEvent.AgentRunStateChanged(
-                            input.sessionId,
-                            AgentRunState.Compacting,
-                            retryAttempt = handle.lastRetryAttempt,
-                        ),
-                    )
-                    compactor.process(input.sessionId, history, input.model)
-                    history = store.listMessagesWithParts(input.sessionId, includeCompacted = false)
-                    bus.publish(
-                        BusEvent.AgentRunStateChanged(
-                            input.sessionId,
-                            AgentRunState.Generating,
-                            retryAttempt = handle.lastRetryAttempt,
-                        ),
-                    )
-                }
-            }
+            // Compaction hook: before asking the provider for another turn,
+            // estimate token usage and let the Compactor prune + summarise
+            // if we are over budget. Returns the post-process history (re-
+            // read from the store after compaction) or the input history
+            // unchanged if under budget / no compactor configured.
+            history = compactionGate.maybeCompact(input, handle, history)
 
             // Re-read the session every step so a `switch_project` invoked in the
             // previous turn is reflected in the next turn's system prompt and in
@@ -384,98 +368,19 @@ class Agent(
             // Same re-read captures `spendCapCents` so a mid-run
             // `set_session_spend_cap` takes effect on the very next tool dispatch.
             val sessionSnapshot = store.getSession(input.sessionId)
-            val currentProjectId = sessionSnapshot?.currentProjectId
-            val spendCapCents = sessionSnapshot?.spendCapCents
-            val disabledToolIds = sessionSnapshot?.disabledToolIds ?: emptySet()
+            val snapshot = RetryLoop.SessionSnapshot(
+                currentProjectId = sessionSnapshot?.currentProjectId,
+                spendCapCents = sessionSnapshot?.spendCapCents,
+                disabledToolIds = sessionSnapshot?.disabledToolIds ?: emptySet(),
+            )
 
-            var providerIndex = 0
-            var attempt = 0
-            var asstMsg: Message.Assistant
-            var turnResult: TurnResult
-            while (true) {
-                attempt++
-                asstMsg = Message.Assistant(
-                    id = MessageId(Uuid.random().toString()),
-                    sessionId = input.sessionId,
-                    createdAt = clock.now(),
-                    parentId = userMsg.id,
-                    model = input.model,
-                )
-                store.appendMessage(asstMsg)
-                handle.currentAssistantId = asstMsg.id
-
-                turnResult = executor.streamTurn(
-                    asstMsg, history, input, currentProjectId, providerIndex, spendCapCents, disabledToolIds,
-                    retryAttempt = handle.lastRetryAttempt,
-                )
-
-                // Only retry when the turn failed and nothing useful was streamed.
-                // Mid-stream errors (rare — an error event after text/tool_calls) are
-                // preserved so the user sees the partial output.
-                if (turnResult.finish != FinishReason.ERROR) break
-                if (turnResult.emittedContent) break
-                val reason = RetryClassifier.reason(turnResult.error, turnResult.retriable) ?: break
-
-                // Same-provider retry budget exhausted AND a fallback provider is
-                // configured → advance the chain. Mirrors OpenCode's
-                // `session/llm.ts` two-tier model: retry covers the same provider's
-                // transient blips, fallback covers sustained per-provider outages
-                // (a whole cloud down, a whole account rate-limited, etc.).
-                if (attempt >= retryPolicy.maxAttempts) {
-                    val nextIndex = providerIndex + 1
-                    if (nextIndex >= executor.providerCount) break
-                    val fromId = executor.providerIdAt(providerIndex)
-                    val toId = executor.providerIdAt(nextIndex)
-                    log.info(
-                        "provider.fallback",
-                        "session" to input.sessionId.value,
-                        "from" to fromId,
-                        "to" to toId,
-                        "reason" to reason,
-                    )
-                    bus.publish(
-                        BusEvent.AgentProviderFallback(
-                            sessionId = input.sessionId,
-                            fromProviderId = fromId,
-                            toProviderId = toId,
-                            reason = reason,
-                        ),
-                    )
-                    runCatching { store.deleteMessage(asstMsg.id) }
-                    providerIndex = nextIndex
-                    attempt = 0
-                    continue
-                }
-
-                val kind = RetryClassifier.kind(turnResult.error, turnResult.retriable)
-                val wait = retryPolicy.delayFor(attempt, turnResult.retryAfterMs, kind)
-                log.info(
-                    "retry.scheduled",
-                    "session" to input.sessionId.value,
-                    "attempt" to attempt,
-                    "waitMs" to wait,
-                    "reason" to reason,
-                )
-                bus.publish(
-                    BusEvent.AgentRetryScheduled(
-                        sessionId = input.sessionId,
-                        attempt = attempt,
-                        waitMs = wait,
-                        reason = reason,
-                    ),
-                )
-                // Stamp the handle so subsequent AgentRunStateChanged emits
-                // (inside executor.streamTurn, the compaction transitions, and
-                // the terminal Idle/Failed/Cancelled in run()) can correlate
-                // their state with this retry attempt. Monotonic across steps
-                // and provider fallbacks within one run — resetting would hide
-                // "retry #N succeeded after 2 steps" from the terminal emit.
-                handle.lastRetryAttempt = attempt
-                // Wipe the failed assistant message (+ its StepFinish(ERROR) part)
-                // so the retry produces a clean single message per turn.
-                runCatching { store.deleteMessage(asstMsg.id) }
-                delay(wait)
-            }
+            val (asstMsg, turnResult) = retryLoop.runStepWithRetry(
+                input = input,
+                handle = handle,
+                history = history,
+                parentUserMsgId = userMsg.id,
+                snapshot = snapshot,
+            )
 
             val finalised = asstMsg.copy(
                 tokens = turnResult.usage,

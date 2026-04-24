@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **debt-split-agent-kt-round-2** — `Agent.kt` 502 LOC。先前一轮已拆出 `AgentTurnExecutor`（`decisions/2026-04-21-debt-split-agent-kt.md`）；当前主类承载 run() + runLoop() + retry / compaction / cancel / titler 协调逻辑，继续膨胀会把 test-helper 耐受度磨低。**方向：** 把 retry-backoff 子状态机（当前散在 runLoop）抽 `RetryCoordinator`，compaction 触发抽 `CompactionGate`；dispatcher 保留在主类。Rubric §5.6。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排
 
