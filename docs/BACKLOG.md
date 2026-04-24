@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **clip-consistency-binding-persistence** — M1 criterion 2 是 "绑定持久化"，但现状 `Clip` 无持久字段承载 consistency binding；binding 是 tool-input 参数（`generate_image(consistencyBindingIds=[...])`），每次重生成 LLM 都得再传一次，漂失风险高。**方向：** 在 `Clip` 上加一个持久字段（`consistencyBindingIds: List<SourceNodeId>` 或语义等价物），让 AIGC tool 在有持久 binding 时优先读 `Clip.*`，tool-input 的同名参数沦为覆盖/首次绑定入口；重生成无需 LLM 重传。Rubric §5.5。Milestone §M1.
 - **consistency-binding-reverse-lookup** — M1 criterion 3。现在只能从 `Clip` 读 binding 正向；给定一个 consistency source node，无法反查"哪些 clip 绑了我"。改 `character_ref` 的名字后缺失反查 = 不知道哪些 clip 需要 stale。**方向：** `source_query` 或 `project_query` 新增 select（如 `consistency_bound_clips`），输入 source node id，输出绑定了它的 clip id 列表。折入已有 dispatcher，不新开 tool。Rubric §5.3 / §5.5。Milestone §M1.
 - **consistency-kind-extension** — M1 criterion 4："Kind 可扩证明"。`ConsistencyKinds.ALL` 目前恰好 3 个（`CHARACTER_REF` / `STYLE_BIBLE` / `BRAND_PALETTE`），无第 4 个活例证明机制可扩。**方向：** 落第 4 个 kind（如 `lora_binding` 或 `color_palette`）+ 在 `PromptFolding` when-branch 里正式处理 + `ConsistencyBodies` 定义其 body schema。完整闭合一个最小样例。Rubric §5.5。Milestone §M1.
 
