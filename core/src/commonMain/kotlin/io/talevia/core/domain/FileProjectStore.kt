@@ -5,7 +5,6 @@ import io.talevia.core.ProjectId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.logging.Loggers
-import io.talevia.core.logging.warn
 import io.talevia.core.platform.BundleLocker
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -195,63 +194,34 @@ class FileProjectStore(
         }
     }
 
-    private fun resolvedCreatedAt(stored: StoredProject, fallback: Long): Long =
-        stored.createdAtEpochMs.takeIf { it > 0L } ?: fallback
-
     override suspend fun summary(id: ProjectId): ProjectSummary? = mutex.withLock {
         val entry = registry.get(id) ?: return null
         val path = entry.path.toPath()
         val taleviaJson = path.resolve(TALEVIA_JSON)
-        if (!fs.exists(taleviaJson)) return null
-        // Prefer the cached `entry.createdAtEpochMs` (populated by
-        // `openAt` / `createAt` / `upsert`) so we can skip the
-        // `decodeStored` JSON read entirely when the registry has the
-        // field. Only decode when the cache is zero (legacy recents.json
-        // schema from before this field existed, or a first-open via
-        // `get`/`list` that didn't thread it through).
-        if (entry.createdAtEpochMs > 0L) {
-            val updated = bundleTimestamps(fs, taleviaJson, fallback = entry.lastOpenedAtEpochMs).second
-            return ProjectSummary(
-                id = id.value,
-                title = entry.title,
-                createdAtEpochMs = entry.createdAtEpochMs,
-                updatedAtEpochMs = entry.lastOpenedAtEpochMs.takeIf { it > 0L } ?: updated,
-            )
-        }
-        val stored = decodeStored(fs, path, json)
-        val (createdFromFs, updated) = bundleTimestamps(fs, taleviaJson, fallback = entry.lastOpenedAtEpochMs)
-        ProjectSummary(
-            id = id.value,
-            title = stored.title,
-            createdAtEpochMs = resolvedCreatedAt(stored, createdFromFs),
-            updatedAtEpochMs = entry.lastOpenedAtEpochMs.takeIf { it > 0L } ?: updated,
-        )
+        resolveProjectSummary(
+            entry = entry,
+            taleviaJson = taleviaJson,
+            fs = fs,
+            json = json,
+            decodeWithLock = { decodeStored(fs, path, json) },
+        )?.summary
     }
 
     override suspend fun listSummaries(): List<ProjectSummary> = registry.list().mapNotNull { entry ->
         val path = entry.path.toPath()
         val taleviaJson = path.resolve(TALEVIA_JSON)
-        if (!fs.exists(taleviaJson)) return@mapNotNull null
-        // Same cache-first fast path as `summary(...)` above. Registry
-        // entries created before this field existed fall through to the
-        // decode-from-bundle path, and heal on the next `upsert`.
-        if (entry.createdAtEpochMs > 0L) {
-            val updated = bundleTimestamps(fs, taleviaJson, fallback = entry.lastOpenedAtEpochMs).second
-            return@mapNotNull ProjectSummary(
-                id = entry.id,
-                title = entry.title,
-                createdAtEpochMs = entry.createdAtEpochMs,
-                updatedAtEpochMs = entry.lastOpenedAtEpochMs.takeIf { it > 0L } ?: updated,
-            )
-        }
-        val stored = runCatching { mutex.withLock { decodeStored(fs, path, json) } }.getOrNull() ?: return@mapNotNull null
-        val (createdFromFs, updated) = bundleTimestamps(fs, taleviaJson, fallback = entry.lastOpenedAtEpochMs)
-        ProjectSummary(
-            id = entry.id,
-            title = stored.title,
-            createdAtEpochMs = resolvedCreatedAt(stored, createdFromFs),
-            updatedAtEpochMs = entry.lastOpenedAtEpochMs.takeIf { it > 0L } ?: updated,
-        )
+        resolveProjectSummary(
+            entry = entry,
+            taleviaJson = taleviaJson,
+            fs = fs,
+            json = json,
+            // Slow path runs decode under the per-store mutex so concurrent
+            // registry iteration is safe. runCatching absorbs a corrupt
+            // bundle without failing the whole list.
+            decodeWithLock = { bundleDir ->
+                runCatching { mutex.withLock { decodeStored(fs, bundleDir, json) } }.getOrNull()
+            },
+        )?.summary
     }.sortedByDescending { it.updatedAtEpochMs }
 
     override suspend fun mutate(id: ProjectId, block: suspend (Project) -> Project): Project = mutex.withLock {
@@ -263,7 +233,7 @@ class FileProjectStore(
             val current = readBundle(fs, path, json)
             val updated = block(current)
             val now = clock.now().toEpochMilliseconds()
-            val createdAt = resolvedCreatedAt(stored, fallback = now)
+            val createdAt = stored.createdAtEpochMs.takeIf { it > 0L } ?: now
             val stamped = ProjectRecencyStamper.stamp(updated, prior = current, now = now)
             writeBundleLocked(fs, path, stored.title, stamped, createdAtEpochMs = createdAt, json = json)
             registry.upsert(id, path, stored.title, lastOpenedAtEpochMs = now)
@@ -364,49 +334,11 @@ class FileProjectStore(
         }
     }
 
-    private suspend fun maybeEmitValidationWarning(project: Project) {
-        val issues = ProjectSourceDagValidator.validate(project.source)
-        if (issues.isEmpty()) return
-        logger.warn(
-            "project ${project.id.value} failed source-DAG validation on load",
-            "projectId" to project.id.value,
-            "issueCount" to issues.size.toString(),
-            "firstIssue" to issues.first(),
-        )
-        bus?.publish(BusEvent.ProjectValidationWarning(project.id, issues))
-    }
+    private suspend fun maybeEmitValidationWarning(project: Project) =
+        emitValidationWarningIfAny(project, bus, logger)
 
-    /**
-     * Scan `project.assets` for `MediaSource.File` paths that don't exist
-     * on the current machine. Every cross-machine bundle open flows through
-     * `openAt` / `get`; this is where alice's `/Users/alice/raw.mp4` fails
-     * to resolve on bob's machine. Publishes one `BusEvent.AssetsMissing`
-     * carrying every missing asset so UI / CLI can show a single "relink
-     * these before export" panel instead of N independent events.
-     *
-     * Scope: only `MediaSource.File` (absolute host paths) is checked.
-     * `BundleFile` paths resolve inside the bundle (a missing bundle-file
-     * is a different failure — bundle corruption). `Http` / `Platform`
-     * sources aren't filesystem-checkable. `bus == null` short-circuits
-     * so pure-store tests don't pay for the scan.
-     */
-    private suspend fun maybeEmitMissingAssets(project: Project) {
-        val publisher = bus ?: return
-        val missing = project.assets.mapNotNull { asset ->
-            val src = asset.source
-            if (src !is MediaSource.File) return@mapNotNull null
-            if (fs.exists(src.path.toPath())) return@mapNotNull null
-            BusEvent.MissingAsset(assetId = asset.id.value, originalPath = src.path)
-        }
-        if (missing.isEmpty()) return
-        logger.warn(
-            "project ${project.id.value} has ${missing.size} missing file-asset(s) on open",
-            "projectId" to project.id.value,
-            "missingCount" to missing.size.toString(),
-            "firstAsset" to missing.first().assetId,
-        )
-        publisher.publish(BusEvent.AssetsMissing(project.id, missing))
-    }
+    private suspend fun maybeEmitMissingAssets(project: Project) =
+        emitMissingAssetsIfAny(project, bus, fs, logger)
 
     /** Bundle id-as-default-dir-name only — accepts arbitrary user-picked paths. */
     private fun String.requireSafeFilename(): String {
