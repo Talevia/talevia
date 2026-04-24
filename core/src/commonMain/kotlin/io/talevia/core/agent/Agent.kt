@@ -131,6 +131,20 @@ class Agent(
      * have a ProjectStore singleton; null is safe (asset-scoped tools stay hidden).
      */
     private val projects: io.talevia.core.domain.ProjectStore? = null,
+    /**
+     * Ordering policy applied to [fallbackProviders] at construction time.
+     * Default [ProviderRoutingPolicy.Default] preserves pre-policy
+     * registry order so existing composition roots are unchanged.
+     * Composition roots that want cost-aware fallback pass
+     * [CheapestFirstPolicy] — M2 exit summary §3.1 follow-up #3.
+     *
+     * Fallback ordering is a build-time decision (not per-turn): the
+     * fallback chain doesn't change mid-run, and re-sorting on every
+     * turn would silently shuffle the chain if [LlmPricing] ever grew a
+     * mutable surface. Constructor-time application keeps the policy
+     * cacheable and test-friendly.
+     */
+    private val routingPolicy: ProviderRoutingPolicy = ProviderRoutingPolicy.Default,
 ) {
 
     private val log = Loggers.get("agent")
@@ -138,7 +152,7 @@ class Agent(
     private val executor = AgentTurnExecutor(
         providers = buildList {
             add(provider)
-            addAll(fallbackProviders.filter { it.id != provider.id })
+            addAll(routingPolicy.orderFallbacks(provider, fallbackProviders))
         },
         registry = registry,
         permissions = permissions,
