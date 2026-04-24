@@ -16,6 +16,7 @@ import io.talevia.core.tool.builtin.session.query.ForkRow
 import io.talevia.core.tool.builtin.session.query.MessageDetailRow
 import io.talevia.core.tool.builtin.session.query.MessageRow
 import io.talevia.core.tool.builtin.session.query.PartRow
+import io.talevia.core.tool.builtin.session.query.RunFailureRow
 import io.talevia.core.tool.builtin.session.query.RunStateTransitionRow
 import io.talevia.core.tool.builtin.session.query.SessionMetadataRow
 import io.talevia.core.tool.builtin.session.query.SessionRow
@@ -31,6 +32,7 @@ import io.talevia.core.tool.builtin.session.query.runForksQuery
 import io.talevia.core.tool.builtin.session.query.runMessageDetailQuery
 import io.talevia.core.tool.builtin.session.query.runMessagesQuery
 import io.talevia.core.tool.builtin.session.query.runPartsQuery
+import io.talevia.core.tool.builtin.session.query.runRunFailureQuery
 import io.talevia.core.tool.builtin.session.query.runRunStateHistoryQuery
 import io.talevia.core.tool.builtin.session.query.runSessionMetadataQuery
 import io.talevia.core.tool.builtin.session.query.runSessionsQuery
@@ -172,6 +174,8 @@ class SessionQueryTool(
             "overThreshold, messageCount); ratio un-clamped > 1.0 when over. requires sessionId.\n" +
             "  • tool_spec_budget — registry-wide (toolCount, estimatedTokens, specBytes, " +
             "registryResolved, topByTokens[5]). Session-independent — sessionId rejected.\n" +
+            "  • run_failure — post-mortem for failed turns (terminalCause + stepFinishErrors); " +
+            "requires sessionId; optional messageId drills to one turn.\n" +
             "Common: limit (default 100, clamped 1..1000), offset (default 0). Filter-on-" +
             "wrong-select fails loud."
     override val inputSerializer: KSerializer<Input> = serializer()
@@ -198,6 +202,7 @@ class SessionQueryTool(
         SELECT_CONTEXT_PRESSURE -> ContextPressureRow.serializer()
         SELECT_RUN_STATE_HISTORY -> RunStateTransitionRow.serializer()
         SELECT_TOOL_SPEC_BUDGET -> ToolSpecBudgetRow.serializer()
+        SELECT_RUN_FAILURE -> RunFailureRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
 
@@ -224,6 +229,7 @@ class SessionQueryTool(
             SELECT_CONTEXT_PRESSURE -> runContextPressureQuery(sessions, input)
             SELECT_RUN_STATE_HISTORY -> runRunStateHistoryQuery(sessions, agentStates, input, limit, offset)
             SELECT_TOOL_SPEC_BUDGET -> runToolSpecBudgetQuery(toolRegistry, input)
+            SELECT_RUN_FAILURE -> runRunFailureQuery(sessions, agentStates, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -249,8 +255,8 @@ class SessionQueryTool(
             if (select != SELECT_TOOL_CALLS && input.toolId != null) {
                 add("toolId (select=tool_calls only)")
             }
-            if (select != SELECT_MESSAGE && input.messageId != null) {
-                add("messageId (select=message only)")
+            if (select != SELECT_MESSAGE && select != SELECT_RUN_FAILURE && input.messageId != null) {
+                add("messageId (select=message or run_failure only)")
             }
             // sessionId is required for everything except sessions (and `message`, which
             // uses messageId for the drill-down); rejected for sessions.
@@ -289,11 +295,13 @@ class SessionQueryTool(
         const val SELECT_CONTEXT_PRESSURE = "context_pressure"
         const val SELECT_RUN_STATE_HISTORY = "run_state_history"
         const val SELECT_TOOL_SPEC_BUDGET = "tool_spec_budget"
+        const val SELECT_RUN_FAILURE = "run_failure"
         internal val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
             SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
             SELECT_SESSION_METADATA, SELECT_MESSAGE, SELECT_SPEND, SELECT_CACHE_STATS,
             SELECT_CONTEXT_PRESSURE, SELECT_RUN_STATE_HISTORY, SELECT_TOOL_SPEC_BUDGET,
+            SELECT_RUN_FAILURE,
         )
 
         private const val DEFAULT_LIMIT = 100

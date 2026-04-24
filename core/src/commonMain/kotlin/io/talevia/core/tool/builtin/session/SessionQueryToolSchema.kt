@@ -21,9 +21,9 @@ internal val SESSION_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
             put("type", "string")
             put(
                 "description",
-                "What to query: sessions | messages | parts | forks | ancestors | tool_calls | " +
+                "sessions | messages | parts | forks | ancestors | tool_calls | " +
                     "compactions | status | session_metadata | message | spend | cache_stats | " +
-                    "context_pressure | run_state_history (case-insensitive).",
+                    "context_pressure | run_state_history | tool_spec_budget | run_failure.",
             )
         }
         putJsonObject("sessionId") {
@@ -73,7 +73,7 @@ internal val SESSION_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
             put("type", "string")
             put(
                 "description",
-                "Message id for drill-down. Required for select=message; rejected elsewhere.",
+                "Message id. Required for select=message; optional on run_failure.",
             )
         }
         putJsonObject("limit") {
