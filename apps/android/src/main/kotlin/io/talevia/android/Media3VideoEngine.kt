@@ -64,6 +64,8 @@ class Media3VideoEngine(
     private val pathResolver: MediaPathResolver,
 ) : VideoEngine {
 
+    override val engineId: String = "media3-android"
+
     override suspend fun probe(source: MediaSource): MediaMetadata = withContext(Dispatchers.IO) {
         val path = sourceToPath(source)
         val retriever = MediaMetadataRetriever()

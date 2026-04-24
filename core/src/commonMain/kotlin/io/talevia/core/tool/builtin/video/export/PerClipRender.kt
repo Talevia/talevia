@@ -133,6 +133,7 @@ internal suspend fun runPerClipRender(
                 fades = fades,
                 boundSourceDeepHashes = boundHashes,
                 output = output,
+                engineId = engine.engineId,
             )
             val cached = project.clipRenderCache.findByFingerprint(fingerprint)
             val cachedPath = cached?.mezzaninePath

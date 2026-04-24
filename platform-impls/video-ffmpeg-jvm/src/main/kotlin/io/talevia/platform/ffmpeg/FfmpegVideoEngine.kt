@@ -341,6 +341,8 @@ class FfmpegVideoEngine(
         }
     }.flowOn(ioDispatcher)
 
+    override val engineId: String = "ffmpeg-jvm"
+
     override val supportsPerClipCache: Boolean = true
 
     override suspend fun mezzaninePresent(path: String): Boolean {

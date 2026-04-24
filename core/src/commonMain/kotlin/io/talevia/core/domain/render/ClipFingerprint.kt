@@ -36,15 +36,31 @@ import io.talevia.core.util.fnv1a64Hex
  *    the cache. `outputPath` and `container` are intentionally excluded so
  *    mezzanines survive moving the export target within the same profile.
  *
+ * 5. **Engine id.** Two engines produce byte-different mezzanines at the same
+ *    [OutputSpec] (FFmpeg's x264 ≠ Media3's hardware-accelerated codec ≠
+ *    AVFoundation's AVAssetWriter default), so a FFmpeg-produced `.mp4`
+ *    must NOT serve a Media3 request even when every other axis matches.
+ *    Phase-1 decision (`docs/decisions/2026-04-23-export-incremental-render-phase-1-cache-key-design.md`)
+ *    specified this as the missing axis; pre-engine-id entries in live
+ *    `ClipRenderCache` instances will ghost-miss (fingerprint won't
+ *    recompute to the old value), `mezzaninePresent(path)` catches them
+ *    as the safety net, and the next `gc-render-cache` sweeps the
+ *    orphans off disk. One-time migration cost.
+ *
  * Hash is FNV-1a 64-bit hex (matches [RenderCache]'s fingerprint derivation
  * — the 2^64 space is plenty for per-project entry counts in the dozens to
  * low thousands).
+ *
+ * Segment order is load-bearing: `clip | fades | src | out | engine`. Any
+ * reorder mass-invalidates the cache for zero behaviour change. New axes
+ * append at the end.
  */
 fun clipMezzanineFingerprint(
     clip: Clip.Video,
     fades: TransitionFades?,
     boundSourceDeepHashes: Map<SourceNodeId, String>,
     output: OutputSpec,
+    engineId: String,
 ): String {
     val json = JsonConfig.default
     val canonical = buildString {
@@ -68,6 +84,7 @@ fun clipMezzanineFingerprint(
         append(",vb=").append(output.videoBitrate)
         append(",ac=").append(output.audioCodec)
         append(",ab=").append(output.audioBitrate)
+        append("|engine=").append(engineId)
     }
     return fnv1a64Hex(canonical)
 }

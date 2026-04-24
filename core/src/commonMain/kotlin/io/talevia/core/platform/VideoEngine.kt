@@ -39,6 +39,24 @@ interface VideoEngine {
     suspend fun thumbnail(asset: AssetId, source: MediaSource, time: kotlin.time.Duration): ByteArray
 
     /**
+     * Stable identifier for this engine implementation, folded into
+     * [io.talevia.core.domain.render.clipMezzanineFingerprint] as the 5th key
+     * segment. Two engines produce byte-different mezzanines at the same
+     * [OutputSpec] (different codec tunings: FFmpeg's x264 ≠ Media3's
+     * hardware-accelerated codec ≠ AVFoundation's AVAssetWriter default), so
+     * a FFmpeg-produced `.mp4` must NOT serve a Media3 request even when
+     * every other axis matches. The fingerprint is the source-of-truth for
+     * cache keying; `mezzaninePresent(path)` alone is fragile against
+     * shared filesystems (phase-1 decision, 2026-04-23).
+     *
+     * Default `"unknown"` keeps test fakes unchanged (they get a uniform
+     * bucket; within one test's ProjectStore there's no cross-engine
+     * collision). Production engines MUST override with a stable slug:
+     * `"ffmpeg-jvm"` / `"media3-android"` / `"avfoundation-ios"`.
+     */
+    val engineId: String get() = "unknown"
+
+    /**
      * Whether this engine implements the per-clip mezzanine render path
      * ([renderClip] + [concatMezzanines]) that powers [ExportTool]'s
      * [io.talevia.core.domain.render.ClipRenderCache] optimization (VISION §3.2 —
