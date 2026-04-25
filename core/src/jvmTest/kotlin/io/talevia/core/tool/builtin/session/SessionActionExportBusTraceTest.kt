@@ -51,9 +51,6 @@ class SessionActionExportBusTraceTest {
         TaleviaDb.Schema.create(driver)
         val bus = EventBus()
         val store = SqlDelightSessionStore(TaleviaDb(driver), bus)
-        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val recorder = BusEventTraceRecorder(bus = bus, scope = scope)
-        recorder.awaitReady()
         val ctx = ToolContext(
             sessionId = SessionId(sessionIdValue),
             messageId = MessageId("m"),
@@ -62,7 +59,15 @@ class SessionActionExportBusTraceTest {
             emitPart = { },
             messages = emptyList(),
         )
-        // Seed a session so resolveSessionId has something to point at.
+        // Seed a session BEFORE the recorder subscribes — `store.createSession`
+        // publishes `BusEvent.SessionCreated` on the bus, and we don't want
+        // that lifecycle event polluting the recorder's per-session ring
+        // (the `seedEventCount = 0` test case explicitly asserts the
+        // "no bus events captured" empty-output path; if `createSession`
+        // runs after the recorder subscribes, the SessionCreated event
+        // races into the recorder and breaks the assertion non-
+        // deterministically — flaky failure surfaced by gradle test-
+        // cache invalidation in cycle 148).
         val now = Clock.System.now()
         store.createSession(
             Session(
@@ -73,6 +78,9 @@ class SessionActionExportBusTraceTest {
                 updatedAt = now,
             ),
         )
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val recorder = BusEventTraceRecorder(bus = bus, scope = scope)
+        recorder.awaitReady()
         if (seedEventCount > 0) {
             // Fire session-scoped events the recorder will capture.
             // The recorder's collector runs on Default (different

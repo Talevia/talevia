@@ -235,15 +235,9 @@ class ClipSetActionTool(
     }
 }
 
-private fun JsonObjectBuilder.stringProp(name: String, description: String? = null) = putJsonObject(name) {
-    put("type", "string")
-    if (description != null) put("description", description)
-}
-
-private fun JsonObjectBuilder.numberProp(name: String, description: String? = null) = putJsonObject(name) {
-    put("type", "number")
-    if (description != null) put("description", description)
-}
+// `stringProp` / `numberProp` live in `ClipActionToolSchema.kt` as
+// `internal` — see note there. Two file-private copies in this package
+// silently break Kotlin/Native's `$default`-arg synthesizer.
 
 /** `type=array` + `items=object(properties, required, additionalProperties=false)` — one shape per *Items payload. */
 private fun JsonObjectBuilder.itemArray(

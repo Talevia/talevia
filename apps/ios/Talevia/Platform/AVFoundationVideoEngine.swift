@@ -574,6 +574,22 @@ final class AVFoundationVideoEngine: NSObject, VideoEngine {
         super.init()
     }
 
+    /// Identifier consumed by ExportTool's per-clip render-cache fingerprint
+    /// — different engines must produce mutually-incompatible cache keys so
+    /// switching engines invalidates mezzanines. AVFoundation does not yet
+    /// implement the per-clip incremental render path (CLAUDE.md "Known
+    /// incomplete" — only the FFmpeg engine has `supportsPerClipCache=true`),
+    /// so this id only ever participates in the whole-timeline render path's
+    /// own bookkeeping.
+    var engineId: String { "avfoundation" }
+
+    /// AVFoundation goes through the whole-timeline render path; the per-clip
+    /// `renderClip` / `concatMezzanines` primitives are FFmpeg-only today.
+    /// Returning `false` keeps `ExportTool` on the legacy
+    /// `runWholeTimelineRender` branch, matching the current contract on this
+    /// platform.
+    var supportsPerClipCache: Bool { false }
+
     // swiftlint:disable identifier_name
     func __probe(
         source: MediaSource,
@@ -738,6 +754,59 @@ final class AVFoundationVideoEngine: NSObject, VideoEngine {
                 completionHandler(nil, error)
             }
         }
+    }
+    // swiftlint:enable identifier_name
+
+    // swiftlint:disable identifier_name
+
+    /// Per-clip mezzanine render path — FFmpeg-only today (CLAUDE.md
+    /// "Known incomplete"). `supportsPerClipCache` returns `false` so
+    /// `ExportTool` never reaches this stub on AVFoundation; it exists
+    /// only to satisfy the protocol contract that Kotlin's default
+    /// implementation can't fulfil through the SKIE-bridged ObjC
+    /// surface.
+    func __renderClip(
+        clip: Clip.Video,
+        fades: TransitionFades?,
+        output: OutputSpec,
+        mezzaninePath: String,
+        resolver: (any MediaPathResolver)?,
+        completionHandler: @escaping @Sendable ((any Error)?) -> Void
+    ) {
+        completionHandler(avfError("renderClip not supported by AVFoundationVideoEngine (supportsPerClipCache=false)"))
+    }
+
+    /// Stub for the per-clip cache liveness check — AVFoundation never
+    /// writes mezzanines, so this is unreachable in production. Returns
+    /// `true` so a hypothetical caller treats "no mezzanine work needed"
+    /// as a present cache rather than triggering re-render — matches
+    /// Kotlin's default-true semantics.
+    func __mezzaninePresent(
+        path: String,
+        completionHandler: @escaping @Sendable (KotlinBoolean?, (any Error)?) -> Void
+    ) {
+        completionHandler(KotlinBoolean(value: true), nil)
+    }
+
+    /// Stub for mezzanine deletion — no mezzanines were ever written by
+    /// AVFoundation, so we return `false` (no file went). Matches
+    /// Kotlin's default-false semantics for engines without a per-clip
+    /// path.
+    func __deleteMezzanine(
+        path: String,
+        completionHandler: @escaping @Sendable (KotlinBoolean?, (any Error)?) -> Void
+    ) {
+        completionHandler(KotlinBoolean(value: false), nil)
+    }
+
+    /// Stub — see `renderClip` rationale.
+    func __concatMezzanines(
+        mezzaninePaths: [String],
+        subtitles: [Clip.Text],
+        output: OutputSpec,
+        completionHandler: @escaping @Sendable ((any Error)?) -> Void
+    ) {
+        completionHandler(avfError("concatMezzanines not supported by AVFoundationVideoEngine (supportsPerClipCache=false)"))
     }
     // swiftlint:enable identifier_name
 

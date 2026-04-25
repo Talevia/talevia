@@ -32,6 +32,34 @@ unused one line above.
 **Fix:** rename the ctor param (`rawEnv` / `initialEnv`) so resolution
 is unambiguous. The compiler won't warn about the shadow.
 
+### Two `private fun JsonObjectBuilder.X` extensions in one package break Kotlin/Native's `$default` synthesizer
+`2026-04-25 — debt-ios-swift-catchup-deep-drift`
+
+Two file-private top-level extension functions with the **same exact
+signature** in the same package compile fine on JVM (each gets a
+unique mangled name keyed on file) but break Kotlin/Native at the
+LINK step (not the compile step) with:
+
+```
+e: Compilation failed: kfun:io.talevia.core.tool.builtin.video#stringProp$default__at__kotlinx.serialization.json.JsonObjectBuilder(kotlin.String;kotlin.String?;kotlin.Int){}kotlinx.serialization.json.JsonElement?
+e: java.lang.AssertionError: ...DeclarationsGeneratorVisitor.visitSimpleFunction(LlvmDeclarations.kt:449)
+```
+
+K/N synthesises `<fun>$default` companions for default-args and the
+file-private mangling collides for the synthetic.
+
+**Symptom that hides this from "every-target":** `:core:compileKotlinIosSimulatorArm64`
+type-checks Kotlin source and PASSES. The bug only fires at
+`:core:linkDebugFrameworkIosSimulatorArm64` / `:core:linkDebugFrameworkIosX64`.
+CLAUDE.md's "Every target" command runs `compileKotlinIosSimulatorArm64`
+but NOT the link step → broken framework can sit on main for cycles
+without anyone noticing.
+
+**Fix:** consolidate the duplicate definitions into one location with
+`internal` visibility (e.g. one canonical `JsonObjectBuilder.stringProp`
+in a `*Schema.kt` sibling file, callers in the same package use it
+directly). Or rename one set so the signatures differ.
+
 ### Type-inference cascade: "Cannot infer type for this parameter" often masks a missing import
 `2026-04-23 — tts-provider-fallback-chain`
 

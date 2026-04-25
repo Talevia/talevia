@@ -114,14 +114,14 @@ final class AppContainer {
         registry.register(tool: CompareAigcCandidatesTool(registry: registry))
         registry.register(tool: ReplayLockfileTool(registry: registry, projects: self.projects))
         registry.register(tool: SessionQueryTool(sessions: self.sessions, agentStates: self.agentStates, projects: self.projects, toolRegistry: registry, permissionHistory: self.permissionHistory, busTrace: self.busTrace))
-        registry.register(tool: ExportSessionTool(sessions: self.sessions))
-        registry.register(tool: EstimateSessionTokensTool(sessions: self.sessions))
-        registry.register(tool: ForkSessionTool(sessions: self.sessions))
-        registry.register(tool: SessionActionTool(sessions: self.sessions, clock: clock, projects: self.projects))
-        registry.register(tool: SetSessionSpendCapTool(sessions: self.sessions, clock: clock))
-        registry.register(tool: SetToolEnabledTool(sessions: self.sessions, clock: clock))
+        // First-pass registration without `providers` — the ProviderRegistry
+        // is built FROM this same container in the second pass, so
+        // `action="compact"` is wired below at the second-pass re-register.
+        // `bus` is required for `action="revert"` (publishes
+        // BusEvent.SessionReverted); compact's bus needs land in the
+        // second pass too.
+        registry.register(tool: SessionActionTool(sessions: self.sessions, clock: clock, projects: self.projects, busTrace: self.busTrace, bus: self.bus))
         registry.register(tool: SwitchProjectTool(sessions: self.sessions, projects: self.projects, clock: clock, bus: self.bus))
-        registry.register(tool: RevertSessionTool(sessions: self.sessions, projects: self.projects, bus: self.bus))
         registry.register(tool: ReadPartTool(sessions: self.sessions))
         registry.register(tool: ImportMediaTool(
             engine: self.engine,
@@ -148,13 +148,11 @@ final class AppContainer {
         registry.register(tool: ReorderTracksTool(store: self.projects))
         registry.register(tool: RevertTimelineTool(sessions: self.sessions, projects: self.projects))
         registry.register(tool: ClearTimelineTool(store: self.projects))
+        // `create_from_template` is now `project_action(action="create_from_template")`;
+        // `state` / `validation` / `stale_clips` are now `project_query(select=…)`.
         registry.register(tool: ProjectActionTool(projects: self.projects))
-        registry.register(tool: CreateProjectFromTemplateTool(projects: self.projects))
         registry.register(tool: ListProjectsTool(projects: self.projects))
-        registry.register(tool: GetProjectStateTool(projects: self.projects))
         registry.register(tool: ProjectQueryTool(projects: self.projects))
-        registry.register(tool: ValidateProjectTool(projects: self.projects))
-        registry.register(tool: FindStaleClipsTool(projects: self.projects))
         registry.register(tool: ProjectMaintenanceActionTool(projects: self.projects, engine: self.engine, clock: clock))
         registry.register(tool: ProjectPinActionTool(projects: self.projects))
         registry.register(tool: ProjectSnapshotActionTool(projects: self.projects, clock: clock))
@@ -162,10 +160,10 @@ final class AppContainer {
         registry.register(tool: DiffProjectsTool(projects: self.projects))
         registry.register(tool: ExportProjectTool(projects: self.projects))
         registry.register(tool: ImportProjectFromJsonTool(projects: self.projects))
+        // `describe` is now `source_query(select="describe")`;
+        // `import` is now `source_node_action(action="import")`.
         registry.register(tool: SourceQueryTool(projects: self.projects))
-        registry.register(tool: DescribeSourceNodeTool(projects: self.projects))
         registry.register(tool: DiffSourceNodesTool(projects: self.projects))
-        registry.register(tool: ImportSourceNodeTool(projects: self.projects))
         registry.register(tool: ExportSourceNodeTool(projects: self.projects))
         registry.register(tool: SourceNodeActionTool(projects: self.projects))
         self.tools = registry
@@ -188,7 +186,21 @@ final class AppContainer {
             rateLimitHistory: self.rateLimitHistory,
             engineReadiness: engineReadiness
         ))
-        registry.register(tool: CompactSessionTool(providers: self.providers, sessions: self.sessions, bus: self.bus))
+        // Re-register SessionActionTool with `providers` wired in so
+        // action="compact" dispatches against the live ProviderRegistry.
+        // The first-pass registration above can't pass providers (the
+        // registry is built from this same container in the second pass).
+        // `ToolRegistry.register` is overwrite-by-id so this replaces
+        // the first-pass registration. Mirrors the cycle-147 pattern in
+        // the four Kotlin AppContainers (CLI / Desktop / Server / Android).
+        registry.register(tool: SessionActionTool(
+            sessions: self.sessions,
+            clock: clock,
+            projects: self.projects,
+            busTrace: self.busTrace,
+            bus: self.bus,
+            providers: self.providers
+        ))
 
         // Eager-warm LLM providers so first AIGC dispatch doesn't pay
         // cold-start latency. Best-effort; failures swallowed (logged).
@@ -206,8 +218,11 @@ final class AppContainer {
 /// `resolver` parameter.
 private final class FailingMediaPathResolver: NSObject, MediaPathResolver {
     // swiftlint:disable identifier_name
+    // `AssetId` is a Kotlin `@JvmInline value class` — SKIE erases it to `id`
+    // (Swift `Any`) on the iOS bridge, so the protocol method's parameter
+    // type must be `Any`, not the (no-longer-exposed) `AssetId`.
     func __resolve(
-        assetId: AssetId,
+        assetId: Any,
         completionHandler: @escaping @Sendable (String?, (any Error)?) -> Void
     ) {
         completionHandler(nil, NSError(

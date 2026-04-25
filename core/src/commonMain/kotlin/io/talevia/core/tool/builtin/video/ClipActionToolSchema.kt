@@ -118,13 +118,19 @@ internal val CLIP_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
     put("additionalProperties", false)
 }
 
-/** DSL helpers for the JSON Schema builder — keep the schema block compact. */
-private fun JsonObjectBuilder.stringProp(name: String, description: String? = null) = putJsonObject(name) {
+// DSL helpers for the JSON Schema builders in this package. `internal`
+// (not file-private) because `ClipSetActionTool.kt` also calls them — two
+// file-private definitions of the same `JsonObjectBuilder` extension
+// signature in one package break Kotlin/Native's `$default`-arg
+// synthesizer (compile passes, link fails with an `IrSimpleFunction`
+// AssertionError on iOS framework link). One canonical `internal` copy
+// in this file avoids that collision.
+internal fun JsonObjectBuilder.stringProp(name: String, description: String? = null) = putJsonObject(name) {
     put("type", "string")
     if (description != null) put("description", description)
 }
 
-private fun JsonObjectBuilder.numberProp(name: String, description: String? = null) = putJsonObject(name) {
+internal fun JsonObjectBuilder.numberProp(name: String, description: String? = null) = putJsonObject(name) {
     put("type", "number")
     if (description != null) put("description", description)
 }
