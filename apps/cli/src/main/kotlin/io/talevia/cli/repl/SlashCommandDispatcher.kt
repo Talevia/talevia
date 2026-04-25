@@ -75,6 +75,7 @@ internal class SlashCommandDispatcher(
             }
             "sessions" -> renderer.println(sessionsTable(projectId, currentSession))
             "projects" -> renderer.println(projectsTable())
+            "forks" -> renderer.println(forksTree(currentSession))
             "resume" -> {
                 if (args.isBlank()) {
                     renderer.println(Styles.meta("usage: /resume <id-prefix>"))
@@ -617,6 +618,61 @@ internal class SlashCommandDispatcher(
             return Styles.meta("/summary: failed to decode rows — ${e.message}")
         }
         return formatCompactionSummary(rows)
+    }
+
+    /**
+     * `/forks` shows the active session's lineage — root → … → parent
+     * → CURRENT — followed by direct children fetched via
+     * `SessionStore.listChildSessions`. We walk parentId ourselves
+     * rather than calling `SessionQueryTool(select=ancestors)` because
+     * the slash dispatcher already has direct store access and the
+     * ancestor walk is a tight cycle-safe loop the tool itself only
+     * wraps; round-tripping through tool dispatch + JSON
+     * serialization would be pure overhead. Same shape as
+     * [projectsTable]'s direct-store rendering.
+     *
+     * Cycle-safe: bails on first revisited id. The session row may
+     * vanish mid-walk (race with concurrent delete) — handled by
+     * stopping the chain at the first missing parent rather than
+     * raising.
+     */
+    private suspend fun forksTree(sessionId: SessionId): String {
+        val active = container.sessions.getSession(sessionId)
+            ?: return Styles.meta("/forks: session ${sessionId.value.take(8)} not found")
+
+        // Walk the parent chain child-first → root, then reverse so
+        // the formatter receives root → … → parent in render order.
+        val visited = mutableSetOf(active.id)
+        val chainChildFirst = mutableListOf<ForksTreeNode>()
+        var cursor = active.parentId
+        while (cursor != null) {
+            if (!visited.add(cursor)) break
+            val ancestor = container.sessions.getSession(cursor) ?: break
+            chainChildFirst += ForksTreeNode(
+                id = ancestor.id.value,
+                title = ancestor.title,
+                createdAtEpochMs = ancestor.createdAt.toEpochMilliseconds(),
+                archived = ancestor.archived,
+            )
+            cursor = ancestor.parentId
+        }
+        val ancestors = chainChildFirst.asReversed()
+
+        val children = container.sessions.listChildSessions(active.id).map {
+            ForksTreeNode(
+                id = it.id.value,
+                title = it.title,
+                createdAtEpochMs = it.createdAt.toEpochMilliseconds(),
+                archived = it.archived,
+            )
+        }
+        val current = ForksTreeNode(
+            id = active.id.value,
+            title = active.title,
+            createdAtEpochMs = active.createdAt.toEpochMilliseconds(),
+            archived = active.archived,
+        )
+        return formatForksTree(current, ancestors, children)
     }
 
     private companion object {

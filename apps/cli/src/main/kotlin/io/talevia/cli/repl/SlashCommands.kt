@@ -65,6 +65,11 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         category = SlashCategory.HISTORY,
     ),
     SlashCommandSpec(
+        "/forks",
+        "show the active session's fork tree (ancestors → current → children)",
+        category = SlashCategory.HISTORY,
+    ),
+    SlashCommandSpec(
         "/model",
         "show or override the model id (same provider)",
         argHint = "[<id>]",

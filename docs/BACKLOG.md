@@ -17,7 +17,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **cli-forks-slash-cmd** — 用户在 session 之间 `/fork` 和 `/resume` 跳来跳去，没办法看"这个 session 是从哪个 session fork 来的，又被 fork 出过哪几个分支"。`session_query(select=forks)` 已存在。**方向：** `/forks` slash dispatch 该 select，按时间倒序打 fork 树（祖先 → 当前 → 子分支）；指明哪个是当前 session。Rubric §5.4。Milestone §later.
 - **aigc-result-multi-variant** — `generate_image` / `generate_video` 每次产 1 个 asset；OpenAI / Replicate 都支持 `n` 参数返 N 个候选让人挑。当前 agent 拿不到。**方向：** AIGC tools 接收 `n: Int = 1`，返回 List<assetId>；lockfile 每个变体一条 entry，共享 inputHash + 不同 variantIndex。Permission ASK 一次性覆盖 N 次成本。Rubric §5.2。Milestone §later.
 - **debt-aigc-test-fake-extract-phase-2** — cycle 121 落地了 5 个 `OneShot*Engine` 共享 fakes 并迁移了 5 个最简单 call site；剩 9 个 inline fake 仍未抽（`CountingImageEngine` × 3 callers、`WarmingFakeEngine`、`FailingTtsEngine`、e2e 的 `FullFieldsImageEngine` / `OneShotImageEngine` 等）。**方向：** 加 `CountingImageGenEngine`（call-count-keyed bytes）+ `WarmingMusicGenEngine`（onWarmup callback）+ `FailingTtsEngine` 到 `AigcEngineFakes.kt`，然后扫所有还没迁的 inline。**触发条件：** 出现第 10 个 inline fake（说明 phase 1 没收住），或下次有人改 `*Engine` interface 因为 fake 不一致踩坑。Rubric §5.6。Milestone §later.
 
