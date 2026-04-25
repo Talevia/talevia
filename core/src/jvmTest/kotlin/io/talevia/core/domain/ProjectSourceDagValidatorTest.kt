@@ -54,11 +54,17 @@ class ProjectSourceDagValidatorTest {
     }
 
     @Test fun cycleReported() {
-        // a → b → c → a — cycle of 3 nodes.
-        var source: Source = Source.EMPTY
-        source = source.addNode(node("a", parents = listOf("b")))
-        source = source.addNode(node("b", parents = listOf("c")))
-        source = source.addNode(node("c", parents = listOf("a")))
+        // a → b → c → a — cycle of 3 nodes. Validator runs against
+        // already-corrupted on-disk data (e.g. older build's bundle), so
+        // construct via raw Source(...) to bypass the addNode write
+        // guard introduced in cycle-108.
+        val source = Source(
+            nodes = listOf(
+                node("a", parents = listOf("b")),
+                node("b", parents = listOf("c")),
+                node("c", parents = listOf("a")),
+            ),
+        )
 
         val issues = ProjectSourceDagValidator.validate(source)
         // At least one cycle message. Exact text varies with DFS start node but
@@ -72,10 +78,14 @@ class ProjectSourceDagValidatorTest {
 
     @Test fun multipleIssuesCombined() {
         // Combination: one dangling + one cycle, both should be reported.
-        var source: Source = Source.EMPTY
-        source = source.addNode(node("orphan", parents = listOf("ghost")))
-        source = source.addNode(node("a", parents = listOf("b")))
-        source = source.addNode(node("b", parents = listOf("a")))
+        // Cycle bypasses the write guard via raw Source(...).
+        val source = Source(
+            nodes = listOf(
+                node("orphan", parents = listOf("ghost")),
+                node("a", parents = listOf("b")),
+                node("b", parents = listOf("a")),
+            ),
+        )
 
         val issues = ProjectSourceDagValidator.validate(source)
         assertTrue(issues.any { "missing parent" in it }, issues.toString())
@@ -83,10 +93,8 @@ class ProjectSourceDagValidatorTest {
     }
 
     @Test fun cycleOnlyReportedOncePerDistinctLoop() {
-        // Self-cycle — a → a. Even though DFS could hit it twice (once from
-        // a as start, once if we ever re-enter), report-once set dedupes.
-        var source: Source = Source.EMPTY
-        source = source.addNode(node("a", parents = listOf("a")))
+        // Self-cycle — a → a. Bypass the write guard via raw Source(...).
+        val source = Source(nodes = listOf(node("a", parents = listOf("a"))))
         val issues = ProjectSourceDagValidator.validate(source)
         val cycleMessages = issues.filter { "cycle" in it }
         assertEquals(1, cycleMessages.size, "expected single cycle message, got: $cycleMessages")

@@ -125,11 +125,18 @@ class SourceDagTest {
     }
 
     @Test fun staleIsCycleTolerant() {
-        // Data-layer doesn't forbid cycles — BFS must not hang on them.
-        val src = Source.EMPTY
-            .addNode(leaf("a"))
-            .addNode(child("b", "a", "c")) // b <- a, b <- c
-            .addNode(child("c", "b")) // c <- b  (cycle b↔c)
+        // Mutation guards (cycle-108) reject cycle-introducing writes via
+        // addNode/replaceNode, but on-disk data from older builds can
+        // still carry one — the BFS must not hang on it. Construct the
+        // cycle by raw Source(...) to bypass the write guard, matching
+        // the on-disk-corrupted scenario.
+        val src = Source(
+            nodes = listOf(
+                leaf("a"),
+                child("b", "a", "c"), // b <- a, b <- c
+                child("c", "b"), // c <- b  (cycle b↔c)
+            ),
+        )
         val stale = src.stale(setOf(SourceNodeId("a")))
         assertEquals(setOf(SourceNodeId("a"), SourceNodeId("b"), SourceNodeId("c")), stale)
     }

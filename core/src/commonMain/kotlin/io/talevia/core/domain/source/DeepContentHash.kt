@@ -37,6 +37,7 @@ import io.talevia.core.util.fnv1a64Hex
 fun Source.deepContentHashOf(
     nodeId: SourceNodeId,
     cache: MutableMap<SourceNodeId, String> = mutableMapOf(),
+    inProgress: MutableSet<SourceNodeId> = mutableSetOf(),
 ): String {
     cache[nodeId]?.let { return it }
     val node = byId[nodeId] ?: run {
@@ -48,6 +49,20 @@ fun Source.deepContentHashOf(
         return sentinel
     }
 
+    // Cycle defense: if we're already computing this node's hash up the
+    // call stack, fold a stable "cycle:<id>" sentinel and bail. The
+    // mutation guards in SourceMutations reject cycle-introducing writes,
+    // but on-disk data from older builds (or hand-edited talevia.json)
+    // might still carry one — recursion without this would stack-overflow.
+    if (nodeId in inProgress) {
+        val sentinel = "cycle:${nodeId.value}"
+        // Don't cache the sentinel — the same id under a different
+        // ancestor walk should produce its real hash. Only the current
+        // back-edge sees the sentinel.
+        return sentinel
+    }
+    inProgress += nodeId
+
     // Canonical parent projection: sort by id so list-order permutations
     // don't change the deep hash. The shallow contentHash already stabilises
     // on `parents: List<SourceRef>` order, so a re-ordered parents list
@@ -58,9 +73,10 @@ fun Source.deepContentHashOf(
     val parentHashes = node.parents
         .map { it.nodeId }
         .sortedBy { it.value }
-        .joinToString(separator = "|") { "${it.value}=${deepContentHashOf(it, cache)}" }
+        .joinToString(separator = "|") { "${it.value}=${deepContentHashOf(it, cache, inProgress)}" }
 
     val folded = fnv1a64Hex("shallow=${node.contentHash}|parents=$parentHashes")
     cache[nodeId] = folded
+    inProgress -= nodeId
     return folded
 }

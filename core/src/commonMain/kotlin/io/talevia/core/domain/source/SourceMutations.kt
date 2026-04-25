@@ -23,10 +23,12 @@ fun Source.addNode(node: SourceNode): Source {
         "SourceNode ${node.id.value} already exists; use replaceNode(id, ...) to update"
     }
     val prepared = node.bumpedForWrite()
-    return copy(
+    val next = copy(
         revision = revision + 1,
         nodes = nodes + prepared,
     )
+    next.requireAcyclic("addNode(${node.id.value})")
+    return next
 }
 
 /**
@@ -43,10 +45,12 @@ fun Source.replaceNode(id: SourceNodeId, updater: (SourceNode) -> SourceNode): S
         "replaceNode must not change id: expected ${id.value}, got ${next.id.value}"
     }
     val bumped = next.bumpedForWrite()
-    return copy(
+    val updatedSource = copy(
         revision = revision + 1,
         nodes = nodes.toMutableList().also { it[index] = bumped },
     )
+    updatedSource.requireAcyclic("replaceNode(${id.value})")
+    return updatedSource
 }
 
 /**
@@ -71,3 +75,20 @@ private fun SourceNode.bumpedForWrite(): SourceNode = copy(
     revision = revision + 1,
     contentHash = contentHashOf(kind, body, parents),
 )
+
+/**
+ * Throws [IllegalStateException] if [Source.cycleAt] finds a cycle.
+ * Intended to run AFTER applying a mutation so the error message
+ * names the operation that introduced it. Cycles in the parent-edge
+ * DAG break [deepContentHashOf]'s recursion and must never land on
+ * disk.
+ */
+private fun Source.requireAcyclic(operation: String) {
+    val cycle = cycleAt() ?: return
+    val cycleStr = cycle.joinToString(" → ") { it.value }
+    error(
+        "$operation would introduce a cycle in the Source DAG: $cycleStr. " +
+            "Source must remain acyclic — pick a different parent set, or " +
+            "remove the offending edge first.",
+    )
+}
