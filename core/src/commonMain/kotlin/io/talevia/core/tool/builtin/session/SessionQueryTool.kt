@@ -184,46 +184,44 @@ class SessionQueryTool(
 
     override val id: String = "session_query"
     override val helpText: String =
-        "Unified read-only query over sessions + messages + parts + forks. Pick one `select`:\n" +
+        "Unified read-only query over sessions + messages + parts + forks. " +
+            "All selects require sessionId except sessions / tool_spec_budget; " +
+            "select=message uses messageId instead. Filter-on-wrong-select fails loud. " +
+            "Common: limit (1..1000, default 100), offset. Picks one `select`:\n" +
             "  • sessions — filter: projectId, includeArchived.\n" +
-            "  • messages — filter: role (user|assistant). requires sessionId.\n" +
+            "  • messages — filter: role (user|assistant).\n" +
             "  • parts — filter: kind (text|reasoning|tool|media|timeline-snapshot|" +
-            "render-progress|step-start|step-finish|compaction|todos), includeCompacted. " +
-            "requires sessionId.\n" +
-            "  • forks — child sessions. requires sessionId.\n" +
-            "  • ancestors — parent chain. requires sessionId.\n" +
-            "  • tool_calls — filter: toolId, includeCompacted. requires sessionId.\n" +
-            "  • compactions — Part.Compaction aggregate. requires sessionId.\n" +
+            "render-progress|step-start|step-finish|compaction|todos), includeCompacted.\n" +
+            "  • forks — child sessions.\n" +
+            "  • ancestors — parent chain.\n" +
+            "  • tool_calls — filter: toolId, includeCompacted.\n" +
+            "  • compactions — Part.Compaction aggregate.\n" +
             "  • status — (state, cause?, neverRan, estimatedTokens, compactionThreshold, " +
-            "percent); state: idle|generating|awaiting_tool|compacting|cancelled|failed. " +
-            "requires sessionId.\n" +
-            "  • session_metadata — single-row drill-down. requires sessionId.\n" +
-            "  • message — single-row + parts summary. requires messageId.\n" +
+            "percent); state: idle|generating|awaiting_tool|compacting|cancelled|failed.\n" +
+            "  • session_metadata — single-row drill-down.\n" +
+            "  • message — single-row + parts summary.\n" +
             "  • spend — single-row AIGC cost.\n" +
             "  • spend_summary — per-provider roll-up.\n" +
             "  • context_pressure — (currentEstimate, threshold, ratio, marginTokens, " +
-            "overThreshold, messageCount). requires sessionId.\n" +
+            "overThreshold, messageCount).\n" +
             "  • tool_spec_budget — registry-wide (toolCount, estimatedTokens, specBytes, " +
-            "topByTokens[5]). sessionId rejected.\n" +
-            "  • run_failure — failed-turn post-mortem. requires sessionId; optional messageId.\n" +
+            "topByTokens[5]).\n" +
+            "  • run_failure — failed-turn post-mortem; optional messageId.\n" +
             "  • fallback_history — turns with ≥1 fallback hop {messageId, createdAtEpochMs, " +
-            "model, finish, chain}. requires sessionId; optional messageId.\n" +
+            "model, finish, chain}; optional messageId.\n" +
             "  • cancellation_history — finish=CANCELLED turns {messageId, createdAtEpochMs, " +
-            "model, reason, inFlightToolCallCount, inFlightToolIds}. requires sessionId; " +
-            "optional messageId.\n" +
+            "model, reason, inFlightToolCallCount, inFlightToolIds}; optional messageId.\n" +
             "  • permission_history — Asked↔Replied round-trips {requestId, permission, " +
-            "patterns, decision, accepted?, remembered?, askedEpochMs, repliedEpochMs}. " +
-            "requires sessionId.\n" +
-            "  • permission_rules — {permission, pattern, action, source}. requires sessionId.\n" +
+            "patterns, decision, accepted?, remembered?, askedEpochMs, repliedEpochMs}.\n" +
+            "  • permission_rules — {permission, pattern, action, source}.\n" +
             "  • preflight_summary — single-row plan-time snapshot collapsing context_pressure + " +
-            "fallback + cancel + retry + pendingPermissionAsks. requires sessionId.\n" +
+            "fallback + cancel + retry + pendingPermissionAsks.\n" +
             "  • recap — single-row session orientation: turnCount, totalTokensIn/Out, " +
-            "totalCostCents, distinctToolsUsed, lastModelId, firstAt/lastAt. requires sessionId.\n" +
+            "totalCostCents, distinctToolsUsed, lastModelId, firstAt/lastAt.\n" +
             "  • step_history — per-step timeline {model, finishReason, tokens, toolCallCount, " +
-            "elapsedMs}. sessionId; optional messageId.\n" +
+            "elapsedMs}; optional messageId.\n" +
             "  • active_run_summary — latest turn stats (state, elapsedMs, tokensIn/Out, " +
-            "toolCallCount, compactionsInRun). requires sessionId.\n" +
-            "Common: limit (1..1000, default 100), offset. Filter-on-wrong-select fails loud."
+            "toolCallCount, compactionsInRun)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.read")

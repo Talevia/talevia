@@ -74,154 +74,110 @@ internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
         }
         putJsonObject("trackKind") {
             put("type", "string")
-            put(
-                "description",
-                "video|audio|subtitle|effect (case-insensitive). Applies to " +
-                    "select=tracks and select=timeline_clips.",
-            )
+            put("description", "video|audio|subtitle|effect. tracks/timeline_clips.")
         }
         putJsonObject("trackId") {
             put("type", "string")
-            put("description", "Exact track id. select=timeline_clips only.")
+            put("description", "Exact track id. timeline_clips only.")
         }
         putJsonObject("fromSeconds") {
             put("type", "number")
-            put("description", "Time window lower bound (seconds). select=timeline_clips only.")
+            put("description", "Window lower bound (s). timeline_clips only.")
         }
         putJsonObject("toSeconds") {
             put("type", "number")
-            put("description", "Time window upper bound (seconds). select=timeline_clips only.")
+            put("description", "Window upper bound (s). timeline_clips only.")
         }
         putJsonObject("onlyNonEmpty") {
             put("type", "boolean")
-            put("description", "Skip tracks whose clips list is empty. select=tracks only.")
+            put("description", "Skip empty tracks. tracks only.")
         }
         putJsonObject("onlySourceBound") {
             put("type", "boolean")
-            put(
-                "description",
-                "Keep only clips with non-empty sourceBinding (AIGC-derived). " +
-                    "select=timeline_clips only.",
-            )
+            put("description", "Keep clips with non-empty sourceBinding (AIGC). timeline_clips only.")
         }
         putJsonObject("onlyPinned") {
             put("type", "boolean")
             put(
                 "description",
-                "Pin filter. select=timeline_clips: true=clips pinned / false=clips NOT pinned. " +
-                    "select=lockfile_entries: true=only pinned entries.",
+                "Pin filter. timeline_clips: true=pinned / false=NOT pinned. " +
+                    "lockfile_entries: true=only pinned.",
             )
         }
         putJsonObject("kind") {
             put("type", "string")
-            put("description", "video|audio|image|all (default all). select=assets only.")
+            put("description", "video|audio|image|all (default all). assets only.")
         }
         putJsonObject("onlyUnused") {
             put("type", "boolean")
-            put("description", "Keep only assets with zero clip references. select=assets only.")
+            put("description", "Keep assets with zero clip refs. assets only.")
         }
         putJsonObject("onlyReferenced") {
             put("type", "boolean")
             put(
                 "description",
-                "true = keep only assets referenced by clip/filter/lockfile. " +
-                    "false = keep only un-referenced (safe-to-delete). select=assets only.",
+                "true=referenced by clip/filter/lockfile / false=safe-to-delete. assets only.",
             )
         }
         putJsonObject("onlyOrphaned") {
             put("type", "boolean")
-            put(
-                "description",
-                "Keep only transitions whose flanking video clips are both missing " +
-                    "(GC candidates). select=transitions only.",
-            )
+            put("description", "Transitions whose flanking video clips are both missing. transitions only.")
         }
         putJsonObject("toolId") {
             put("type", "string")
-            put(
-                "description",
-                "Filter lockfile entries by producing tool id (e.g. generate_image, " +
-                    "synthesize_speech). select=lockfile_entries only.",
-            )
+            put("description", "Producing tool id (e.g. generate_image). lockfile_entries only.")
         }
         putJsonObject("sinceEpochMs") {
             put("type", "integer")
-            put(
-                "description",
-                "Keep lockfile entries with createdAtEpochMs >= sinceEpochMs. " +
-                    "select=lockfile_entries only.",
-            )
+            put("description", "createdAtEpochMs >= sinceEpochMs. lockfile_entries only.")
         }
         putJsonObject("maxAgeDays") {
             put("type", "integer")
-            put(
-                "description",
-                "Drop snapshots captured strictly earlier than now - maxAgeDays. " +
-                    "select=snapshots only.",
-            )
+            put("description", "Drop snapshots older than now - maxAgeDays. snapshots only.")
         }
         putJsonObject("assetId") {
             put("type", "string")
-            put(
-                "description",
-                "Required for select=clips_for_asset. Asset id to look up clip references for.",
-            )
+            put("description", "Required for clips_for_asset.")
         }
         putJsonObject("sourceNodeId") {
             put("type", "string")
             put(
                 "description",
-                "Source node id. Required for select=clips_for_source and " +
-                    "select=consistency_propagation; optional filter for " +
-                    "select=lockfile_entries (\"this character's generation history\").",
+                "Required for clips_for_source / consistency_propagation; " +
+                    "optional filter on lockfile_entries.",
             )
         }
         putJsonObject("clipId") {
             put("type", "string")
-            put("description", "Required for select=clip. Clip id for drill-down.")
+            put("description", "Required for clip drill-down.")
         }
         putJsonObject("inputHash") {
             put("type", "string")
-            put(
-                "description",
-                "Required for select=lockfile_entry. Lockfile entry inputHash for drill-down.",
-            )
+            put("description", "Required for lockfile_entry drill-down.")
         }
         putJsonObject("sortBy") {
             put("type", "string")
-            put(
-                "description",
-                "Ordering applied before offset+limit. Accepted values depend on select; " +
-                    "see the tool description.",
-            )
+            put("description", "Per-select ordering applied before offset+limit. See helpText.")
         }
         putJsonObject("limit") {
             put("type", "integer")
-            put(
-                "description",
-                "Max rows (default 100, clamped to [1, 500]). Applied after filter+sort+offset.",
-            )
+            put("description", "Max rows (default 100, [1..500]).")
         }
         putJsonObject("offset") {
             put("type", "integer")
-            put("description", "Skip N rows after filter+sort (default 0).")
+            put("description", "Skip N rows (default 0).")
         }
         putJsonObject("fromSnapshotId") {
             put("type", "string")
             put(
                 "description",
-                "\"from\" side of a timeline diff. Null = current live state. " +
-                    "select=timeline_diff only; at least one of (fromSnapshotId, toSnapshotId) " +
-                    "must be non-null.",
+                "\"from\" side of timeline_diff. Null = live state. " +
+                    "≥1 of (fromSnapshotId, toSnapshotId) required.",
             )
         }
         putJsonObject("toSnapshotId") {
             put("type", "string")
-            put(
-                "description",
-                "\"to\" side of a timeline diff. Null = current live state. " +
-                    "select=timeline_diff only.",
-            )
+            put("description", "\"to\" side of timeline_diff. Null = live state.")
         }
     }
     put("required", JsonArray(listOf(JsonPrimitive("select"))))

@@ -144,27 +144,21 @@ class ProviderQueryTool(
     override val id: String = "provider_query"
     override val helpText: String =
         "Unified read-only query over the LLM provider registry. Pick one `select`:\n" +
-            "  • providers — enumerate configured providers + mark default. No HTTP.\n" +
-            "  • models — fetch one provider's model catalog (contextWindow, supportsTools, " +
-            "supportsThinking, supportsImages). requires providerId. Hits /models endpoint; " +
-            "failures surface via Output.error with empty rows.\n" +
-            "  • cost_compare — priced (provider, model) pairs + cents-per-1k rates + rolled-up " +
-            "estimatedCostCents for (requestedInputTokens, requestedOutputTokens). " +
-            "Sorted ascending; rows.first() is cheapest. Local snapshot table; no HTTP.\n" +
-            "  • warmup_stats — per-provider cold-start latency over the rolling window. Rows: " +
-            "{providerId, count, p50Ms, p95Ms, p99Ms, minMs, maxMs, latestMs}. Sourced from " +
-            "BusEvent.ProviderWarmup(Starting→Ready) pairings since process start. Providers " +
-            "without a warmup/streaming split (e.g. synchronous OpenAI image endpoints) are " +
-            "absent from the result. No filters; no HTTP.\n" +
+            "  • providers — list configured providers + mark default. No HTTP.\n" +
+            "  • models — one provider's model catalog (contextWindow, supportsTools/Thinking/" +
+            "Images). Requires providerId. Hits /models; failures surface via Output.error.\n" +
+            "  • cost_compare — priced (provider, model) pairs + cents-per-1k + estimatedCostCents " +
+            "for (requestedInputTokens, requestedOutputTokens). Sorted asc; rows.first() cheapest.\n" +
+            "  • warmup_stats — per-provider cold-start latency rolling window. Rows: " +
+            "{providerId, count, p50/p95/p99/min/max/latestMs}. Sourced from " +
+            "BusEvent.ProviderWarmup pairings since process start.\n" +
             "  • cost_history — most-recent N priced AIGC dispatches across every project. " +
             "Rows: {toolId, providerId, modelId, costCents, projectId, sessionId, " +
-            "originatingMessageId, assetId, createdAtEpochMs}. Sourced from each project's " +
-            "lockfile.entries; entries without costCents are filtered out. Filters: limit " +
-            "(default 50, max 500), sinceEpochMs. Sorted by createdAtEpochMs desc.\n" +
-            "  • aigc_cost_estimate — plan-time cost estimate for one AIGC dispatch. Requires " +
-            "(toolId, providerId, modelId, inputs); inputs match the tool's baseInputs (width/" +
-            "height, text, durationSeconds…). Row: {…, cents, priceBasis, pricedInputs}. cents=" +
-            "null = no rule matched (≠ free). Use before dispatch; cost_history for post-hoc.\n" +
+            "originatingMessageId, assetId, createdAtEpochMs}. Filters: limit (default 50, " +
+            "max 500), sinceEpochMs. Sorted by createdAtEpochMs desc.\n" +
+            "  • aigc_cost_estimate — plan-time cost estimate. Requires (toolId, providerId, " +
+            "modelId, inputs); inputs mirror the tool's baseInputs. Row: {…, cents, priceBasis, " +
+            "pricedInputs}. cents=null = no rule matched (≠ free).\n" +
             "  • rate_limit_history — per-provider 429 retry summary {providerId, count, " +
             "firstEpochMs, lastEpochMs, totalWaitMs, mostRecentReason}."
     override val inputSerializer: KSerializer<Input> = serializer()

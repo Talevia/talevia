@@ -110,16 +110,22 @@ class ToolSpecBudgetGateTest {
      *     offenders (project_query 1481→1269, session_query 1344→1071,
      *     clip_action 1324→1177). Saved 632 tokens / 2.7%; ~0.04%
      *     buffer (8 tokens).
-     *   - 22_600 (this cycle, cycle-91): 22_543 measured. +43 over
-     *     prior 22_500 ceiling; load-bearing addition of
-     *     `provider_query(select=rate_limit_history)` per backlog
-     *     `provider-query-rate-limit-history`. Surfaces per-provider
-     *     429 retry counts from a new bus aggregator
-     *     (RateLimitHistoryRecorder) — ops dashboards / cost-aware
-     *     operators see "I'm hitting Anthropic's tier-1 cap N times
-     *     today" without tailing the bus. helpText already trimmed
-     *     to a one-line schema-only signature; remaining cost is the
-     *     row's 6 field names which are the answer. ~0.25% buffer.
+     *   - 22_600 (cycle-91): 22_543 measured. +43 over prior 22_500
+     *     ceiling; load-bearing addition of
+     *     `provider_query(select=rate_limit_history)`. Surfaces
+     *     per-provider 429 retry counts from a new bus aggregator
+     *     (RateLimitHistoryRecorder).
+     *   - 22_000 (this cycle, cycle-98): 21_901 measured — REACHED
+     *     `debt-tool-spec-budget-trim-22000` target. Trim recipe
+     *     replicated against this cycle's top-4 offenders:
+     *     project_query 1269→1076 (schema-description compression),
+     *     session_query 1118→1047 (collapsed "requires sessionId"
+     *     postfix on every select line into a single preamble),
+     *     clip_action 1177→1039 (per-verb itemArray descriptions
+     *     stripped of "; at least one" + verbose prose), source_query
+     *     1061→919 (same compression as project_query), provider_query
+     *     775→737 (helpText prose tightened). Saved 665 tokens / 2.9%;
+     *     ~0.45% buffer (99 tokens).
      *   - 20_000 (next target, R.6 P0 threshold): requires either
      *     deleting ~10 more tools or moving per-action details to a
      *     `list_tools(select=tool_detail)` sidecar so the live spec
@@ -134,7 +140,7 @@ class ToolSpecBudgetGateTest {
      * the number increased — rationale lives in the commit body since
      * docs/decisions/ was removed (commit ae213b05).
      */
-    private val CEILING_TOKENS: Int = 22_600
+    private val CEILING_TOKENS: Int = 22_000
 
     @Test
     fun registeredToolSpecsFitWithinCeiling() {

@@ -35,97 +35,82 @@ internal val CLIP_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
             )
         }
         putJsonObject("addItems") {
-            itemArray("Required when action=add. Clips to append; at least one.", required = listOf("assetId")) {
+            itemArray("action=add. Clips to append.", required = listOf("assetId")) {
                 stringProp("assetId")
-                numberProp("timelineStartSeconds", "If omitted, append after the last clip on the target track.")
-                numberProp("sourceStartSeconds", "Trim offset into the source media.")
-                numberProp("durationSeconds", "If omitted, use the asset's full remaining duration.")
-                stringProp("trackId", "Optional track; defaults to the first Video track (created if absent).")
+                numberProp("timelineStartSeconds", "Default: append after last clip on track.")
+                numberProp("sourceStartSeconds", "Source-trim offset (s).")
+                numberProp("durationSeconds", "Default: asset's remaining duration.")
+                stringProp("trackId", "Default: first Video track (created if absent).")
             }
         }
         putJsonObject("clipIds") {
             put("type", "array")
-            put("description", "Required when action=remove. Clip ids to delete; at least one.")
+            put("description", "action=remove. Clip ids to delete.")
             putJsonObject("items") { put("type", "string") }
         }
         putJsonObject("ripple") {
             put("type", "boolean")
-            put("description", "action=remove only. Close the gap on each removed clip's track. Default false.")
+            put("description", "action=remove. Close the gap on each removed clip's track. Default false.")
         }
         putJsonObject("duplicateItems") {
             itemArray(
-                "Required when action=duplicate. Clones to produce; at least one.",
+                "action=duplicate. Clones to produce.",
                 required = listOf("clipId", "timelineStartSeconds"),
             ) {
                 stringProp("clipId")
-                numberProp("timelineStartSeconds", "New timeline start position in seconds (must be >= 0).")
-                stringProp("trackId", "Optional target track id of the same kind. Defaults to the source clip's track.")
+                numberProp("timelineStartSeconds", "Timeline start (s, >= 0).")
+                stringProp("trackId", "Optional same-kind target. Default: source's track.")
             }
         }
         putJsonObject("moveItems") {
             itemArray(
-                "Required when action=move. Reposition operations; at least one.",
+                "action=move. Reposition operations.",
                 required = listOf("clipId"),
             ) {
                 stringProp("clipId")
                 numberProp(
                     "timelineStartSeconds",
-                    "New timeline start position in seconds (>= 0). Omit to keep current (valid only when toTrackId is set).",
+                    "Timeline start (s, >= 0). Omit only when toTrackId is set.",
                 )
-                stringProp(
-                    "toTrackId",
-                    "Optional target track id. Omit for same-track reposition. Must be same kind as the clip.",
-                )
+                stringProp("toTrackId", "Optional same-kind target. Omit for same-track reposition.")
             }
         }
         putJsonObject("splitItems") {
             itemArray(
-                "Required when action=split. Split operations; at least one.",
+                "action=split. Split operations.",
                 required = listOf("clipId", "atTimelineSeconds"),
             ) {
                 stringProp("clipId")
-                numberProp(
-                    "atTimelineSeconds",
-                    "Absolute timeline position to split at (strictly between clip's start and end).",
-                )
+                numberProp("atTimelineSeconds", "Timeline split point (strictly inside the clip).")
             }
         }
         putJsonObject("trimItems") {
             itemArray(
-                "Required when action=trim. Trim operations; at least one.",
+                "action=trim. Trim operations.",
                 required = listOf("clipId"),
             ) {
                 stringProp("clipId")
-                numberProp(
-                    "newSourceStartSeconds",
-                    "New trim offset into the source media (>= 0). Omit to keep current.",
-                )
-                numberProp(
-                    "newDurationSeconds",
-                    "New duration in seconds (> 0). Applied to both timeRange and sourceRange. Omit to keep current.",
-                )
+                numberProp("newSourceStartSeconds", "Source-trim offset (s, >= 0). Omit to keep.")
+                numberProp("newDurationSeconds", "New duration (s, > 0); rewrites timeRange + sourceRange. Omit to keep.")
             }
         }
         putJsonObject("replaceItems") {
             itemArray(
-                "Required when action=replace. Clip → new-asset swaps; at least one.",
+                "action=replace. Clip → new-asset swaps.",
                 required = listOf("clipId", "newAssetId"),
             ) {
                 stringProp("clipId")
-                stringProp(
-                    "newAssetId",
-                    "Replacement asset; must already exist in the project's asset catalog.",
-                )
+                stringProp("newAssetId", "Must already be in the project's asset catalog.")
             }
         }
         putJsonObject("fadeItems") {
             itemArray(
-                "Required when action=fade. Audio-clip fade envelope edits; at least one.",
+                "action=fade. Audio-clip fade envelope edits.",
                 required = listOf("clipId"),
             ) {
                 stringProp("clipId")
-                numberProp("fadeInSeconds", "Fade-in ramp seconds. 0.0 disables. Omit to keep current.")
-                numberProp("fadeOutSeconds", "Fade-out ramp seconds. 0.0 disables. Omit to keep current.")
+                numberProp("fadeInSeconds", "Fade-in ramp (s). 0.0 disables. Omit to keep.")
+                numberProp("fadeOutSeconds", "Fade-out ramp (s). 0.0 disables. Omit to keep.")
             }
         }
     }
