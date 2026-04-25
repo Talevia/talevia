@@ -81,7 +81,18 @@ final class AppContainer {
         self.rateLimitHistory = RateLimitHistoryRecorder.companion.withSupervisor(bus: self.bus)
         let clock = ClockSystem.shared
         let json = JsonConfig.shared.default
-        self.sessions = SqlDelightSessionStore(db: self.db, bus: self.bus, clock: clock, json: json)
+        self.sessions = SqlDelightSessionStore(
+            db: self.db,
+            bus: self.bus,
+            clock: clock,
+            json: json,
+            // SKIE doesn't translate Kotlin default parameters into Swift
+            // initializer defaults — the Kotlin `maxMessages: Int =
+            // DEFAULT_MAX_MESSAGES` ctor param shows up as required from
+            // Swift. Pass the same default explicitly. (See cycle-149
+            // ENGINEERING_NOTES "SKIE bridging quirks".)
+            maxMessages: SqlDelightSessionStore.companion.DEFAULT_MAX_MESSAGES
+        )
         self.permissionHistory = PermissionHistoryRecorder.companion.withSupervisor(bus: self.bus, store: self.sessions)
         self.busTrace = BusEventTraceRecorder.companion.withSupervisor(bus: self.bus)
 

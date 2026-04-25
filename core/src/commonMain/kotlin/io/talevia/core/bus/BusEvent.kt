@@ -26,6 +26,26 @@ sealed interface BusEvent {
     data class SessionUpdated(override val sessionId: SessionId) : SessionEvent
     data class SessionDeleted(override val sessionId: SessionId) : SessionEvent
 
+    /**
+     * Published by [io.talevia.core.session.SessionStore.appendMessage] when
+     * the post-append message count would exceed the configured per-store
+     * `maxMessages` ceiling — the bound that backstops the
+     * `Compactor`-trigger-threshold gate when compaction can't keep up
+     * (rapid-fire tool outputs, model that throws on too-large context
+     * the compactor can't reduce enough). The event fires alongside a
+     * thrown `IllegalStateException` from `appendMessage` so UIs can
+     * surface "this session is full, fork or revert" without polling.
+     *
+     * `messageCount` is the count BEFORE the rejected append — i.e. the
+     * current size; `cap` is the configured ceiling that triggered the
+     * rejection. `cap == messageCount` is the typical trip.
+     */
+    data class SessionFull(
+        override val sessionId: SessionId,
+        val messageCount: Int,
+        val cap: Int,
+    ) : SessionEvent
+
     data class MessageUpdated(
         override val sessionId: SessionId,
         val messageId: MessageId,

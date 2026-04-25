@@ -32,7 +32,39 @@ class SqlDelightSessionStore(
     private val bus: EventBus,
     private val clock: Clock = Clock.System,
     private val json: Json = JsonConfig.default,
+    /**
+     * Hard upper bound on `Session.messages.size` — the safety net behind
+     * the [io.talevia.core.compaction.Compactor]'s soft-trigger threshold
+     * (which fires around 85 % of the per-model context budget).
+     *
+     * The compactor handles the common case ("session is approaching
+     * context limit, summarise + prune"), but it can fall behind in two
+     * pathological shapes:
+     *  - Tool outputs accumulate faster than the compactor's per-turn
+     *    cadence (rapid AIGC dispatch, log-tailing tools, batched
+     *    bulk imports).
+     *  - The model's context budget is small enough that the
+     *    compactor's protected last-N user turns + summary part still
+     *    overflows; the compactor's `Skipped("nothing to prune")`
+     *    branch fires and the message-count just keeps climbing.
+     *
+     * Without an upper bound, both shapes degrade silently into
+     * memory + UI freezes. Hitting [maxMessages] throws an
+     * [IllegalStateException] from [appendMessage] AND publishes a
+     * [BusEvent.SessionFull] event so subscribed UIs can surface
+     * "session is full — fork or revert" without polling.
+     *
+     * Default 1000 is intentionally generous: typical sessions stay
+     * under 200 messages, so the cap mostly catches runaway / abusive
+     * scenarios. Tune via the ctor in test rigs that exercise the
+     * boundary, or in containers with stricter resource budgets.
+     */
+    private val maxMessages: Int = DEFAULT_MAX_MESSAGES,
 ) : SessionStore {
+
+    init {
+        require(maxMessages > 0) { "maxMessages must be positive (got $maxMessages)" }
+    }
 
     override suspend fun createSession(session: Session) {
         writeSession(session)
@@ -93,6 +125,24 @@ class SqlDelightSessionStore(
             .map { json.decodeFromString(Session.serializer(), it.data_) }
 
     override suspend fun appendMessage(message: Message) {
+        // Hard upper bound check (cycle 155 — `bound-session-history-hard-cap`):
+        // count the existing messages in this session BEFORE the insert; if at
+        // or above the configured ceiling, reject + publish so UIs can surface
+        // the boundary. Compactor's soft-trigger threshold is the common-case
+        // gate (fires around 85 % of the per-model context budget); this hard
+        // cap is the safety net for shapes the compactor can't keep up with
+        // (rapid-fire tool outputs, tiny context budgets where compactor's
+        // `Skipped("nothing to prune")` branch fires repeatedly).
+        val current = db.messagesQueries.countBySession(message.sessionId.value).executeAsOne()
+        if (current >= maxMessages) {
+            bus.publish(BusEvent.SessionFull(message.sessionId, current.toInt(), maxMessages))
+            error(
+                "Session ${message.sessionId.value} hit the appendMessage cap " +
+                    "(messageCount=$current, cap=$maxMessages). Compactor's soft trigger " +
+                    "fires earlier; this hard cap fires when compaction can't keep up. " +
+                    "Fork the session or revert older turns to reclaim space.",
+            )
+        }
         db.messagesQueries.insert(
             id = message.id.value,
             session_id = message.sessionId.value,
@@ -383,5 +433,17 @@ class SqlDelightSessionStore(
         is Part.Compaction -> "compaction"
         is Part.Todos -> "todos"
         is Part.Plan -> "plan"
+    }
+
+    companion object {
+        /**
+         * Default ceiling for `Session.messages.size` enforced by
+         * [appendMessage] when the ctor's `maxMessages` is left unset.
+         * Generous (1000) so typical sessions stay well under it; the
+         * cap catches runaway / abusive shapes (rapid-fire tool outputs,
+         * compactor falling behind on tiny-context-budget models). Tune
+         * per-test or per-container via the ctor.
+         */
+        const val DEFAULT_MAX_MESSAGES: Int = 1000
     }
 }

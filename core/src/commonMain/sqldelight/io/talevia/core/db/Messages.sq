@@ -23,6 +23,9 @@ SELECT * FROM Messages WHERE id = ?;
 selectBySession:
 SELECT * FROM Messages WHERE session_id = ? ORDER BY time_created ASC, id ASC;
 
+countBySession:
+SELECT COUNT(*) FROM Messages WHERE session_id = ?;
+
 deleteBySession:
 DELETE FROM Messages WHERE session_id = ?;
 

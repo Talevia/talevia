@@ -75,6 +75,7 @@ internal fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.SessionCreated -> "session.created"
     is BusEvent.SessionUpdated -> "session.updated"
     is BusEvent.SessionDeleted -> "session.deleted"
+    is BusEvent.SessionFull -> "session.full"
     is BusEvent.SessionCancelled -> "session.cancelled"
     is BusEvent.SessionCancelRequested -> "session.cancel.requested"
     is BusEvent.MessageUpdated -> "message.updated"
@@ -193,6 +194,13 @@ data class BusEventDto(
             is BusEvent.SessionCreated -> BusEventDto("session.created", e.sessionId.value)
             is BusEvent.SessionUpdated -> BusEventDto("session.updated", e.sessionId.value)
             is BusEvent.SessionDeleted -> BusEventDto("session.deleted", e.sessionId.value)
+            is BusEvent.SessionFull -> BusEventDto(
+                "session.full", e.sessionId.value,
+                // No bespoke DTO field for cap/messageCount; the SSE consumer can
+                // re-fetch session_query if needed. Hold the line on field bloat
+                // — adding per-event fields here is the easy mistake that turns
+                // BusEventDto into a kitchen sink.
+            )
             is BusEvent.SessionCancelled -> BusEventDto("session.cancelled", e.sessionId.value)
             is BusEvent.SessionCancelRequested -> BusEventDto("session.cancel.requested", e.sessionId.value)
             is BusEvent.MessageUpdated -> BusEventDto("message.updated", e.sessionId.value, messageId = e.messageId.value)
