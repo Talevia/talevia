@@ -98,15 +98,25 @@ class ToolSpecBudgetGateTest {
      *     answers "how many character_refs are unused?" in one query
      *     instead of an O(n) walk through `consistency_propagation`.
      *     ~0.2% buffer.
-     *   - 23_200 (this cycle, cycle-83): 23_124 measured. +24 tokens
-     *     above prior ceiling; load-bearing additions of
+     *   - 23_200 (cycle-83): 23_124 measured. +24 tokens above prior
+     *     ceiling; load-bearing additions of
      *     `session_query(select=preflight_summary)` (cycle-82) +
-     *     `session_query(select=step_history)` (this cycle). preflight
+     *     `session_query(select=step_history)` (cycle-83). preflight
      *     consolidates 4 query lanes into one row to cut per-plan tool
-     *     calls; step_history exposes per-step (model/finish/tokens/
-     *     toolCallCount/elapsedMs) timeline previously only
-     *     reconstructable from the parts select. helpText for both
-     *     trimmed before bumping. ~0.3% buffer.
+     *     calls; step_history exposes per-step timeline previously only
+     *     reconstructable from the parts select. ~0.3% buffer.
+     *   - 22_500 (this cycle, cycle-84): 22_492 measured — REACHED
+     *     cycle-31 P0 target. Trim recipe replicated against this
+     *     cycle's top-3 offenders (project_query 1481→1269,
+     *     session_query 1344→1071, clip_action 1324→1177): drop
+     *     ordering / sort-by elaborations, drop redundant "requires
+     *     sessionId" repetition where it's already implied,
+     *     compact per-action elaborations on clip_action verbs (the
+     *     row schemas + dispatch-time validation already stop typos
+     *     loud). Saved 632 tokens / 2.7%; ~0.04% buffer (8 tokens).
+     *     Tightening below 22_500 needs a different lever — either
+     *     consolidating tools or moving per-action detail to a
+     *     `list_tools(select=tool_detail)` sidecar.
      *   - 20_000 (next target, R.6 P0 threshold): requires either
      *     deleting ~10 more tools or moving per-action details to a
      *     `list_tools(select=tool_detail)` sidecar so the live spec
@@ -121,7 +131,7 @@ class ToolSpecBudgetGateTest {
      * the number increased — rationale lives in the commit body since
      * docs/decisions/ was removed (commit ae213b05).
      */
-    private val CEILING_TOKENS: Int = 23_200
+    private val CEILING_TOKENS: Int = 22_500
 
     @Test
     fun registeredToolSpecsFitWithinCeiling() {

@@ -226,24 +226,17 @@ class ClipActionTool(
     override val id: String = "clip_action"
     override val helpText: String =
         "Eight-way clip edit verb dispatching on `action`: " +
-            "`add` + `addItems` (assetId, timelineStartSeconds?, sourceStartSeconds?, " +
-            "durationSeconds?, trackId?) appends clips. " +
-            "`remove` + `clipIds` + optional `ripple` (default false) deletes clips; " +
-            "ripple closes the gap on the removed clip's track. " +
-            "`duplicate` + `duplicateItems` (clipId, timelineStartSeconds, trackId?) clones " +
-            "clips preserving all attached state; cross-kind trackId rejected. " +
-            "`move` + `moveItems` (clipId, timelineStartSeconds?, toTrackId?, at least one) " +
-            "repositions clips in time and/or across same-kind tracks. " +
-            "`split` + `splitItems` (clipId, atTimelineSeconds) splits each clip at the given " +
-            "timeline position; split point must lie strictly inside the clip. " +
-            "`trim` + `trimItems` (clipId, newSourceStartSeconds?, newDurationSeconds?) " +
-            "retrims video/audio clips preserving filters; text clips rejected. " +
-            "`replace` + `replaceItems` (clipId, newAssetId) swaps the asset on one or many " +
-            "clips, preserving timeline position + transforms + filters and copying the new " +
-            "asset's lockfile sourceBinding; text clips rejected. " +
-            "`fade` + `fadeItems` (clipId, fadeInSeconds?, fadeOutSeconds?) sets fade " +
-            "envelope on audio clips; fadeIn + fadeOut must not exceed clip duration. " +
-            "All-or-nothing per call; one timeline snapshot per call."
+            "`add` + addItems (assetId, timelineStartSeconds?, sourceStartSeconds?, " +
+            "durationSeconds?, trackId?). " +
+            "`remove` + clipIds + optional `ripple` (default false). " +
+            "`duplicate` + duplicateItems (clipId, timelineStartSeconds, trackId?). " +
+            "`move` + moveItems (clipId, timelineStartSeconds?, toTrackId?). " +
+            "`split` + splitItems (clipId, atTimelineSeconds). " +
+            "`trim` + trimItems (clipId, newSourceStartSeconds?, newDurationSeconds?). " +
+            "`replace` + replaceItems (clipId, newAssetId). " +
+            "`fade` + fadeItems (clipId, fadeInSeconds?, fadeOutSeconds?). " +
+            "All-or-nothing per call; one snapshot per call. text clips rejected by " +
+            "trim/replace; cross-kind trackId rejected."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")

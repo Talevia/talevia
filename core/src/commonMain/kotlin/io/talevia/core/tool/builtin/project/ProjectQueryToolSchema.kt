@@ -32,34 +32,24 @@ internal val PROJECT_QUERY_HELP_TEXT: String =
         "  • timeline_clips — filter: trackKind, trackId, fromSeconds, toSeconds, " +
         "onlySourceBound, onlyPinned. sortBy: startSeconds|durationSeconds|recent.\n" +
         "  • assets — filter: kind (video|audio|image|all), onlyUnused, onlyReferenced. " +
-        "sortBy: insertion|duration|duration-asc|id|recent. sortBy=recent orders by " +
-        "most-recently-mutated first (null stamps sort last).\n" +
-        "  • transitions — filter: onlyOrphaned. Chronological.\n" +
-        "  • lockfile_entries — filter: toolId, onlyPinned, sourceNodeId, sinceEpochMs. " +
-        "Most-recent first.\n" +
+        "sortBy: insertion|duration|duration-asc|id|recent.\n" +
+        "  • transitions — filter: onlyOrphaned.\n" +
+        "  • lockfile_entries — filter: toolId, onlyPinned, sourceNodeId, sinceEpochMs.\n" +
         "  • clips_for_asset — required: assetId.\n" +
         "  • clips_for_source — required: sourceNodeId. Transitive closure.\n" +
-        "  • consistency_propagation — required: sourceNodeId. Audits whether node body " +
-        "values reach bound clips' AIGC prompts.\n" +
+        "  • consistency_propagation — required: sourceNodeId.\n" +
         "  • clip — required: clipId. Drill-down.\n" +
         "  • lockfile_entry — required: inputHash. Drill-down.\n" +
-        "  • project_metadata — single-row aggregate across tracks/clips/source/lockfile/snapshots.\n" +
-        "  • snapshots — filter: maxAgeDays. Newest first. Default limit 50, max 500.\n" +
-        "  • spend — single-row AIGC cost aggregate; breaks down by toolId and sessionId.\n" +
-        "  • lockfile_cache_stats — single-row AIGC cache-hit aggregate. totalExports = " +
-        "memoized whole-timeline export count; hits/misses = current-timeline clips whose " +
-        "assetId does/doesn't match a lockfile entry; perModelBreakdown groups hits by " +
-        "(providerId, modelId). No filters.\n" +
-        "  • lockfile_orphans — lockfile entries whose assetId is no longer referenced by any " +
-        "clip on the timeline (gc candidates). Rows: {assetId, inputHash, toolId, providerId, " +
-        "modelId, costCents, createdAtEpochMs, pinned}. Sorted unpinned-first, newest-first; " +
-        "pinned entries still appear for audit but at the tail. No filters beyond limit/offset.\n" +
-        "  • timeline_diff — filter: fromSnapshotId, toSnapshotId (≥1 required). Tracks/clips " +
-        "added/removed/changed + totalChanges. Same-project only.\n" +
-        "  • source_binding_stats — per-kind coverage: {kind, totalNodes, boundDirectly, " +
-        "boundTransitively, orphans, coverageRatio, orphanNodeIds}. Sorted by kind.\n" +
-        "Common: limit (default 100, clamped 1..500), offset (default 0). Filter-on-wrong-select " +
-        "fails loud."
+        "  • project_metadata — single-row aggregate.\n" +
+        "  • snapshots — filter: maxAgeDays.\n" +
+        "  • spend — single-row AIGC cost aggregate.\n" +
+        "  • lockfile_cache_stats — single-row hit/miss + perModelBreakdown.\n" +
+        "  • lockfile_orphans — gc candidates {assetId, inputHash, toolId, providerId, modelId, " +
+        "costCents, createdAtEpochMs, pinned}.\n" +
+        "  • timeline_diff — filter: fromSnapshotId, toSnapshotId (≥1).\n" +
+        "  • source_binding_stats — per-kind {kind, totalNodes, boundDirectly, " +
+        "boundTransitively, orphans, coverageRatio, orphanNodeIds}.\n" +
+        "Common: limit (1..500, default 100), offset. Filter-on-wrong-select fails loud."
 
 internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
     put("type", "object")

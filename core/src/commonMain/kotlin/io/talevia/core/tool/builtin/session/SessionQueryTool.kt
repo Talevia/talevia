@@ -181,46 +181,35 @@ class SessionQueryTool(
     override val id: String = "session_query"
     override val helpText: String =
         "Unified read-only query over sessions + messages + parts + forks. Pick one `select`:\n" +
-            "  • sessions — filter: projectId, includeArchived. Most-recent by updatedAt.\n" +
+            "  • sessions — filter: projectId, includeArchived.\n" +
             "  • messages — filter: role (user|assistant). requires sessionId.\n" +
             "  • parts — filter: kind (text|reasoning|tool|media|timeline-snapshot|" +
             "render-progress|step-start|step-finish|compaction|todos), includeCompacted. " +
             "requires sessionId.\n" +
-            "  • forks — immediate child sessions (one hop). requires sessionId. Oldest first.\n" +
-            "  • ancestors — parent chain to root. requires sessionId. Depth-bounded.\n" +
-            "  • tool_calls — Part.Tool only. filter: toolId, includeCompacted. " +
+            "  • forks — child sessions. requires sessionId.\n" +
+            "  • ancestors — parent chain. requires sessionId.\n" +
+            "  • tool_calls — filter: toolId, includeCompacted. requires sessionId.\n" +
+            "  • compactions — Part.Compaction aggregate. requires sessionId.\n" +
+            "  • status — (state, cause?, neverRan, estimatedTokens, compactionThreshold, " +
+            "percent); state: idle|generating|awaiting_tool|compacting|cancelled|failed. " +
             "requires sessionId.\n" +
-            "  • compactions — Part.Compaction aggregate (from/to messageId + full summary + " +
-            "compactedAtEpochMs). requires sessionId.\n" +
-            "  • status — agent run state + compaction progress: (state, cause?, neverRan, " +
-            "estimatedTokens, compactionThreshold, percent). state: " +
-            "idle|generating|awaiting_tool|compacting|cancelled|failed. requires sessionId.\n" +
-            "  • session_metadata — single-row drill-down (message counts, token usage, " +
-            "compaction presence, permission-rule count). requires sessionId.\n" +
-            "  • message — single-row drill-down + per-part summaries. requires messageId.\n" +
-            "  • spend — single-row AIGC cost aggregate for this session's current project. " +
-            "requires sessionId.\n" +
-            "  • spend_summary — per-provider roll-up of this session's AIGC spend: " +
-            "(totalCalls, totalTokens?, estimatedUsdCents?, perProviderBreakdown[providerId, " +
-            "calls, tokens?, usdCents?, unknownCalls]). Complements `spend` (grouped by tool) " +
-            "with a provider lens. requires sessionId.\n" +
+            "  • session_metadata — single-row drill-down. requires sessionId.\n" +
+            "  • message — single-row + parts summary. requires messageId.\n" +
+            "  • spend — single-row AIGC cost. requires sessionId.\n" +
+            "  • spend_summary — per-provider roll-up. requires sessionId.\n" +
             "  • context_pressure — (currentEstimate, threshold, ratio, marginTokens, " +
-            "overThreshold, messageCount); ratio un-clamped > 1.0 when over. requires sessionId.\n" +
+            "overThreshold, messageCount). requires sessionId.\n" +
             "  • tool_spec_budget — registry-wide (toolCount, estimatedTokens, specBytes, " +
-            "registryResolved, topByTokens[5]). Session-independent — sessionId rejected.\n" +
-            "  • run_failure — post-mortem for failed turns (terminalCause + stepFinishErrors); " +
-            "requires sessionId; optional messageId drills to one turn.\n" +
-            "  • fallback_history — every assistant turn whose window saw ≥1 provider fallback " +
-            "hop, oldest first. Rows: {messageId, createdAtEpochMs, model, finish, chain}. " +
-            "Complements run_failure (which only surfaces on error turns) by showing successful " +
-            "turns that recovered via fallback. requires sessionId; optional messageId narrows.\n" +
-            "  • cancellation_history — every assistant turn with finish=CANCELLED, oldest first. " +
-            "Rows: {messageId, createdAtEpochMs, model, reason, inFlightToolCallCount, inFlightToolIds}. " +
-            "Complements run_failure (error turns) + fallback_history (successful-with-recovery) " +
-            "with the third post-mortem axis. requires sessionId; optional messageId narrows.\n" +
-            "  • permission_history — every Asked↔Replied round-trip this process. Rows: " +
-            "{requestId, permission, patterns, decision (once|always|reject|pending), accepted?, " +
-            "remembered?, askedEpochMs, repliedEpochMs}. requires sessionId. Process-scoped.\n" +
+            "topByTokens[5]). sessionId rejected.\n" +
+            "  • run_failure — failed-turn post-mortem. requires sessionId; optional messageId.\n" +
+            "  • fallback_history — turns with ≥1 fallback hop {messageId, createdAtEpochMs, " +
+            "model, finish, chain}. requires sessionId; optional messageId.\n" +
+            "  • cancellation_history — finish=CANCELLED turns {messageId, createdAtEpochMs, " +
+            "model, reason, inFlightToolCallCount, inFlightToolIds}. requires sessionId; " +
+            "optional messageId.\n" +
+            "  • permission_history — Asked↔Replied round-trips {requestId, permission, " +
+            "patterns, decision, accepted?, remembered?, askedEpochMs, repliedEpochMs}. " +
+            "requires sessionId.\n" +
             "  • preflight_summary — single-row plan-time snapshot collapsing context_pressure + " +
             "fallback + cancel + retry + pendingPermissionAsks. requires sessionId.\n" +
             "  • step_history — per-step timeline {model, finishReason, tokens, toolCallCount, " +
