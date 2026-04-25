@@ -717,9 +717,10 @@ internal class SlashCommandDispatcher(
      * (added cycle 124). Three modes selected by args:
      *
      *  - blank → show: pulls current cap + cumulative spend via
-     *    `SetSessionSpendCapTool` (no-op semantics: omit capCents) and
-     *    `session_query(select=spend)`.
-     *  - `clear` → call `set_session_spend_cap` with `capCents=null`.
+     *    `session_action(action="set_spend_cap")` (no-op semantics:
+     *    omit capCents) and `session_query(select=spend)`.
+     *  - `clear` → call `session_action(action="set_spend_cap")` with
+     *    `capCents=null`.
      *  - numeric (USD, possibly with leading `$` and `.cc`) → convert
      *    to cents (round-half-up via `Math.round`), call setter.
      *
@@ -729,7 +730,7 @@ internal class SlashCommandDispatcher(
      */
     private suspend fun handleSpendCap(sessionId: SessionId, rawArgs: String): String {
         val args = rawArgs.trim()
-        val tool = io.talevia.core.tool.builtin.session.SetSessionSpendCapTool(container.sessions)
+        val tool = io.talevia.core.tool.builtin.session.SessionActionTool(container.sessions)
         val ctx = io.talevia.core.tool.ToolContext(
             sessionId = sessionId,
             messageId = io.talevia.core.MessageId("slash-spendcap"),
@@ -760,7 +761,8 @@ internal class SlashCommandDispatcher(
 
         val out = runCatching {
             tool.execute(
-                io.talevia.core.tool.builtin.session.SetSessionSpendCapTool.Input(
+                io.talevia.core.tool.builtin.session.SessionActionTool.Input(
+                    action = "set_spend_cap",
                     sessionId = sessionId.value,
                     capCents = newCapCents,
                 ),
@@ -769,7 +771,7 @@ internal class SlashCommandDispatcher(
         }.getOrElse { e ->
             return Styles.meta("/spendcap: ${e.message ?: e::class.simpleName}")
         }
-        return formatSpendCapMutation(out.data.previousCapCents, out.data.capCents)
+        return formatSpendCapMutation(out.data.previousSpendCapCents, out.data.spendCapCents)
     }
 
     /**

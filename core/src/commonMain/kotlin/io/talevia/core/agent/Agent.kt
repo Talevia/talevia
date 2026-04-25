@@ -325,7 +325,7 @@ class Agent(
             // previous turn is reflected in the next turn's system prompt and in
             // the ToolContext seen by freshly dispatched tools (VISION §5.4).
             // Same re-read captures `spendCapCents` so a mid-run
-            // `set_session_spend_cap` takes effect on the very next tool dispatch.
+            // `session_action(action="set_spend_cap")` takes effect on the very next tool dispatch.
             val sessionSnapshot = store.getSession(input.sessionId)
             val snapshot = RetryLoop.SessionSnapshot(
                 currentProjectId = sessionSnapshot?.currentProjectId,

@@ -18,6 +18,13 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
 
+/**
+ * Cycle 143 folded `set_session_spend_cap` into
+ * `session_action(action="set_spend_cap")`. This suite continues to
+ * pin the three-state cap (null / 0 / positive cents), the no-op
+ * semantics, the negative-cap rejection, and the missing-session
+ * error — but routes through the unified action dispatcher.
+ */
 class SetSessionSpendCapToolTest {
 
     private val now: Instant = Instant.fromEpochMilliseconds(1_700_000_000_000L)
@@ -51,18 +58,25 @@ class SetSessionSpendCapToolTest {
         messages = emptyList(),
     )
 
+    private fun setSpendCapInput(capCents: Long?, sessionId: String? = null) =
+        SessionActionTool.Input(
+            action = "set_spend_cap",
+            sessionId = sessionId,
+            capCents = capCents,
+        )
+
     @Test fun setsCapFromNullToValue() = runTest {
         val sessions = freshSessions()
         val sid = sessions.seed("s-set")
-        val tool = SetSessionSpendCapTool(sessions)
+        val tool = SessionActionTool(sessions)
 
         val out = tool.execute(
-            SetSessionSpendCapTool.Input(capCents = 500L),
+            setSpendCapInput(capCents = 500L),
             ctxFor(sid),
         ).data
 
-        assertNull(out.previousCapCents)
-        assertEquals(500L, out.capCents)
+        assertNull(out.previousSpendCapCents)
+        assertEquals(500L, out.spendCapCents)
         assertEquals(500L, sessions.getSession(sid)!!.spendCapCents)
     }
 
@@ -72,15 +86,15 @@ class SetSessionSpendCapToolTest {
         sessions.updateSession(
             sessions.getSession(sid)!!.copy(spendCapCents = 100L, updatedAt = now),
         )
-        val tool = SetSessionSpendCapTool(sessions)
+        val tool = SessionActionTool(sessions)
 
         val out = tool.execute(
-            SetSessionSpendCapTool.Input(capCents = null),
+            setSpendCapInput(capCents = null),
             ctxFor(sid),
         ).data
 
-        assertEquals(100L, out.previousCapCents)
-        assertNull(out.capCents)
+        assertEquals(100L, out.previousSpendCapCents)
+        assertNull(out.spendCapCents)
         assertNull(sessions.getSession(sid)!!.spendCapCents)
     }
 
@@ -90,14 +104,14 @@ class SetSessionSpendCapToolTest {
         // "block everything" intent.
         val sessions = freshSessions()
         val sid = sessions.seed("s-zero")
-        val tool = SetSessionSpendCapTool(sessions)
+        val tool = SessionActionTool(sessions)
 
         val out = tool.execute(
-            SetSessionSpendCapTool.Input(capCents = 0L),
+            setSpendCapInput(capCents = 0L),
             ctxFor(sid),
         ).data
 
-        assertEquals(0L, out.capCents)
+        assertEquals(0L, out.spendCapCents)
         assertEquals(0L, sessions.getSession(sid)!!.spendCapCents)
     }
 
@@ -108,35 +122,35 @@ class SetSessionSpendCapToolTest {
             sessions.getSession(sid)!!.copy(spendCapCents = 250L, updatedAt = now),
         )
         val before = sessions.getSession(sid)!!.updatedAt
-        val tool = SetSessionSpendCapTool(sessions)
+        val tool = SessionActionTool(sessions)
 
         val out = tool.execute(
-            SetSessionSpendCapTool.Input(capCents = 250L),
+            setSpendCapInput(capCents = 250L),
             ctxFor(sid),
         ).data
 
-        assertEquals(250L, out.previousCapCents)
-        assertEquals(250L, out.capCents)
+        assertEquals(250L, out.previousSpendCapCents)
+        assertEquals(250L, out.spendCapCents)
         assertEquals(before, sessions.getSession(sid)!!.updatedAt, "no-op must not bump updatedAt")
     }
 
     @Test fun negativeCapIsRejected() = runTest {
         val sessions = freshSessions()
         val sid = sessions.seed("s-neg")
-        val tool = SetSessionSpendCapTool(sessions)
+        val tool = SessionActionTool(sessions)
 
         assertFailsWith<IllegalArgumentException> {
-            tool.execute(SetSessionSpendCapTool.Input(capCents = -1L), ctxFor(sid))
+            tool.execute(setSpendCapInput(capCents = -1L), ctxFor(sid))
         }
     }
 
     @Test fun missingSessionErrorsCleanly() = runTest {
         val sessions = freshSessions()
-        val tool = SetSessionSpendCapTool(sessions)
+        val tool = SessionActionTool(sessions)
 
         val ex = assertFailsWith<IllegalStateException> {
             tool.execute(
-                SetSessionSpendCapTool.Input(sessionId = "does-not-exist", capCents = 1L),
+                setSpendCapInput(sessionId = "does-not-exist", capCents = 1L),
                 ctxFor(SessionId("does-not-exist")),
             )
         }

@@ -41,7 +41,7 @@ data class Session(
      * compares `project.lockfile` spend attributed to this session against
      * [spendCapCents] and raises a `aigc.budget` permission ASK once the
      * cumulative total meets or exceeds the cap. Flipped by
-     * `set_session_spend_cap`.
+     * `session_action(action="set_spend_cap")`.
      *
      * **Three-state:** `null` = no cap (silent default; the agent runs
      * without a spending guard, matching pre-cap behaviour). `0L` =

@@ -80,7 +80,7 @@ internal suspend fun enforceTimelineSpendCap(project: Project, ctx: ToolContext)
             "Export refused: timeline contains ${totalCost}¢ (≈\$${totalCost / 100.0}) of AIGC " +
                 "content across $pricedClipCount priced clip(s) — exceeds session spend cap of " +
                 "${cap}¢ (≈\$${cap / 100.0}). User denied export. Raise the cap via " +
-                "set_session_spend_cap or clear it (capCents=null) to proceed.",
+                "session_action(action=set_spend_cap) or clear it (capCents=null) to proceed.",
         )
     }
 }

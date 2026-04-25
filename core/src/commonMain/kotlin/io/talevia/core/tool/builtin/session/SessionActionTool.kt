@@ -12,6 +12,7 @@ import io.talevia.core.tool.builtin.session.action.executeSessionDelete
 import io.talevia.core.tool.builtin.session.action.executeSessionExportBusTrace
 import io.talevia.core.tool.builtin.session.action.executeSessionImport
 import io.talevia.core.tool.builtin.session.action.executeSessionRename
+import io.talevia.core.tool.builtin.session.action.executeSessionSetSpendCap
 import io.talevia.core.tool.builtin.session.action.executeSessionSetSystemPrompt
 import io.talevia.core.tool.builtin.session.action.executeSessionSetToolEnabled
 import io.talevia.core.tool.builtin.session.action.executeSessionUnarchive
@@ -101,7 +102,7 @@ class SessionActionTool(
          * the dispatch is running.
          */
         val sessionId: String? = null,
-        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, `"set_system_prompt"`, `"export_bus_trace"`, or `"set_tool_enabled"`. */
+        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, `"set_system_prompt"`, `"export_bus_trace"`, `"set_tool_enabled"`, or `"set_spend_cap"`. */
         val action: String,
         /** Required for `action="rename"`. Must be non-blank. Ignored on other actions. */
         val newTitle: String? = null,
@@ -177,6 +178,23 @@ class SessionActionTool(
          * Ignored on every other action.
          */
         val enabled: Boolean? = null,
+        /**
+         * Used by `action=set_spend_cap`. Cents cap for AIGC spend on
+         * this session: `null` = clear (no budget gating), `0` = block
+         * every paid AIGC call (each one ASKs), positive integer =
+         * cap in cents (e.g. `500` = $5.00). Negative values are
+         * rejected loud — the most common shape of that mistake is
+         * the user confusing dollars with cents.
+         *
+         * The cap is consulted by
+         * [io.talevia.core.tool.builtin.aigc.AigcBudgetGuard] on every
+         * AIGC dispatch; once cumulative session spend reaches the cap
+         * the guard raises an `aigc.budget` permission ASK and the
+         * user decides whether to continue, stop, or persist an
+         * override. Inspect current spend via
+         * `session_query(select=spend)`.
+         */
+        val capCents: Long? = null,
     )
 
     @Serializable data class Output(
@@ -262,6 +280,21 @@ class SessionActionTool(
          * on every other action.
          */
         val toolEnabledChanged: Boolean = false,
+        /**
+         * `set_spend_cap` only: cents cap as it stood before this
+         * call (so the caller can reason about idempotency / undo).
+         * Null when the action is not set_spend_cap, OR when the
+         * action was set_spend_cap and the prior cap was null
+         * ("cleared"). The action echo discriminates the two cases.
+         */
+        val previousSpendCapCents: Long? = null,
+        /**
+         * `set_spend_cap` only: cents cap after this call — echoes
+         * the input. Null when the action is not set_spend_cap, OR
+         * when the action was set_spend_cap and the new cap is null
+         * (the cap was cleared). The action echo discriminates.
+         */
+        val spendCapCents: Long? = null,
     )
 
     override val id: String = "session_action"
@@ -278,8 +311,10 @@ class SessionActionTool(
             "offline triage, `set_tool_enabled`+`toolId`+`enabled` flips a tool in the " +
             "session's `disabledToolIds` set (disabled tools are filtered from the next " +
             "turn's tool spec — use to enforce 'stop using <tool>'; no-op when already in " +
-            "the requested state). sessionId defaults to owning session except on delete " +
-            "and import. Permission: session.write (delete=session.destructive)."
+            "the requested state), `set_spend_cap`+`capCents` configures the AIGC spend " +
+            "cap (capCents=null clears, 0 blocks, positive = cents). sessionId defaults " +
+            "to owning session except on delete and import. Permission: session.write " +
+            "(delete=session.destructive)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
 
@@ -314,7 +349,7 @@ class SessionActionTool(
                 put("type", "string")
                 put(
                     "description",
-                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, `set_system_prompt`, `export_bus_trace`, or `set_tool_enabled`.",
+                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, `set_system_prompt`, `export_bus_trace`, `set_tool_enabled`, or `set_spend_cap`.",
                 )
                 put(
                     "enum",
@@ -329,6 +364,7 @@ class SessionActionTool(
                             JsonPrimitive("set_system_prompt"),
                             JsonPrimitive("export_bus_trace"),
                             JsonPrimitive("set_tool_enabled"),
+                            JsonPrimitive("set_spend_cap"),
                         ),
                     ),
                 )
@@ -403,6 +439,19 @@ class SessionActionTool(
                         "requested state.",
                 )
             }
+            putJsonObject("capCents") {
+                put(
+                    "type",
+                    JsonArray(listOf(JsonPrimitive("integer"), JsonPrimitive("null"))),
+                )
+                put(
+                    "description",
+                    "Used by action=set_spend_cap. AIGC spend cap in cents. null clears " +
+                        "the cap. 0 blocks all paid AIGC calls (each one ASKs). Positive " +
+                        "cents sets the budget (e.g. 500 = $5.00). Must be ≥ 0 when " +
+                        "non-null. No-op when already in the requested state.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("action"))))
         put("additionalProperties", false)
@@ -421,9 +470,11 @@ class SessionActionTool(
             "set_system_prompt" -> executeSessionSetSystemPrompt(sessions, clock, input, ctx)
             "export_bus_trace" -> executeSessionExportBusTrace(busTrace, input, ctx)
             "set_tool_enabled" -> executeSessionSetToolEnabled(sessions, clock, input, ctx)
+            "set_spend_cap" -> executeSessionSetSpendCap(sessions, clock, input, ctx)
             else -> error(
                 "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, " +
-                    "remove_permission_rule, import, set_system_prompt, export_bus_trace, set_tool_enabled",
+                    "remove_permission_rule, import, set_system_prompt, export_bus_trace, " +
+                    "set_tool_enabled, set_spend_cap",
             )
         }
     }

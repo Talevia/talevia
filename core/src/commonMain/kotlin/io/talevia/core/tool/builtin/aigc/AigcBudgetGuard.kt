@@ -100,7 +100,7 @@ internal object AigcBudgetGuard {
             error(
                 "Session spend cap of ${cap}¢ (≈\$${cap / 100.0}) reached — current session " +
                     "spend is ${spentCents}¢. User denied continuation of $toolId. Raise the " +
-                    "cap via set_session_spend_cap or clear it (capCents=null) to proceed.",
+                    "cap via session_action(action=set_spend_cap) or clear it (capCents=null) to proceed.",
             )
         }
     }
