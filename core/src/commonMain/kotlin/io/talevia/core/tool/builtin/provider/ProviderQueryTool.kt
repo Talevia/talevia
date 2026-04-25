@@ -12,12 +12,14 @@ import io.talevia.core.tool.builtin.provider.query.CostCompareRow
 import io.talevia.core.tool.builtin.provider.query.CostHistoryRow
 import io.talevia.core.tool.builtin.provider.query.ModelRow
 import io.talevia.core.tool.builtin.provider.query.ProviderRow
+import io.talevia.core.tool.builtin.provider.query.RateLimitHistoryRow
 import io.talevia.core.tool.builtin.provider.query.WarmupStatsRow
 import io.talevia.core.tool.builtin.provider.query.runAigcCostEstimateQuery
 import io.talevia.core.tool.builtin.provider.query.runCostCompareQuery
 import io.talevia.core.tool.builtin.provider.query.runCostHistoryQuery
 import io.talevia.core.tool.builtin.provider.query.runModelsQuery
 import io.talevia.core.tool.builtin.provider.query.runProvidersQuery
+import io.talevia.core.tool.builtin.provider.query.runRateLimitHistoryQuery
 import io.talevia.core.tool.builtin.provider.query.runWarmupStatsQuery
 import io.talevia.core.tool.query.QueryDispatcher
 import kotlinx.serialization.KSerializer
@@ -63,6 +65,14 @@ class ProviderQueryTool(
     private val providers: ProviderRegistry,
     private val warmupStats: ProviderWarmupStats,
     private val projects: ProjectStore,
+    /**
+     * Optional rate-limit recorder. Required for `select=rate_limit_history`;
+     * null in test rigs that don't wire the bus aggregator. When null
+     * the select reports zero rows with a descriptive note rather
+     * than failing — same convention as the other optional aggregator
+     * wires.
+     */
+    private val rateLimitHistory: io.talevia.core.provider.RateLimitHistoryRecorder? = null,
 ) : QueryDispatcher<ProviderQueryTool.Input, ProviderQueryTool.Output>() {
 
     @Serializable data class Input(
@@ -154,7 +164,9 @@ class ProviderQueryTool(
             "  • aigc_cost_estimate — plan-time cost estimate for one AIGC dispatch. Requires " +
             "(toolId, providerId, modelId, inputs); inputs match the tool's baseInputs (width/" +
             "height, text, durationSeconds…). Row: {…, cents, priceBasis, pricedInputs}. cents=" +
-            "null = no rule matched (≠ free). Use before dispatch; cost_history for post-hoc."
+            "null = no rule matched (≠ free). Use before dispatch; cost_history for post-hoc.\n" +
+            "  • rate_limit_history — per-provider 429 retry summary {providerId, count, " +
+            "firstEpochMs, lastEpochMs, totalWaitMs, mostRecentReason}."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("provider.read")
@@ -167,7 +179,7 @@ class ProviderQueryTool(
                 put(
                     "description",
                     "What to query: providers | models | cost_compare | warmup_stats | " +
-                        "cost_history | aigc_cost_estimate (case-insensitive).",
+                        "cost_history | aigc_cost_estimate | rate_limit_history (case-insensitive).",
                 )
                 put(
                     "enum",
@@ -178,6 +190,7 @@ class ProviderQueryTool(
                         add(JsonPrimitive(SELECT_WARMUP_STATS))
                         add(JsonPrimitive(SELECT_COST_HISTORY))
                         add(JsonPrimitive(SELECT_AIGC_COST_ESTIMATE))
+                        add(JsonPrimitive(SELECT_RATE_LIMIT_HISTORY))
                     },
                 )
             }
@@ -236,6 +249,7 @@ class ProviderQueryTool(
         SELECT_WARMUP_STATS -> WarmupStatsRow.serializer()
         SELECT_COST_HISTORY -> CostHistoryRow.serializer()
         SELECT_AIGC_COST_ESTIMATE -> AigcCostEstimateRow.serializer()
+        SELECT_RATE_LIMIT_HISTORY -> RateLimitHistoryRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
 
@@ -262,6 +276,7 @@ class ProviderQueryTool(
                 modelId = input.modelId!!,
                 inputs = input.inputs ?: JsonObject(emptyMap()),
             )
+            SELECT_RATE_LIMIT_HISTORY -> runRateLimitHistoryQuery(rateLimitHistory)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -366,9 +381,10 @@ class ProviderQueryTool(
         const val SELECT_WARMUP_STATS = "warmup_stats"
         const val SELECT_COST_HISTORY = "cost_history"
         const val SELECT_AIGC_COST_ESTIMATE = "aigc_cost_estimate"
+        const val SELECT_RATE_LIMIT_HISTORY = "rate_limit_history"
         internal val ALL_SELECTS = setOf(
             SELECT_PROVIDERS, SELECT_MODELS, SELECT_COST_COMPARE, SELECT_WARMUP_STATS,
-            SELECT_COST_HISTORY, SELECT_AIGC_COST_ESTIMATE,
+            SELECT_COST_HISTORY, SELECT_AIGC_COST_ESTIMATE, SELECT_RATE_LIMIT_HISTORY,
         )
     }
 }

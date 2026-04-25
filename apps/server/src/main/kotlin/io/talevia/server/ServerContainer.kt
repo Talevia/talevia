@@ -131,6 +131,11 @@ class ServerContainer(
         bus,
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
+    val rateLimitHistory: io.talevia.core.provider.RateLimitHistoryRecorder =
+        io.talevia.core.provider.RateLimitHistoryRecorder(
+            bus,
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        )
     val sessions: SessionStore = SqlDelightSessionStore(db, bus)
     val permissionHistory: io.talevia.core.permission.PermissionHistoryRecorder =
         io.talevia.core.permission.PermissionHistoryRecorder(
@@ -301,7 +306,7 @@ class ServerContainer(
         providerRegistryOverride ?: ProviderRegistry.Builder().addEnv(httpClient, env).build()
 
     init {
-        tools.register(io.talevia.core.tool.builtin.provider.ProviderQueryTool(providers, warmupStats, projects))
+        tools.register(io.talevia.core.tool.builtin.provider.ProviderQueryTool(providers, warmupStats, projects, rateLimitHistory))
         tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
     }
 

@@ -105,18 +105,21 @@ class ToolSpecBudgetGateTest {
      *     consolidates 4 query lanes into one row to cut per-plan tool
      *     calls; step_history exposes per-step timeline previously only
      *     reconstructable from the parts select. ~0.3% buffer.
-     *   - 22_500 (this cycle, cycle-84): 22_492 measured — REACHED
-     *     cycle-31 P0 target. Trim recipe replicated against this
-     *     cycle's top-3 offenders (project_query 1481→1269,
-     *     session_query 1344→1071, clip_action 1324→1177): drop
-     *     ordering / sort-by elaborations, drop redundant "requires
-     *     sessionId" repetition where it's already implied,
-     *     compact per-action elaborations on clip_action verbs (the
-     *     row schemas + dispatch-time validation already stop typos
-     *     loud). Saved 632 tokens / 2.7%; ~0.04% buffer (8 tokens).
-     *     Tightening below 22_500 needs a different lever — either
-     *     consolidating tools or moving per-action detail to a
-     *     `list_tools(select=tool_detail)` sidecar.
+     *   - 22_500 (cycle-84): 22_492 measured — REACHED cycle-31 P0
+     *     target. Trim recipe replicated against this cycle's top-3
+     *     offenders (project_query 1481→1269, session_query 1344→1071,
+     *     clip_action 1324→1177). Saved 632 tokens / 2.7%; ~0.04%
+     *     buffer (8 tokens).
+     *   - 22_600 (this cycle, cycle-91): 22_543 measured. +43 over
+     *     prior 22_500 ceiling; load-bearing addition of
+     *     `provider_query(select=rate_limit_history)` per backlog
+     *     `provider-query-rate-limit-history`. Surfaces per-provider
+     *     429 retry counts from a new bus aggregator
+     *     (RateLimitHistoryRecorder) — ops dashboards / cost-aware
+     *     operators see "I'm hitting Anthropic's tier-1 cap N times
+     *     today" without tailing the bus. helpText already trimmed
+     *     to a one-line schema-only signature; remaining cost is the
+     *     row's 6 field names which are the answer. ~0.25% buffer.
      *   - 20_000 (next target, R.6 P0 threshold): requires either
      *     deleting ~10 more tools or moving per-action details to a
      *     `list_tools(select=tool_detail)` sidecar so the live spec
@@ -131,7 +134,7 @@ class ToolSpecBudgetGateTest {
      * the number increased — rationale lives in the commit body since
      * docs/decisions/ was removed (commit ae213b05).
      */
-    private val CEILING_TOKENS: Int = 22_500
+    private val CEILING_TOKENS: Int = 22_600
 
     @Test
     fun registeredToolSpecsFitWithinCeiling() {

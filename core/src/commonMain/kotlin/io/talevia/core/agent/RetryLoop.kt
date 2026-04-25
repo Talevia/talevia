@@ -153,6 +153,7 @@ internal class RetryLoop(
                     attempt = attempt,
                     waitMs = wait,
                     reason = reason,
+                    providerId = executor.providerIdAt(providerIndex),
                 ),
             )
             // Stamp the handle so subsequent AgentRunStateChanged emits

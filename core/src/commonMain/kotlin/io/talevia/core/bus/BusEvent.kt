@@ -115,6 +115,15 @@ sealed interface BusEvent {
         val attempt: Int,
         val waitMs: Long,
         val reason: String,
+        /**
+         * Provider id the retry is targeting on this attempt. Carried so
+         * subscribers (rate-limit history aggregator, ops dashboards)
+         * don't have to scrape the [reason] string. Default null
+         * preserves serialised compatibility with pre-cycle-91 emitters
+         * (any test rig publishing this event without
+         * RetryLoop's threaded provider chain).
+         */
+        val providerId: String? = null,
     ) : SessionEvent
 
     /**

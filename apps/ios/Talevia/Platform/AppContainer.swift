@@ -18,6 +18,7 @@ final class AppContainer {
     let agentStates: AgentRunStateTracker
     let warmupStats: ProviderWarmupStats
     let permissionHistory: PermissionHistoryRecorder
+    let rateLimitHistory: RateLimitHistoryRecorder
     let sessions: SqlDelightSessionStore
     /// File-bundle [ProjectStore]. Bundles default to
     /// `<Documents>/projects/...`; the per-machine recents catalog lives at
@@ -71,6 +72,7 @@ final class AppContainer {
         self.bus = EventBus(extraBufferCapacity: 0)
         self.agentStates = AgentRunStateTrackerCompanion.shared.withSupervisor(bus: self.bus)
         self.warmupStats = ProviderWarmupStatsCompanion.shared.withSupervisor(bus: self.bus)
+        self.rateLimitHistory = RateLimitHistoryRecorderCompanion.shared.withSupervisor(bus: self.bus)
         let clock = ClockSystem.shared
         let json = JsonConfig.shared.default
         self.sessions = SqlDelightSessionStore(db: self.db, bus: self.bus, clock: clock, json: json)
@@ -177,7 +179,7 @@ final class AppContainer {
         self.providers = buildIosProviderRegistry(httpClient: self.httpClient)
 
         // Provider-dependent tools land after providers is initialised.
-        registry.register(tool: ProviderQueryTool(providers: self.providers, warmupStats: self.warmupStats, projects: self.projects))
+        registry.register(tool: ProviderQueryTool(providers: self.providers, warmupStats: self.warmupStats, projects: self.projects, rateLimitHistory: self.rateLimitHistory))
         registry.register(tool: CompactSessionTool(providers: self.providers, sessions: self.sessions, bus: self.bus))
     }
 }
