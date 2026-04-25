@@ -97,6 +97,7 @@ internal fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.AigcCacheProbe -> "aigc.cache.probe"
     is BusEvent.AssetsMissing -> "project.assets.missing"
     is BusEvent.ProviderWarmup -> "provider.warmup"
+    is BusEvent.AigcJobProgress -> "aigc.job.progress"
 }
 
 /**
@@ -176,6 +177,16 @@ data class BusEventDto(
     val spendCapCents: Long? = null,
     /** Set for `spend.cap.approaching` — `"aigc"` (mid-session) | `"export"` (export-time). */
     val spendCapScope: String? = null,
+    /** Set for `aigc.job.progress` — the AIGC tool dispatcher's call id. */
+    val callId: String? = null,
+    /** Set for `aigc.job.progress` — opaque per-job id (mirror of `Part.RenderProgress.jobId`). */
+    val jobId: String? = null,
+    /** Set for `aigc.job.progress` — `"started" | "progress" | "completed" | "failed"`. */
+    val aigcJobPhase: String? = null,
+    /** Set for `aigc.job.progress` — completion ratio 0..1, null if not numeric. */
+    val ratio: Float? = null,
+    /** Set for `aigc.job.progress` — provider's ETA hint (seconds), null if unknown. */
+    val etaSec: Int? = null,
 ) {
     companion object {
         fun from(e: BusEvent): BusEventDto = when (e) {
@@ -292,6 +303,23 @@ data class BusEventDto(
                     BusEvent.ProviderWarmup.Phase.Ready -> "ready"
                 },
                 epochMs = e.epochMs,
+            )
+            is BusEvent.AigcJobProgress -> BusEventDto(
+                "aigc.job.progress",
+                e.sessionId.value,
+                callId = e.callId.value,
+                toolId = e.toolId,
+                jobId = e.jobId,
+                aigcJobPhase = when (e.phase) {
+                    BusEvent.AigcProgressPhase.Started -> "started"
+                    BusEvent.AigcProgressPhase.Progress -> "progress"
+                    BusEvent.AigcProgressPhase.Completed -> "completed"
+                    BusEvent.AigcProgressPhase.Failed -> "failed"
+                },
+                ratio = e.ratio,
+                etaSec = e.etaSec,
+                message = e.message,
+                providerId = e.providerId,
             )
         }
     }

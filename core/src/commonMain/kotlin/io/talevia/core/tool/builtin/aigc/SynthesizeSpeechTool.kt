@@ -234,10 +234,16 @@ class SynthesizeSpeechTool(
             speed = input.speed,
             language = input.language,
         )
+        // TTS picks its provider via fallback inside the block, so the
+        // bookend bus event reports the *first-attempt* providerId — the
+        // actual successful provider is recorded later in the lockfile
+        // entry's provenance and emitted via AigcCostRecorded.
         val result = AigcPipeline.withProgress<TtsResult>(
             ctx = ctx,
             jobId = "tts-${inputHash.take(8)}",
             startMessage = "synthesising speech (${input.text.length} chars) with ${input.model}",
+            toolId = id,
+            providerId = engines.firstOrNull()?.providerId,
         ) {
             synthesizeWithFallback(engines, request) { phase, providerId ->
                 ctx.publishEvent(

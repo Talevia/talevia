@@ -14,8 +14,6 @@
 ## P0 — 高杠杆、下一步就该动
 
 - **debt-aigc-tool-consolidation** — `core/tool/builtin/aigc/` 4 个单 verb 工具 (`generate_image` 356 LOC / `generate_video` 367 / `generate_music` 310 / `synthesize_speech` 363) 各带一份 helpText + JSON schema + dispatch boilerplate；LLM 每轮付 4 份 spec token。**方向：** 复刻 `clip_action` / `project_action` 模式，折成 `aigc_generate(kind=image|video|music|speech)` 一个 dispatcher + 4 个 sibling handler 文件；同步删 4 个旧工具。净 tool count -3。Rubric §5.6 / §5.7 / §3a-1。Milestone §later. · skipped 2026-04-25: §3a-7 hit — `LockfileEntry.toolId` already stamped `"generate_image"` 等 in on-disk bundles; removing those tool ids breaks ReplayLockfileTool. Needs alias-map design first.
-- **aigc-streaming-progress-events** — `generate_video` / `synthesize_speech` 单次 60-180 s，CLI 期间只看到 spinner 没有进度反馈；`AigcPipeline.emitPart(...)` 已能发零碎 part 但没标准化进度事件。**方向：** `BusEvent.AigcJobProgress(toolId, sessionId, callId, percent?, etaSec?, message?)`，pipeline 在 provider poll 间隔触发，CLI Renderer 拉一行 inline 进度条。Rubric §5.4。Milestone §later.
-
 ## P1 — 中优，做完 P0 再排
 
 - **session-export-markdown-format** — `export_session` 只产 JSON；分享给非 Talevia 用户（debug、bug report）需要人读的 transcript。**方向：** Input 加 `format: String? = "json"`，新增 `"markdown"` 走 role 分块 + 时间戳 + tool call 折叠的渲染器。Rubric §5.4。Milestone §later.

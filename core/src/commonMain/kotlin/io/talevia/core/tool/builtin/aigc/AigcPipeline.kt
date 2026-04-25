@@ -5,6 +5,7 @@ import io.talevia.core.MessageId
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStore
@@ -154,9 +155,12 @@ internal object AigcPipeline {
         jobId: String,
         startMessage: String,
         clock: Clock = Clock.System,
+        toolId: String? = null,
+        providerId: String? = null,
         block: suspend () -> T,
     ): T {
         val partId = PartId(Uuid.random().toString())
+        val effectiveToolId = toolId ?: jobId.substringBefore('-')
         ctx.emitPart(
             Part.RenderProgress(
                 id = partId,
@@ -166,6 +170,18 @@ internal object AigcPipeline {
                 jobId = jobId,
                 ratio = 0f,
                 message = startMessage,
+            ),
+        )
+        ctx.publishEvent(
+            BusEvent.AigcJobProgress(
+                sessionId = ctx.sessionId,
+                callId = ctx.callId,
+                toolId = effectiveToolId,
+                jobId = jobId,
+                phase = BusEvent.AigcProgressPhase.Started,
+                ratio = 0f,
+                message = startMessage,
+                providerId = providerId,
             ),
         )
         return try {
@@ -181,8 +197,21 @@ internal object AigcPipeline {
                     message = "completed",
                 ),
             )
+            ctx.publishEvent(
+                BusEvent.AigcJobProgress(
+                    sessionId = ctx.sessionId,
+                    callId = ctx.callId,
+                    toolId = effectiveToolId,
+                    jobId = jobId,
+                    phase = BusEvent.AigcProgressPhase.Completed,
+                    ratio = 1f,
+                    message = "completed",
+                    providerId = providerId,
+                ),
+            )
             result
         } catch (t: Throwable) {
+            val errMessage = "failed: ${t.message ?: t::class.simpleName ?: "unknown"}"
             ctx.emitPart(
                 Part.RenderProgress(
                     id = partId,
@@ -191,7 +220,19 @@ internal object AigcPipeline {
                     createdAt = clock.now(),
                     jobId = jobId,
                     ratio = 0f,
-                    message = "failed: ${t.message ?: t::class.simpleName ?: "unknown"}",
+                    message = errMessage,
+                ),
+            )
+            ctx.publishEvent(
+                BusEvent.AigcJobProgress(
+                    sessionId = ctx.sessionId,
+                    callId = ctx.callId,
+                    toolId = effectiveToolId,
+                    jobId = jobId,
+                    phase = BusEvent.AigcProgressPhase.Failed,
+                    ratio = 0f,
+                    message = errMessage,
+                    providerId = providerId,
                 ),
             )
             throw t

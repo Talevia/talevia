@@ -196,6 +196,15 @@ class EventBusMetricsSink(
             BusEvent.ProviderWarmup.Phase.Starting -> "provider.warmup.starting"
             BusEvent.ProviderWarmup.Phase.Ready -> "provider.warmup.ready"
         }
+        // Per-phase counters mirror the warmup pattern so a Prometheus
+        // scrape can alert when Started / Completed cardinalities drift
+        // (Started without Completed/Failed = stuck job).
+        is BusEvent.AigcJobProgress -> when (event.phase) {
+            BusEvent.AigcProgressPhase.Started -> "aigc.job.started"
+            BusEvent.AigcProgressPhase.Progress -> "aigc.job.progress"
+            BusEvent.AigcProgressPhase.Completed -> "aigc.job.completed"
+            BusEvent.AigcProgressPhase.Failed -> "aigc.job.failed"
+        }
     }
 
     /**

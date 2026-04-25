@@ -209,6 +209,8 @@ class GenerateVideoTool(
             jobId = "gen-video-${inputHash.take(8)}",
             startMessage = "generating ${input.durationSeconds}s video " +
                 "(${input.width}x${input.height}) with ${input.model}",
+            toolId = id,
+            providerId = engine.providerId,
         ) {
             engine.generate(
                 VideoGenRequest(

@@ -1,5 +1,6 @@
 package io.talevia.core.bus
 
+import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.PartId
 import io.talevia.core.ProjectId
@@ -418,4 +419,55 @@ sealed interface BusEvent {
     ) : SessionEvent {
         enum class Phase { Starting, Ready }
     }
+
+    /**
+     * Bookend (and, once engines support it, mid-flight) progress signal for
+     * AIGC dispatches. Fires from [io.talevia.core.tool.builtin.aigc.AigcPipeline.withProgress]
+     * at start ([Phase.Started] / `ratio=0`) and at the terminal edge
+     * ([Phase.Completed] / `ratio=1` on success, [Phase.Failed] /
+     * `ratio=0` on error) — same lifecycle as the existing
+     * [io.talevia.core.session.Part.RenderProgress] audit trail, but on
+     * the bus instead of the session-history part stream.
+     *
+     * Why duplicate the progress signal across Part + BusEvent:
+     *
+     * - `Part.RenderProgress` is **session-history persistent** — every
+     *   tick lands in `messages_parts.data` so `revert_session` /
+     *   `replay_lockfile` / cross-machine re-runs see the same audit
+     *   trail. The CLI Renderer already paints a one-liner from those
+     *   parts (see `EventRouter` → `renderer.renderProgress`).
+     * - `BusEvent.AigcJobProgress` is **ephemeral**, with no session-
+     *   store write. Subscribers that don't want every progress tick to
+     *   pollute Part history (metrics counters, desktop in-flight UI
+     *   panel, server SSE stream, future operator dashboards) can listen
+     *   here directly without filtering `PartUpdated` for
+     *   `Part.RenderProgress` after the fact.
+     *
+     * CLI does **not** subscribe to this event — the existing
+     * `Part.RenderProgress` path already drives its inline progress
+     * line; double-subscribing would render every tick twice. New
+     * subscribers should pick whichever shape matches their persistence
+     * intent.
+     *
+     * `ratio` is `0f..1f` clamped at the publisher; `null` is reserved
+     * for engines that report progress as opaque "still working" pings
+     * without a numeric ratio (none today, future-proof). `etaSec` mirrors
+     * the same null-when-unknown convention. `providerId` is non-null
+     * when the dispatching engine knows it (Replicate / OpenAI), else
+     * empty — the bookend doesn't always have a provider attribution
+     * (cache hits short-circuit before the engine call).
+     */
+    data class AigcJobProgress(
+        override val sessionId: SessionId,
+        val callId: CallId,
+        val toolId: String,
+        val jobId: String,
+        val phase: AigcProgressPhase,
+        val ratio: Float? = null,
+        val etaSec: Int? = null,
+        val message: String? = null,
+        val providerId: String? = null,
+    ) : SessionEvent
+
+    enum class AigcProgressPhase { Started, Progress, Completed, Failed }
 }

@@ -182,6 +182,8 @@ class UpscaleAssetTool(
             ctx = ctx,
             jobId = "upscale-${inputHash.take(8)}",
             startMessage = "upscaling asset ${input.assetId} x${input.scale} with ${input.model}",
+            toolId = id,
+            providerId = engine.providerId,
         ) {
             engine.upscale(
                 UpscaleRequest(

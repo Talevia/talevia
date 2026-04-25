@@ -200,6 +200,8 @@ class GenerateImageTool(
             ctx = ctx,
             jobId = "gen-image-${inputHash.take(8)}",
             startMessage = "generating ${input.width}x${input.height} image with ${input.model}",
+            toolId = id,
+            providerId = engine.providerId,
         ) {
             engine.generate(
                 ImageGenRequest(

@@ -3,6 +3,7 @@ package io.talevia.core.tool.builtin.aigc
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
 import io.talevia.core.SessionId
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.session.Part
 import io.talevia.core.tool.ToolContext
@@ -29,12 +30,14 @@ class AigcPipelineProgressTest {
 
     private class CapturedCtx {
         val parts = mutableListOf<Part>()
+        val events = mutableListOf<BusEvent>()
         val ctx = ToolContext(
             sessionId = SessionId("s-progress"),
             messageId = MessageId("m-progress"),
             callId = CallId("c-progress"),
             askPermission = { PermissionDecision.Once },
             emitPart = { p -> parts += p },
+            publishEvent = { e -> events += e },
             messages = emptyList(),
         )
     }
@@ -114,5 +117,92 @@ class AigcPipelineProgressTest {
         }
         assertEquals(1, blockStartedAfter, "block must see exactly 1 emitted part (the started marker) before running")
         assertNotNull(cap.parts.firstOrNull() as? Part.RenderProgress)
+    }
+
+    @Test
+    fun successPublishesStartedThenCompletedBusEvents() = runTest {
+        // The new BusEvent.AigcJobProgress channel runs alongside the
+        // session-history Part.RenderProgress so non-Part subscribers
+        // (metrics, desktop, server SSE) can see the same lifecycle without
+        // parsing PartUpdated. Pair fires Started + Completed on success.
+        val cap = CapturedCtx()
+        AigcPipeline.withProgress(
+            ctx = cap.ctx,
+            jobId = "job-bus-ok",
+            startMessage = "doing thing",
+            toolId = "generate_image",
+            providerId = "openai",
+        ) {
+            "payload"
+        }
+
+        val progress = cap.events.filterIsInstance<BusEvent.AigcJobProgress>()
+        assertEquals(2, progress.size, "expected Started + Completed; got: $progress")
+        assertEquals(BusEvent.AigcProgressPhase.Started, progress[0].phase)
+        assertEquals(BusEvent.AigcProgressPhase.Completed, progress[1].phase)
+        assertTrue(progress.all { it.jobId == "job-bus-ok" })
+        assertTrue(progress.all { it.toolId == "generate_image" })
+        assertTrue(progress.all { it.providerId == "openai" })
+        assertTrue(progress.all { it.callId.value == "c-progress" })
+        assertTrue(progress.all { it.sessionId.value == "s-progress" })
+        assertEquals(0f, progress[0].ratio)
+        assertEquals(1f, progress[1].ratio)
+        assertEquals("doing thing", progress[0].message)
+        assertEquals("completed", progress[1].message)
+
+        // Part.RenderProgress + BusEvent.AigcJobProgress fire as a pair —
+        // 2 of each.
+        assertEquals(2, cap.parts.size, "Part.RenderProgress count unchanged")
+    }
+
+    @Test
+    fun failurePublishesStartedThenFailedBusEvents() = runTest {
+        // Failure path mirrors the Part shape: Started + Failed (no
+        // Completed), with the failure message verbatim from the
+        // RenderProgress part and the original exception rethrown.
+        val cap = CapturedCtx()
+        val boom = IllegalStateException("provider exploded")
+
+        assertFailsWith<IllegalStateException> {
+            AigcPipeline.withProgress(
+                ctx = cap.ctx,
+                jobId = "job-bus-err",
+                startMessage = "about to blow",
+                toolId = "generate_video",
+            ) {
+                throw boom
+            }
+        }
+
+        val progress = cap.events.filterIsInstance<BusEvent.AigcJobProgress>()
+        assertEquals(2, progress.size, "expected Started + Failed; got: $progress")
+        assertEquals(BusEvent.AigcProgressPhase.Started, progress[0].phase)
+        assertEquals(BusEvent.AigcProgressPhase.Failed, progress[1].phase)
+        assertEquals(0f, progress[1].ratio)
+        val failMsg = progress[1].message ?: error("Failed phase must carry a message")
+        assertTrue(failMsg.startsWith("failed:"))
+        assertTrue("provider exploded" in failMsg)
+        // toolId echoes the explicit override; jobId uses the base name
+        // not the substring fallback because we passed toolId.
+        assertTrue(progress.all { it.toolId == "generate_video" })
+    }
+
+    @Test
+    fun toolIdDefaultsToJobIdPrefixWhenOmitted() = runTest {
+        // Backward-compat: existing AIGC tools call withProgress without a
+        // toolId argument, so the dispatcher derives one from the jobId
+        // prefix (e.g. `gen-image-abc123` → `gen`). Real tools should pass
+        // an explicit toolId; this fallback exists so the metrics counter
+        // doesn't go nameless when callers haven't migrated yet.
+        val cap = CapturedCtx()
+        AigcPipeline.withProgress(
+            ctx = cap.ctx,
+            jobId = "gen-image-abc123",
+            startMessage = "x",
+        ) {
+            "ok"
+        }
+        val first = cap.events.filterIsInstance<BusEvent.AigcJobProgress>().first()
+        assertEquals("gen", first.toolId, "fallback splits jobId on first '-'")
     }
 }

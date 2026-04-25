@@ -185,6 +185,8 @@ class GenerateMusicTool(
             ctx = ctx,
             jobId = "gen-music-${inputHash.take(8)}",
             startMessage = "generating ${input.durationSeconds}s music with ${input.model}",
+            toolId = id,
+            providerId = engine.providerId,
         ) {
             engine.generate(
                 MusicGenRequest(
