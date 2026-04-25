@@ -106,6 +106,30 @@ class ExportTool(
         val perClipCacheHits: Int = 0,
         val perClipCacheMisses: Int = 0,
         /**
+         * Per-clip USD-cents attribution: `clipId.value` →
+         * `lockfile.byAssetId[clip.assetId].costCents` (or null when the
+         * clip's asset is non-AIGC / never-priced). Empty when the
+         * exported timeline has no clips with priced provenance — the
+         * common case for renders of pure user footage with no AIGC
+         * inserts.
+         *
+         * The attribution is exact for AIGC clips: the lockfile entry
+         * keyed by the clip's assetId is the call that produced the
+         * file, so its `costCents` is the cost of THIS clip's asset
+         * (cache hits include their original price too — billing
+         * doesn't refund). Clips that share an asset with other clips
+         * report the same cents on every clip; the sum is intentional
+         * because each clip references the same paid output.
+         */
+        val perClipCostCents: Map<String, Long?> = emptyMap(),
+        /**
+         * Sum of non-null entries in [perClipCostCents]. Convenience
+         * roll-up so the common "what did this export cost" question
+         * answers without a client-side reduce. Zero when no clip has
+         * priced provenance.
+         */
+        val totalCostCents: Long = 0L,
+        /**
          * Provenance record baked into the exported file's container metadata
          * (VISION §5.3). Null only on engines that can't write container
          * metadata (Media3 / AVFoundation today) — the FFmpeg engine always
@@ -194,6 +218,7 @@ class ExportTool(
         if (!input.forceRender) {
             val cached = project.renderCache.findByFingerprint(fingerprint)
             if (cached != null && cached.outputPath == input.outputPath) {
+                val (cachedPerClipCost, cachedTotalCost) = buildPerClipCostAttribution(project)
                 val out = Output(
                     outputPath = cached.outputPath,
                     durationSeconds = cached.durationSeconds,
@@ -201,6 +226,8 @@ class ExportTool(
                     resolutionHeight = cached.resolutionHeight,
                     cacheHit = true,
                     staleClipsIncluded = staleClipIds,
+                    perClipCostCents = cachedPerClipCost,
+                    totalCostCents = cachedTotalCost,
                     provenance = provenance,
                 )
                 val staleSuffix = if (staleClipIds.isEmpty()) "" else " [allowStale: ${staleClipIds.size} stale clip(s)]"
@@ -257,6 +284,10 @@ class ExportTool(
             )
         }
 
+        // Re-read the project so attribution sees any lockfile entries that
+        // landed during this export (e.g. AIGC tools the timeline references).
+        val finalProject = store.get(project.id) ?: project
+        val (perClipCost, totalCost) = buildPerClipCostAttribution(finalProject)
         val out = Output(
             outputPath = input.outputPath,
             durationSeconds = duration,
@@ -266,6 +297,8 @@ class ExportTool(
             staleClipsIncluded = staleClipIds,
             perClipCacheHits = perClipStats.hits,
             perClipCacheMisses = perClipStats.misses,
+            perClipCostCents = perClipCost,
+            totalCostCents = totalCost,
             provenance = provenance,
         )
         val staleSuffix = if (staleClipIds.isEmpty()) "" else " [allowStale: ${staleClipIds.size} stale clip(s)]"
@@ -274,9 +307,11 @@ class ExportTool(
         } else {
             " [per-clip cache: ${perClipStats.hits} hit, ${perClipStats.misses} miss]"
         }
+        val costSuffix = if (totalCost > 0L) " [cost: ${totalCost}¢]" else ""
         return ToolResult(
             title = "export → ${input.outputPath.substringAfterLast('/')}",
-            outputForLlm = "Exported timeline (${duration}s, ${width}x${height}) to ${input.outputPath}.$staleSuffix$perClipSuffix",
+            outputForLlm = "Exported timeline (${duration}s, ${width}x${height}) to " +
+                "${input.outputPath}.$staleSuffix$perClipSuffix$costSuffix",
             data = out,
             attachments = listOf(
                 MediaAttachment(
@@ -339,4 +374,37 @@ class ExportTool(
             "wav" -> "audio/wav"
             else -> "application/octet-stream"
         }
+
+    /**
+     * Build the per-clip cost map for [Output.perClipCostCents] +
+     * [Output.totalCostCents].
+     *
+     * Lookup is via `lockfile.byAssetId[clip.assetId]` — exact
+     * one-to-one keying. A clip whose asset wasn't AIGC-produced has
+     * no lockfile entry → null cents (still in the map; the agent can
+     * see "this clip is unpriced" distinct from "0 cents"). Clips
+     * sharing an asset report the same cents per clip; the sum is
+     * intentional because each clip references the same paid output.
+     *
+     * Returns the (map, total) pair so the caller doesn't have to
+     * reduce twice. Empty inputs and clips without `assetId` (text
+     * clips) are skipped — they'd never have a lockfile entry anyway.
+     */
+    private fun buildPerClipCostAttribution(project: Project): Pair<Map<String, Long?>, Long> {
+        val perClip = mutableMapOf<String, Long?>()
+        var total = 0L
+        for (track in project.timeline.tracks) {
+            for (clip in track.clips) {
+                val assetId = when (clip) {
+                    is io.talevia.core.domain.Clip.Video -> clip.assetId
+                    is io.talevia.core.domain.Clip.Audio -> clip.assetId
+                    is io.talevia.core.domain.Clip.Text -> null
+                }
+                val cents = assetId?.let { project.lockfile.byAssetId[it]?.costCents }
+                perClip[clip.id.value] = cents
+                if (cents != null) total += cents
+            }
+        }
+        return perClip to total
+    }
 }

@@ -153,6 +153,123 @@ class ExportToolTest {
         assertEquals(2, engine.renderCalls)
     }
 
+    @Test fun perClipCostMapAttributesAigcClipsAndSumsTotal() = runTest {
+        // backlog export-cost-attribution-by-clip — the export Output
+        // must surface per-clip costCents (lockfile.byAssetId lookup)
+        // plus a totalCostCents roll-up for the whole timeline.
+        val (store, engine, pid) = newFixture()
+        // c1 already exists with assetId=a1. Add a second clip c2/a2,
+        // and lockfile entries for both with explicit costCents.
+        store.mutate(pid) { p ->
+            val track = p.timeline.tracks.first() as Track.Video
+            val c2 = Clip.Video(
+                id = ClipId("c2"),
+                timeRange = TimeRange(5.seconds, 3.seconds),
+                sourceRange = TimeRange(0.seconds, 3.seconds),
+                assetId = AssetId("a2"),
+            )
+            p.copy(
+                timeline = p.timeline.copy(
+                    tracks = listOf(track.copy(clips = track.clips + c2)),
+                    duration = 8.seconds,
+                ),
+                lockfile = p.lockfile
+                    .append(
+                        LockfileEntry(
+                            inputHash = "h1",
+                            toolId = "generate_image",
+                            assetId = AssetId("a1"),
+                            provenance = GenerationProvenance(
+                                providerId = "openai",
+                                modelId = "gpt-image-1",
+                                modelVersion = null,
+                                seed = 1L,
+                                parameters = JsonObject(emptyMap()),
+                                createdAtEpochMs = 0L,
+                            ),
+                            costCents = 6L,
+                        ),
+                    )
+                    .append(
+                        LockfileEntry(
+                            inputHash = "h2",
+                            toolId = "generate_image",
+                            assetId = AssetId("a2"),
+                            provenance = GenerationProvenance(
+                                providerId = "openai",
+                                modelId = "gpt-image-1",
+                                modelVersion = null,
+                                seed = 2L,
+                                parameters = JsonObject(emptyMap()),
+                                createdAtEpochMs = 0L,
+                            ),
+                            costCents = 4L,
+                        ),
+                    ),
+            )
+        }
+
+        val tool = ExportTool(store, engine)
+        val input = ExportTool.Input(projectId = pid.value, outputPath = "/tmp/cost-test.mp4")
+        val out = tool.execute(input, ctx()).data
+
+        assertEquals(6L, out.perClipCostCents["c1"], "c1 → a1 lockfile entry attributes 6¢")
+        assertEquals(4L, out.perClipCostCents["c2"], "c2 → a2 lockfile entry attributes 4¢")
+        assertEquals(10L, out.totalCostCents, "total is sum of priced clip costs")
+    }
+
+    @Test fun perClipCostMapMarksUnpricedClipsAsNullCents() = runTest {
+        // c1 exists with assetId=a1 but has no lockfile entry —
+        // the map must surface "c1 → null" distinct from "0¢".
+        val (store, engine, pid) = newFixture()
+        val tool = ExportTool(store, engine)
+        val out = tool.execute(
+            ExportTool.Input(projectId = pid.value, outputPath = "/tmp/unpriced.mp4"),
+            ctx(),
+        ).data
+        assertTrue(out.perClipCostCents.containsKey("c1"), "c1 must appear in the map even when unpriced")
+        assertEquals(null, out.perClipCostCents["c1"], "no lockfile entry → null cents (≠ zero)")
+        assertEquals(0L, out.totalCostCents, "totalCost is 0 when nothing is priced")
+    }
+
+    @Test fun perClipCostMapAlsoPopulatesOnCacheHitPath() = runTest {
+        // The cache-hit short-circuit returns a different Output. It
+        // still needs to carry the cost attribution (the cost was paid
+        // when the cached output was originally created — the cache hit
+        // means we skip re-rendering, not that the cost vanished).
+        val (store, engine, pid) = newFixture()
+        store.mutate(pid) { p ->
+            p.copy(
+                lockfile = p.lockfile.append(
+                    LockfileEntry(
+                        inputHash = "h1",
+                        toolId = "generate_image",
+                        assetId = AssetId("a1"),
+                        provenance = GenerationProvenance(
+                            providerId = "openai",
+                            modelId = "gpt-image-1",
+                            modelVersion = null,
+                            seed = 1L,
+                            parameters = JsonObject(emptyMap()),
+                            createdAtEpochMs = 0L,
+                        ),
+                        costCents = 7L,
+                    ),
+                ),
+            )
+        }
+        val tool = ExportTool(store, engine)
+        val input = ExportTool.Input(projectId = pid.value, outputPath = "/tmp/cache-cost.mp4")
+        val first = tool.execute(input, ctx()).data
+        assertEquals(false, first.cacheHit)
+        assertEquals(7L, first.totalCostCents)
+
+        val cached = tool.execute(input, ctx()).data
+        assertEquals(true, cached.cacheHit, "second call must hit the render cache")
+        assertEquals(7L, cached.totalCostCents, "cache hit still reports the cost paid up front")
+        assertEquals(7L, cached.perClipCostCents["c1"])
+    }
+
     @Test fun refusesToExportWhenAigcClipIsStale() = runTest {
         val (store, engine, pid) = newFixture()
         val tool = ExportTool(store, engine)
