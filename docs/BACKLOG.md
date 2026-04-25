@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **agent-query-pre-flight-summary** — agent 计划下一步前需要 "我现在处境如何" 的 single-row 摘要：context_pressure% + lastFallback hop + lastCancel epoch + activeRetryAttempt + 在飞 tool count。当前要分 4 个 query 拼起来。**方向：** `session_query(select=preflight_summary, sessionId)` 单行汇集。Rubric §5.4。Milestone §later.
 - **session-query-step-history** — assistant turn 内部多 step (text → tool_calls → text 等) 历史虽在 `Part.StepStart`/`Part.StepFinish` 里，但没有 select 把 "每个 step 的 model/finish/tokens/toolCallCount/elapsedMs" 拍平到一个 timeline。debug 只能 grep `~/.talevia/cli.log`。**方向：** `session_query(select=step_history, sessionId)` 按 message 汇总。每行 (messageId, stepIndex, model, finishReason, tokensIn/Out, toolCallCount, elapsedMs)。Rubric §5.4。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排

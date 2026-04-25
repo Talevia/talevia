@@ -21,6 +21,7 @@ import io.talevia.core.tool.builtin.session.query.MessageDetailRow
 import io.talevia.core.tool.builtin.session.query.MessageRow
 import io.talevia.core.tool.builtin.session.query.PartRow
 import io.talevia.core.tool.builtin.session.query.PermissionHistoryRow
+import io.talevia.core.tool.builtin.session.query.PreflightSummaryRow
 import io.talevia.core.tool.builtin.session.query.RunFailureRow
 import io.talevia.core.tool.builtin.session.query.RunStateTransitionRow
 import io.talevia.core.tool.builtin.session.query.SessionMetadataRow
@@ -42,6 +43,7 @@ import io.talevia.core.tool.builtin.session.query.runMessageDetailQuery
 import io.talevia.core.tool.builtin.session.query.runMessagesQuery
 import io.talevia.core.tool.builtin.session.query.runPartsQuery
 import io.talevia.core.tool.builtin.session.query.runPermissionHistoryQuery
+import io.talevia.core.tool.builtin.session.query.runPreflightSummaryQuery
 import io.talevia.core.tool.builtin.session.query.runRunFailureQuery
 import io.talevia.core.tool.builtin.session.query.runRunStateHistoryQuery
 import io.talevia.core.tool.builtin.session.query.runSessionMetadataQuery
@@ -217,6 +219,8 @@ class SessionQueryTool(
             "  • permission_history — every Asked↔Replied round-trip this process. Rows: " +
             "{requestId, permission, patterns, decision (once|always|reject|pending), accepted?, " +
             "remembered?, askedEpochMs, repliedEpochMs}. requires sessionId. Process-scoped.\n" +
+            "  • preflight_summary — single-row plan-time snapshot collapsing context_pressure + " +
+            "fallback + cancel + retry + pendingPermissionAsks. requires sessionId.\n" +
             "  • active_run_summary — running stats for the latest turn (state, elapsedMs, " +
             "tokensIn/Out, toolCallCount, compactionsInRun). requires sessionId.\n" +
             "Common: limit (default 100, clamped 1..1000), offset (default 0). Filter-on-" +
@@ -250,6 +254,7 @@ class SessionQueryTool(
         SELECT_FALLBACK_HISTORY -> FallbackHistoryRow.serializer()
         SELECT_CANCELLATION_HISTORY -> CancellationHistoryRow.serializer()
         SELECT_PERMISSION_HISTORY -> PermissionHistoryRow.serializer()
+        SELECT_PREFLIGHT_SUMMARY -> PreflightSummaryRow.serializer()
         SELECT_ACTIVE_RUN_SUMMARY -> ActiveRunSummaryRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
@@ -282,6 +287,13 @@ class SessionQueryTool(
             SELECT_FALLBACK_HISTORY -> runFallbackHistoryQuery(sessions, fallbackTracker, input, limit, offset)
             SELECT_CANCELLATION_HISTORY -> runCancellationHistoryQuery(sessions, input, limit, offset)
             SELECT_PERMISSION_HISTORY -> runPermissionHistoryQuery(permissionHistory, input, limit, offset)
+            SELECT_PREFLIGHT_SUMMARY -> runPreflightSummaryQuery(
+                sessions = sessions,
+                agentStates = agentStates,
+                fallbackTracker = fallbackTracker,
+                permissionHistory = permissionHistory,
+                input = input,
+            )
             SELECT_ACTIVE_RUN_SUMMARY -> runActiveRunSummaryQuery(sessions, agentStates, input)
             else -> error("unreachable — select validated above: '$select'")
         }
@@ -358,6 +370,7 @@ class SessionQueryTool(
         const val SELECT_FALLBACK_HISTORY = "fallback_history"
         const val SELECT_CANCELLATION_HISTORY = "cancellation_history"
         const val SELECT_PERMISSION_HISTORY = "permission_history"
+        const val SELECT_PREFLIGHT_SUMMARY = "preflight_summary"
         const val SELECT_ACTIVE_RUN_SUMMARY = "active_run_summary"
         internal val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
@@ -366,7 +379,7 @@ class SessionQueryTool(
             SELECT_CACHE_STATS,
             SELECT_CONTEXT_PRESSURE, SELECT_RUN_STATE_HISTORY, SELECT_TOOL_SPEC_BUDGET,
             SELECT_RUN_FAILURE, SELECT_FALLBACK_HISTORY, SELECT_CANCELLATION_HISTORY,
-            SELECT_PERMISSION_HISTORY,
+            SELECT_PERMISSION_HISTORY, SELECT_PREFLIGHT_SUMMARY,
             SELECT_ACTIVE_RUN_SUMMARY,
         )
 
