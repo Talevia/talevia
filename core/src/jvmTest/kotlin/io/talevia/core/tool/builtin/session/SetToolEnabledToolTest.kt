@@ -28,6 +28,13 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
+/**
+ * Cycle 142 folded `set_tool_enabled` into
+ * `session_action(action="set_tool_enabled")`. This suite continues
+ * to pin the upsert + no-op semantics, the registry-filter
+ * downstream effect, and the blank-toolId guard, but routes through
+ * the unified action dispatcher.
+ */
 class SetToolEnabledToolTest {
 
     private val now: Instant = Instant.fromEpochMilliseconds(1_700_000_000_000L)
@@ -61,6 +68,12 @@ class SetToolEnabledToolTest {
         messages = emptyList(),
     )
 
+    private fun setToolEnabledInput(toolId: String, enabled: Boolean) = SessionActionTool.Input(
+        action = "set_tool_enabled",
+        toolId = toolId,
+        enabled = enabled,
+    )
+
     /** Minimal test tool used to verify registry-level filtering. */
     @Serializable data class Nothing(val n: Int = 0)
     private class TestTool(override val id: String) : Tool<Nothing, Nothing> {
@@ -76,54 +89,54 @@ class SetToolEnabledToolTest {
     @Test fun disablingATollAddsItToDisabledToolIds() = runTest {
         val sessions = freshSessions()
         val sid = sessions.seed("s-disable")
-        val tool = SetToolEnabledTool(sessions)
+        val tool = SessionActionTool(sessions)
 
         val out = tool.execute(
-            SetToolEnabledTool.Input(toolId = "generate_video", enabled = false),
+            setToolEnabledInput(toolId = "generate_video", enabled = false),
             ctxFor(sid),
         ).data
 
         assertEquals("generate_video", out.toolId)
         assertEquals(false, out.enabled)
-        assertTrue(out.changed, "first disable must be a mutation, not a no-op")
+        assertTrue(out.toolEnabledChanged, "first disable must be a mutation, not a no-op")
         assertEquals(setOf("generate_video"), sessions.getSession(sid)!!.disabledToolIds)
     }
 
     @Test fun reEnablingRemovesFromDisabledToolIds() = runTest {
         val sessions = freshSessions()
         val sid = sessions.seed("s-re-enable")
-        val tool = SetToolEnabledTool(sessions)
+        val tool = SessionActionTool(sessions)
 
-        tool.execute(SetToolEnabledTool.Input(toolId = "generate_video", enabled = false), ctxFor(sid))
+        tool.execute(setToolEnabledInput(toolId = "generate_video", enabled = false), ctxFor(sid))
         val out = tool.execute(
-            SetToolEnabledTool.Input(toolId = "generate_video", enabled = true),
+            setToolEnabledInput(toolId = "generate_video", enabled = true),
             ctxFor(sid),
         ).data
 
-        assertTrue(out.changed, "re-enable must be a mutation")
+        assertTrue(out.toolEnabledChanged, "re-enable must be a mutation")
         assertEquals(emptySet(), sessions.getSession(sid)!!.disabledToolIds)
     }
 
     @Test fun noopWhenAlreadyInRequestedState() = runTest {
         val sessions = freshSessions()
         val sid = sessions.seed("s-noop")
-        val tool = SetToolEnabledTool(sessions)
+        val tool = SessionActionTool(sessions)
 
         // Session starts empty (tool enabled by default) → enable=true is a no-op.
         val noopEnable = tool.execute(
-            SetToolEnabledTool.Input(toolId = "generate_video", enabled = true),
+            setToolEnabledInput(toolId = "generate_video", enabled = true),
             ctxFor(sid),
         ).data
-        assertFalse(noopEnable.changed, "enabling an already-enabled tool must be a no-op")
+        assertFalse(noopEnable.toolEnabledChanged, "enabling an already-enabled tool must be a no-op")
         assertEquals(emptySet(), sessions.getSession(sid)!!.disabledToolIds)
 
-        tool.execute(SetToolEnabledTool.Input(toolId = "generate_video", enabled = false), ctxFor(sid))
+        tool.execute(setToolEnabledInput(toolId = "generate_video", enabled = false), ctxFor(sid))
         // Now disabled → disable=false again is a no-op.
         val noopDisable = tool.execute(
-            SetToolEnabledTool.Input(toolId = "generate_video", enabled = false),
+            setToolEnabledInput(toolId = "generate_video", enabled = false),
             ctxFor(sid),
         ).data
-        assertFalse(noopDisable.changed, "disabling an already-disabled tool must be a no-op")
+        assertFalse(noopDisable.toolEnabledChanged, "disabling an already-disabled tool must be a no-op")
     }
 
     /**
@@ -159,10 +172,24 @@ class SetToolEnabledToolTest {
     @Test fun rejectsBlankToolId() = runTest {
         val sessions = freshSessions()
         val sid = sessions.seed("s-blank")
-        val tool = SetToolEnabledTool(sessions)
+        val tool = SessionActionTool(sessions)
         val ex = runCatching {
-            tool.execute(SetToolEnabledTool.Input(toolId = "   ", enabled = false), ctxFor(sid))
+            tool.execute(setToolEnabledInput(toolId = "   ", enabled = false), ctxFor(sid))
         }.exceptionOrNull()
         assertTrue(ex is IllegalArgumentException, "blank toolId must fail loud")
+    }
+
+    @Test fun rejectsMissingEnabled() = runTest {
+        val sessions = freshSessions()
+        val sid = sessions.seed("s-no-enabled")
+        val tool = SessionActionTool(sessions)
+        val ex = runCatching {
+            tool.execute(
+                SessionActionTool.Input(action = "set_tool_enabled", toolId = "generate_video"),
+                ctxFor(sid),
+            )
+        }.exceptionOrNull()
+        assertTrue(ex is IllegalStateException, "missing enabled flag must fail loud")
+        assertTrue(ex.message!!.contains("enabled"), ex.message)
     }
 }

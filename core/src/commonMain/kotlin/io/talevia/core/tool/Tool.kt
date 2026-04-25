@@ -110,8 +110,8 @@ data class ToolAvailabilityContext(
      * [ToolApplicability.isAvailable] check, so a disabled tool is invisible
      * to the LLM regardless of other eligibility. Default empty — pre-feature
      * call sites and tests see every applicable tool. Flipped by the
-     * session-scoped `set_tool_enabled` tool which writes
-     * `Session.disabledToolIds`.
+     * session-scoped `session_action(action="set_tool_enabled")` verb
+     * which writes `Session.disabledToolIds`.
      */
     val disabledToolIds: Set<String> = emptySet(),
 )

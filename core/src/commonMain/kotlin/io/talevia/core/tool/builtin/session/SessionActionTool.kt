@@ -13,6 +13,7 @@ import io.talevia.core.tool.builtin.session.action.executeSessionExportBusTrace
 import io.talevia.core.tool.builtin.session.action.executeSessionImport
 import io.talevia.core.tool.builtin.session.action.executeSessionRename
 import io.talevia.core.tool.builtin.session.action.executeSessionSetSystemPrompt
+import io.talevia.core.tool.builtin.session.action.executeSessionSetToolEnabled
 import io.talevia.core.tool.builtin.session.action.executeSessionUnarchive
 import kotlinx.datetime.Clock
 import kotlinx.serialization.KSerializer
@@ -100,7 +101,7 @@ class SessionActionTool(
          * the dispatch is running.
          */
         val sessionId: String? = null,
-        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, `"set_system_prompt"`, or `"export_bus_trace"`. */
+        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, `"set_system_prompt"`, `"export_bus_trace"`, or `"set_tool_enabled"`. */
         val action: String,
         /** Required for `action="rename"`. Must be non-blank. Ignored on other actions. */
         val newTitle: String? = null,
@@ -160,6 +161,22 @@ class SessionActionTool(
          * Ignored on every other action.
          */
         val limit: Int? = null,
+        /**
+         * Required for `action=set_tool_enabled`. Tool id to flip in
+         * the session's `disabledToolIds` set, e.g. `"generate_video"`.
+         * Ignored on every other action. NOT validated against the
+         * registry — `disabledToolIds` is per-session persisted state
+         * and may legitimately reference an env-gated tool that isn't
+         * loaded right now (it'll still be filtered out if it ever is).
+         */
+        val toolId: String? = null,
+        /**
+         * Required for `action=set_tool_enabled`. Upsert flag:
+         * `false` adds `toolId` to the disabled set (no-op when already
+         * disabled); `true` removes it (no-op when already enabled).
+         * Ignored on every other action.
+         */
+        val enabled: Boolean? = null,
     )
 
     @Serializable data class Output(
@@ -228,6 +245,23 @@ class SessionActionTool(
          * Empty string otherwise.
          */
         val exportedTraceFormat: String = "",
+        /**
+         * `set_tool_enabled` only: tool id the call targeted, echoed
+         * for caller convenience. Empty string otherwise.
+         */
+        val toolId: String = "",
+        /**
+         * `set_tool_enabled` only: state after the write (`true` =
+         * enabled / removed from disabled set; `false` = disabled /
+         * added). Always-false on every other action.
+         */
+        val enabled: Boolean = false,
+        /**
+         * `set_tool_enabled` only: `true` when the call mutated the
+         * session (toggle); `false` when it was a no-op. Always-false
+         * on every other action.
+         */
+        val toolEnabledChanged: Boolean = false,
     )
 
     override val id: String = "session_action"
@@ -241,8 +275,11 @@ class SessionActionTool(
             "system prompt without spinning up a second Agent (null=clear, empty string=valid " +
             "no-prompt override), `export_bus_trace`+optional `format`/`limit` flushes the " +
             "session's `BusEventTraceRecorder` ring buffer to JSONL (default) or JSON for " +
-            "offline triage. sessionId defaults to owning session except on delete and import. " +
-            "Permission: session.write (delete=session.destructive)."
+            "offline triage, `set_tool_enabled`+`toolId`+`enabled` flips a tool in the " +
+            "session's `disabledToolIds` set (disabled tools are filtered from the next " +
+            "turn's tool spec — use to enforce 'stop using <tool>'; no-op when already in " +
+            "the requested state). sessionId defaults to owning session except on delete " +
+            "and import. Permission: session.write (delete=session.destructive)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
 
@@ -277,7 +314,7 @@ class SessionActionTool(
                 put("type", "string")
                 put(
                     "description",
-                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, `set_system_prompt`, or `export_bus_trace`.",
+                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, `set_system_prompt`, `export_bus_trace`, or `set_tool_enabled`.",
                 )
                 put(
                     "enum",
@@ -291,6 +328,7 @@ class SessionActionTool(
                             JsonPrimitive("import"),
                             JsonPrimitive("set_system_prompt"),
                             JsonPrimitive("export_bus_trace"),
+                            JsonPrimitive("set_tool_enabled"),
                         ),
                     ),
                 )
@@ -346,6 +384,25 @@ class SessionActionTool(
                         "(default = full ring buffer). Must be ≥ 1 if set.",
                 )
             }
+            putJsonObject("toolId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Required for action=set_tool_enabled. Tool id to flip in the session's " +
+                        "disabledToolIds set, e.g. 'generate_video'. Not validated against the " +
+                        "registry — disabledToolIds may legitimately reference an env-gated " +
+                        "tool that isn't loaded right now.",
+                )
+            }
+            putJsonObject("enabled") {
+                put("type", "boolean")
+                put(
+                    "description",
+                    "Required for action=set_tool_enabled. true = enable (remove from " +
+                        "disabled set); false = disable (add). No-op when already in the " +
+                        "requested state.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("action"))))
         put("additionalProperties", false)
@@ -363,8 +420,10 @@ class SessionActionTool(
             "import" -> executeSessionImport(sessions, projects, input)
             "set_system_prompt" -> executeSessionSetSystemPrompt(sessions, clock, input, ctx)
             "export_bus_trace" -> executeSessionExportBusTrace(busTrace, input, ctx)
+            "set_tool_enabled" -> executeSessionSetToolEnabled(sessions, clock, input, ctx)
             else -> error(
-                "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, remove_permission_rule, import, set_system_prompt, export_bus_trace",
+                "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, " +
+                    "remove_permission_rule, import, set_system_prompt, export_bus_trace, set_tool_enabled",
             )
         }
     }

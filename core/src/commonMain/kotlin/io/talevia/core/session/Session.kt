@@ -52,7 +52,8 @@ data class Session(
     val spendCapCents: Long? = null,
     /**
      * Tools the agent is NOT allowed to dispatch in this session. Flipped by
-     * `set_tool_enabled`. Applied at request-assembly time: `AgentTurnExecutor`
+     * `session_action(action="set_tool_enabled")`. Applied at request-assembly
+     * time: `AgentTurnExecutor`
      * forwards the set into [io.talevia.core.tool.ToolAvailabilityContext] and
      * `ToolRegistry.specs(ctx)` filters them out before the provider sees the
      * tool bundle — so a disabled tool is invisible to the model, not merely

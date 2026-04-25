@@ -55,7 +55,6 @@ import io.talevia.core.tool.builtin.session.RevertSessionTool
 import io.talevia.core.tool.builtin.session.SessionActionTool
 import io.talevia.core.tool.builtin.session.SessionQueryTool
 import io.talevia.core.tool.builtin.session.SetSessionSpendCapTool
-import io.talevia.core.tool.builtin.session.SetToolEnabledTool
 import io.talevia.core.tool.builtin.session.SwitchProjectTool
 import io.talevia.core.tool.builtin.shell.BashTool
 import io.talevia.core.tool.builtin.source.DiffSourceNodesTool
@@ -150,7 +149,6 @@ fun ToolRegistry.registerSessionAndMetaTools(
     register(ExportSessionTool(sessions))
     register(ForkSessionTool(sessions))
     register(SetSessionSpendCapTool(sessions))
-    register(SetToolEnabledTool(sessions))
     register(SwitchProjectTool(sessions, projects, bus = bus, agentStates = agentStates))
     register(RevertSessionTool(sessions, projects, bus))
     register(
