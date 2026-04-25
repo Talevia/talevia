@@ -16,7 +16,6 @@
 ## P1 — 中优，做完 P0 再排
 
 - **m2-provider-second-impl** — M2 criterion 2："provider 多元"。`ImageGenEngine` / `VideoGenEngine` / `MusicGenEngine` / `TtsEngine` 4 个接口每个都只有 1 个 prod impl（grep 印证：OpenAI 图/视/语音 + Replicate 音乐/放大，各 1 家）。**方向：** 任一 engine 长出第二个非 stub 生产 impl（如 `AnthropicImageGenEngine` 若 Claude 上线图像、`ElevenLabsTtsEngine`、`StabilityImageGenEngine`、`LocalMLXTtsEngine`）。需要专有 API key + 产品抉择，待用户决定。Rubric §5.7 / §5.2。Milestone §M2. · skipped 2026-04-24: 需专有 API key + vendor 决策 (跨 5 个 repopulate 周期的老约束).
-- **benchmark-source-deep-content-hash** — `Source.deepContentHashOf` 是 per-clip render fingerprint 的关键计算 (parent traversal × Json encode)。无 wall-time guard，下次某 source 改动让 hash 不缓存就退化 4-10× 没人发现。**方向：** `SourceDeepHashBenchmark` —— 100-node DAG (depth 6 mix), per-node hash + 多 leaf 重叠 cache —— wall-time soft budget。和现有 7 bench 同 pattern。Rubric §5.7。Milestone §later.
 - **debt-tool-count-net-growth** — R.5.1 scan 84 tools；连续 4 cycle 稳定（之前 85 → 84 在 pin merge）。下次 repopulate net + 2 视为膨胀信号 → 升 P1 + 列新 tool 列表。**方向：** observational；触发 → 追近似群分析。**触发条件：** 下次 repopulate count > 86。Rubric §5.6。Milestone §later.
 
 ## P2 — 记债 / 观望
