@@ -11,6 +11,7 @@ import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 class OpenProjectToolTest {
@@ -45,20 +46,27 @@ class OpenProjectToolTest {
         // Pre-condition: the fresh store doesn't know about this id yet.
         assertEquals(null, freshStore.get(originalId))
 
-        val tool = OpenProjectTool(freshStore)
-        val result = tool.execute(OpenProjectTool.Input(path = path.toString()), ctx())
+        val tool = ProjectActionTool(freshStore)
+        val result = tool.execute(
+            ProjectActionTool.Input(action = "open", path = path.toString()),
+            ctx(),
+        )
 
+        val open = assertNotNull(result.data.openResult)
         assertEquals(originalId.value, result.data.projectId)
-        assertEquals("Copied Movie", result.data.title)
+        assertEquals("Copied Movie", open.title)
         // After open, the project is reachable by id.
         assertTrue(freshStore.get(originalId) != null)
     }
 
     @Test fun openMissingPathThrows() = runTest {
         val (store, _) = ProjectStoreTestKit.createWithFs()
-        val tool = OpenProjectTool(store)
+        val tool = ProjectActionTool(store)
         assertFailsWith<Throwable> {
-            tool.execute(OpenProjectTool.Input(path = "/projects/does-not-exist"), ctx())
+            tool.execute(
+                ProjectActionTool.Input(action = "open", path = "/projects/does-not-exist"),
+                ctx(),
+            )
         }
     }
 
@@ -67,17 +75,31 @@ class OpenProjectToolTest {
         // Create the directory but no talevia.json inside.
         val emptyDir = "/projects/empty".toPath()
         fs.createDirectories(emptyDir)
-        val tool = OpenProjectTool(store)
+        val tool = ProjectActionTool(store)
         assertFailsWith<Throwable> {
-            tool.execute(OpenProjectTool.Input(path = emptyDir.toString()), ctx())
+            tool.execute(
+                ProjectActionTool.Input(action = "open", path = emptyDir.toString()),
+                ctx(),
+            )
         }
     }
 
     @Test fun blankPathFailsLoud() = runTest {
         val (store, _) = ProjectStoreTestKit.createWithFs()
-        val tool = OpenProjectTool(store)
+        val tool = ProjectActionTool(store)
         assertFailsWith<IllegalArgumentException> {
-            tool.execute(OpenProjectTool.Input(path = "  "), ctx())
+            tool.execute(
+                ProjectActionTool.Input(action = "open", path = "  "),
+                ctx(),
+            )
+        }
+    }
+
+    @Test fun missingPathFailsLoud() = runTest {
+        val (store, _) = ProjectStoreTestKit.createWithFs()
+        val tool = ProjectActionTool(store)
+        assertFailsWith<IllegalStateException> {
+            tool.execute(ProjectActionTool.Input(action = "open"), ctx())
         }
     }
 }

@@ -78,7 +78,7 @@ class CreateProjectFromTemplateTool(
         val intent: String? = null,
         /**
          * Optional filesystem path for the new bundle. See
-         * [CreateProjectTool.Input.path] for semantics. The template is
+         * [ProjectActionTool.Input.path] (action="create") for semantics. The template is
          * seeded into the bundle via a follow-up [ProjectStore.mutate] when
          * `path` is set, since [ProjectStore.createAt] only takes timeline +
          * outputProfile.

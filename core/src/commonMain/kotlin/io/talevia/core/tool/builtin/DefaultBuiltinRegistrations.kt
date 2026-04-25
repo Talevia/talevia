@@ -38,8 +38,6 @@ import io.talevia.core.tool.builtin.meta.ListToolsTool
 import io.talevia.core.tool.builtin.ml.DescribeAssetTool
 import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
 import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
-import io.talevia.core.tool.builtin.project.CreateProjectTool
-import io.talevia.core.tool.builtin.project.DeleteProjectTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.ExportProjectTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
@@ -47,15 +45,12 @@ import io.talevia.core.tool.builtin.project.ForkProjectTool
 import io.talevia.core.tool.builtin.project.GetProjectStateTool
 import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
-import io.talevia.core.tool.builtin.project.OpenProjectTool
+import io.talevia.core.tool.builtin.project.ProjectActionTool
 import io.talevia.core.tool.builtin.project.ProjectMaintenanceActionTool
 import io.talevia.core.tool.builtin.project.ProjectPinActionTool
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
 import io.talevia.core.tool.builtin.project.ProjectSnapshotActionTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
-import io.talevia.core.tool.builtin.project.RemoveAssetTool
-import io.talevia.core.tool.builtin.project.RenameProjectTool
-import io.talevia.core.tool.builtin.project.SetOutputProfileTool
 import io.talevia.core.tool.builtin.project.ValidateProjectTool
 import io.talevia.core.tool.builtin.session.EstimateSessionTokensTool
 import io.talevia.core.tool.builtin.session.ExportSessionTool
@@ -226,17 +221,12 @@ fun ToolRegistry.registerProjectTools(
 ) {
     register(ExportTool(projects, engine))
     register(ExportDryRunTool(projects))
-    register(CreateProjectTool(projects))
-    register(OpenProjectTool(projects))
+    register(ProjectActionTool(projects))
     register(CreateProjectFromTemplateTool(projects))
     register(ListProjectsTool(projects))
     register(GetProjectStateTool(projects))
-    register(DeleteProjectTool(projects))
-    register(RenameProjectTool(projects))
     register(FindStaleClipsTool(projects))
     register(ProjectQueryTool(projects))
-    register(RemoveAssetTool(projects))
-    register(SetOutputProfileTool(projects))
     register(ValidateProjectTool(projects))
     register(RegenerateStaleClipsTool(projects, this))
     register(ProjectMaintenanceActionTool(projects, engine))

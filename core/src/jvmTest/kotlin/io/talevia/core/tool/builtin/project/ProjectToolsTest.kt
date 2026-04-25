@@ -33,18 +33,29 @@ class ProjectToolsTest {
 
     private data class Rig(val store: FileProjectStore, val ctx: ToolContext)
 
+    private fun createInput(
+        title: String,
+        projectId: String? = null,
+        resolutionPreset: String? = null,
+        fps: Int? = null,
+    ) = ProjectActionTool.Input(
+        action = "create",
+        title = title,
+        projectId = projectId,
+        resolutionPreset = resolutionPreset,
+        fps = fps,
+    )
+
     @Test fun createProjectSlugsTitleAndPersistsDefaults() = runTest {
         val rig = rig()
-        val tool = CreateProjectTool(rig.store)
-        val out = tool.execute(
-            CreateProjectTool.Input(title = "Graduation Vlog 2026"),
-            rig.ctx,
-        )
-        assertEquals("proj-graduation-vlog-2026", out.data.projectId)
-        assertEquals(1920, out.data.resolutionWidth)
-        assertEquals(1080, out.data.resolutionHeight)
-        assertEquals(30, out.data.fps)
-        val project = rig.store.get(ProjectId(out.data.projectId))
+        val tool = ProjectActionTool(rig.store)
+        val out = tool.execute(createInput(title = "Graduation Vlog 2026"), rig.ctx).data
+        val create = assertNotNull(out.createResult)
+        assertEquals("proj-graduation-vlog-2026", out.projectId)
+        assertEquals(1920, create.resolutionWidth)
+        assertEquals(1080, create.resolutionHeight)
+        assertEquals(30, create.fps)
+        val project = rig.store.get(ProjectId(out.projectId))
         assertNotNull(project)
         assertEquals(1920, project.outputProfile.resolution.width)
         assertEquals(0, project.timeline.tracks.size)
@@ -52,45 +63,48 @@ class ProjectToolsTest {
 
     @Test fun createProjectAcceptsResolutionAndFpsOverrides() = runTest {
         val rig = rig()
-        val tool = CreateProjectTool(rig.store)
+        val tool = ProjectActionTool(rig.store)
         val out = tool.execute(
-            CreateProjectTool.Input(title = "promo", resolutionPreset = "4k", fps = 60),
+            createInput(title = "promo", resolutionPreset = "4k", fps = 60),
             rig.ctx,
-        )
-        assertEquals(3840, out.data.resolutionWidth)
-        assertEquals(2160, out.data.resolutionHeight)
-        assertEquals(60, out.data.fps)
+        ).data
+        val create = assertNotNull(out.createResult)
+        assertEquals(3840, create.resolutionWidth)
+        assertEquals(2160, create.resolutionHeight)
+        assertEquals(60, create.fps)
     }
 
     @Test fun createProjectRejectsUnknownPreset() = runTest {
         val rig = rig()
-        val tool = CreateProjectTool(rig.store)
+        val tool = ProjectActionTool(rig.store)
         assertFailsWith<IllegalArgumentException> {
-            tool.execute(
-                CreateProjectTool.Input(title = "x", resolutionPreset = "8k"),
-                rig.ctx,
-            )
+            tool.execute(createInput(title = "x", resolutionPreset = "8k"), rig.ctx)
         }
     }
 
     @Test fun createProjectFailsLoudOnDuplicateId() = runTest {
         val rig = rig()
-        val tool = CreateProjectTool(rig.store)
-        tool.execute(CreateProjectTool.Input(title = "Mei", projectId = "proj-mei"), rig.ctx)
+        val tool = ProjectActionTool(rig.store)
+        tool.execute(createInput(title = "Mei", projectId = "proj-mei"), rig.ctx)
         val ex = assertFailsWith<IllegalArgumentException> {
-            tool.execute(
-                CreateProjectTool.Input(title = "Mei v2", projectId = "proj-mei"),
-                rig.ctx,
-            )
+            tool.execute(createInput(title = "Mei v2", projectId = "proj-mei"), rig.ctx)
         }
         assertTrue("already exists" in ex.message.orEmpty())
     }
 
+    @Test fun createProjectRejectsBlankTitle() = runTest {
+        val rig = rig()
+        val tool = ProjectActionTool(rig.store)
+        assertFailsWith<IllegalStateException> {
+            tool.execute(ProjectActionTool.Input(action = "create"), rig.ctx)
+        }
+    }
+
     @Test fun listProjectsReturnsCatalogMetadata() = runTest {
         val rig = rig()
-        val create = CreateProjectTool(rig.store)
-        create.execute(CreateProjectTool.Input(title = "Alpha"), rig.ctx)
-        create.execute(CreateProjectTool.Input(title = "Beta"), rig.ctx)
+        val create = ProjectActionTool(rig.store)
+        create.execute(createInput(title = "Alpha"), rig.ctx)
+        create.execute(createInput(title = "Beta"), rig.ctx)
 
         val tool = ListProjectsTool(rig.store)
         val out = tool.execute(ListProjectsTool.Input(), rig.ctx)
@@ -108,8 +122,8 @@ class ProjectToolsTest {
 
     @Test fun getProjectStateReportsCountsAndProfile() = runTest {
         val rig = rig()
-        CreateProjectTool(rig.store).execute(
-            CreateProjectTool.Input(title = "snap", resolutionPreset = "720p", fps = 24),
+        ProjectActionTool(rig.store).execute(
+            createInput(title = "snap", resolutionPreset = "720p", fps = 24),
             rig.ctx,
         )
         val out = GetProjectStateTool(rig.store).execute(
@@ -139,23 +153,46 @@ class ProjectToolsTest {
 
     @Test fun deleteProjectRemovesRowAndReportsTitle() = runTest {
         val rig = rig()
-        CreateProjectTool(rig.store).execute(CreateProjectTool.Input(title = "doomed"), rig.ctx)
-        val out = DeleteProjectTool(rig.store).execute(
-            DeleteProjectTool.Input(projectId = "proj-doomed"),
+        val tool = ProjectActionTool(rig.store)
+        tool.execute(createInput(title = "doomed"), rig.ctx)
+        val out = tool.execute(
+            ProjectActionTool.Input(action = "delete", projectId = "proj-doomed"),
             rig.ctx,
-        )
-        assertEquals("doomed", out.data.title)
+        ).data
+        val delete = assertNotNull(out.deleteResult)
+        assertEquals("doomed", delete.title)
         assertNull(rig.store.get(ProjectId("proj-doomed")))
     }
 
     @Test fun deleteProjectFailsLoudWhenMissing() = runTest {
         val rig = rig()
         assertFailsWith<IllegalStateException> {
-            DeleteProjectTool(rig.store).execute(
-                DeleteProjectTool.Input(projectId = "proj-ghost"),
+            ProjectActionTool(rig.store).execute(
+                ProjectActionTool.Input(action = "delete", projectId = "proj-ghost"),
                 rig.ctx,
             )
         }
+    }
+
+    @Test fun deleteRequiresProjectId() = runTest {
+        val rig = rig()
+        assertFailsWith<IllegalStateException> {
+            ProjectActionTool(rig.store).execute(
+                ProjectActionTool.Input(action = "delete"),
+                rig.ctx,
+            )
+        }
+    }
+
+    @Test fun unknownActionFailsLoud() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalStateException> {
+            ProjectActionTool(rig.store).execute(
+                ProjectActionTool.Input(action = "frobnicate"),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("unknown action"))
     }
 
     @Test fun slugifierHandlesPunctuationAndCollapses() {

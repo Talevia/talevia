@@ -27,25 +27,30 @@ class RenameProjectToolTest {
         messages = emptyList(),
     )
 
-    private fun fixture(title: String = "Original"): Triple<FileProjectStore, ProjectId, Project> {
+    private fun fixture(): Triple<FileProjectStore, ProjectId, Project> {
         val store = ProjectStoreTestKit.create()
         val pid = ProjectId("p-1")
         val project = Project(id = pid, timeline = Timeline())
-        return Triple(store, pid, project).also {
-            // upsert happens inside the test body after store+project are constructed
-        }
+        return Triple(store, pid, project)
     }
+
+    private fun renameInput(projectId: String, title: String) = ProjectActionTool.Input(
+        action = "rename",
+        projectId = projectId,
+        title = title,
+    )
 
     @Test
     fun renames_existing_project() = runTest {
         val (store, pid, project) = fixture()
         store.upsert("Old Title", project)
-        val tool = RenameProjectTool(store)
+        val tool = ProjectActionTool(store)
 
-        val result = tool.execute(RenameProjectTool.Input(pid.value, "New Title"), ctx())
+        val result = tool.execute(renameInput(pid.value, "New Title"), ctx())
 
-        assertEquals("Old Title", result.data.previousTitle)
-        assertEquals("New Title", result.data.title)
+        val rename = assertNotNull(result.data.renameResult)
+        assertEquals("Old Title", rename.previousTitle)
+        assertEquals("New Title", rename.title)
         val after = store.summary(pid)
         assertNotNull(after)
         assertEquals("New Title", after.title)
@@ -56,9 +61,9 @@ class RenameProjectToolTest {
         val (store, pid, project) = fixture()
         store.upsert("Old", project)
         val before = store.get(pid)!!
-        val tool = RenameProjectTool(store)
+        val tool = ProjectActionTool(store)
 
-        tool.execute(RenameProjectTool.Input(pid.value, "New"), ctx())
+        tool.execute(renameInput(pid.value, "New"), ctx())
 
         val after = store.get(pid)!!
         assertEquals(before, after)
@@ -68,21 +73,22 @@ class RenameProjectToolTest {
     fun no_op_when_title_identical() = runTest {
         val (store, pid, project) = fixture()
         store.upsert("Same", project)
-        val tool = RenameProjectTool(store)
+        val tool = ProjectActionTool(store)
 
-        val result = tool.execute(RenameProjectTool.Input(pid.value, "Same"), ctx())
+        val result = tool.execute(renameInput(pid.value, "Same"), ctx())
 
-        assertEquals("Same", result.data.previousTitle)
-        assertEquals("Same", result.data.title)
+        val rename = assertNotNull(result.data.renameResult)
+        assertEquals("Same", rename.previousTitle)
+        assertEquals("Same", rename.title)
     }
 
     @Test
     fun rejects_missing_project() = runTest {
         val (store, _, _) = fixture()
-        val tool = RenameProjectTool(store)
+        val tool = ProjectActionTool(store)
 
         assertFailsWith<IllegalStateException> {
-            tool.execute(RenameProjectTool.Input("no-such-project", "X"), ctx())
+            tool.execute(renameInput("no-such-project", "X"), ctx())
         }
     }
 
@@ -90,10 +96,10 @@ class RenameProjectToolTest {
     fun rejects_blank_title() = runTest {
         val (store, pid, project) = fixture()
         store.upsert("Old", project)
-        val tool = RenameProjectTool(store)
+        val tool = ProjectActionTool(store)
 
         assertFailsWith<IllegalArgumentException> {
-            tool.execute(RenameProjectTool.Input(pid.value, "  "), ctx())
+            tool.execute(renameInput(pid.value, "  "), ctx())
         }
     }
 
@@ -101,13 +107,27 @@ class RenameProjectToolTest {
     fun rename_persists_across_list_summaries() = runTest {
         val (store, pid, project) = fixture()
         store.upsert("First", project)
-        val tool = RenameProjectTool(store)
+        val tool = ProjectActionTool(store)
 
-        tool.execute(RenameProjectTool.Input(pid.value, "Second"), ctx())
+        tool.execute(renameInput(pid.value, "Second"), ctx())
 
         val summaries = store.listSummaries()
         assertEquals(1, summaries.size)
         assertEquals("Second", summaries.single().title)
         assertEquals(pid.value, summaries.single().id)
+    }
+
+    @Test
+    fun rejects_missing_title() = runTest {
+        val (store, pid, project) = fixture()
+        store.upsert("Old", project)
+        val tool = ProjectActionTool(store)
+
+        assertFailsWith<IllegalStateException> {
+            tool.execute(
+                ProjectActionTool.Input(action = "rename", projectId = pid.value),
+                ctx(),
+            )
+        }
     }
 }

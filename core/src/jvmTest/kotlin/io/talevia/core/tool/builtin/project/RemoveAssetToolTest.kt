@@ -23,6 +23,7 @@ import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
@@ -74,27 +75,30 @@ class RemoveAssetToolTest {
         return store to pid
     }
 
+    private fun input(projectId: String, assetId: String, force: Boolean = false) =
+        ProjectActionTool.Input(
+            action = "remove_asset",
+            projectId = projectId,
+            assetId = assetId,
+            force = force,
+        )
+
     @Test fun removesUnusedAsset() = runTest {
         val (store, pid) = fixture()
-        val tool = RemoveAssetTool(store)
-        val out = tool.execute(
-            RemoveAssetTool.Input(projectId = pid.value, assetId = "v-unused"),
-            ctx(),
-        ).data
-        assertEquals(true, out.removed)
-        assertTrue(out.dependentClips.isEmpty())
+        val tool = ProjectActionTool(store)
+        val out = tool.execute(input(pid.value, "v-unused"), ctx()).data
+        val remove = assertNotNull(out.removeAssetResult)
+        assertEquals(true, remove.removed)
+        assertTrue(remove.dependentClips.isEmpty())
         val remaining = store.get(pid)!!.assets.map { it.id.value }
         assertEquals(listOf("v-used"), remaining)
     }
 
     @Test fun refusesWhenAssetInUse() = runTest {
         val (store, pid) = fixture()
-        val tool = RemoveAssetTool(store)
+        val tool = ProjectActionTool(store)
         val ex = assertFailsWith<IllegalStateException> {
-            tool.execute(
-                RemoveAssetTool.Input(projectId = pid.value, assetId = "v-used"),
-                ctx(),
-            )
+            tool.execute(input(pid.value, "v-used"), ctx())
         }
         assertTrue(ex.message!!.contains("in use"))
         assertTrue(ex.message!!.contains("c-1"))
@@ -105,13 +109,11 @@ class RemoveAssetToolTest {
 
     @Test fun forceRemovesInUseAssetAndReportsDependents() = runTest {
         val (store, pid) = fixture()
-        val tool = RemoveAssetTool(store)
-        val out = tool.execute(
-            RemoveAssetTool.Input(projectId = pid.value, assetId = "v-used", force = true),
-            ctx(),
-        ).data
-        assertEquals(true, out.removed)
-        assertEquals(setOf("c-1", "c-2"), out.dependentClips.toSet())
+        val tool = ProjectActionTool(store)
+        val out = tool.execute(input(pid.value, "v-used", force = true), ctx()).data
+        val remove = assertNotNull(out.removeAssetResult)
+        assertEquals(true, remove.removed)
+        assertEquals(setOf("c-1", "c-2"), remove.dependentClips.toSet())
         val remaining = store.get(pid)!!.assets.map { it.id.value }
         assertEquals(listOf("v-unused"), remaining)
         // Dangling clips are intentionally left in place.
@@ -123,24 +125,18 @@ class RemoveAssetToolTest {
 
     @Test fun rejectsMissingAsset() = runTest {
         val (store, pid) = fixture()
-        val tool = RemoveAssetTool(store)
+        val tool = ProjectActionTool(store)
         val ex = assertFailsWith<IllegalStateException> {
-            tool.execute(
-                RemoveAssetTool.Input(projectId = pid.value, assetId = "nope"),
-                ctx(),
-            )
+            tool.execute(input(pid.value, "nope"), ctx())
         }
         assertTrue(ex.message!!.contains("not found"))
     }
 
     @Test fun rejectsMissingProject() = runTest {
         val (store, _) = fixture()
-        val tool = RemoveAssetTool(store)
+        val tool = ProjectActionTool(store)
         val ex = assertFailsWith<IllegalStateException> {
-            tool.execute(
-                RemoveAssetTool.Input(projectId = "nope", assetId = "x"),
-                ctx(),
-            )
+            tool.execute(input("nope", "x"), ctx())
         }
         assertTrue(ex.message!!.contains("project"))
         assertTrue(ex.message!!.contains("not found"))
@@ -148,18 +144,23 @@ class RemoveAssetToolTest {
 
     @Test fun removalIsPersisted() = runTest {
         val (store, pid) = fixture()
-        val tool = RemoveAssetTool(store)
-        tool.execute(
-            RemoveAssetTool.Input(projectId = pid.value, assetId = "v-unused"),
-            ctx(),
-        )
+        val tool = ProjectActionTool(store)
+        tool.execute(input(pid.value, "v-unused"), ctx())
         // Fetch a second time: asset should be gone.
         val ex = assertFailsWith<IllegalStateException> {
+            tool.execute(input(pid.value, "v-unused"), ctx())
+        }
+        assertTrue(ex.message!!.contains("not found"))
+    }
+
+    @Test fun missingAssetIdFailsLoud() = runTest {
+        val (store, pid) = fixture()
+        val tool = ProjectActionTool(store)
+        assertFailsWith<IllegalStateException> {
             tool.execute(
-                RemoveAssetTool.Input(projectId = pid.value, assetId = "v-unused"),
+                ProjectActionTool.Input(action = "remove_asset", projectId = pid.value),
                 ctx(),
             )
         }
-        assertTrue(ex.message!!.contains("not found"))
     }
 }

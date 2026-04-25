@@ -99,9 +99,9 @@ private class TaleviaCli : CliktCommand(name = "talevia") {
  * id surfaced. Anything else falls through to the existing Clikt-managed flow
  * (`talevia [--resume]`).
  *
- * TODO(file-bundle-migration): a separate agent will deliver an `OpenProjectTool`
- * that reuses this code from inside the agent loop. Until then we call the
- * store directly here.
+ * The agent-loop equivalent is `project_action(action="open")`; the CLI
+ * subcommand here calls the store directly because it runs before the
+ * REPL spins up an agent context.
  */
 fun main(args: Array<String>) {
     if (args.isNotEmpty()) {

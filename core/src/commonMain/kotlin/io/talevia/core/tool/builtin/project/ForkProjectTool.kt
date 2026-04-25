@@ -72,7 +72,7 @@ class ForkProjectTool(
         val variantSpec: VariantSpec? = null,
         /**
          * Optional filesystem path for the forked bundle. See
-         * [CreateProjectTool.Input.path] for semantics.
+         * [ProjectActionTool.Input.path] (action="create") for semantics.
          */
         val path: String? = null,
     )
