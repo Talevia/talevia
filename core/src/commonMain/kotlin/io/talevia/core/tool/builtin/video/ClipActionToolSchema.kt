@@ -25,12 +25,16 @@ internal val CLIP_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
         }
         putJsonObject("action") {
             put("type", "string")
-            put("description", "One of: add, remove, duplicate, move, split, trim, replace, fade.")
+            put(
+                "description",
+                "One of: add, remove, duplicate, move, split, trim, replace, fade, edit_text.",
+            )
             put(
                 "enum",
                 JsonArray(
-                    listOf("add", "remove", "duplicate", "move", "split", "trim", "replace", "fade")
-                        .map(::JsonPrimitive),
+                    listOf(
+                        "add", "remove", "duplicate", "move", "split", "trim", "replace", "fade", "edit_text",
+                    ).map(::JsonPrimitive),
                 ),
             )
         }
@@ -113,6 +117,21 @@ internal val CLIP_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
                 numberProp("fadeOutSeconds", "Fade-out ramp (s). 0.0 disables. Omit to keep.")
             }
         }
+        putJsonObject("editTextItems") {
+            itemArray(
+                "action=edit_text. Per-text-clip body / style patch (at least one field per item).",
+                required = listOf("clipId"),
+            ) {
+                stringProp("clipId")
+                stringProp("newText", "Replace the text body. Must be non-blank.")
+                stringProp("fontFamily")
+                numberProp("fontSize", "Point size; must be > 0.")
+                stringProp("color", "CSS-style hex (e.g. #FFFFFF).")
+                stringProp("backgroundColor", "Background hex; '' clears (transparent).")
+                boolProp("bold")
+                boolProp("italic")
+            }
+        }
     }
     put("required", JsonArray(listOf(JsonPrimitive("action"))))
     put("additionalProperties", false)
@@ -132,6 +151,11 @@ internal fun JsonObjectBuilder.stringProp(name: String, description: String? = n
 
 internal fun JsonObjectBuilder.numberProp(name: String, description: String? = null) = putJsonObject(name) {
     put("type", "number")
+    if (description != null) put("description", description)
+}
+
+internal fun JsonObjectBuilder.boolProp(name: String, description: String? = null) = putJsonObject(name) {
+    put("type", "boolean")
     if (description != null) put("description", description)
 }
 

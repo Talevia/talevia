@@ -12,21 +12,24 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.serializer
 
 /**
- * Eight-way clip edit verb — consolidates `AddClipTool` + `RemoveClipTool` +
+ * Nine-way clip edit verb — consolidates `AddClipTool` + `RemoveClipTool` +
  * `DuplicateClipTool` (phase-1, 2026-04-23), `MoveClipTool` + `SplitClipTool`
- * + `TrimClipTool` (phase-2, 2026-04-23), and `ReplaceClipTool` +
+ * + `TrimClipTool` (phase-2, 2026-04-23), `ReplaceClipTool` +
  * `FadeAudioClipTool` (phase-3, 2026-04-24 — fold enabled by the axis
- * split landed earlier the same day).
+ * split landed earlier the same day), and `EditTextClipTool`
+ * (phase-4, cycle 152 — surgical text body / style edits on existing
+ * `Clip.Text` clips).
  *
  * **Structure (post axis-split + phase-3, 2026-04-24).** The class itself carries
  * only the LLM-facing surface: nested data classes for input/output
  * payloads, the JSON schema, the tool metadata, the `rejectForeign`
- * one-liner, and the six-way dispatch `when` in [execute]. The actual
- * per-verb business logic lives in two sibling files:
+ * one-liner, and the dispatch `when` in [execute]. The actual per-verb
+ * business logic lives in sibling files:
  *
  * - [executeClipAdd] / [executeClipDuplicate] — `ClipCreateHandlers.kt`
  * - [executeClipRemove] / [executeClipMove] / [executeClipSplit] /
- *   [executeClipTrim] — `ClipMutateHandlers.kt`
+ *   [executeClipTrim] — `ClipMutateHandlers.kt` (place / shape / audio splits)
+ * - [executeClipEditText] — `ClipEditTextHandler.kt`
  *
  * And the small shared helpers (`pickVideoTrack`, `cloneClip`,
  * `splitClip`, `trackKindOf`, …) live in `ClipActionHelpers.kt`. This
@@ -49,6 +52,7 @@ import kotlinx.serialization.serializer
  * - `trim` + `trimItems` → [executeClipTrim]
  * - `replace` + `replaceItems` → [executeClipReplace]
  * - `fade` + `fadeItems` → [executeClipFade]
+ * - `edit_text` + `editTextItems` → [executeClipEditText]
  */
 class ClipActionTool(
     private val store: ProjectStore,
@@ -105,6 +109,25 @@ class ClipActionTool(
         val fadeOutSeconds: Float? = null,
     )
 
+    /**
+     * One edit_text request. Mirrors the legacy `EditTextClipTool.Item`.
+     * Partial-patch semantics: `null` = keep, value = replace,
+     * `""` on `backgroundColor` = clear (set to null). At least one
+     * field per item must be non-null; the handler rejects no-op items.
+     */
+    @Serializable data class EditTextItem(
+        val clipId: String,
+        /** New body text. Null = keep. Must be non-blank when provided. */
+        val newText: String? = null,
+        val fontFamily: String? = null,
+        val fontSize: Float? = null,
+        val color: String? = null,
+        /** `""` clears (transparent); non-empty sets; null keeps. */
+        val backgroundColor: String? = null,
+        val bold: Boolean? = null,
+        val italic: Boolean? = null,
+    )
+
     @Serializable data class Input(
         /**
          * Optional — omit to default to the session's current project binding
@@ -114,7 +137,7 @@ class ClipActionTool(
         val projectId: String? = null,
         /**
          * One of `"add"`, `"remove"`, `"duplicate"`, `"move"`, `"split"`,
-         * `"trim"`, `"replace"`, `"fade"`. Case-sensitive.
+         * `"trim"`, `"replace"`, `"fade"`, `"edit_text"`. Case-sensitive.
          */
         val action: String,
         /** Required when `action="add"`. Clips to insert. */
@@ -135,6 +158,8 @@ class ClipActionTool(
         val replaceItems: List<ReplaceItem>? = null,
         /** Required when `action="fade"`. Audio clip fade-envelope edits. */
         val fadeItems: List<FadeItem>? = null,
+        /** Required when `action="edit_text"`. Per-text-clip body / style edits. */
+        val editTextItems: List<EditTextItem>? = null,
     )
 
     @Serializable data class AddResult(
@@ -199,6 +224,12 @@ class ClipActionTool(
         val newFadeOutSeconds: Float,
     )
 
+    @Serializable data class EditTextResult(
+        val clipId: String,
+        /** Field names that were updated (e.g. `["text", "fontSize", "bold"]`). */
+        val updatedFields: List<String>,
+    )
+
     @Serializable data class Output(
         val projectId: String,
         val action: String,
@@ -219,13 +250,15 @@ class ClipActionTool(
         val replaced: List<ReplaceResult> = emptyList(),
         /** Populated when `action="fade"`. */
         val faded: List<FadeResult> = emptyList(),
+        /** Populated when `action="edit_text"`. */
+        val editedText: List<EditTextResult> = emptyList(),
         /** `action="remove"` only — echoes the input `ripple` flag. */
         val rippled: Boolean = false,
     )
 
     override val id: String = "clip_action"
     override val helpText: String =
-        "Eight-way clip edit verb dispatching on `action`: " +
+        "Nine-way clip edit verb dispatching on `action`: " +
             "`add` + addItems (assetId, timelineStartSeconds?, sourceStartSeconds?, " +
             "durationSeconds?, trackId?). " +
             "`remove` + clipIds + optional `ripple` (default false). " +
@@ -235,6 +268,9 @@ class ClipActionTool(
             "`trim` + trimItems (clipId, newSourceStartSeconds?, newDurationSeconds?). " +
             "`replace` + replaceItems (clipId, newAssetId). " +
             "`fade` + fadeItems (clipId, fadeInSeconds?, fadeOutSeconds?). " +
+            "`edit_text` + editTextItems (clipId, newText?, fontFamily?, fontSize?, " +
+            "color?, backgroundColor?, bold?, italic?) — at least one field per item; " +
+            "preserves clip ids, tracks, transforms, timeRanges; backgroundColor=\"\" clears. " +
             "All-or-nothing per call; one snapshot per call. text clips rejected by " +
             "trim/replace; cross-kind trackId rejected."
     override val inputSerializer: KSerializer<Input> = serializer()
@@ -255,8 +291,10 @@ class ClipActionTool(
             "trim" -> executeClipTrim(store, pid, input, ctx)
             "replace" -> executeClipReplace(store, pid, input, ctx)
             "fade" -> executeClipFade(store, pid, input, ctx)
+            "edit_text" -> executeClipEditText(store, pid, input, ctx)
             else -> error(
-                "unknown action '${input.action}'; accepted: add, remove, duplicate, move, split, trim, replace, fade",
+                "unknown action '${input.action}'; " +
+                    "accepted: add, remove, duplicate, move, split, trim, replace, fade, edit_text",
             )
         }
     }

@@ -64,7 +64,6 @@ import io.talevia.core.tool.builtin.video.ClearTimelineTool
 import io.talevia.core.tool.builtin.video.ClipActionTool
 import io.talevia.core.tool.builtin.video.ClipSetActionTool
 import io.talevia.core.tool.builtin.video.ConsolidateMediaIntoBundleTool
-import io.talevia.core.tool.builtin.video.EditTextClipTool
 import io.talevia.core.tool.builtin.video.ExportDryRunTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ExtractFrameTool
@@ -189,7 +188,6 @@ fun ToolRegistry.registerClipAndTrackTools(
     register(FilterActionTool(projects))
     register(ApplyLutTool(projects))
     register(AddSubtitlesTool(projects))
-    register(EditTextClipTool(projects))
     register(TransitionActionTool(projects))
     register(TrackActionTool(projects))
     register(RevertTimelineTool(sessions, projects))

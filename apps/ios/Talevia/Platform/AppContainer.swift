@@ -159,7 +159,7 @@ final class AppContainer {
         registry.register(tool: FilterActionTool(store: self.projects))
         registry.register(tool: ApplyLutTool(store: self.projects))
         registry.register(tool: AddSubtitlesTool(store: self.projects))
-        registry.register(tool: EditTextClipTool(store: self.projects))
+        // `EditTextClipTool` folded into `clip_action(action="edit_text")` (cycle 152).
         registry.register(tool: TransitionActionTool(store: self.projects))
         // `AddTrackTool` / `RemoveTrackTool` (folded earlier) and
         // `DuplicateTrackTool` / `ReorderTracksTool` (cycle 151) all live

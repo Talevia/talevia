@@ -26,6 +26,13 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
+/**
+ * Cycle 152 absorbed the standalone `EditTextClipTool` into
+ * [ClipActionTool] as `action="edit_text"`; these tests pin the same
+ * partial-patch / fail-loud semantics on the dispatcher (rename of
+ * class, same fixture, same assertions) so a future fold doesn't
+ * silently lose the contract.
+ */
 class EditTextClipToolTest {
 
     private fun ctx(parts: MutableList<Part>): ToolContext = ToolContext(
@@ -81,10 +88,11 @@ class EditTextClipToolTest {
         backgroundColor: String? = null,
         bold: Boolean? = null,
         italic: Boolean? = null,
-    ) = EditTextClipTool.Input(
+    ) = ClipActionTool.Input(
         projectId = "p",
-        items = listOf(
-            EditTextClipTool.Item(
+        action = "edit_text",
+        editTextItems = listOf(
+            ClipActionTool.EditTextItem(
                 clipId, newText, fontFamily, fontSize, color, backgroundColor, bold, italic,
             ),
         ),
@@ -92,10 +100,11 @@ class EditTextClipToolTest {
 
     @Test fun editsTextBody() = runTest {
         val (store, pid) = fixture()
-        val tool = EditTextClipTool(store)
+        val tool = ClipActionTool(store)
         val parts = mutableListOf<Part>()
         val out = tool.execute(singleEdit("t-1", newText = "goodbye"), ctx(parts)).data
-        assertEquals(listOf("text"), out.results.single().updatedFields)
+        assertEquals(listOf("text"), out.editedText.single().updatedFields)
+        assertEquals("edit_text", out.action)
         val clip = store.get(pid)!!.timeline.tracks.filterIsInstance<Track.Subtitle>().single().clips
             .filterIsInstance<Clip.Text>().single()
         assertEquals("goodbye", clip.text)
@@ -105,12 +114,12 @@ class EditTextClipToolTest {
 
     @Test fun patchesStyleFieldsPreservesOthers() = runTest {
         val (store, pid) = fixture(style = TextStyle(fontSize = 48f, color = "#FFFFFF", bold = false))
-        val tool = EditTextClipTool(store)
+        val tool = ClipActionTool(store)
         val out = tool.execute(
             singleEdit("t-1", fontSize = 72f, bold = true),
             ctx(mutableListOf()),
         ).data
-        assertEquals(setOf("fontSize", "bold"), out.results.single().updatedFields.toSet())
+        assertEquals(setOf("fontSize", "bold"), out.editedText.single().updatedFields.toSet())
         val clip = store.get(pid)!!.timeline.tracks.filterIsInstance<Track.Subtitle>().single().clips
             .filterIsInstance<Clip.Text>().single()
         assertEquals(72f, clip.style.fontSize)
@@ -121,7 +130,7 @@ class EditTextClipToolTest {
 
     @Test fun clearsBackgroundColorWithEmptyString() = runTest {
         val (store, pid) = fixture(style = TextStyle(backgroundColor = "#000000"))
-        val tool = EditTextClipTool(store)
+        val tool = ClipActionTool(store)
         tool.execute(singleEdit("t-1", backgroundColor = ""), ctx(mutableListOf()))
         val clip = store.get(pid)!!.timeline.tracks.filterIsInstance<Track.Subtitle>().single().clips
             .filterIsInstance<Clip.Text>().single()
@@ -130,7 +139,7 @@ class EditTextClipToolTest {
 
     @Test fun setsBackgroundColor() = runTest {
         val (store, pid) = fixture()
-        val tool = EditTextClipTool(store)
+        val tool = ClipActionTool(store)
         tool.execute(singleEdit("t-1", backgroundColor = "#000000"), ctx(mutableListOf()))
         val clip = store.get(pid)!!.timeline.tracks.filterIsInstance<Track.Subtitle>().single().clips
             .filterIsInstance<Clip.Text>().single()
@@ -145,13 +154,14 @@ class EditTextClipToolTest {
             style = TextStyle(),
         )
         val (store, pid) = fixture(extraText = extra)
-        val tool = EditTextClipTool(store)
+        val tool = ClipActionTool(store)
         tool.execute(
-            EditTextClipTool.Input(
+            ClipActionTool.Input(
                 projectId = pid.value,
-                items = listOf(
-                    EditTextClipTool.Item("t-1", newText = "a"),
-                    EditTextClipTool.Item("t-2", fontSize = 30f),
+                action = "edit_text",
+                editTextItems = listOf(
+                    ClipActionTool.EditTextItem("t-1", newText = "a"),
+                    ClipActionTool.EditTextItem("t-2", fontSize = 30f),
                 ),
             ),
             ctx(mutableListOf()),
@@ -165,14 +175,15 @@ class EditTextClipToolTest {
     @Test fun midBatchFailureLeavesProjectUntouched() = runTest {
         val (store, pid) = fixture()
         val before = store.get(pid)!!
-        val tool = EditTextClipTool(store)
+        val tool = ClipActionTool(store)
         assertFailsWith<IllegalStateException> {
             tool.execute(
-                EditTextClipTool.Input(
+                ClipActionTool.Input(
                     projectId = pid.value,
-                    items = listOf(
-                        EditTextClipTool.Item("t-1", newText = "x"),
-                        EditTextClipTool.Item("ghost", newText = "y"),
+                    action = "edit_text",
+                    editTextItems = listOf(
+                        ClipActionTool.EditTextItem("t-1", newText = "x"),
+                        ClipActionTool.EditTextItem("ghost", newText = "y"),
                     ),
                 ),
                 ctx(mutableListOf()),
@@ -183,7 +194,7 @@ class EditTextClipToolTest {
 
     @Test fun rejectsEmptyEdit() = runTest {
         val (store, pid) = fixture()
-        val tool = EditTextClipTool(store)
+        val tool = ClipActionTool(store)
         val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(singleEdit("t-1"), ctx(mutableListOf()))
         }
@@ -192,7 +203,7 @@ class EditTextClipToolTest {
 
     @Test fun rejectsBlankNewText() = runTest {
         val (store, pid) = fixture()
-        val tool = EditTextClipTool(store)
+        val tool = ClipActionTool(store)
         val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(singleEdit("t-1", newText = "   "), ctx(mutableListOf()))
         }
@@ -201,7 +212,7 @@ class EditTextClipToolTest {
 
     @Test fun rejectsNonPositiveFontSize() = runTest {
         val (store, pid) = fixture()
-        val tool = EditTextClipTool(store)
+        val tool = ClipActionTool(store)
         val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(singleEdit("t-1", fontSize = 0f), ctx(mutableListOf()))
         }
@@ -210,7 +221,7 @@ class EditTextClipToolTest {
 
     @Test fun rejectsNonTextClip() = runTest {
         val (store, pid) = fixture()
-        val tool = EditTextClipTool(store)
+        val tool = ClipActionTool(store)
         val ex = assertFailsWith<IllegalStateException> {
             tool.execute(singleEdit("v-1", newText = "x"), ctx(mutableListOf()))
         }
@@ -219,7 +230,7 @@ class EditTextClipToolTest {
 
     @Test fun rejectsMissingClip() = runTest {
         val (store, pid) = fixture()
-        val tool = EditTextClipTool(store)
+        val tool = ClipActionTool(store)
         val ex = assertFailsWith<IllegalStateException> {
             tool.execute(singleEdit("nope", newText = "x"), ctx(mutableListOf()))
         }
@@ -228,7 +239,7 @@ class EditTextClipToolTest {
 
     @Test fun preservesClipIdAndTimeRange() = runTest {
         val (store, pid) = fixture()
-        val tool = EditTextClipTool(store)
+        val tool = ClipActionTool(store)
         tool.execute(singleEdit("t-1", newText = "new"), ctx(mutableListOf()))
         val clip = store.get(pid)!!.timeline.tracks.filterIsInstance<Track.Subtitle>().single().clips
             .filterIsInstance<Clip.Text>().single()

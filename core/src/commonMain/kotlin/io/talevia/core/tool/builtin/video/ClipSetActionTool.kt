@@ -38,10 +38,14 @@ import kotlinx.serialization.serializer
  * untouched. One `Part.TimelineSnapshot` per call so `revert_timeline`
  * walks back the whole batch in one step.
  *
- * `EditTextClipTool` stays standalone — text-style fields (font / size /
- * colour / alignment) have a distinct per-field shape that doesn't collapse
- * into the single-typed-payload pattern; the bullet explicitly scopes it
- * out.
+ * Text-clip body / style edits do NOT live here — cycle 152 absorbed
+ * the standalone `EditTextClipTool` into
+ * `clip_action(action="edit_text", editTextItems=…)` rather than
+ * `set_clip_field` because the `editTextItems` shape carries 7 optional
+ * partial-patch fields (newText / fontFamily / fontSize / color /
+ * backgroundColor / bold / italic) which don't collapse into a single
+ * typed-payload-per-item pattern that this tool's `field=` discriminator
+ * relies on.
  *
  * ## Fields
  *
