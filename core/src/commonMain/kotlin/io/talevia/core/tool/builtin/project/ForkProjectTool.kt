@@ -9,19 +9,12 @@ import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.ToolResult
-import io.talevia.core.tool.builtin.project.fork.VariantReshape
-import io.talevia.core.tool.builtin.project.fork.applyVariantSpec
+import io.talevia.core.tool.builtin.project.fork.persistFork
 import io.talevia.core.tool.builtin.project.fork.regenerateTtsInLanguage
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
-import okio.Path.Companion.toPath
 
 /**
  * Branch a project into a new one (VISION §3.4 — "可分支").
@@ -188,75 +181,7 @@ class ForkProjectTool(
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.write")
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("sourceProjectId") { put("type", "string") }
-            putJsonObject("newTitle") {
-                put("type", "string")
-                put("description", "Title for the forked project (also drives the default newProjectId).")
-            }
-            putJsonObject("newProjectId") {
-                put("type", "string")
-                put("description", "Optional explicit id for the fork; defaults to a slug of newTitle.")
-            }
-            putJsonObject("snapshotId") {
-                put("type", "string")
-                put(
-                    "description",
-                    "Optional snapshot to fork from; defaults to the source project's current state.",
-                )
-            }
-            putJsonObject("path") {
-                put("type", "string")
-                put(
-                    "description",
-                    "Optional absolute filesystem path for the fork's bundle. Defaults to the " +
-                        "store's default-projects-home. The directory must not already contain a " +
-                        "talevia.json.",
-                )
-            }
-            putJsonObject("variantSpec") {
-                put("type", "object")
-                put(
-                    "description",
-                    "Optional reshape spec. Set fields trigger post-fork transforms: aspectRatio " +
-                        "remaps resolution (16:9 / 9:16 / 1:1 / 4:5 / 21:9); durationSecondsMax caps " +
-                        "the timeline at that many seconds.",
-                )
-                putJsonObject("properties") {
-                    putJsonObject("aspectRatio") {
-                        put("type", "string")
-                        put(
-                            "description",
-                            "Target aspect preset: 16:9, 9:16, 1:1, 4:5, or 21:9 (case-insensitive).",
-                        )
-                    }
-                    putJsonObject("durationSecondsMax") {
-                        put("type", "number")
-                        put("description", "Cap the timeline at this many seconds (must be > 0).")
-                    }
-                    putJsonObject("language") {
-                        put("type", "string")
-                        put(
-                            "description",
-                            "ISO-639-1 language code (e.g. en / es / zh). Regenerates TTS for " +
-                                "every non-blank text clip in the fork against this language; " +
-                                "results land in Output.languageRegeneratedClips as (clipId, " +
-                                "assetId, cacheHit). The fork's timeline isn't rewired — chain " +
-                                "clip_action(action=\"replace\") per entry to swap audio.",
-                        )
-                    }
-                }
-                put("additionalProperties", false)
-            }
-        }
-        put(
-            "required",
-            JsonArray(listOf(JsonPrimitive("sourceProjectId"), JsonPrimitive("newTitle"))),
-        )
-        put("additionalProperties", false)
-    }
+    override val inputSchema: JsonObject = FORK_PROJECT_INPUT_SCHEMA
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         require(input.newTitle.isNotBlank()) { "newTitle must not be blank" }
@@ -275,49 +200,13 @@ class ForkProjectTool(
                 )
         }
 
-        // Compute reshape (variantSpec) from the source payload BEFORE persistence
-        // so the dropped/truncated counters are accurate; replaying it against
-        // the post-persist shape would always count zero (the body is already
-        // trimmed).
-        data class PersistResult(val pid: ProjectId, val reshape: VariantReshape?)
-        val persisted: PersistResult = if (input.path != null && input.path.isNotBlank()) {
-            val created = projects.createAt(
-                path = input.path.toPath(),
-                title = input.newTitle,
-                timeline = payload.timeline,
-                outputProfile = payload.outputProfile,
-            )
-            val baseFork = payload.copy(
-                id = created.id,
-                snapshots = emptyList(),
-                parentProjectId = sourcePid,
-            )
-            val reshape = input.variantSpec?.let { spec -> applyVariantSpec(baseFork, spec) }
-            val forkBody = reshape?.project ?: baseFork
-            projects.mutate(created.id) { forkBody }
-            PersistResult(created.id, reshape)
-        } else {
-            val rawId = input.newProjectId?.takeIf { it.isNotBlank() }
-                ?: slugifyProjectId(input.newTitle)
-            val candidate = ProjectId(rawId)
-            require(projects.get(candidate) == null) {
-                "project ${candidate.value} already exists; pick a different newProjectId or call list_projects to find an unused id"
-            }
-            val baseFork = payload.copy(
-                id = candidate,
-                snapshots = emptyList(),
-                parentProjectId = sourcePid,
-            )
-            val reshape = input.variantSpec?.let { spec -> applyVariantSpec(baseFork, spec) }
-            val forkBody = reshape?.project ?: baseFork
-            projects.upsert(input.newTitle, forkBody)
-            PersistResult(candidate, reshape)
-        }
+        // Persistence + variant reshape lives in fork/ForkProjectPersist.kt
+        // — handles the path / no-path branches uniformly and re-reads the
+        // forked Project from the store so post-store stamping is visible.
+        val persisted = persistFork(projects, sourcePid, payload, input)
         val newPid = persisted.pid
         val reshape = persisted.reshape
-        // Reload the persisted form so subsequent steps see the post-store
-        // shape (with stamping etc.).
-        val forked = projects.get(newPid) ?: error("Fork ${newPid.value} not found after persist")
+        val forked = persisted.forked
 
         val regenerations = input.variantSpec?.language?.let { lang ->
             regenerateTtsInLanguage(registry, newPid, forked, lang.trim(), ctx)
