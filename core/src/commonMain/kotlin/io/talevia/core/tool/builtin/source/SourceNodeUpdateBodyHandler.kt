@@ -56,7 +56,7 @@ internal suspend fun executeSourceUpdateBody(
         val existing = source.byId[nodeId]
             ?: error(
                 "Source node ${nodeId.value} not found in project ${input.projectId}. " +
-                    "Call source_query(select=nodes) or describe_source_node to discover available ids.",
+                    "Call source_query(select=nodes) or source_query(select=node_detail) to discover available ids.",
             )
         previousHash = existing.contentHash
         previousBody = existing.body

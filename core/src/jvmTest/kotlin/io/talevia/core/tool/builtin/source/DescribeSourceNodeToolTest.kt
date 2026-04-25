@@ -3,6 +3,7 @@ package io.talevia.core.tool.builtin.source
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
+import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
@@ -25,7 +26,9 @@ import io.talevia.core.domain.source.consistency.addStyleBible
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.source.query.NodeDetailRow
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlin.test.Test
@@ -34,11 +37,18 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
+/**
+ * Cycle 137: `describe_source_node` was folded into
+ * `source_query(select=node_detail)`. This test continues to cover the
+ * single-node deep-zoom contract — typed body, parents-with-kinds,
+ * direct DAG children, bound clips with `directly` flag, humanised
+ * summary — but exercises it through the unified query dispatcher.
+ */
 class DescribeSourceNodeToolTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: DescribeSourceNodeTool,
+        val tool: SourceQueryTool,
         val ctx: ToolContext,
         val pid: ProjectId,
     )
@@ -54,7 +64,24 @@ class DescribeSourceNodeToolTest {
             emitPart = { },
             messages = emptyList(),
         )
-        return Rig(store, DescribeSourceNodeTool(store), ctx, project.id)
+        return Rig(store, SourceQueryTool(store), ctx, project.id)
+    }
+
+    private fun nodeDetailInput(projectId: String, nodeId: String) = SourceQueryTool.Input(
+        select = SourceQueryTool.SELECT_NODE_DETAIL,
+        projectId = projectId,
+        id = nodeId,
+    )
+
+    private fun decodeRow(out: SourceQueryTool.Output): NodeDetailRow {
+        assertEquals(SourceQueryTool.SELECT_NODE_DETAIL, out.select)
+        assertEquals(1, out.total)
+        assertEquals(1, out.returned)
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(NodeDetailRow.serializer()),
+            out.rows,
+        )
+        return rows.single()
     }
 
     @Test fun describesCharacterRefWithResolvedParents() = runTest {
@@ -70,7 +97,6 @@ class DescribeSourceNodeToolTest {
                 SourceNodeId("mei"),
                 CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
             ).let { with2 ->
-                // Give mei a parent ref onto style-warm.
                 with2.copy(
                     nodes = with2.nodes.map { node ->
                         if (node.id == SourceNodeId("mei")) {
@@ -93,23 +119,21 @@ class DescribeSourceNodeToolTest {
             emitPart = { },
             messages = emptyList(),
         )
-        val tool = DescribeSourceNodeTool(store)
-        val out = tool.execute(
-            DescribeSourceNodeTool.Input(projectId = pid.value, nodeId = "mei"),
+        val out = SourceQueryTool(store).execute(
+            nodeDetailInput(projectId = pid.value, nodeId = "mei"),
             ctx,
-        ).data
-
-        assertEquals("mei", out.node.nodeId)
-        assertEquals("core.consistency.character_ref", out.node.kind)
-        val parents = out.node.parentRefs
+        )
+        val row = decodeRow(out.data)
+        assertEquals("mei", row.nodeId)
+        assertEquals("core.consistency.character_ref", row.kind)
+        val parents = row.parentRefs
         assertEquals(1, parents.size)
         assertEquals("style-warm", parents.single().nodeId)
         assertEquals("core.consistency.style_bible", parents.single().kind)
-        assertTrue(out.summary.contains("Mei"))
+        assertTrue(row.summary.contains("Mei"))
     }
 
     @Test fun describesStyleBibleWithDirectChildren() = runTest {
-        // Build: style-warm (parent of both mei and kai)
         val pid = ProjectId("p")
         val store = ProjectStoreTestKit.create()
         store.upsert("demo", Project(id = pid, timeline = Timeline()))
@@ -154,19 +178,17 @@ class DescribeSourceNodeToolTest {
             emitPart = { },
             messages = emptyList(),
         )
-        val out = DescribeSourceNodeTool(store).execute(
-            DescribeSourceNodeTool.Input(projectId = pid.value, nodeId = "style-warm"),
+        val out = SourceQueryTool(store).execute(
+            nodeDetailInput(projectId = pid.value, nodeId = "style-warm"),
             ctx,
-        ).data
-        val kids = out.children.map { it.nodeId }.toSet()
+        )
+        val row = decodeRow(out.data)
+        val kids = row.children.map { it.nodeId }.toSet()
         assertEquals(setOf("mei", "kai"), kids)
-        assertTrue(out.children.all { it.kind == "core.consistency.character_ref" })
+        assertTrue(row.children.all { it.kind == "core.consistency.character_ref" })
     }
 
     @Test fun describesBoundClipsDirectAndTransitive() = runTest {
-        // Graph: style → mei → (nothing). Clip c1 binds mei directly; clip c2 binds
-        // style directly. Call describe_source_node on mei → c1 is direct,
-        // nothing transitive from above. Call on style → c2 direct + c1 transitive via mei.
         val pid = ProjectId("p")
         val store = ProjectStoreTestKit.create()
         val videoTrack = Track.Video(
@@ -223,24 +245,22 @@ class DescribeSourceNodeToolTest {
             emitPart = { },
             messages = emptyList(),
         )
-        val tool = DescribeSourceNodeTool(store)
+        val tool = SourceQueryTool(store)
 
-        val meiOut = tool.execute(
-            DescribeSourceNodeTool.Input(projectId = pid.value, nodeId = "mei"),
-            ctx,
-        ).data
-        assertEquals(1, meiOut.boundClips.size)
-        assertEquals("c1", meiOut.boundClips.single().clipId)
-        assertTrue(meiOut.boundClips.single().directly)
+        val mei = decodeRow(
+            tool.execute(nodeDetailInput(projectId = pid.value, nodeId = "mei"), ctx).data,
+        )
+        assertEquals(1, mei.boundClips.size)
+        assertEquals("c1", mei.boundClips.single().clipId)
+        assertTrue(mei.boundClips.single().directly)
 
-        val styleOut = tool.execute(
-            DescribeSourceNodeTool.Input(projectId = pid.value, nodeId = "style-warm"),
-            ctx,
-        ).data
-        assertEquals(2, styleOut.boundClips.size)
-        val byId = styleOut.boundClips.associateBy { it.clipId }
+        val style = decodeRow(
+            tool.execute(nodeDetailInput(projectId = pid.value, nodeId = "style-warm"), ctx).data,
+        )
+        assertEquals(2, style.boundClips.size)
+        val byId = style.boundClips.associateBy { it.clipId }
         assertTrue(byId["c2"]!!.directly)
-        assertTrue(!byId["c1"]!!.directly) // bound via mei
+        assertTrue(!byId["c1"]!!.directly)
         assertEquals(listOf("mei"), byId["c1"]!!.boundViaNodeIds)
     }
 
@@ -248,7 +268,7 @@ class DescribeSourceNodeToolTest {
         val rig = rig(Project(id = ProjectId("p"), timeline = Timeline()))
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                DescribeSourceNodeTool.Input(projectId = "nope", nodeId = "x"),
+                nodeDetailInput(projectId = "nope", nodeId = "x"),
                 rig.ctx,
             )
         }
@@ -259,11 +279,25 @@ class DescribeSourceNodeToolTest {
         val rig = rig(Project(id = ProjectId("p"), timeline = Timeline()))
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                DescribeSourceNodeTool.Input(projectId = rig.pid.value, nodeId = "ghost"),
+                nodeDetailInput(projectId = rig.pid.value, nodeId = "ghost"),
                 rig.ctx,
             )
         }
         assertTrue(ex.message!!.contains("not found"))
+    }
+
+    @Test fun rejectsMissingId() = runTest {
+        val rig = rig(Project(id = ProjectId("p"), timeline = Timeline()))
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                SourceQueryTool.Input(
+                    select = SourceQueryTool.SELECT_NODE_DETAIL,
+                    projectId = rig.pid.value,
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(ex.message!!.contains("requires id"), ex.message)
     }
 
     @Test fun emptyNodeHasEmptyParentsAndChildren() = runTest {
@@ -274,18 +308,18 @@ class DescribeSourceNodeToolTest {
                 CharacterRefBody(name = "L", visualDescription = "v"),
             )
         }
-        val out = rig.tool.execute(
-            DescribeSourceNodeTool.Input(projectId = rig.pid.value, nodeId = "lonely"),
-            rig.ctx,
-        ).data
-        assertTrue(out.node.parentRefs.isEmpty())
-        assertTrue(out.children.isEmpty())
-        assertTrue(out.boundClips.isEmpty())
+        val row = decodeRow(
+            rig.tool.execute(
+                nodeDetailInput(projectId = rig.pid.value, nodeId = "lonely"),
+                rig.ctx,
+            ).data,
+        )
+        assertTrue(row.parentRefs.isEmpty())
+        assertTrue(row.children.isEmpty())
+        assertTrue(row.boundClips.isEmpty())
     }
 
     @Test fun parentMarkedMissingWhenAncestorAbsent() = runTest {
-        // Craft a node whose parents include a non-existent id, simulating the
-        // "dangling ref" edge case (import partial / remove_source_node bypassed).
         val rig = rig(Project(id = ProjectId("p"), timeline = Timeline()))
         rig.store.mutateSource(rig.pid) { source ->
             source.copy(
@@ -298,11 +332,13 @@ class DescribeSourceNodeToolTest {
                 ),
             )
         }
-        val out = rig.tool.execute(
-            DescribeSourceNodeTool.Input(projectId = rig.pid.value, nodeId = "orphan"),
-            rig.ctx,
-        ).data
-        val parent = out.node.parentRefs.single()
+        val row = decodeRow(
+            rig.tool.execute(
+                nodeDetailInput(projectId = rig.pid.value, nodeId = "orphan"),
+                rig.ctx,
+            ).data,
+        )
+        val parent = row.parentRefs.single()
         assertEquals("ghost-parent", parent.nodeId)
         assertEquals("(missing)", parent.kind)
     }
@@ -315,13 +351,15 @@ class DescribeSourceNodeToolTest {
                 CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
             )
         }
-        val out = rig.tool.execute(
-            DescribeSourceNodeTool.Input(projectId = rig.pid.value, nodeId = "mei"),
-            rig.ctx,
-        ).data
+        val row = decodeRow(
+            rig.tool.execute(
+                nodeDetailInput(projectId = rig.pid.value, nodeId = "mei"),
+                rig.ctx,
+            ).data,
+        )
         val stored = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("mei")]!!
-        assertEquals(stored.contentHash, out.node.contentHash)
-        assertEquals(stored.revision, out.node.revision)
+        assertEquals(stored.contentHash, row.contentHash)
+        assertEquals(stored.revision, row.revision)
     }
 
     @Test fun summaryUsesHumanisedCharacterRef() = runTest {
@@ -332,11 +370,13 @@ class DescribeSourceNodeToolTest {
                 CharacterRefBody(name = "Mei", visualDescription = "teal hair, warrior garb"),
             )
         }
-        val out = rig.tool.execute(
-            DescribeSourceNodeTool.Input(projectId = rig.pid.value, nodeId = "mei"),
-            rig.ctx,
-        ).data
-        assertTrue(out.summary.contains("Mei"))
-        assertTrue(out.summary.contains("teal hair"))
+        val row = decodeRow(
+            rig.tool.execute(
+                nodeDetailInput(projectId = rig.pid.value, nodeId = "mei"),
+                rig.ctx,
+            ).data,
+        )
+        assertTrue(row.summary.contains("Mei"))
+        assertTrue(row.summary.contains("teal hair"))
     }
 }

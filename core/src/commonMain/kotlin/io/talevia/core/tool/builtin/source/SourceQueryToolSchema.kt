@@ -23,7 +23,7 @@ internal val SOURCE_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
             put(
                 "description",
                 "What to query: nodes | dag_summary | dot | ascii_tree | orphans | leaves | " +
-                    "descendants | ancestors | history (case-insensitive).",
+                    "descendants | ancestors | history | node_detail (case-insensitive).",
             )
         }
         putJsonObject("projectId") {
@@ -59,7 +59,11 @@ internal val SOURCE_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
         }
         putJsonObject("id") {
             put("type", "string")
-            put("description", "Exact node id (≤1 row). nodes only.")
+            put(
+                "description",
+                "Exact node id. nodes (optional filter, ≤1 row) | node_detail (required — " +
+                    "the node to drill into).",
+            )
         }
         putJsonObject("includeBody") {
             put("type", "boolean")

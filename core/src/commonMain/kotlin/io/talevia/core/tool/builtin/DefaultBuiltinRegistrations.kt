@@ -62,7 +62,6 @@ import io.talevia.core.tool.builtin.session.SetSessionSpendCapTool
 import io.talevia.core.tool.builtin.session.SetToolEnabledTool
 import io.talevia.core.tool.builtin.session.SwitchProjectTool
 import io.talevia.core.tool.builtin.shell.BashTool
-import io.talevia.core.tool.builtin.source.DescribeSourceNodeTool
 import io.talevia.core.tool.builtin.source.DiffSourceNodesTool
 import io.talevia.core.tool.builtin.source.ExportSourceNodeTool
 import io.talevia.core.tool.builtin.source.SourceNodeActionTool
@@ -246,7 +245,6 @@ fun ToolRegistry.registerProjectTools(
  */
 fun ToolRegistry.registerSourceNodeTools(projects: ProjectStore) {
     register(SourceQueryTool(projects))
-    register(DescribeSourceNodeTool(projects))
     register(DiffSourceNodesTool(projects))
     register(ExportSourceNodeTool(projects))
     register(SourceNodeActionTool(projects))

@@ -20,7 +20,7 @@ import kotlinx.serialization.json.JsonElement
  * Sequence contract: rows come newest-first from [runHistoryQuery], so
  * `rows.first()` is the most-recent overwritten state and `rows.last()` is
  * the oldest one in the returned window. The current body is NOT included
- * — it lives on the `SourceNode` itself (`describe_source_node` or
+ * — it lives on the `SourceNode` itself (`select=node_detail` or
  * `select=nodes` with `includeBody=true`).
  */
 @Serializable

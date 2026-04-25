@@ -140,7 +140,7 @@ class ApplyLutTool(
                 style.lutReference
                     ?: error(
                         "style_bible '${sid.value}' has no lutReference; set one by updating the node's body " +
-                            "(describe_source_node → set body.lutReference → update_source_node_body) first",
+                            "(source_query(select=node_detail) → set body.lutReference → update_source_node_body) first",
                     )
             }
             if (project.assets.none { it.id == lutId }) {

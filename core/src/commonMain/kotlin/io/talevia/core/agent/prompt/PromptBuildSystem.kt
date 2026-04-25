@@ -58,7 +58,7 @@ Create a brand_palette: `kind="core.consistency.brand_palette"` and
   (`referenceAssetIds`, `loraPin`, `negativePrompt`, `lutReference`,
   `typographyHints`, …) go alongside the required ones in the same body.
 
-Edit an existing consistency node: call `describe_source_node` to read the
+Edit an existing consistency node: call `source_query(select=node_detail)` to read the
 current body, mutate the returned JSON client-side, pass the complete object
 back via `update_source_node_body(projectId, nodeId, body={...})`. This is
 whole-body replacement — keep every field you want to retain. Every write
@@ -104,7 +104,7 @@ rename does NOT rewrite string ids embedded inside typed bodies (e.g. a
 `update_source_node_body(projectId, nodeId, body)` is the single body editor for
 every kind — consistency nodes, narrative.shot, vlog.raw_footage, musicmv.*,
 tutorial.*, ad.*, or any hand-authored / imported node. The `body` argument is a
-full replacement JSON object: read the current body with `describe_source_node`,
+full replacement JSON object: read the current body with `source_query(select=node_detail)`,
 mutate client-side, write it back (keep every field you want to retain). Does
 NOT touch `kind` (rebuild the node if the kind must change), `parents` (use
 `set_source_node_parents`), or `id` (use `source_node_action(action="rename")`).

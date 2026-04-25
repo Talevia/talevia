@@ -12,6 +12,7 @@ import io.talevia.core.tool.builtin.source.query.BodyRevisionRow
 import io.talevia.core.tool.builtin.source.query.DagSummaryRow
 import io.talevia.core.tool.builtin.source.query.DotRow
 import io.talevia.core.tool.builtin.source.query.LeafRow
+import io.talevia.core.tool.builtin.source.query.NodeDetailRow
 import io.talevia.core.tool.builtin.source.query.NodeRow
 import io.talevia.core.tool.builtin.source.query.OrphanRow
 import io.talevia.core.tool.builtin.source.query.runAncestorsQuery
@@ -21,6 +22,7 @@ import io.talevia.core.tool.builtin.source.query.runDescendantsQuery
 import io.talevia.core.tool.builtin.source.query.runDotQuery
 import io.talevia.core.tool.builtin.source.query.runHistoryQuery
 import io.talevia.core.tool.builtin.source.query.runLeavesQuery
+import io.talevia.core.tool.builtin.source.query.runNodeDetailQuery
 import io.talevia.core.tool.builtin.source.query.runNodesAllProjectsQuery
 import io.talevia.core.tool.builtin.source.query.runNodesQuery
 import io.talevia.core.tool.builtin.source.query.runOrphansQuery
@@ -62,10 +64,14 @@ import kotlinx.serialization.serializer
  *    sorted by id. Symmetric companion to `select=nodes&hasParent=false`
  *    (roots) — the downstream tip of a chain. Natural regenerate-after-
  *    edit targets.
- *
- * `describe_source_node` stays as a separate tool — it's single-entity deep
- * inspection (body + parents + children + bindings), not projection. Same
- * split `project_query` made with `describe_clip` / `describe_lockfile_entry`.
+ *  - `node_detail` — single-row deep zoom on one node (body, parents
+ *    with kinds resolved, direct children, bound clips with `directly`
+ *    flag, humanised summary). Requires `id`. Cycle 137 absorbed the
+ *    standalone `describe_source_node` tool here, mirroring the earlier
+ *    `describe_clip` → `project_query(select=clip_detail)` and
+ *    `describe_lockfile_entry` → `project_query(select=lockfile_entry_detail)`
+ *    folds — single-entity drill-downs belong on the same dispatcher as
+ *    bulk projections.
  *
  * Output is uniform: `{select, total, returned, rows}` where `rows` is a
  * [JsonArray] whose shape depends on `select`. Consumers decode with the
@@ -78,8 +84,9 @@ class SourceQueryTool(
 
     @Serializable data class Input(
         /** One of [SELECT_NODES] / [SELECT_DAG_SUMMARY] / [SELECT_DOT] /
-         *  [SELECT_ASCII_TREE] / [SELECT_ORPHANS] / [SELECT_DESCENDANTS] /
-         *  [SELECT_ANCESTORS] / [SELECT_HISTORY] (case-insensitive). */
+         *  [SELECT_ASCII_TREE] / [SELECT_ORPHANS] / [SELECT_LEAVES] /
+         *  [SELECT_DESCENDANTS] / [SELECT_ANCESTORS] / [SELECT_HISTORY] /
+         *  [SELECT_NODE_DETAIL] (case-insensitive). */
         val select: String,
         /**
          * Target project. Required when `scope == "project"` (default) or unset.
@@ -106,7 +113,11 @@ class SourceQueryTool(
         val contentSubstring: String? = null,
         /** Case-sensitive match for [contentSubstring]. Default false. `select=nodes` only. */
         val caseSensitive: Boolean? = null,
-        /** Exact node id (e.g. `"char.mei"`). `select=nodes` only — returns ≤1 row. */
+        /**
+         * Exact node id. For `select=nodes` it's an optional filter that
+         * narrows to ≤1 row; for `select=node_detail` it's required —
+         * the node to drill into.
+         */
         val id: String? = null,
         /** Include each node's full JSON body. `select=nodes` only. Default false. */
         val includeBody: Boolean? = null,
@@ -184,6 +195,10 @@ class SourceQueryTool(
             "  • leaves — rows: {id, kind, revision, parentCount}. Every node with no children " +
             "(downstream tip of a chain). Sorted by id. No filters; pairs with select=nodes&" +
             "hasParent=false (roots) for the symmetric DAG-tip view.\n" +
+            "  • node_detail — single-row deep zoom on one node: {nodeId, kind, revision, " +
+            "contentHash, body, parentRefs (with kinds), children, boundClips (with directly " +
+            "flag), summary}. requires id. Use before editing a node to see exactly what it " +
+            "looks like and what depends on it.\n" +
             "  • descendants — BFS downstream from root; rows carry depthFromRoot (0=root). " +
             "requires root. Optional depth cap (null/negative=unbounded). Cycle-safe.\n" +
             "  • ancestors — BFS upstream from root; same shape as descendants.\n" +
@@ -193,7 +208,7 @@ class SourceQueryTool(
             "Common: projectId (required unless scope='all_projects'), limit, offset (nodes/" +
             "descendants/ancestors/history only; history ignores offset). scope='all_projects' " +
             "(select=nodes only) enumerates every project and tags rows with projectId. Filter-" +
-            "on-wrong-select fails loud. describe_source_node handles single-entity deep views."
+            "on-wrong-select fails loud."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.read")
@@ -211,6 +226,7 @@ class SourceQueryTool(
         SELECT_ORPHANS -> OrphanRow.serializer()
         SELECT_LEAVES -> LeafRow.serializer()
         SELECT_HISTORY -> BodyRevisionRow.serializer()
+        SELECT_NODE_DETAIL -> NodeDetailRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
 
@@ -242,6 +258,7 @@ class SourceQueryTool(
             SELECT_DESCENDANTS -> runDescendantsQuery(project, input)
             SELECT_ANCESTORS -> runAncestorsQuery(project, input)
             SELECT_HISTORY -> runHistoryQuery(projects, project, input)
+            SELECT_NODE_DETAIL -> runNodeDetailQuery(project, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -257,7 +274,10 @@ class SourceQueryTool(
                 if (input.kindPrefix != null) add("kindPrefix (select=nodes only)")
                 if (input.contentSubstring != null) add("contentSubstring (select=nodes only)")
                 if (input.caseSensitive != null) add("caseSensitive (select=nodes only)")
-                if (input.id != null) add("id (select=nodes only)")
+                // id is also valid for node_detail (required there).
+                if (select != SELECT_NODE_DETAIL && input.id != null) {
+                    add("id (select=nodes / node_detail only)")
+                }
                 if (input.sortBy != null) add("sortBy (select=nodes only)")
                 if (input.hasParent != null) add("hasParent (select=nodes only)")
             }
@@ -316,9 +336,11 @@ class SourceQueryTool(
         const val SELECT_DESCENDANTS = "descendants"
         const val SELECT_ANCESTORS = "ancestors"
         const val SELECT_HISTORY = "history"
+        const val SELECT_NODE_DETAIL = "node_detail"
         internal val ALL_SELECTS = setOf(
             SELECT_NODES, SELECT_DAG_SUMMARY, SELECT_DOT, SELECT_ASCII_TREE,
             SELECT_ORPHANS, SELECT_LEAVES, SELECT_DESCENDANTS, SELECT_ANCESTORS, SELECT_HISTORY,
+            SELECT_NODE_DETAIL,
         )
 
         const val SCOPE_PROJECT = "project"
