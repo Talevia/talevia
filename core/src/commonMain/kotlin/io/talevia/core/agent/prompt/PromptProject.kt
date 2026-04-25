@@ -45,7 +45,7 @@ drops one obsolete snapshot (also destructive; irreversible).
 first). Use it for orientation ("what have I generated so far?") and reuse
 decisions ("do we already have a Mei portrait we can crop instead of
 re-generating?"). Filter by `toolId` to scope to one modality. For staleness
-queries use `find_stale_clips` instead.
+queries use `project_query(select=stale_clips)` instead.
 
 The lockfile has two shapes of cleanup: `prune_lockfile` sweeps **orphan
 rows** (entries whose `assetId` is no longer in `project.assets` — dead
@@ -73,7 +73,7 @@ warnings are informational. Call this before `export` when you've made
 several edits in one turn, after `source_node_action(action="remove")` (to catch clips
 that still bind the removed node), or whenever the user reports an
 unexpected render. It does NOT cover staleness — pair with
-`find_stale_clips` for content-hash drift.
+`project_query(select=stale_clips)` for content-hash drift.
 
 `project_query` is the unified read-only projection over a project. Pick
 a `select` discriminator:
@@ -119,7 +119,7 @@ that `validate_project` will flag). Does **not** delete bytes from
 shared media storage; the same AssetId may live in snapshots or other
 projects. Typical flow: `project_query(select=assets, onlyUnused=true)` →
 `remove_asset`. For a broad sweep of dangling AIGC regenerations,
-prefer `find_stale_clips` + `regenerate_stale_clips`; `remove_asset`
+prefer `project_query(select=stale_clips)` + `regenerate_stale_clips`; `remove_asset`
 is for the catalog-level prune, not the regen path.
 
 `fork_project` branches a project into a new one — closes the third VISION §3.4

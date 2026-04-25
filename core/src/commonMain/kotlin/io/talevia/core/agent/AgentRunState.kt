@@ -29,7 +29,7 @@ import kotlinx.serialization.Serializable
  * NOT persisted to the session store this cycle (write amplification
  * per-transition is substantial). Revert support that needs to recover
  * the last pre-failure state is a follow-up — for now, subscribers
- * (`find_stale_clips` / UI status bar / SSE) can tail the event stream.
+ * (`project_query(select=stale_clips)` / UI status bar / SSE) can tail the event stream.
  */
 @Serializable
 sealed interface AgentRunState {

@@ -57,7 +57,7 @@ import kotlinx.serialization.json.put
  *
  * Mutations go through the existing tool (`regenerate_stale_clips`);
  * this panel is the UI half of what `list_lockfile_entries` /
- * `find_stale_clips` already expose to the agent.
+ * `project_query(select=stale_clips)` already expose to the agent.
  */
 @Composable
 fun LockfilePanel(

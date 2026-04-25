@@ -29,7 +29,7 @@ import kotlinx.serialization.serializer
  * 只重编译这些镜头").
  *
  * Before this tool the flow required the agent to:
- *   1. `find_stale_clips` — get N stale ids
+ *   1. `project_query(select=stale_clips)` — get N stale ids
  *   2. For each, figure out which AIGC tool produced the asset and what inputs
  *      to hand it (not trivially recoverable from `provenance.parameters`, which
  *      holds the *folded* prompt, not the base prompt)
@@ -99,7 +99,7 @@ class RegenerateStaleClipsTool(
             "it with its original inputs; consistency folding re-runs against the current source " +
             "graph so the regenerations pick up the edit that made them stale. Swaps each new asset " +
             "onto its clip's timeline slot. Use after editing a character_ref / style_bible / " +
-            "brand_palette; one call replaces the find_stale_clips → generate_* → clip_action(action=\"replace\") " +
+            "brand_palette; one call replaces the project_query(select=stale_clips) → generate_* → clip_action(action=\"replace\") " +
             "chain. Clips whose lockfile entry is pinned (project_pin_action(target=lockfile_entry)) are skipped with " +
             "reason 'pinned' — a pin is user intent and overrides regeneration."
     override val inputSerializer: KSerializer<Input> = serializer()

@@ -59,7 +59,7 @@ internal suspend fun executeSourceSetParents(
     return ToolResult(
         title = "set source parents for ${nodeId.value}",
         outputForLlm = "Replaced parents of ${nodeId.value}: was $previous, now $next. " +
-            "contentHash bumped — run find_stale_clips to see downstream impact.$regenNudge",
+            "contentHash bumped — run project_query(select=stale_clips) to see downstream impact.$regenNudge",
         data = SourceNodeActionTool.Output(
             projectId = input.projectId,
             action = "set_parents",

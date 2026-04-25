@@ -40,7 +40,7 @@ import okio.Path.Companion.toPath
  * (clip → asset / source-binding references, source DAG parent integrity,
  * audio envelope ranges, etc.). Any `error`-severity issue aborts the
  * import with a rendered summary rather than upserting a project the
- * rest of the stack (`find_stale_clips`, export, renderers) will trip
+ * rest of the stack (`project_query(select=stale_clips)`, export, renderers) will trip
  * over later. Warnings never block — they're reported via the Output
  * counters. Pass `force = true` to bypass the gate (for import-to-fix
  * workflows); counters are still populated.

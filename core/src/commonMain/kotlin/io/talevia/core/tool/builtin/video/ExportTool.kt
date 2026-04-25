@@ -42,7 +42,7 @@ import kotlin.time.DurationUnit
  * Stale-guard (VISION §3.2). Before touching the engine we compute
  * `staleClipsFromLockfile` — clips whose conditioning source nodes drifted since
  * the asset was generated. If any are stale the export is refused with an
- * actionable message pointing at `find_stale_clips` / regeneration, unless the
+ * actionable message pointing at `project_query(select=stale_clips)` / regeneration, unless the
  * caller opts in with `allowStale=true`. Without this guard the render cache
  * would happily hand back output whose visual content no longer matches the
  * current source graph: the cache is keyed on timeline JSON + output spec, and
@@ -80,7 +80,7 @@ class ExportTool(
         /**
          * Opt-in override when the project has clips whose conditioning source nodes
          * have drifted since generation (VISION §3.2). Default: refuse to export so
-         * the user sees stale content explicitly via `find_stale_clips` and decides
+         * the user sees stale content explicitly via `project_query(select=stale_clips)` and decides
          * whether to regenerate or ship-as-is.
          */
         val allowStale: Boolean = false,
@@ -168,7 +168,7 @@ class ExportTool(
                 put(
                     "description",
                     "Export even if some AIGC clips are stale (their conditioning source nodes drifted since " +
-                        "generation). Default false — call find_stale_clips first and regenerate before exporting.",
+                        "generation). Default false — call project_query(select=stale_clips) first and regenerate before exporting.",
                 )
             }
         }
@@ -218,7 +218,7 @@ class ExportTool(
             error(
                 "export refused: ${staleReports.size} stale clip(s). " +
                     "Conditioning source nodes drifted since the asset was generated — " +
-                    "run find_stale_clips, regenerate the affected clips, then retry. " +
+                    "run project_query(select=stale_clips), regenerate the affected clips, then retry. " +
                     "Pass allowStale=true to export as-is. Stale: $head$tail",
             )
         }

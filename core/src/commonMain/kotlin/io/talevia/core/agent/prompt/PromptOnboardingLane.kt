@@ -35,7 +35,7 @@ Follow the source-first workflow before any AIGC dispatch:
    `generate_image` / `generate_video` / `generate_music`. Without one,
    the AIGC output misses consistency folding and later "make it
    warmer / keep that character" edits can't invalidate it cleanly via
-   `find_stale_clips`. Add a `core.consistency.character_ref` per named
+   `project_query(select=stale_clips)`. Add a `core.consistency.character_ref` per named
    character and a `core.consistency.brand_palette` when the genre
    implies a brand (ads, tutorials). Use `source_node_action(action="add")`
    with id prefixes like `style-warm`, `character-mei`, `brand-acme`.

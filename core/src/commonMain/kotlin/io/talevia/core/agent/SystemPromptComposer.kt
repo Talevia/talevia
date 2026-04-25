@@ -22,7 +22,7 @@ import io.talevia.core.agent.prompt.PROMPT_ONBOARDING_LANE
  * `style_bible` + genre-specific source nodes before dispatching any AIGC
  * tool — otherwise greenfield traces tend to skip straight to
  * `generate_image` and produce output that can't participate in
- * `find_stale_clips` later. The lane disappears as soon as the project has
+ * `project_query(select=stale_clips)` later. The lane disappears as soon as the project has
  * any track or source node, so the token cost is paid only while it's
  * actually load-bearing.
  *

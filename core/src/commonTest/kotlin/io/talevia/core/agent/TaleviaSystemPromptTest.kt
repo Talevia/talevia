@@ -64,8 +64,9 @@ class TaleviaSystemPromptTest {
         // Character-voice pinning (VISION §5.5 audio lane) — overrides explicit voice.
         "voiceId",
         // Stale-clip detection — the lockfile-driven query that closes the
-        // edit-character-then-regenerate loop (VISION §3.2).
-        "find_stale_clips",
+        // edit-character-then-regenerate loop (VISION §3.2). Cycle 138 folded
+        // the standalone tool into project_query as a select arm.
+        "project_query(select=stale_clips)",
         // The mutation half of the regenerate-after-stale loop — post phase-3
         // (2026-04-24) the verb is an action on `clip_action`, not a
         // standalone tool id.

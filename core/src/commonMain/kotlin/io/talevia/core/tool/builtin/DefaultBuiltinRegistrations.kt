@@ -40,7 +40,6 @@ import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
 import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.ExportProjectTool
-import io.talevia.core.tool.builtin.project.FindStaleClipsTool
 import io.talevia.core.tool.builtin.project.ForkProjectTool
 import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
@@ -226,7 +225,6 @@ fun ToolRegistry.registerProjectTools(
     register(ProjectActionTool(projects))
     register(CreateProjectFromTemplateTool(projects))
     register(ListProjectsTool(projects))
-    register(FindStaleClipsTool(projects))
     register(ProjectQueryTool(projects))
     register(ValidateProjectTool(projects))
     register(RegenerateStaleClipsTool(projects, this))

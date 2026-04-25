@@ -105,10 +105,10 @@ internal suspend fun executeSourceUpdateBody(
     val hint = updated.autoRegenHint()
     val staleHint = if (boundClipCount == 0) {
         " No clips bind this node directly; DAG descendants unchanged (body edits don't rewrite " +
-            "parent refs). Call find_stale_clips if you want to surface transitively-stale clips."
+            "parent refs). Call project_query(select=stale_clips) if you want to surface transitively-stale clips."
     } else {
         " $boundClipCount clip(s) bind this node directly — they will show up as stale in " +
-            "find_stale_clips until re-rendered."
+            "project_query(select=stale_clips) until re-rendered."
     }
     val regenNudge = if (hint != null) {
         " autoRegenHint: ${hint.staleClipCount} clip(s) need regeneration — suggested next: ${hint.suggestedTool}."

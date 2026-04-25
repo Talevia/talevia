@@ -79,7 +79,7 @@ import kotlinx.serialization.serializer
  *   `mergeFieldPaths`) — replace a source node's `body` wholesale.
  *   Kind-agnostic; does not touch kind / parents / id (use the
  *   matching action verbs). Bumps `contentHash` so bound clips go
- *   stale; `find_stale_clips` surfaces them. Three input modes
+ *   stale; `project_query(select=stale_clips)` surfaces them. Three input modes
  *   (mutually exclusive): full-replacement object, restore-by-history-
  *   index, or per-field merge from a historical revision. Empty body
  *   is rejected. The dispatcher's [InputCompatSerializer] rescues the
@@ -264,7 +264,7 @@ class SourceNodeActionTool(
         /**
          * Count of clips whose `sourceBinding` includes this nodeId
          * directly — the immediate blast-radius hint. A non-zero value
-         * means `find_stale_clips` returns these clips on the next
+         * means `project_query(select=stale_clips)` returns these clips on the next
          * check.
          */
         val boundClipCount: Int,
@@ -318,7 +318,7 @@ class SourceNodeActionTool(
          * anything; rename rewires bindings rather than dropping them,
          * so it also leaves staleness unchanged (descendant
          * `contentHash` cascades are the staleness signal there,
-         * surfaced by `find_stale_clips`).
+         * surfaced by `project_query(select=stale_clips)`).
          */
         val autoRegenHint: AutoRegenHint? = null,
     )

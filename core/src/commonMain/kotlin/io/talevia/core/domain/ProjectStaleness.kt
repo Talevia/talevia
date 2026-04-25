@@ -11,7 +11,7 @@ import kotlinx.serialization.Serializable
  * VISION §5.5 auto-regen hint — attached to the `Output` of every
  * source-mutation tool that can plausibly stale existing clips. Lets the
  * agent follow up a source edit with a batched regeneration call
- * **without** having to first dispatch `find_stale_clips` to see if it's
+ * **without** having to first dispatch `project_query(select=stale_clips)` to see if it's
  * worth it. `null` hint = no stale clips (agent can skip the suggestion);
  * non-null = "here are N stale clips bound to the lockfile — the single
  * suggested next tool is [suggestedTool]".
@@ -65,7 +65,7 @@ fun Project.autoRegenHint(): AutoRegenHint? {
  * tracking** and returned in neither [staleClips] nor [freshClips]. The
  * "either / or" split deliberately leaves a third "unknown / not-tracked"
  * bucket: these clips don't oppose in the incremental-compile decision, so
- * callers downstream (`regenerate_stale_clips`, the `find_stale_clips` report)
+ * callers downstream (`regenerate_stale_clips`, the `project_query(select=stale_clips)` report)
  * leave them alone unless the user explicitly opts them in by binding a source
  * node.
  *
@@ -184,7 +184,7 @@ fun Project.freshClips(changed: Set<SourceNodeId>): Set<ClipId> {
 
 /**
  * Per-clip stale report — emitted by [staleClipsFromLockfile] / surfaced by the
- * `find_stale_clips` tool.
+ * `project_query(select=stale_clips)` tool.
  *
  * @property clipId The stale clip on the timeline.
  * @property assetId The asset that clip plays.
@@ -205,7 +205,7 @@ data class StaleClipReport(
  * compares the snapshotted `sourceContentHashes` to the project's *current*
  * `Source` hashes. A mismatch on any bound node flags the clip stale.
  *
- * This is the lane the agent's `find_stale_clips` tool reads. Clips without a
+ * This is the lane the agent's `project_query(select=stale_clips)` tool reads. Clips without a
  * matching lockfile entry (e.g. imported media), or whose entry has an empty
  * snapshot (legacy entries written before the snapshot field existed), are
  * silently skipped — there's no anchor to compare against. Imported media is

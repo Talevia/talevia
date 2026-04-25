@@ -28,7 +28,9 @@ import io.talevia.core.domain.source.replaceNode
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.project.query.StaleClipReportRow
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -36,10 +38,10 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Round-trips the lockfile-driven stale-clip detector through `find_stale_clips`.
- * The detector itself has unit coverage on the domain extension; this suite proves
- * the tool surfaces the right shape to the agent and respects the legacy /
- * imported-media skip rules.
+ * Cycle 138 folded `find_stale_clips` into
+ * `project_query(select=stale_clips)`. This suite continues to round-trip
+ * the lockfile-driven detector through the unified dispatcher and
+ * pin the legacy / imported-media skip rules.
  */
 class FindStaleClipsToolTest {
 
@@ -93,13 +95,26 @@ class FindStaleClipsToolTest {
         store.mutate(projectId) { it.copy(lockfile = it.lockfile.append(entry)) }
     }
 
+    private fun staleInput(projectId: String, limit: Int? = null) = ProjectQueryTool.Input(
+        projectId = projectId,
+        select = ProjectQueryTool.SELECT_STALE_CLIPS,
+        limit = limit,
+    )
+
+    private fun decodeRows(out: ProjectQueryTool.Output): List<StaleClipReportRow> {
+        assertEquals(ProjectQueryTool.SELECT_STALE_CLIPS, out.select)
+        return JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(StaleClipReportRow.serializer()),
+            out.rows,
+        )
+    }
+
     @Test fun freshProjectReportsZeroStale() = runTest {
         val store = newStore()
         val pid = ProjectId("p-fresh")
         val asset = AssetId("a-1")
         seedProjectWithClip(store, pid, videoClip("c-1", asset))
 
-        // Set up source + lockfile so the snapshot matches the current source hash.
         store.mutateSource(pid) {
             it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Mei", visualDescription = "teal hair"))
         }
@@ -117,12 +132,10 @@ class FindStaleClipsToolTest {
             ),
         )
 
-        val tool = FindStaleClipsTool(store)
-        val out = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data
-
-        assertEquals(0, out.staleClipCount)
-        assertEquals(1, out.totalClipCount)
-        assertTrue(out.reports.isEmpty())
+        val out = ProjectQueryTool(store).execute(staleInput(pid.value), ctx()).data
+        assertEquals(0, out.total)
+        assertEquals(0, out.returned)
+        assertTrue(decodeRows(out).isEmpty())
     }
 
     @Test fun characterEditFlagsBoundClip() = runTest {
@@ -148,7 +161,6 @@ class FindStaleClipsToolTest {
             ),
         )
 
-        // User edits the character — content hash changes.
         store.mutateSource(pid) { source ->
             source.replaceNode(SourceNodeId("mei")) { node ->
                 node.copy(
@@ -160,12 +172,11 @@ class FindStaleClipsToolTest {
             }
         }
 
-        val tool = FindStaleClipsTool(store)
-        val out = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data
-
-        assertEquals(1, out.staleClipCount)
-        assertEquals(1, out.reports.size)
-        val report = out.reports.single()
+        val out = ProjectQueryTool(store).execute(staleInput(pid.value), ctx()).data
+        assertEquals(1, out.total)
+        val rows = decodeRows(out)
+        assertEquals(1, rows.size)
+        val report = rows.single()
         assertEquals("c-1", report.clipId)
         assertEquals(asset.value, report.assetId)
         assertEquals(listOf("mei"), report.changedSourceIds)
@@ -200,7 +211,6 @@ class FindStaleClipsToolTest {
             ),
         )
 
-        // Only the style bible changes.
         store.mutateSource(pid) { source ->
             source.replaceNode(SourceNodeId("noir")) { node ->
                 node.copy(
@@ -212,41 +222,18 @@ class FindStaleClipsToolTest {
             }
         }
 
-        val tool = FindStaleClipsTool(store)
-        val out = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data
-
-        assertEquals(1, out.staleClipCount)
-        val report = out.reports.single()
-        // Detector reports only the *direct* drifted ids; mei is unchanged so absent.
+        val out = ProjectQueryTool(store).execute(staleInput(pid.value), ctx()).data
+        assertEquals(1, out.total)
+        val report = decodeRows(out).single()
         assertEquals(listOf("noir"), report.changedSourceIds)
     }
 
     @Test fun transitiveConsistencyEditFlagsGrandchildBoundClip() = runTest {
-        // VISION §5.5 / source-consistency-propagation runtime coverage.
-        // Two existing tests each cover half the lane:
-        //   • `TransitiveSourceHashTest.staleClipsFromLockfileFlagsClipWhenGrandparentEdited`
-        //     proves grandparent-edit → grandchild-deep-hash-drift for generic
-        //     (`test.generic`) nodes, but bypasses the tool and the consistency
-        //     kinds (`character_ref` / `style_bible`).
-        //   • `characterEditFlagsBoundClip` (above) proves a consistency-node
-        //     edit surfaces through the tool, but for a *directly-bound*
-        //     character_ref only; the parent-chain path isn't exercised.
-        // This test pins the intersection — a consistency-kind DAG where the
-        // clip binds the child (`mei` character_ref) and the *parent*
-        // (`noir` style_bible) is edited; the tool must still report the clip
-        // stale, with the child's id listed in `changedSourceIds` (deep-hash
-        // drift surfaces on the descendant even though its shallow contentHash
-        // is unchanged). This is the combined-regression shape — a future
-        // refactor that re-introduces shallow-hash-only comparison, or that
-        // drops `parents = [noir]` wiring from `addCharacterRef`'s signature,
-        // breaks this test.
         val store = newStore()
         val pid = ProjectId("p-transitive")
         val asset = AssetId("a-1")
         seedProjectWithClip(store, pid, videoClip("c-1", asset, binding = setOf(SourceNodeId("mei"))))
 
-        // noir is the style_bible; mei is the character_ref with noir as its
-        // parent (modelling "this character's look builds on this style").
         store.mutateSource(pid) {
             it.addStyleBible(
                 SourceNodeId("noir"),
@@ -257,8 +244,6 @@ class FindStaleClipsToolTest {
                 parents = listOf(SourceRef(SourceNodeId("noir"))),
             )
         }
-        // Snapshot the child's deep hash — which includes the parent's body —
-        // at generation time.
         val snapshotHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
         appendLockfile(
             store,
@@ -272,15 +257,10 @@ class FindStaleClipsToolTest {
                 sourceContentHashes = mapOf(SourceNodeId("mei") to snapshotHash),
             ),
         )
-        // Sanity: before any edit, nothing is stale.
-        val toolBefore = FindStaleClipsTool(store)
-        val baseline = toolBefore.execute(FindStaleClipsTool.Input(pid.value), ctx()).data
-        assertEquals(0, baseline.staleClipCount, "freshly-snapshotted project must not report stale")
+        val tool = ProjectQueryTool(store)
+        val baseline = tool.execute(staleInput(pid.value), ctx()).data
+        assertEquals(0, baseline.total, "freshly-snapshotted project must not report stale")
 
-        // User edits only the parent `noir`. mei's own body + direct parents
-        // list are unchanged, so its SHALLOW contentHash stays identical —
-        // only its deep (folded-with-ancestors) hash shifts. The tool is the
-        // consumer that surfaces this through the lockfile snapshot diff.
         store.mutateSource(pid) { source ->
             source.replaceNode(SourceNodeId("noir")) { node ->
                 node.copy(
@@ -292,16 +272,12 @@ class FindStaleClipsToolTest {
             }
         }
 
-        val tool = FindStaleClipsTool(store)
-        val out = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data
-        assertEquals(1, out.staleClipCount, "parent-edit must flag the child-bound clip stale through deep-hash drift")
-        val report = out.reports.single()
+        val out = tool.execute(staleInput(pid.value), ctx()).data
+        assertEquals(1, out.total, "parent-edit must flag the child-bound clip stale through deep-hash drift")
+        val report = decodeRows(out).single()
         assertEquals("c-1", report.clipId)
         // Detector names only the directly-bound-and-drifted id. The parent
-        // (`noir`) caused the drift but isn't in the clip's binding, so it's
-        // not listed — the child (`mei`) *is* in the binding and *did* see a
-        // deep-hash change, so it shows up. Contract: report names the
-        // bound-and-drifted nodes, not the root-cause ancestors.
+        // (`noir`) caused the drift but isn't in the clip's binding.
         assertEquals(listOf("mei"), report.changedSourceIds)
     }
 
@@ -315,7 +291,6 @@ class FindStaleClipsToolTest {
             it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Mei", visualDescription = "teal"))
         }
 
-        // Legacy: empty sourceContentHashes — pre-snapshot lockfile entry.
         appendLockfile(
             store,
             pid,
@@ -329,7 +304,6 @@ class FindStaleClipsToolTest {
             ),
         )
 
-        // Even after a real edit, legacy entries are "unknown" — never stale, never fresh.
         store.mutateSource(pid) { source ->
             source.replaceNode(SourceNodeId("mei")) { node ->
                 node.copy(
@@ -341,11 +315,9 @@ class FindStaleClipsToolTest {
             }
         }
 
-        val tool = FindStaleClipsTool(store)
-        val out = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data
-
-        assertEquals(0, out.staleClipCount)
-        assertTrue(out.reports.isEmpty())
+        val out = ProjectQueryTool(store).execute(staleInput(pid.value), ctx()).data
+        assertEquals(0, out.total)
+        assertTrue(decodeRows(out).isEmpty())
     }
 
     @Test fun importedClipWithoutLockfileEntryIsSkipped() = runTest {
@@ -354,15 +326,9 @@ class FindStaleClipsToolTest {
         val asset = AssetId("a-imported")
         seedProjectWithClip(store, pid, videoClip("c-1", asset))
 
-        // No lockfile entry at all — the clip plays an imported asset.
-        // (Source has no nodes either; the detector should still gracefully skip.)
-
-        val tool = FindStaleClipsTool(store)
-        val out = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data
-
-        assertEquals(0, out.staleClipCount)
-        assertEquals(1, out.totalClipCount)
-        assertTrue(out.reports.isEmpty())
+        val out = ProjectQueryTool(store).execute(staleInput(pid.value), ctx()).data
+        assertEquals(0, out.total)
+        assertTrue(decodeRows(out).isEmpty())
     }
 
     @Test fun emptyLockfileShortCircuits() = runTest {
@@ -370,27 +336,20 @@ class FindStaleClipsToolTest {
         val pid = ProjectId("p-empty")
         store.upsert("demo", Project(id = pid, timeline = Timeline()))
 
-        val tool = FindStaleClipsTool(store)
-        val out = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data
-
-        assertEquals(0, out.staleClipCount)
-        assertEquals(0, out.totalClipCount)
-        assertTrue(out.reports.isEmpty())
+        val out = ProjectQueryTool(store).execute(staleInput(pid.value), ctx()).data
+        assertEquals(0, out.total)
+        assertTrue(decodeRows(out).isEmpty())
     }
 
     /**
-     * Seeds a project with `clipCount` AIGC clips all bound to a single character
-     * ref, then drifts the character so every clip goes stale. Returns the project
-     * id for further assertions.
+     * Seeds a project with `clipCount` AIGC clips all bound to a single
+     * character ref, then drifts the character so every clip goes stale.
      */
     private suspend fun seedManyStale(
         store: FileProjectStore,
         pid: ProjectId,
         clipCount: Int,
     ) {
-        // Intentionally insert clips in non-sorted order (reverse + zero-padded) so the
-        // store / detector cannot accidentally hand us a pre-sorted stream — ordering
-        // has to come from the tool itself.
         val clips = (clipCount - 1 downTo 0).map { i ->
             val idx = i.toString().padStart(3, '0')
             videoClip(
@@ -425,7 +384,6 @@ class FindStaleClipsToolTest {
                 ),
             )
         }
-        // Drift the character → every bound clip becomes stale.
         store.mutateSource(pid) { source ->
             source.replaceNode(SourceNodeId("mei")) { node ->
                 node.copy(
@@ -438,19 +396,17 @@ class FindStaleClipsToolTest {
         }
     }
 
-    @Test fun limitCapsReportsButKeepsTrueStaleCount() = runTest {
+    @Test fun limitCapsRowsButKeepsTrueStaleCount() = runTest {
         val store = newStore()
         val pid = ProjectId("p-capped")
         seedManyStale(store, pid, clipCount = 12)
 
-        val tool = FindStaleClipsTool(store)
-        val out = tool.execute(FindStaleClipsTool.Input(pid.value, limit = 5), ctx()).data
-
+        val out = ProjectQueryTool(store).execute(staleInput(pid.value, limit = 5), ctx()).data
         // True total preserved.
-        assertEquals(12, out.staleClipCount)
-        assertEquals(12, out.totalClipCount)
-        // Reports trimmed to the cap.
-        assertEquals(5, out.reports.size)
+        assertEquals(12, out.total)
+        // Rows trimmed to the cap.
+        assertEquals(5, out.returned)
+        assertEquals(5, decodeRows(out).size)
     }
 
     @Test fun reportOrderIsDeterministicAcrossCalls() = runTest {
@@ -458,26 +414,24 @@ class FindStaleClipsToolTest {
         val pid = ProjectId("p-ordered")
         seedManyStale(store, pid, clipCount = 8)
 
-        val tool = FindStaleClipsTool(store)
-        val first = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data.reports
-        val second = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data.reports
+        val tool = ProjectQueryTool(store)
+        val first = decodeRows(tool.execute(staleInput(pid.value), ctx()).data)
+        val second = decodeRows(tool.execute(staleInput(pid.value), ctx()).data)
 
         assertEquals(first, second)
         // And the order is specifically ascending-by-clipId.
         assertEquals(first.map { it.clipId }, first.map { it.clipId }.sorted())
     }
 
-    @Test fun omittedLimitFallsBackToDefault50() = runTest {
+    @Test fun omittedLimitFallsBackToProjectQueryDefault100() = runTest {
         val store = newStore()
         val pid = ProjectId("p-default")
-        // 60 stale clips > default cap of 50.
-        seedManyStale(store, pid, clipCount = 60)
+        // 110 stale clips > project_query default cap of 100 (was 50 pre-fold).
+        seedManyStale(store, pid, clipCount = 110)
 
-        val tool = FindStaleClipsTool(store)
-        // Null / omitted limit (uses the `limit: Int? = null` default).
-        val out = tool.execute(FindStaleClipsTool.Input(pid.value), ctx()).data
-
-        assertEquals(60, out.staleClipCount)
-        assertEquals(FindStaleClipsTool.DEFAULT_LIMIT, out.reports.size)
+        val out = ProjectQueryTool(store).execute(staleInput(pid.value), ctx()).data
+        assertEquals(110, out.total)
+        // Default limit shifted from 50 (find_stale_clips) → 100 (project_query) on the fold.
+        assertEquals(100, out.returned)
     }
 }

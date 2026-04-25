@@ -33,7 +33,7 @@ import kotlinx.serialization.serializer
  * proactively.
  *
  * Intentionally narrow: structural invariants only. Does NOT cover:
- * - Staleness (lockfile / contentHash drift) — that's `find_stale_clips`.
+ * - Staleness (lockfile / contentHash drift) — that's `project_query(select=stale_clips)`.
  * - Render-cache health — exports already re-check.
  * - Semantic "is this a good edit" judgment — out of scope for a linter.
  *
@@ -80,7 +80,7 @@ class ValidateProjectTool(
             "fade envelope out of range, timeline duration out of sync with clips, and " +
             "source DAG integrity (parent refs pointing at missing nodes; parent cycles " +
             "that would break DFS traversal). Returns one row per issue; `passed=true` iff " +
-            "no errors. Does NOT check content staleness — use `find_stale_clips` for that."
+            "no errors. Does NOT check content staleness — use `project_query(select=stale_clips)` for that."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.read")

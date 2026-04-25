@@ -62,7 +62,7 @@ Edit an existing consistency node: call `source_query(select=node_detail)` to re
 current body, mutate the returned JSON client-side, pass the complete object
 back via `update_source_node_body(projectId, nodeId, body={...})`. This is
 whole-body replacement — keep every field you want to retain. Every write
-bumps `contentHash` so downstream clips go stale and `find_stale_clips`
+bumps `contentHash` so downstream clips go stale and `project_query(select=stale_clips)`
 surfaces them for regeneration.
 
 Use `source_query(select=nodes, kindPrefix=core.consistency.)` to recover
@@ -109,18 +109,18 @@ mutate client-side, write it back (keep every field you want to retain). Does
 NOT touch `kind` (rebuild the node if the kind must change), `parents` (use
 `set_source_node_parents`), or `id` (use `source_node_action(action="rename")`).
 Bumps
-`contentHash` so bound clips go stale — run `find_stale_clips` after editing.
+`contentHash` so bound clips go stale — run `project_query(select=stale_clips)` after editing.
 
 When the user changes a consistency node and you need to regenerate everything
 that depended on it, call `regenerate_stale_clips` — one tool that handles the
-full find_stale_clips → regenerate → clip_action(action="replace") chain in one atomic batch.
+full project_query(select=stale_clips) → regenerate → clip_action(action="replace") chain in one atomic batch.
 It walks each stale clip, re-dispatches the original AIGC tool with the raw
 inputs captured in the lockfile (so consistency folding re-runs against the
 current source graph and the regeneration picks up the edit), and splices the
 new assetId + binding back onto each clip's timeline slot. Single consent
-covers the whole batch. Use `find_stale_clips` on its own when you just want
+covers the whole batch. Use `project_query(select=stale_clips)` on its own when you just want
 to *report* drift without regenerating (e.g. the user is planning, not yet
-committing). The legacy chain (`find_stale_clips` → `generate_image` →
+committing). The legacy chain (`project_query(select=stale_clips)` → `generate_image` →
 `clip_action(action="replace")`) still works and is the right escape hatch when you need
 per-clip control — e.g. skip one of the stale clips, or change
 `consistencyBindingIds` for a specific regeneration.

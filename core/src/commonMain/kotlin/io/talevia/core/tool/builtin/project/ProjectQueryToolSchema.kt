@@ -51,6 +51,10 @@ internal val PROJECT_QUERY_HELP_TEXT: String =
         "Diffs lockfile entries by inputHash (added / removed / unchangedCount).\n" +
         "  • source_binding_stats — per-kind {kind, totalNodes, boundDirectly, " +
         "boundTransitively, orphans, coverageRatio, orphanNodeIds}.\n" +
+        "  • stale_clips — rows: {clipId, assetId, changedSourceIds}. Every AIGC clip " +
+        "whose lockfile-snapshot of bound source-node hashes no longer matches the project's " +
+        "current value. Sorted by clipId. Use after editing a source node to plan which clips " +
+        "to regenerate (call regenerate_stale_clips for the batch verb).\n" +
         "Common: limit (1..500, default 100), offset. Filter-on-wrong-select fails loud."
 
 internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
@@ -71,7 +75,7 @@ internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
                     "lockfile_entries | clips_for_asset | clips_for_source | " +
                     "clip | lockfile_entry | project_metadata | consistency_propagation | " +
                     "spend | lockfile_cache_stats | lockfile_diff | lockfile_orphans | snapshots | " +
-                    "timeline_diff | source_binding_stats (case-insensitive).",
+                    "timeline_diff | source_binding_stats | stale_clips (case-insensitive).",
             )
         }
         putJsonObject("trackKind") {
