@@ -15,7 +15,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **bus-trace-cli-slash** — cycle-100 加了 `session_query(select=bus_trace)`；CLI 用户每次手敲 query 麻烦。**方向：** `/trace [kind=]` slash 命令打印当前 session 最近 N=20 行；继承 `/permissions` 风格。`SlashCompletion` 给 kind 候选（`PartDelta` / `MessageUpdated` / …）。Rubric §5.4 / cli。Milestone §later.
 - **debt-consolidate-project-lifecycle-tools** — `core/tool/builtin/project/` 有 20 个 *Tool.kt，其中 6 个是单 verb lifecycle (CreateProject / OpenProject / DeleteProject / RenameProject / SetOutputProfile / RemoveAsset)。每个工具一份 helpText + schema + dispatch 是 LLM context 累计代价。**方向：** 复刻 `clip_action` 模式，折成 `project_action(action=create|open|delete|rename|set_output_profile|remove_asset)` 一个工具；同步删 6 个旧工具。净 tool count -5。Rubric §5.6 / §5.7 / §3a-1。Milestone §later.
 - **compaction-strategy-prune-only** — `Compactor` 当前默认 summarize-old (LLM call + token cost)。某些 session（仅 tool-heavy，prose 极少）summarize 没意义；只 prune 最老的 `Part.Tool` results 就够了。**方向：** `CompactionStrategy.PruneToolsOnly` 选项，从 oldest 开始按 `estimatedTokens` 删 `Part.Tool` 直到回到阈值；不调 LLM。`set_compaction_strategy` 或 session metadata 切换。Rubric §5.6 / §5.7。Milestone §later.
 

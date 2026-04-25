@@ -111,6 +111,7 @@ internal class SlashCommandDispatcher(
             "spend" -> renderer.println(spendSummary(currentSession))
             "metrics" -> renderer.println(metricsSummary())
             "permissions" -> renderer.println(permissionsSummary(currentSession))
+            "trace" -> renderer.println(traceSummary(currentSession, args))
             "todos" -> renderer.println(todosSummary(currentSession))
             "status" -> renderer.println(statusLine(projectId, currentSession, currentModel))
             "history" -> renderer.println(historyTable(currentSession))
@@ -459,6 +460,65 @@ internal class SlashCommandDispatcher(
     }
 
     /**
+     * `/trace [kind]` surfaces `session_query(select=bus_trace)` as a
+     * CLI shortcut. Recent (default last 20) bus events for the active
+     * session, oldest-first. Optional bareword filters by event class
+     * (`/trace PartDelta`); accepts `kind=PartDelta` form too. Useful
+     * when a turn fails and the operator wants to see what events
+     * actually fired without `~/.talevia/cli.log` tailing.
+     */
+    private suspend fun traceSummary(sessionId: SessionId, args: String): String {
+        // Parse args: bare word or `kind=foo`. Empty = no filter.
+        val trimmed = args.trim()
+        val kindFilter: String? = when {
+            trimmed.isEmpty() -> null
+            trimmed.startsWith("kind=") -> trimmed.substringAfter("kind=").trim().ifBlank { null }
+            else -> trimmed
+        }
+        val tool = io.talevia.core.tool.builtin.session.SessionQueryTool(
+            sessions = container.sessions,
+            busTrace = container.busTrace,
+        )
+        val ctx = io.talevia.core.tool.ToolContext(
+            sessionId = sessionId,
+            messageId = io.talevia.core.MessageId("slash-trace"),
+            callId = io.talevia.core.CallId("slash-trace"),
+            askPermission = { io.talevia.core.permission.PermissionDecision.Once },
+            emitPart = { },
+            messages = emptyList(),
+        )
+        val out = runCatching {
+            tool.execute(
+                io.talevia.core.tool.builtin.session.SessionQueryTool.Input(
+                    select = io.talevia.core.tool.builtin.session.SessionQueryTool.SELECT_BUS_TRACE,
+                    sessionId = sessionId.value,
+                    kind = kindFilter,
+                    limit = TRACE_DEFAULT_LIMIT,
+                ),
+                ctx,
+            )
+        }.getOrElse { e ->
+            return Styles.meta("/trace: ${e.message ?: e::class.simpleName}")
+        }
+        val rows = runCatching {
+            io.talevia.core.JsonConfig.default.decodeFromJsonElement(
+                kotlinx.serialization.builtins.ListSerializer(
+                    io.talevia.core.tool.builtin.session.query.BusTraceRow.serializer(),
+                ),
+                out.data.rows,
+            )
+        }.getOrElse { e ->
+            return Styles.meta("/trace: failed to decode rows — ${e.message}")
+        }
+        // The recorder returns oldest-first inside its ring buffer
+        // (cycle-100 BusEventTraceRecorder.snapshot order). With
+        // limit=20 we get the most recent 20 from the front of the
+        // matrix walker's filtered output. Reverse so newest appears
+        // last (matches scroll direction of an interactive terminal).
+        return formatBusTrace(rows, kindFilter)
+    }
+
+    /**
      * `/metrics` renders the in-process `MetricsRegistry` — counters
      * grouped by dotted-prefix, latency histograms (P50/P95/P99) for any
      * observed timer. Mirrors the server's `/metrics` endpoint content
@@ -489,5 +549,10 @@ internal class SlashCommandDispatcher(
         }
         return "in=${tokens.input} · out=${tokens.output} · reasoning=${tokens.reasoning} · " +
             "cache r/w=${tokens.cacheRead}/${tokens.cacheWrite} · usd=${"%.5f".format(usd)}"
+    }
+
+    private companion object {
+        /** Default `/trace` row cap. 20 is small enough for one terminal page, large enough to span a typical turn's events. */
+        const val TRACE_DEFAULT_LIMIT: Int = 20
     }
 }

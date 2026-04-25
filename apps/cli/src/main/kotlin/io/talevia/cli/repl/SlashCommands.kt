@@ -86,6 +86,12 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         category = SlashCategory.MODEL,
     ),
     SlashCommandSpec(
+        "/trace",
+        "recent bus events (last 20) for this session; optional event-class filter",
+        argHint = "[<kind>]",
+        category = SlashCategory.MODEL,
+    ),
+    SlashCommandSpec(
         "/todos",
         "show the agent's current todo list for this session",
         category = SlashCategory.MODEL,
