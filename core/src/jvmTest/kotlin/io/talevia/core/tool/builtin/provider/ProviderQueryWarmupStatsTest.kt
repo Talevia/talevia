@@ -54,7 +54,7 @@ class ProviderQueryWarmupStatsTest {
 
     @Test fun emptyStatsReturnsZeroRows() = runTest {
         val stats = ProviderWarmupStats(bus(), scope)
-        val out = ProviderQueryTool(emptyRegistry(), stats).execute(
+        val out = ProviderQueryTool(emptyRegistry(), stats, io.talevia.core.domain.ProjectStoreTestKit.create()).execute(
             ProviderQueryTool.Input(select = "warmup_stats"),
             ctx(),
         ).data
@@ -86,7 +86,7 @@ class ProviderQueryWarmupStatsTest {
         )
         yield()
 
-        val out = ProviderQueryTool(emptyRegistry(), stats).execute(
+        val out = ProviderQueryTool(emptyRegistry(), stats, io.talevia.core.domain.ProjectStoreTestKit.create()).execute(
             ProviderQueryTool.Input(select = "warmup_stats"),
             ctx(),
         ).data
@@ -147,7 +147,7 @@ class ProviderQueryWarmupStatsTest {
             yield()
         }
 
-        val rows = ProviderQueryTool(emptyRegistry(), stats).execute(
+        val rows = ProviderQueryTool(emptyRegistry(), stats, io.talevia.core.domain.ProjectStoreTestKit.create()).execute(
             ProviderQueryTool.Input(select = "warmup_stats"),
             ctx(),
         ).data.rows.decodeRowsAs(WarmupStatsRow.serializer())
@@ -171,7 +171,7 @@ class ProviderQueryWarmupStatsTest {
             yield()
         }
 
-        val rows = ProviderQueryTool(emptyRegistry(), stats).execute(
+        val rows = ProviderQueryTool(emptyRegistry(), stats, io.talevia.core.domain.ProjectStoreTestKit.create()).execute(
             ProviderQueryTool.Input(select = "warmup_stats"),
             ctx(),
         ).data.rows.decodeRowsAs(WarmupStatsRow.serializer())
@@ -187,7 +187,7 @@ class ProviderQueryWarmupStatsTest {
         val eb = bus()
         val stats = ProviderWarmupStats(eb, scope)
         val ex = assertFailsWith<IllegalStateException> {
-            ProviderQueryTool(emptyRegistry(), stats).execute(
+            ProviderQueryTool(emptyRegistry(), stats, io.talevia.core.domain.ProjectStoreTestKit.create()).execute(
                 ProviderQueryTool.Input(select = "warmup_stats", providerId = "replicate"),
                 ctx(),
             )

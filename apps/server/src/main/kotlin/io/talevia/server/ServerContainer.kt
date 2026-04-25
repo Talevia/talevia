@@ -295,7 +295,7 @@ class ServerContainer(
         providerRegistryOverride ?: ProviderRegistry.Builder().addEnv(httpClient, env).build()
 
     init {
-        tools.register(io.talevia.core.tool.builtin.provider.ProviderQueryTool(providers, warmupStats))
+        tools.register(io.talevia.core.tool.builtin.provider.ProviderQueryTool(providers, warmupStats, projects))
         tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
     }
 

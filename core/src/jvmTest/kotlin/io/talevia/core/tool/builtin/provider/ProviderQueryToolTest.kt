@@ -60,6 +60,7 @@ class ProviderQueryToolTest {
         ProviderQueryTool(
             reg,
             io.talevia.core.provider.ProviderWarmupStats.withSupervisor(io.talevia.core.bus.EventBus()),
+            io.talevia.core.domain.ProjectStoreTestKit.create(),
         )
 
     @Test fun providersSelectEnumeratesAllWithDefaultMarker() = runTest {

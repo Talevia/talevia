@@ -49,7 +49,7 @@ class QueryDispatcherConventionTest {
                 ProjectQueryTool(projects),
                 SessionQueryTool(sessions),
                 SourceQueryTool(projects),
-                ProviderQueryTool(providers, warmupStats),
+                ProviderQueryTool(providers, warmupStats, projects),
             )
         }
 

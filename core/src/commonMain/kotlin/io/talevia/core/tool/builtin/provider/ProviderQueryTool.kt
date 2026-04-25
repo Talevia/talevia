@@ -1,16 +1,19 @@
 package io.talevia.core.tool.builtin.provider
 
 import io.talevia.core.JsonConfig
+import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.provider.ProviderWarmupStats
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.provider.query.CostCompareRow
+import io.talevia.core.tool.builtin.provider.query.CostHistoryRow
 import io.talevia.core.tool.builtin.provider.query.ModelRow
 import io.talevia.core.tool.builtin.provider.query.ProviderRow
 import io.talevia.core.tool.builtin.provider.query.WarmupStatsRow
 import io.talevia.core.tool.builtin.provider.query.runCostCompareQuery
+import io.talevia.core.tool.builtin.provider.query.runCostHistoryQuery
 import io.talevia.core.tool.builtin.provider.query.runModelsQuery
 import io.talevia.core.tool.builtin.provider.query.runProvidersQuery
 import io.talevia.core.tool.builtin.provider.query.runWarmupStatsQuery
@@ -57,11 +60,12 @@ import kotlinx.serialization.serializer
 class ProviderQueryTool(
     private val providers: ProviderRegistry,
     private val warmupStats: ProviderWarmupStats,
+    private val projects: ProjectStore,
 ) : QueryDispatcher<ProviderQueryTool.Input, ProviderQueryTool.Output>() {
 
     @Serializable data class Input(
         /** One of [SELECT_PROVIDERS] / [SELECT_MODELS] / [SELECT_COST_COMPARE] /
-         *  [SELECT_WARMUP_STATS] (case-insensitive). */
+         *  [SELECT_WARMUP_STATS] / [SELECT_COST_HISTORY] (case-insensitive). */
         val select: String,
         /** Required for [SELECT_MODELS]; rejected for [SELECT_PROVIDERS] / [SELECT_COST_COMPARE]. */
         val providerId: String? = null,
@@ -75,6 +79,17 @@ class ProviderQueryTool(
          * comparison scales to. Rejected for other selects.
          */
         val requestedOutputTokens: Int? = null,
+        /**
+         * [SELECT_COST_HISTORY] only — cap returned rows. Default 50, clamped
+         * to 1..500. Rejected for other selects.
+         */
+        val limit: Int? = null,
+        /**
+         * [SELECT_COST_HISTORY] only — drop entries with
+         * `provenance.createdAtEpochMs < sinceEpochMs`. Rejected for other
+         * selects. Null/omitted = no lower bound.
+         */
+        val sinceEpochMs: Long? = null,
     )
 
     @Serializable data class Output(
@@ -109,7 +124,12 @@ class ProviderQueryTool(
             "{providerId, count, p50Ms, p95Ms, p99Ms, minMs, maxMs, latestMs}. Sourced from " +
             "BusEvent.ProviderWarmup(Starting→Ready) pairings since process start. Providers " +
             "without a warmup/streaming split (e.g. synchronous OpenAI image endpoints) are " +
-            "absent from the result. No filters; no HTTP."
+            "absent from the result. No filters; no HTTP.\n" +
+            "  • cost_history — most-recent N priced AIGC dispatches across every project. " +
+            "Rows: {toolId, providerId, modelId, costCents, projectId, sessionId, " +
+            "originatingMessageId, assetId, createdAtEpochMs}. Sourced from each project's " +
+            "lockfile.entries; entries without costCents are filtered out. Filters: limit " +
+            "(default 50, max 500), sinceEpochMs. Sorted by createdAtEpochMs desc."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("provider.read")
@@ -121,8 +141,8 @@ class ProviderQueryTool(
                 put("type", "string")
                 put(
                     "description",
-                    "What to query: providers | models | cost_compare | warmup_stats " +
-                        "(case-insensitive).",
+                    "What to query: providers | models | cost_compare | warmup_stats | " +
+                        "cost_history (case-insensitive).",
                 )
                 put(
                     "enum",
@@ -131,6 +151,7 @@ class ProviderQueryTool(
                         add(JsonPrimitive(SELECT_MODELS))
                         add(JsonPrimitive(SELECT_COST_COMPARE))
                         add(JsonPrimitive(SELECT_WARMUP_STATS))
+                        add(JsonPrimitive(SELECT_COST_HISTORY))
                     },
                 )
             }
@@ -148,6 +169,20 @@ class ProviderQueryTool(
                 put("minimum", 0)
                 put("description", "cost_compare only. Output-token budget.")
             }
+            putJsonObject("limit") {
+                put("type", "integer")
+                put("minimum", 1)
+                put("maximum", 500)
+                put("description", "cost_history only. Cap returned rows. Default 50.")
+            }
+            putJsonObject("sinceEpochMs") {
+                put("type", "integer")
+                put("minimum", 0)
+                put(
+                    "description",
+                    "cost_history only. Drop entries older than this epoch-ms. Null = no lower bound.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("select"))))
         put("additionalProperties", false)
@@ -160,6 +195,7 @@ class ProviderQueryTool(
         SELECT_MODELS -> ModelRow.serializer()
         SELECT_COST_COMPARE -> CostCompareRow.serializer()
         SELECT_WARMUP_STATS -> WarmupStatsRow.serializer()
+        SELECT_COST_HISTORY -> CostHistoryRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
 
@@ -175,6 +211,11 @@ class ProviderQueryTool(
                 requestedOutputTokens = input.requestedOutputTokens!!,
             )
             SELECT_WARMUP_STATS -> runWarmupStatsQuery(warmupStats)
+            SELECT_COST_HISTORY -> runCostHistoryQuery(
+                store = projects,
+                limit = (input.limit ?: 50).coerceIn(1, 500),
+                sinceEpochMs = input.sinceEpochMs,
+            )
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -192,6 +233,13 @@ class ProviderQueryTool(
                 "The following filter fields do not apply to select='$select': " +
                     "providerId (warmup_stats returns one row per observed provider; " +
                     "filter client-side if you only want one).",
+            )
+        }
+        if (select == SELECT_COST_HISTORY && input.providerId != null) {
+            error(
+                "The following filter fields do not apply to select='$select': " +
+                    "providerId (cost_history aggregates every project's lockfile; " +
+                    "filter client-side if you only want one provider).",
             )
         }
         if (select == SELECT_MODELS && input.providerId.isNullOrBlank()) {
@@ -218,6 +266,14 @@ class ProviderQueryTool(
                     "(cost_compare only).",
             )
         }
+        if (select != SELECT_COST_HISTORY &&
+            (input.limit != null || input.sinceEpochMs != null)
+        ) {
+            error(
+                "The following filter fields do not apply to select='$select': " +
+                    "limit / sinceEpochMs (cost_history only).",
+            )
+        }
         if (select == SELECT_COST_COMPARE) {
             if (input.providerId != null) {
                 error(
@@ -239,8 +295,10 @@ class ProviderQueryTool(
         const val SELECT_MODELS = "models"
         const val SELECT_COST_COMPARE = "cost_compare"
         const val SELECT_WARMUP_STATS = "warmup_stats"
+        const val SELECT_COST_HISTORY = "cost_history"
         internal val ALL_SELECTS = setOf(
             SELECT_PROVIDERS, SELECT_MODELS, SELECT_COST_COMPARE, SELECT_WARMUP_STATS,
+            SELECT_COST_HISTORY,
         )
     }
 }

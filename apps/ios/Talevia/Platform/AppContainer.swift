@@ -175,7 +175,7 @@ final class AppContainer {
         self.providers = buildIosProviderRegistry(httpClient: self.httpClient)
 
         // Provider-dependent tools land after providers is initialised.
-        registry.register(tool: ProviderQueryTool(providers: self.providers, warmupStats: self.warmupStats))
+        registry.register(tool: ProviderQueryTool(providers: self.providers, warmupStats: self.warmupStats, projects: self.projects))
         registry.register(tool: CompactSessionTool(providers: self.providers, sessions: self.sessions, bus: self.bus))
     }
 }
