@@ -298,58 +298,16 @@ class SessionQueryTool(
         }
     }
 
+    /**
+     * Delegate to the matrix-driven walker in
+     * [SessionQueryFilterMatrix.kt]. The previous if-else chain grew
+     * with every new select (cycle-93 §3a #12 trigger fired at 24
+     * selects). The matrix is one entry per select; the walker
+     * computes "which selects DO accept this field" from the matrix
+     * itself for the error message.
+     */
     private fun rejectIncompatibleFilters(select: String, input: Input) {
-        // Each filter field belongs to a specific select. Setting it on the wrong
-        // select usually means the LLM typed the wrong field name — fail loud.
-        val misapplied = buildList {
-            if (select != SELECT_SESSIONS) {
-                // sessions-only filters
-                if (input.projectId != null) add("projectId (select=sessions only)")
-                if (input.includeArchived != null) add("includeArchived (select=sessions only)")
-            }
-            if (select != SELECT_MESSAGES && input.role != null) {
-                add("role (select=messages only)")
-            }
-            if (select != SELECT_PARTS && input.kind != null) {
-                add("kind (select=parts only)")
-            }
-            if (select != SELECT_PARTS && select != SELECT_TOOL_CALLS && input.includeCompacted != null) {
-                add("includeCompacted (select=parts or tool_calls only)")
-            }
-            if (select != SELECT_TOOL_CALLS && input.toolId != null) {
-                add("toolId (select=tool_calls only)")
-            }
-            if (select != SELECT_MESSAGE &&
-                select != SELECT_RUN_FAILURE &&
-                select != SELECT_FALLBACK_HISTORY &&
-                select != SELECT_CANCELLATION_HISTORY &&
-                select != SELECT_STEP_HISTORY &&
-                input.messageId != null
-            ) {
-                add(
-                    "messageId (select=message, run_failure, fallback_history, " +
-                        "cancellation_history, or step_history only)",
-                )
-            }
-            // sessionId is required for everything except sessions (and `message`, which
-            // uses messageId for the drill-down); rejected for sessions.
-            if (select == SELECT_SESSIONS && input.sessionId != null) {
-                add("sessionId (rejected for select=sessions — use projectId)")
-            }
-            if (select != SELECT_RUN_STATE_HISTORY && input.sinceEpochMs != null) {
-                add("sinceEpochMs (select=run_state_history only)")
-            }
-            // tool_spec_budget is a registry-wide snapshot — passing sessionId is a typo.
-            if (select == SELECT_TOOL_SPEC_BUDGET && input.sessionId != null) {
-                add("sessionId (rejected for select=tool_spec_budget — registry-wide snapshot)")
-            }
-        }
-        if (misapplied.isNotEmpty()) {
-            error(
-                "The following filter fields do not apply to select='$select': " +
-                    misapplied.joinToString(", "),
-            )
-        }
+        rejectIncompatibleSessionQueryFilters(select, input)
     }
 
     companion object {
