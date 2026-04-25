@@ -110,6 +110,7 @@ internal class SlashCommandDispatcher(
             "cost" -> renderer.println(costSummary(currentSession))
             "spend" -> renderer.println(spendSummary(currentSession))
             "metrics" -> renderer.println(metricsSummary())
+            "permissions" -> renderer.println(permissionsSummary(currentSession))
             "todos" -> renderer.println(todosSummary(currentSession))
             "status" -> renderer.println(statusLine(projectId, currentSession, currentModel))
             "history" -> renderer.println(historyTable(currentSession))
@@ -406,6 +407,55 @@ internal class SlashCommandDispatcher(
         }
 
         return formatSpendSummary(row)
+    }
+
+    /**
+     * `/permissions` surfaces `session_query(select=permission_history)`
+     * through a CLI shortcut — the same in-memory ledger the agent
+     * sees. Useful when the operator wants to know "what did I just
+     * reject?" without scrolling the transcript or hand-typing a
+     * session_query call.
+     *
+     * Shape: one row per Asked↔Replied round-trip the recorder has
+     * captured for this session (and any prior sessions the recorder
+     * hydrated from SQL at bootstrap). Rejected entries are red,
+     * accepted are green, pending are dim.
+     */
+    private suspend fun permissionsSummary(sessionId: SessionId): String {
+        val tool = io.talevia.core.tool.builtin.session.SessionQueryTool(
+            sessions = container.sessions,
+            permissionHistory = container.permissionHistory,
+        )
+        val ctx = io.talevia.core.tool.ToolContext(
+            sessionId = sessionId,
+            messageId = io.talevia.core.MessageId("slash-permissions"),
+            callId = io.talevia.core.CallId("slash-permissions"),
+            askPermission = { io.talevia.core.permission.PermissionDecision.Once },
+            emitPart = { },
+            messages = emptyList(),
+        )
+        val out = runCatching {
+            tool.execute(
+                io.talevia.core.tool.builtin.session.SessionQueryTool.Input(
+                    select = io.talevia.core.tool.builtin.session.SessionQueryTool.SELECT_PERMISSION_HISTORY,
+                    sessionId = sessionId.value,
+                ),
+                ctx,
+            )
+        }.getOrElse { e ->
+            return Styles.meta("/permissions: ${e.message ?: e::class.simpleName}")
+        }
+        val rows = runCatching {
+            io.talevia.core.JsonConfig.default.decodeFromJsonElement(
+                kotlinx.serialization.builtins.ListSerializer(
+                    io.talevia.core.tool.builtin.session.query.PermissionHistoryRow.serializer(),
+                ),
+                out.data.rows,
+            )
+        }.getOrElse { e ->
+            return Styles.meta("/permissions: failed to decode rows — ${e.message}")
+        }
+        return formatPermissionHistory(rows)
     }
 
     /**

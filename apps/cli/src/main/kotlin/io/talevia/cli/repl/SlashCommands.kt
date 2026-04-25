@@ -81,6 +81,11 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         category = SlashCategory.MODEL,
     ),
     SlashCommandSpec(
+        "/permissions",
+        "show every permission ask + decision (rejected / once / always / pending) for this session",
+        category = SlashCategory.MODEL,
+    ),
+    SlashCommandSpec(
         "/todos",
         "show the agent's current todo list for this session",
         category = SlashCategory.MODEL,
