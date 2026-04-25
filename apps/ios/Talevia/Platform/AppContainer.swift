@@ -71,10 +71,10 @@ final class AppContainer {
         self.bus = EventBus(extraBufferCapacity: 0)
         self.agentStates = AgentRunStateTrackerCompanion.shared.withSupervisor(bus: self.bus)
         self.warmupStats = ProviderWarmupStatsCompanion.shared.withSupervisor(bus: self.bus)
-        self.permissionHistory = PermissionHistoryRecorderCompanion.shared.withSupervisor(bus: self.bus)
         let clock = ClockSystem.shared
         let json = JsonConfig.shared.default
         self.sessions = SqlDelightSessionStore(db: self.db, bus: self.bus, clock: clock, json: json)
+        self.permissionHistory = PermissionHistoryRecorderCompanion.shared.withSupervisor(bus: self.bus, store: self.sessions)
 
         // File-bundle ProjectStore rooted at <Documents>/projects/, recents
         // at <Documents>/recents.json. Bypasses the SqlDelight ProjectStore

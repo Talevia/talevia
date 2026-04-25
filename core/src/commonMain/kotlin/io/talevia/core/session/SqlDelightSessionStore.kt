@@ -298,6 +298,59 @@ class SqlDelightSessionStore(
         is Part.Plan -> p.copy(id = PartId(Uuid.random().toString()), sessionId = newSession, messageId = newMessage)
     }
 
+    override suspend fun recordPermissionAsked(
+        decision: io.talevia.core.permission.PermissionDecisionRow,
+    ) {
+        val patternsJson = io.talevia.core.JsonConfig.default.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(
+                kotlinx.serialization.serializer<String>(),
+            ),
+            decision.patterns,
+        )
+        db.permissionDecisionsQueries.upsertAsked(
+            request_id = decision.requestId,
+            session_id = decision.sessionId,
+            permission = decision.permission,
+            patterns = patternsJson,
+            asked_at_epoch_ms = decision.askedEpochMs,
+        )
+    }
+
+    override suspend fun setPermissionReplied(
+        requestId: String,
+        accepted: Boolean,
+        remembered: Boolean,
+        repliedAtEpochMs: Long,
+    ) {
+        db.permissionDecisionsQueries.setReplied(
+            accepted = if (accepted) 1L else 0L,
+            remembered = if (remembered) 1L else 0L,
+            replied_at_epoch_ms = repliedAtEpochMs,
+            request_id = requestId,
+        )
+    }
+
+    override suspend fun listPermissionDecisions(
+        sessionId: SessionId,
+    ): List<io.talevia.core.permission.PermissionDecisionRow> {
+        val rows = db.permissionDecisionsQueries.selectForSession(sessionId.value).executeAsList()
+        val stringList = kotlinx.serialization.builtins.ListSerializer(
+            kotlinx.serialization.serializer<String>(),
+        )
+        return rows.map { r ->
+            io.talevia.core.permission.PermissionDecisionRow(
+                sessionId = r.session_id,
+                requestId = r.request_id,
+                permission = r.permission,
+                patterns = io.talevia.core.JsonConfig.default.decodeFromString(stringList, r.patterns),
+                askedEpochMs = r.asked_at_epoch_ms,
+                accepted = r.accepted?.let { it == 1L },
+                remembered = r.remembered?.let { it == 1L },
+                repliedEpochMs = r.replied_at_epoch_ms,
+            )
+        }
+    }
+
     private fun kindOf(p: Part): String = when (p) {
         is Part.Text -> "text"
         is Part.Reasoning -> "reasoning"

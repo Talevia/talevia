@@ -1,0 +1,38 @@
+-- Schema v4 → v5: add PermissionDecisions table for cross-restart
+-- permission-history persistence (backlog
+-- `permission-history-persist-cross-restart`).
+--
+-- The bus-driven [PermissionHistoryRecorder] aggregates
+-- BusEvent.PermissionAsked + PermissionReplied pairs in memory; this
+-- table mirrors the same data so a process restart doesn't forget what
+-- the user said no to. The recorder dual-writes to memory + SQL on
+-- every event and hydrates from SQL at construction so
+-- `session_query(permission_history)` answers the same question across
+-- restarts.
+--
+-- Shape mirrors PermissionHistoryRecorder.Entry:
+--   request_id is the unique id for one Asked↔Replied round-trip.
+--   patterns is a JSON-encoded list (matches the bus event shape).
+--   accepted / remembered / replied_at_epoch_ms are NULL while the
+--     decision is pending (asked but not yet replied) — once a reply
+--     lands the recorder issues UPDATE setting all three.
+--
+-- Indexed by session_id since the only read path is "all decisions
+-- for one session, oldest-first" (the `permission_history` query).
+-- request_id has its own UNIQUE index so the on-reply UPDATE is fast
+-- and idempotent (publishing the same Replied twice is a no-op rather
+-- than a constraint violation in the wild).
+
+CREATE TABLE PermissionDecisions (
+    request_id           TEXT NOT NULL PRIMARY KEY,
+    session_id           TEXT NOT NULL,
+    permission           TEXT NOT NULL,
+    patterns             TEXT NOT NULL,
+    accepted             INTEGER,
+    remembered           INTEGER,
+    asked_at_epoch_ms    INTEGER NOT NULL,
+    replied_at_epoch_ms  INTEGER
+);
+
+CREATE INDEX PermissionDecisions_session_idx
+    ON PermissionDecisions(session_id, asked_at_epoch_ms);

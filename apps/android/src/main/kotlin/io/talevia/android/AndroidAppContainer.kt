@@ -63,12 +63,13 @@ class AndroidAppContainer(context: Context) {
         bus,
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
+    val sessions: SessionStore = SqlDelightSessionStore(db, bus)
     val permissionHistory: io.talevia.core.permission.PermissionHistoryRecorder =
         io.talevia.core.permission.PermissionHistoryRecorder(
-            bus,
-            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            bus = bus,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            store = sessions,
         )
-    val sessions: SessionStore = SqlDelightSessionStore(db, bus)
 
     /**
      * File-bundle [ProjectStore]. Bundles default to `<filesDir>/projects/...`

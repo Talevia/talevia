@@ -48,9 +48,21 @@ import kotlinx.datetime.Clock
  */
 class PermissionHistoryRecorder(
     bus: EventBus,
-    scope: CoroutineScope,
+    private val scope: CoroutineScope,
     private val capacityPerSession: Int = DEFAULT_CAPACITY_PER_SESSION,
     private val clock: Clock = Clock.System,
+    /**
+     * Optional persistence sink. When non-null the recorder dual-
+     * writes every Asked / Replied event to SQLite via SessionStore
+     * and answers [hydrateFromStore] from the same table — so a
+     * process restart preserves "the user already rejected this
+     * permission" memory across `talevia` re-launches.
+     *
+     * Null in test rigs that want pure-memory behaviour or rigs that
+     * don't have a SessionStore wired (matches the existing
+     * convention for optional aggregator wiring).
+     */
+    private val store: io.talevia.core.session.SessionStore? = null,
 ) {
 
     /**
@@ -103,7 +115,7 @@ class PermissionHistoryRecorder(
         ready.await()
     }
 
-    private fun onAsked(event: BusEvent.PermissionAsked) {
+    private suspend fun onAsked(event: BusEvent.PermissionAsked) {
         val entry = Entry(
             sessionId = event.sessionId.value,
             requestId = event.requestId,
@@ -113,16 +125,59 @@ class PermissionHistoryRecorder(
         )
         pending[event.requestId] = entry
         appendToSession(entry)
+        // Best-effort SQL write so a crash/kill before the reply still
+        // surfaces the pending row to the next process.
+        runCatching { store?.recordPermissionAsked(entry) }
     }
 
-    private fun onReplied(event: BusEvent.PermissionReplied) {
+    private suspend fun onReplied(event: BusEvent.PermissionReplied) {
         val pendingEntry = pending.remove(event.requestId) ?: return
+        val repliedAt = clock.now().toEpochMilliseconds()
         val resolved = pendingEntry.copy(
             accepted = event.accepted,
             remembered = event.remembered,
-            repliedEpochMs = clock.now().toEpochMilliseconds(),
+            repliedEpochMs = repliedAt,
         )
         replaceInSession(resolved)
+        runCatching {
+            store?.setPermissionReplied(
+                requestId = event.requestId,
+                accepted = event.accepted,
+                remembered = event.remembered,
+                repliedAtEpochMs = repliedAt,
+            )
+        }
+    }
+
+    /**
+     * Pull every persisted decision for [sessionId] out of the
+     * SessionStore and merge into the in-memory ring buffer. Idempotent
+     * — calling twice is safe (rows replace by requestId).
+     *
+     * Call this once per session-of-interest at process startup so the
+     * agent's first read sees decisions inherited from the previous
+     * run. CLI hydrates the active session as part of its bootstrap;
+     * server-side hydration happens lazily when a session is requested.
+     *
+     * No-op when the recorder was constructed without a store.
+     */
+    suspend fun hydrateFromStore(sessionId: io.talevia.core.SessionId) {
+        val s = store ?: return
+        val rows = s.listPermissionDecisions(sessionId)
+        if (rows.isEmpty()) return
+        _records.update { prev ->
+            // Merge: SQL is the source of truth at hydrate-time, in-
+            // memory may have asks the SQL hasn't seen yet (race during
+            // concurrent startup). Union by requestId, prefer SQL when
+            // present.
+            val sid = sessionId.value
+            val existingForSession = prev[sid].orEmpty()
+            val byId = (existingForSession + rows).associateBy { it.requestId }
+            val merged = byId.values
+                .sortedBy { it.askedEpochMs }
+                .takeLast(capacityPerSession)
+            prev + (sid to merged)
+        }
     }
 
     private fun appendToSession(entry: Entry) {
@@ -162,7 +217,14 @@ class PermissionHistoryRecorder(
          * so iOS / other non-JVM callers can skip the scope-construction
          * dance across the language boundary.
          */
-        fun withSupervisor(bus: EventBus): PermissionHistoryRecorder =
-            PermissionHistoryRecorder(bus, CoroutineScope(SupervisorJob() + Dispatchers.Default))
+        fun withSupervisor(
+            bus: EventBus,
+            store: io.talevia.core.session.SessionStore? = null,
+        ): PermissionHistoryRecorder =
+            PermissionHistoryRecorder(
+                bus = bus,
+                scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+                store = store,
+            )
     }
 }

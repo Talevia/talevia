@@ -108,4 +108,37 @@ interface SessionStore {
         newTitle: String? = null,
         anchorMessageId: MessageId? = null,
     ): SessionId
+
+    /**
+     * Persist a permission-asked decision (status: pending) so
+     * [io.talevia.core.permission.PermissionHistoryRecorder] can recover
+     * it after a process restart. Defaults to no-op so test fakes that
+     * don't care about cross-restart history don't have to implement
+     * the SQL path; only [SqlDelightSessionStore] writes through.
+     */
+    suspend fun recordPermissionAsked(
+        decision: io.talevia.core.permission.PermissionDecisionRow,
+    ): Unit = Unit
+
+    /**
+     * Mark a previously-asked decision as replied (accepted +
+     * remembered + repliedAtEpochMs). No-op when [recordPermissionAsked]
+     * is also a no-op (pure-memory fakes).
+     */
+    suspend fun setPermissionReplied(
+        requestId: String,
+        accepted: Boolean,
+        remembered: Boolean,
+        repliedAtEpochMs: Long,
+    ): Unit = Unit
+
+    /**
+     * List every permission decision recorded for [sessionId], oldest-
+     * first. Used by [io.talevia.core.permission.PermissionHistoryRecorder]
+     * to hydrate its in-memory ring buffer at construction. Default
+     * empty list keeps fakes silent.
+     */
+    suspend fun listPermissionDecisions(
+        sessionId: SessionId,
+    ): List<io.talevia.core.permission.PermissionDecisionRow> = emptyList()
 }

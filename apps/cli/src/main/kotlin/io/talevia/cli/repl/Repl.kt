@@ -105,6 +105,12 @@ class Repl(
             }
         }
 
+        // Hydrate the in-memory permission-history aggregator from
+        // SQLite for the active session — so cross-restart "user
+        // already rejected this" memory is visible to the agent on its
+        // very first read. No-op when no decisions persisted yet.
+        container.permissionHistory.hydrateFromStore(sessionId)
+
         val renderer = Renderer(
             terminal,
             markdownEnabled = markdownEnabled,

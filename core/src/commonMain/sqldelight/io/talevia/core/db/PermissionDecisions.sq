@@ -1,0 +1,32 @@
+CREATE TABLE PermissionDecisions (
+    request_id           TEXT NOT NULL PRIMARY KEY,
+    session_id           TEXT NOT NULL,
+    permission           TEXT NOT NULL,
+    patterns             TEXT NOT NULL,
+    accepted             INTEGER,
+    remembered           INTEGER,
+    asked_at_epoch_ms    INTEGER NOT NULL,
+    replied_at_epoch_ms  INTEGER
+);
+
+CREATE INDEX PermissionDecisions_session_idx
+    ON PermissionDecisions(session_id, asked_at_epoch_ms);
+
+upsertAsked:
+INSERT OR REPLACE INTO PermissionDecisions(
+    request_id, session_id, permission, patterns,
+    accepted, remembered, asked_at_epoch_ms, replied_at_epoch_ms
+) VALUES (?, ?, ?, ?, NULL, NULL, ?, NULL);
+
+setReplied:
+UPDATE PermissionDecisions
+   SET accepted = ?,
+       remembered = ?,
+       replied_at_epoch_ms = ?
+ WHERE request_id = ?;
+
+selectForSession:
+SELECT request_id, session_id, permission, patterns, accepted, remembered, asked_at_epoch_ms, replied_at_epoch_ms
+  FROM PermissionDecisions
+ WHERE session_id = ?
+ ORDER BY asked_at_epoch_ms ASC;

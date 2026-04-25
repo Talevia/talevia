@@ -106,12 +106,6 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         bus,
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
-    val permissionHistory: io.talevia.core.permission.PermissionHistoryRecorder =
-        io.talevia.core.permission.PermissionHistoryRecorder(
-            bus,
-            CoroutineScope(SupervisorJob() + Dispatchers.Default),
-        )
-
     /**
      * In-process metrics registry. Counters are fed from the bus via
      * [io.talevia.core.metrics.EventBusMetricsSink]; histograms (tool /
@@ -129,6 +123,13 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         }
 
     val sessions = SqlDelightSessionStore(db, bus)
+
+    val permissionHistory: io.talevia.core.permission.PermissionHistoryRecorder =
+        io.talevia.core.permission.PermissionHistoryRecorder(
+            bus = bus,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+            store = sessions,
+        )
 
     /**
      * File-bundle [ProjectStore]. `TALEVIA_PROJECTS_HOME` is the default
