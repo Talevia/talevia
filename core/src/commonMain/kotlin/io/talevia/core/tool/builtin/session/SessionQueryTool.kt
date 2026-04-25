@@ -26,6 +26,7 @@ import io.talevia.core.tool.builtin.session.query.PreflightSummaryRow
 import io.talevia.core.tool.builtin.session.query.RunFailureRow
 import io.talevia.core.tool.builtin.session.query.RunStateTransitionRow
 import io.talevia.core.tool.builtin.session.query.SessionMetadataRow
+import io.talevia.core.tool.builtin.session.query.SessionRecapRow
 import io.talevia.core.tool.builtin.session.query.SessionRow
 import io.talevia.core.tool.builtin.session.query.SessionSpendSummaryRow
 import io.talevia.core.tool.builtin.session.query.SpendSummaryRow
@@ -50,6 +51,7 @@ import io.talevia.core.tool.builtin.session.query.runPreflightSummaryQuery
 import io.talevia.core.tool.builtin.session.query.runRunFailureQuery
 import io.talevia.core.tool.builtin.session.query.runRunStateHistoryQuery
 import io.talevia.core.tool.builtin.session.query.runSessionMetadataQuery
+import io.talevia.core.tool.builtin.session.query.runSessionRecapQuery
 import io.talevia.core.tool.builtin.session.query.runSessionsQuery
 import io.talevia.core.tool.builtin.session.query.runSpendQuery
 import io.talevia.core.tool.builtin.session.query.runSpendSummaryQuery
@@ -215,6 +217,8 @@ class SessionQueryTool(
             "  • permission_rules — {permission, pattern, action, source}. requires sessionId.\n" +
             "  • preflight_summary — single-row plan-time snapshot collapsing context_pressure + " +
             "fallback + cancel + retry + pendingPermissionAsks. requires sessionId.\n" +
+            "  • recap — single-row session orientation: turnCount, totalTokensIn/Out, " +
+            "totalCostCents, distinctToolsUsed, lastModelId, firstAt/lastAt. requires sessionId.\n" +
             "  • step_history — per-step timeline {model, finishReason, tokens, toolCallCount, " +
             "elapsedMs}. sessionId; optional messageId.\n" +
             "  • active_run_summary — latest turn stats (state, elapsedMs, tokensIn/Out, " +
@@ -251,6 +255,7 @@ class SessionQueryTool(
         SELECT_PERMISSION_HISTORY -> PermissionHistoryRow.serializer()
         SELECT_PERMISSION_RULES -> PermissionRuleRow.serializer()
         SELECT_PREFLIGHT_SUMMARY -> PreflightSummaryRow.serializer()
+        SELECT_RECAP -> SessionRecapRow.serializer()
         SELECT_STEP_HISTORY -> StepHistoryRow.serializer()
         SELECT_ACTIVE_RUN_SUMMARY -> ActiveRunSummaryRow.serializer()
         else -> error("No row serializer registered for select='$select'")
@@ -293,6 +298,7 @@ class SessionQueryTool(
                 input = input,
             )
             SELECT_STEP_HISTORY -> runStepHistoryQuery(sessions, input, limit, offset)
+            SELECT_RECAP -> runSessionRecapQuery(sessions, projects, input)
             SELECT_ACTIVE_RUN_SUMMARY -> runActiveRunSummaryQuery(sessions, agentStates, input)
             else -> error("unreachable — select validated above: '$select'")
         }
@@ -333,6 +339,7 @@ class SessionQueryTool(
         const val SELECT_PERMISSION_HISTORY = "permission_history"
         const val SELECT_PERMISSION_RULES = "permission_rules"
         const val SELECT_PREFLIGHT_SUMMARY = "preflight_summary"
+        const val SELECT_RECAP = "recap"
         const val SELECT_STEP_HISTORY = "step_history"
         const val SELECT_ACTIVE_RUN_SUMMARY = "active_run_summary"
         internal val ALL_SELECTS = setOf(
@@ -343,7 +350,7 @@ class SessionQueryTool(
             SELECT_CONTEXT_PRESSURE, SELECT_RUN_STATE_HISTORY, SELECT_TOOL_SPEC_BUDGET,
             SELECT_RUN_FAILURE, SELECT_FALLBACK_HISTORY, SELECT_CANCELLATION_HISTORY,
             SELECT_PERMISSION_HISTORY, SELECT_PERMISSION_RULES,
-            SELECT_PREFLIGHT_SUMMARY, SELECT_STEP_HISTORY,
+            SELECT_PREFLIGHT_SUMMARY, SELECT_RECAP, SELECT_STEP_HISTORY,
             SELECT_ACTIVE_RUN_SUMMARY,
         )
 

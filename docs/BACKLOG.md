@@ -13,8 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **session-query-recap** — agent 重新连入旧 session 时缺"这个 session 我们做了什么"的快速摘要。当前要 list_messages + parts 拼。**方向：** `session_query(select=recap, sessionId)` 返单行 `{turnCount, totalTokensIn/Out, distinctToolsUsed[], totalCostCents, firstAt, lastAt, lastModelId}`，给 agent 和 operator 同一个开瓶器。Rubric §5.4。Milestone §later.
-
 ## P1 — 中优，做完 P0 再排
 
 - **re-evaluate-m2-provider-second-impl** — `m2-provider-second-impl` 跨 6+ repopulate 周期连续 skip-tagged（"需专有 API key + vendor 决策"），符合 §R skip-≥3-cycles 元 bullet 规则。M2 退出仅卡这一条 criterion。**方向：** 用户决定 promote (给定 vendor + key) / demote (M2 改"single provider acceptable") / delete (criterion 不再相关)。Rubric §5.7 / §5.2。Milestone §M2. · skipped 2026-04-24: meta bullet awaiting user decision (no agent action possible).

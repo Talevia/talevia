@@ -14,6 +14,7 @@ import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_PA
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_PERMISSION_HISTORY
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_PERMISSION_RULES
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_PREFLIGHT_SUMMARY
+import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_RECAP
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_RUN_FAILURE
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_RUN_STATE_HISTORY
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_SESSIONS
@@ -69,6 +70,7 @@ internal val SESSION_QUERY_ACCEPTED_FIELDS: Map<String, Set<String>> = mapOf(
     SELECT_PERMISSION_HISTORY to setOf("sessionId"),
     SELECT_PERMISSION_RULES to setOf("sessionId"),
     SELECT_PREFLIGHT_SUMMARY to setOf("sessionId"),
+    SELECT_RECAP to setOf("sessionId"),
     SELECT_STEP_HISTORY to setOf("sessionId", "messageId"),
     SELECT_ACTIVE_RUN_SUMMARY to setOf("sessionId"),
 )
