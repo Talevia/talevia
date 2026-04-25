@@ -23,7 +23,7 @@ class TaleviaSystemPromptTest {
         "style_bible",
         "brand_palette",
         // Genre coverage (VISION §2) — prompt must teach all five named genres'
-        // kind strings so the agent routes `import_source_node` correctly.
+        // kind strings so the agent routes `source_node_action(action="import")` correctly.
         "vlog.raw_footage",
         "narrative.shot",
         "musicmv.track",
@@ -95,7 +95,7 @@ class TaleviaSystemPromptTest {
         // Node-level diff — the zoom-in sibling of diff_projects (VISION §5.1 "改一个 source 节点").
         "diff_source_nodes",
         // Import — closes the VISION §3.4 "可组合" leg (cross-project source-node reuse).
-        "import_source_node",
+        "source_node_action(action=\"import\"",
         // Atomic source-id refactor — rewrites node, parent-refs, clip bindings, lockfile.
         "source_node_action(action=\"rename\"",
         // Generic body editor — kind-agnostic body replace for genre / imported nodes.

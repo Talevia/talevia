@@ -7,7 +7,6 @@ import io.talevia.core.domain.source.SourceNode
 import io.talevia.core.domain.source.SourceRef
 import io.talevia.core.domain.source.addNode
 import io.talevia.core.domain.source.mutateSource
-import io.talevia.core.tool.ToolResult
 
 /**
  * Live cross-project import handler — copies a [SourceNode] (and any
@@ -15,24 +14,24 @@ import io.talevia.core.tool.ToolResult
  * instance into the target. Mirror of [executeEnvelopeImport]; same dedup
  * + collision contract, different traversal source.
  *
- * Extracted from [ImportSourceNodeTool] so the dispatcher class stays
- * focused on (input shape → handler) routing — see the
- * `debt-split-import-source-node-tool` commit body for the axis
- * rationale. Same handler-extract pattern used for
- * `ClipCreateHandlers` / `ClipMutateHandlers`.
+ * Cycle 136: takes [SourceNodeImportRequest] / returns
+ * [SourceNodeImportOutcome] so the standalone `ImportSourceNodeTool`
+ * could be folded into `source_node_action(action="import")` without
+ * coupling the handler to the action dispatcher's full Input / Output
+ * shapes.
  *
- * Behaviour byte-identical to the pre-split inline path: same content-
+ * Behaviour byte-identical to the pre-fold inline path: same content-
  * addressed dedup (`existingByHash`), same collision-on-id rejection,
  * same self-import guard, same topological parent-walk via
  * [topoCollectForLiveImport].
  */
 internal suspend fun executeLiveImport(
     projects: ProjectStore,
-    input: ImportSourceNodeTool.Input,
+    request: SourceNodeImportRequest,
     toPid: ProjectId,
-): ToolResult<ImportSourceNodeTool.Output> {
-    val fromProjectIdStr = input.fromProjectId!!
-    val fromNodeIdStr = input.fromNodeId!!
+): SourceNodeImportOutcome {
+    val fromProjectIdStr = request.fromProjectId!!
+    val fromNodeIdStr = request.fromNodeId!!
     require(fromProjectIdStr != toPid.value) {
         "fromProjectId and toProjectId are the same ($fromProjectIdStr); " +
             "use source_node_action(action=add) with a fresh nodeId for within-project copies."
@@ -43,9 +42,9 @@ internal suspend fun executeLiveImport(
 
     val leafId = SourceNodeId(fromNodeIdStr)
     val ordered = topoCollectForLiveImport(fromProject.source.nodes.associateBy { it.id }, leafId)
-    val renamed = input.newNodeId?.takeIf { it.isNotBlank() }?.let { SourceNodeId(it) }
+    val renamed = request.newNodeId?.takeIf { it.isNotBlank() }?.let { SourceNodeId(it) }
 
-    val imported = mutableListOf<ImportSourceNodeTool.ImportedNode>()
+    val imported = mutableListOf<SourceNodeImportedNode>()
     projects.mutateSource(toPid) { source ->
         var working = source
         val remap = mutableMapOf<SourceNodeId, SourceNodeId>()
@@ -65,7 +64,7 @@ internal suspend fun executeLiveImport(
             when {
                 existingByHash != null -> {
                     remap[node.id] = existingByHash.id
-                    imported += ImportSourceNodeTool.ImportedNode(
+                    imported += SourceNodeImportedNode(
                         originalId = node.id.value,
                         importedId = existingByHash.id.value,
                         kind = node.kind,
@@ -87,7 +86,7 @@ internal suspend fun executeLiveImport(
                         ),
                     )
                     remap[node.id] = proposedId
-                    imported += ImportSourceNodeTool.ImportedNode(
+                    imported += SourceNodeImportedNode(
                         originalId = node.id.value,
                         importedId = proposedId.value,
                         kind = node.kind,
@@ -104,16 +103,15 @@ internal suspend fun executeLiveImport(
     val dedupNote = imported.count { it.skippedDuplicate }.takeIf { it > 0 }
         ?.let { " — $it already-present node(s) reused" }
         .orEmpty()
-    return ToolResult(
-        title = "import ${leaf.kind} ${leaf.importedId}",
+    return SourceNodeImportOutcome(
+        fromProjectId = fromProjectIdStr,
+        toProjectId = toPid.value,
+        formatVersion = null,
+        nodes = imported,
         outputForLlm = "Imported $fromNodeIdStr from $fromProjectIdStr into " +
             "${toPid.value} as ${leaf.importedId}$parentNote.$dedupNote " +
             "Pass importedId=${leaf.importedId} in consistencyBindingIds for AIGC calls on the target project.",
-        data = ImportSourceNodeTool.Output(
-            fromProjectId = fromProjectIdStr,
-            toProjectId = toPid.value,
-            nodes = imported,
-        ),
+        title = "import ${leaf.kind} ${leaf.importedId}",
     )
 }
 

@@ -28,8 +28,13 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Round-trip coverage for [ExportSourceNodeTool] + [ImportSourceNodeTool] (envelope path)
+ * Round-trip coverage for [ExportSourceNodeTool] +
+ * `source_node_action(action="import", envelope=…)` (envelope path)
  * — the cross-instance leg of VISION §5.1 "Source 能不能序列化、版本化、跨 project 复用?"
+ *
+ * Cycle 136 folded the standalone `ImportSourceNodeTool` into the
+ * action dispatcher; envelope ingest now flows through
+ * `SourceNodeActionTool`'s `action="import"` branch.
  */
 class SourceNodeExportImportToolsTest {
 
@@ -53,6 +58,17 @@ class SourceNodeExportImportToolsTest {
         return Rig(store, ctx)
     }
 
+    private fun envelopeImportInput(
+        toProjectId: String,
+        envelope: String,
+        newNodeId: String? = null,
+    ) = SourceNodeActionTool.Input(
+        projectId = toProjectId,
+        action = "import",
+        envelope = envelope,
+        newNodeId = newNodeId,
+    )
+
     @Test fun roundTripPreservesCharacterRefBody() = runTest {
         val rig = rig()
         rig.store.mutateSource(ProjectId("from")) {
@@ -69,20 +85,16 @@ class SourceNodeExportImportToolsTest {
         assertEquals(1, export.data.nodeCount)
         assertEquals(listOf("core.consistency.character_ref"), export.data.kinds)
 
-        val import = ImportSourceNodeTool(rig.store).execute(
-            ImportSourceNodeTool.Input(
-                toProjectId = "to",
-                envelope = export.data.envelope,
-            ),
+        val import = SourceNodeActionTool(rig.store).execute(
+            envelopeImportInput(toProjectId = "to", envelope = export.data.envelope),
             rig.ctx,
         )
-        assertEquals(ExportSourceNodeTool.FORMAT_VERSION, import.data.formatVersion)
-        val leaf = import.data.nodes.single()
+        assertEquals(ExportSourceNodeTool.FORMAT_VERSION, import.data.importedFormatVersion)
+        val leaf = import.data.imported.single()
         assertEquals("mei", leaf.originalId)
         assertEquals("mei", leaf.importedId)
         assertFalse(leaf.skippedDuplicate)
 
-        // Body round-tripped verbatim.
         val targetNode = rig.store.get(ProjectId("to"))!!.source.byId[SourceNodeId("mei")]!!
         val body = targetNode.asCharacterRef()!!
         assertEquals("Mei", body.name)
@@ -100,21 +112,18 @@ class SourceNodeExportImportToolsTest {
             rig.ctx,
         )
 
-        // First import lands fresh.
-        val first = ImportSourceNodeTool(rig.store).execute(
-            ImportSourceNodeTool.Input(toProjectId = "to", envelope = export.data.envelope),
+        val first = SourceNodeActionTool(rig.store).execute(
+            envelopeImportInput(toProjectId = "to", envelope = export.data.envelope),
             rig.ctx,
         )
-        assertFalse(first.data.nodes.single().skippedDuplicate)
+        assertFalse(first.data.imported.single().skippedDuplicate)
 
-        // Second import is a dedup no-op — contentHash already present.
-        val second = ImportSourceNodeTool(rig.store).execute(
-            ImportSourceNodeTool.Input(toProjectId = "to", envelope = export.data.envelope),
+        val second = SourceNodeActionTool(rig.store).execute(
+            envelopeImportInput(toProjectId = "to", envelope = export.data.envelope),
             rig.ctx,
         )
-        assertTrue(second.data.nodes.single().skippedDuplicate)
+        assertTrue(second.data.imported.single().skippedDuplicate)
 
-        // Target still has exactly one node.
         val target = rig.store.get(ProjectId("to"))!!
         assertEquals(1, target.source.nodes.count { it.kind == "core.consistency.character_ref" })
     }
@@ -131,7 +140,7 @@ class SourceNodeExportImportToolsTest {
                 SourceNode.create(
                     id = SourceNodeId("mei"),
                     kind = "character_ref",
-                    body = working.byId[SourceNodeId("cinematic")]!!.body, // irrelevant — just want parents
+                    body = working.byId[SourceNodeId("cinematic")]!!.body,
                     parents = listOf(SourceRef(SourceNodeId("cinematic"))),
                 ),
             )
@@ -144,12 +153,11 @@ class SourceNodeExportImportToolsTest {
         )
         assertEquals(2, export.data.nodeCount)
 
-        val import = ImportSourceNodeTool(rig.store).execute(
-            ImportSourceNodeTool.Input(toProjectId = "to", envelope = export.data.envelope),
+        val import = SourceNodeActionTool(rig.store).execute(
+            envelopeImportInput(toProjectId = "to", envelope = export.data.envelope),
             rig.ctx,
         )
-        // Parent was imported before the leaf.
-        assertEquals(listOf("cinematic", "mei"), import.data.nodes.map { it.importedId })
+        assertEquals(listOf("cinematic", "mei"), import.data.imported.map { it.importedId })
 
         val target = rig.store.get(ProjectId("to"))!!
         val leaf = target.source.byId[SourceNodeId("mei")]!!
@@ -166,20 +174,19 @@ class SourceNodeExportImportToolsTest {
             rig.ctx,
         )
 
-        // Seed a different-content node at "mei" in the target to force the rename.
         rig.store.mutateSource(ProjectId("to")) {
             it.addCharacterRef(SourceNodeId("mei"), CharacterRefBody(name = "Other", visualDescription = "red"))
         }
 
-        val out = ImportSourceNodeTool(rig.store).execute(
-            ImportSourceNodeTool.Input(
+        val out = SourceNodeActionTool(rig.store).execute(
+            envelopeImportInput(
                 toProjectId = "to",
                 envelope = export.data.envelope,
                 newNodeId = "mei-imported",
             ),
             rig.ctx,
         )
-        assertEquals("mei-imported", out.data.nodes.single().importedId)
+        assertEquals("mei-imported", out.data.imported.single().importedId)
         val target = rig.store.get(ProjectId("to"))!!
         assertTrue(SourceNodeId("mei") in target.source.byId)
         assertTrue(SourceNodeId("mei-imported") in target.source.byId)
@@ -199,8 +206,8 @@ class SourceNodeExportImportToolsTest {
         }
 
         val ex = assertFailsWith<IllegalStateException> {
-            ImportSourceNodeTool(rig.store).execute(
-                ImportSourceNodeTool.Input(toProjectId = "to", envelope = export.data.envelope),
+            SourceNodeActionTool(rig.store).execute(
+                envelopeImportInput(toProjectId = "to", envelope = export.data.envelope),
                 rig.ctx,
             )
         }
@@ -212,8 +219,8 @@ class SourceNodeExportImportToolsTest {
         val bogus = """{"formatVersion":"talevia-source-export-v999","rootNodeId":"mei","nodes":[{"id":"mei","kind":"character_ref","body":{"name":"Mei","visualDescription":"teal"}}]}"""
 
         val ex = assertFailsWith<IllegalArgumentException> {
-            ImportSourceNodeTool(rig.store).execute(
-                ImportSourceNodeTool.Input(toProjectId = "to", envelope = bogus),
+            SourceNodeActionTool(rig.store).execute(
+                envelopeImportInput(toProjectId = "to", envelope = bogus),
                 rig.ctx,
             )
         }
@@ -224,8 +231,8 @@ class SourceNodeExportImportToolsTest {
     @Test fun malformedEnvelopeFails() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            ImportSourceNodeTool(rig.store).execute(
-                ImportSourceNodeTool.Input(toProjectId = "to", envelope = "not-json"),
+            SourceNodeActionTool(rig.store).execute(
+                envelopeImportInput(toProjectId = "to", envelope = "not-json"),
                 rig.ctx,
             )
         }
@@ -260,11 +267,10 @@ class SourceNodeExportImportToolsTest {
             rig.ctx,
         )
         assertTrue(pretty.data.envelope.length > compact.data.envelope.length)
-        // Both must round-trip. Feed pretty-printed envelope into the importer.
-        val imported = ImportSourceNodeTool(rig.store).execute(
-            ImportSourceNodeTool.Input(toProjectId = "to", envelope = pretty.data.envelope),
+        val imported = SourceNodeActionTool(rig.store).execute(
+            envelopeImportInput(toProjectId = "to", envelope = pretty.data.envelope),
             rig.ctx,
         )
-        assertEquals("mei", imported.data.nodes.single().importedId)
+        assertEquals("mei", imported.data.imported.single().importedId)
     }
 }

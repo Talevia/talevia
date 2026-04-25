@@ -10,15 +10,12 @@ import io.talevia.core.tool.ToolResult
 import kotlinx.datetime.Clock
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.JsonTransformingSerializer
-import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 
 /**
@@ -103,7 +100,7 @@ class SourceNodeActionTool(
         val projectId: String,
         /**
          * `"add"`, `"remove"`, `"fork"`, `"rename"`, `"update_body"`,
-         * or `"set_parents"`. Case-sensitive.
+         * `"set_parents"`, or `"import"`. Case-sensitive.
          */
         val action: String,
         /**
@@ -134,7 +131,12 @@ class SourceNodeActionTool(
         val parentIds: List<String>? = null,
         /** `action="fork"` only. Source node to duplicate. */
         val sourceNodeId: String? = null,
-        /** `action="fork"` only. Optional new id; UUID minted when blank. */
+        /**
+         * `action="fork"` or `action="import"`. Optional new id; for
+         * fork, UUID minted when blank; for import, leaf node retains
+         * its source id when blank, gets renamed to this value when
+         * non-blank. Collides with an existing node id → loud error.
+         */
         val newNodeId: String? = null,
         /** `action="rename"` only. Existing id to rewrite. */
         val oldId: String? = null,
@@ -164,6 +166,23 @@ class SourceNodeActionTool(
          * named key must exist in the historical revision.
          */
         val mergeFieldPaths: List<String>? = null,
+        /**
+         * `action="import"` only. Source project id for live cross-
+         * project copy. Pair with `fromNodeId`; mutually exclusive
+         * with `envelope`.
+         */
+        val fromProjectId: String? = null,
+        /**
+         * `action="import"` only. Source node id for live cross-
+         * project copy. Pair with `fromProjectId`.
+         */
+        val fromNodeId: String? = null,
+        /**
+         * `action="import"` only. Portable JSON envelope produced by
+         * `export_source_node`. Mutually exclusive with the
+         * `fromProjectId + fromNodeId` pair.
+         */
+        val envelope: String? = null,
     )
 
     /**
@@ -273,6 +292,24 @@ class SourceNodeActionTool(
         /** Populated when `action="set_parents"`. */
         val parentsSet: List<SetParentsResult> = emptyList(),
         /**
+         * Populated when `action="import"`. One row per node that
+         * landed (or skipped because the target had a content-hash-
+         * equivalent node already).
+         */
+        val imported: List<SourceNodeImportedNode> = emptyList(),
+        /**
+         * `action="import"` only. Source project id when the call
+         * used the live `(fromProjectId, fromNodeId)` shape; null on
+         * the envelope path (envelope carries no source project id).
+         */
+        val importFromProjectId: String? = null,
+        /**
+         * `action="import"` only. Echoed envelope `formatVersion`
+         * after a successful round-trip on the envelope path; null
+         * on the live cross-project path.
+         */
+        val importedFormatVersion: String? = null,
+        /**
          * VISION §5.5 auto-regen hint: non-null when any clip in the
          * project is now stale after the mutation. Populated by
          * `action="remove"` / `action="update_body"` /
@@ -314,137 +351,13 @@ class SourceNodeActionTool(
     override val permission: PermissionSpec = PermissionSpec.fixed("source.write")
     override val applicability: ToolApplicability = ToolApplicability.RequiresProjectBinding
 
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("projectId") { put("type", "string") }
-            putJsonObject("action") {
-                put("type", "string")
-                put(
-                    "description",
-                    "`add` to create a node, `remove` to delete one, `fork` to duplicate under a new " +
-                        "id, `rename` to atomically rewrite an id everywhere it's referenced, " +
-                        "`update_body` to replace a body, `set_parents` to replace a parent list.",
-                )
-                put(
-                    "enum",
-                    JsonArray(
-                        listOf(
-                            JsonPrimitive("add"),
-                            JsonPrimitive("remove"),
-                            JsonPrimitive("fork"),
-                            JsonPrimitive("rename"),
-                            JsonPrimitive("update_body"),
-                            JsonPrimitive("set_parents"),
-                        ),
-                    ),
-                )
-            }
-            putJsonObject("nodeId") {
-                put("type", "string")
-                put(
-                    "description",
-                    "Required for action=add / remove / update_body / set_parents.",
-                )
-            }
-            putJsonObject("kind") {
-                put("type", "string")
-                put(
-                    "description",
-                    "action=add only. Dotted-namespace kind string (e.g. narrative.scene, " +
-                        "musicmv.track, ad.variant_request). Must match what the genre layer " +
-                        "expects — Core does not validate.",
-                )
-            }
-            putJsonObject("body") {
-                put("type", "object")
-                put(
-                    "description",
-                    "action=add: opaque JSON body matching the genre's shape (defaults {}). " +
-                        "action=update_body: complete new body — full replacement, not a partial " +
-                        "patch (required unless restoreFromRevisionIndex / mergeFromRevisionIndex " +
-                        "is set). Kind + body together drive contentHash.",
-                )
-                put("additionalProperties", true)
-                put(
-                    "examples",
-                    buildJsonArray {
-                        add(
-                            buildJsonObject {
-                                put("framing", "wide")
-                                put("dialogue", "...")
-                            },
-                        )
-                    },
-                )
-            }
-            putJsonObject("parentIds") {
-                put("type", "array")
-                put(
-                    "description",
-                    "action=add: optional parent ids; each must already exist; empty default = root. " +
-                        "action=set_parents: required full replacement parent list (empty list clears).",
-                )
-                putJsonObject("items") { put("type", "string") }
-            }
-            putJsonObject("sourceNodeId") {
-                put("type", "string")
-                put("description", "action=fork only. Id of the node to duplicate.")
-            }
-            putJsonObject("newNodeId") {
-                put("type", "string")
-                put(
-                    "description",
-                    "action=fork only. Optional new id for the forked node. Auto-generated UUID if " +
-                        "blank. Collides with an existing node id -> loud error.",
-                )
-            }
-            putJsonObject("oldId") {
-                put("type", "string")
-                put("description", "action=rename only. Existing source-node id to rewrite.")
-            }
-            putJsonObject("newId") {
-                put("type", "string")
-                put(
-                    "description",
-                    "action=rename only. New id. Must be lowercase letters / digits / '-', non-empty, " +
-                        "and must not collide with an existing node.",
-                )
-            }
-            putJsonObject("restoreFromRevisionIndex") {
-                put("type", "integer")
-                put("minimum", 0)
-                put(
-                    "description",
-                    "action=update_body only. Restore an earlier body from this node's history " +
-                        "(0 = most-recent overwritten). Mutually exclusive with body / mergeFromRevisionIndex.",
-                )
-            }
-            putJsonObject("mergeFromRevisionIndex") {
-                put("type", "integer")
-                put("minimum", 0)
-                put(
-                    "description",
-                    "action=update_body only. Per-field merge from a historical revision; pair with " +
-                        "mergeFieldPaths. Mutually exclusive with body / restoreFromRevisionIndex.",
-                )
-            }
-            putJsonObject("mergeFieldPaths") {
-                put("type", "array")
-                putJsonObject("items") { put("type", "string") }
-                put(
-                    "description",
-                    "action=update_body + mergeFromRevisionIndex only. Top-level body keys to copy " +
-                        "from the historical revision; every named key must exist in that revision.",
-                )
-            }
-        }
-        put(
-            "required",
-            JsonArray(listOf(JsonPrimitive("projectId"), JsonPrimitive("action"))),
-        )
-        put("additionalProperties", false)
-    }
+    /**
+     * Schema lives in [SourceNodeActionToolSchema] (extracted cycle 136
+     * to mirror `ClipActionToolSchema.kt` / `ProjectActionToolSchema.kt`
+     * — keeps this file under the long-file threshold while letting the
+     * schema grow with future verbs without re-puffing the dispatcher).
+     */
+    override val inputSchema: JsonObject = SOURCE_NODE_ACTION_INPUT_SCHEMA
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         return when (input.action) {
@@ -452,6 +365,7 @@ class SourceNodeActionTool(
             "remove" -> executeSourceRemove(projects, input)
             "fork" -> executeSourceFork(projects, input)
             "rename" -> executeSourceRename(projects, input, ctx)
+            "import" -> executeSourceImport(projects, input, ctx)
             "update_body" -> executeSourceUpdateBody(projects, input, clock)
             "set_parents" -> executeSourceSetParents(projects, input)
             else -> error(

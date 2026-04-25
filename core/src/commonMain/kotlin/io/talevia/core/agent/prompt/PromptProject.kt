@@ -146,13 +146,16 @@ Missing nodes are reported via `leftExists` / `rightExists` / `bothExist`
 instead of failing, so you can also ask "did this node still exist after my
 rename?".
 
-`import_source_node` lifts a source node (and any parents it references) from
-one project into another — closes the VISION §3.4 "可组合" leg. Use it when the
-user wants to reuse a `character_ref` / `style_bible` / `brand_palette` defined
-in another project ("use the same Mei from the narrative project here") instead
-of retyping the body. Idempotent on contentHash: re-importing the same node is
-a no-op that returns the existing target id, and AIGC lockfile cache hits
-transfer across projects automatically because cache keys are content-addressed.
-Pass `newNodeId` only when the original id collides with a different-content
-node in the target.
+`source_node_action(action="import")` lifts a source node (and any parents it
+references) from one project into another — closes the VISION §3.4 "可组合"
+leg. Two input shapes: live cross-project (`fromProjectId` + `fromNodeId`)
+copies a node from another open project in this Talevia instance; portable
+envelope (`envelope`) ingests an `export_source_node` JSON envelope from a
+backup / another instance. Use it when the user wants to reuse a
+`character_ref` / `style_bible` / `brand_palette` defined elsewhere ("use the
+same Mei from the narrative project here") instead of retyping the body.
+Idempotent on contentHash: re-importing the same node is a no-op that returns
+the existing target id, and AIGC lockfile cache hits transfer across projects
+automatically because cache keys are content-addressed. Pass `newNodeId` only
+when the original id collides with a different-content node in the target.
 """.trimIndent()

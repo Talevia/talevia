@@ -39,7 +39,7 @@ internal fun resolveParentRefs(
         }
         require(id in index) {
             "parent source node ${id.value} not found in project — define the parent first, " +
-                "or use import_source_node to bring it in from another project."
+                "or use source_node_action(action=import) to bring it in from another project."
         }
         if (seen.add(id)) result += SourceRef(id)
     }

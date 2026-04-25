@@ -26,20 +26,22 @@ import kotlinx.serialization.serializer
  * Serialize a source node and all its parents into a portable JSON envelope
  * (VISION §5.1 "Source 能不能序列化、版本化、跨 project 复用?").
  *
- * `import_source_node` already covers **intra-instance** sharing — copy a
- * character_ref from one project to another inside the same Talevia DB. But it
- * requires a live `fromProjectId` on the same store, so it doesn't help the
- * user who wants to:
+ * `source_node_action(action="import")` with the live
+ * `(fromProjectId, fromNodeId)` shape already covers **intra-instance**
+ * sharing — copy a character_ref from one project to another inside the
+ * same Talevia DB. But it requires both projects to be open in the same
+ * store, so it doesn't help the user who wants to:
  *   - back up a hand-tuned Mei character_ref to a file,
  *   - share a style_bible with a collaborator running their own Talevia,
  *   - check a brand_palette into version control alongside brand assets,
  *   - ship a pre-baked "ad template" as a portable artifact.
  *
- * This tool emits a JSON envelope that round-trips via `import_source_node_from_json`
- * with content-addressed dedup preserved. The envelope is **not** a snapshot of
- * the entire project — just the leaf node + its parent chain, topologically
- * ordered (parents first). That's the same minimal-reuse-unit `import_source_node`
- * already operates on, keeping semantics consistent between the two import paths.
+ * This tool emits a JSON envelope that round-trips via
+ * `source_node_action(action="import", envelope=…)` with content-addressed
+ * dedup preserved. The envelope is **not** a snapshot of the entire project
+ * — just the leaf node + its parent chain, topologically ordered (parents
+ * first). That's the same minimal-reuse-unit the live import path operates
+ * on, keeping semantics consistent between the two import shapes.
  *
  * The agent typically pairs this with `write_file` to land the envelope somewhere
  * durable, or returns the JSON in its reply for the user to copy/paste. The
@@ -70,7 +72,7 @@ class ExportSourceNodeTool(
         val nodeCount: Int,
         val kinds: List<String>,
         /** The serialized envelope as a JSON string, ready to hand to `write_file`
-         *  or feed directly to `import_source_node_from_json`. */
+         *  or feed directly to `source_node_action(action="import", envelope=…)`. */
         val envelope: String,
     )
 
@@ -78,9 +80,10 @@ class ExportSourceNodeTool(
     override val helpText: String =
         "Serialize a source node plus every parent it references into a portable JSON envelope. " +
             "Use for cross-instance share / backup / version control — the envelope round-trips " +
-            "via import_source_node_from_json with content-addressed dedup preserved. For " +
-            "intra-instance copies between two local projects use import_source_node instead " +
-            "(no file hop needed). Emits a formatVersion so future schema changes are caught."
+            "via source_node_action(action=import, envelope=…) with content-addressed dedup preserved. " +
+            "For intra-instance copies between two local projects use " +
+            "source_node_action(action=import, fromProjectId=…, fromNodeId=…) instead (no file hop " +
+            "needed). Emits a formatVersion so future schema changes are caught."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.read")
@@ -136,7 +139,8 @@ class ExportSourceNodeTool(
             title = "export ${ordered.last().kind} ${leafId.value}",
             outputForLlm = "Exported ${leafId.value} from ${pid.value}$parentsNote as " +
                 "$FORMAT_VERSION ($kindsLabel, ${serialized.length} bytes). Pass data.envelope to " +
-                "write_file to persist, or to import_source_node_from_json on another project.",
+                "write_file to persist, or to source_node_action(action=import, envelope=…) " +
+                "on another project.",
             data = Output(
                 projectId = pid.value,
                 nodeId = leafId.value,
@@ -149,9 +153,9 @@ class ExportSourceNodeTool(
 
     /**
      * Walk [leafId] and every transitive parent in topological (parents-first) order,
-     * the same traversal [ImportSourceNodeTool.topoCollect] uses. Fails loudly on a
-     * dangling SourceRef — an incomplete export would emit a payload the importer
-     * can't apply.
+     * the same traversal [topoCollectForLiveImport] uses on the live cross-project
+     * import path. Fails loudly on a dangling SourceRef — an incomplete export
+     * would emit a payload the importer can't apply.
      */
     private fun topoCollect(byId: Map<SourceNodeId, SourceNode>, leafId: SourceNodeId): List<SourceNode> {
         val visited = mutableSetOf<SourceNodeId>()

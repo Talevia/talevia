@@ -30,10 +30,15 @@ import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * Cross-project source-node import (VISION §3.4 "可组合"). The agent should be
- * able to lift a character_ref / style_bible from one project into another
- * without retyping the body, and content-addressed dedup should make a re-import
- * a no-op.
+ * Cross-project source-node import (VISION §3.4 "可组合") via
+ * `source_node_action(action="import", …)` — the agent should be
+ * able to lift a character_ref / style_bible from one project into
+ * another without retyping the body, and content-addressed dedup
+ * should make a re-import a no-op.
+ *
+ * Cycle 136 folded the standalone `ImportSourceNodeTool` into the
+ * action dispatcher; tests now exercise the dispatcher's
+ * `action="import"` branch.
  */
 class ImportSourceNodeToolTest {
 
@@ -66,25 +71,37 @@ class ImportSourceNodeToolTest {
         store.mutateSource(pid) { it.addCharacterRef(nodeId, body) }
     }
 
+    private fun importInput(
+        toProjectId: String,
+        fromProjectId: String? = null,
+        fromNodeId: String? = null,
+        envelope: String? = null,
+        newNodeId: String? = null,
+    ) = SourceNodeActionTool.Input(
+        projectId = toProjectId,
+        action = "import",
+        fromProjectId = fromProjectId,
+        fromNodeId = fromNodeId,
+        envelope = envelope,
+        newNodeId = newNodeId,
+    )
+
     @Test fun importsLeafCharacterRefIntoEmptyTarget() = runTest {
         val rig = rig()
         seedCharacter(
             rig.store, ProjectId("from"), SourceNodeId("character-mei"),
             CharacterRefBody(name = "Mei", visualDescription = "teal hair", voiceId = "nova"),
         )
-        val out = ImportSourceNodeTool(rig.store).execute(
-            ImportSourceNodeTool.Input(
-                fromProjectId = "from",
-                fromNodeId = "character-mei",
-                toProjectId = "to",
-            ),
+        val out = SourceNodeActionTool(rig.store).execute(
+            importInput(toProjectId = "to", fromProjectId = "from", fromNodeId = "character-mei"),
             rig.ctx,
         )
-        assertEquals(1, out.data.nodes.size)
-        val leaf = out.data.nodes.single()
+        assertEquals(1, out.data.imported.size)
+        val leaf = out.data.imported.single()
         assertEquals("character-mei", leaf.originalId)
         assertEquals("character-mei", leaf.importedId)
         assertFalse(leaf.skippedDuplicate)
+        assertEquals("from", out.data.importFromProjectId)
 
         val target = rig.store.get(ProjectId("to"))!!
         val imported = target.source.byId[SourceNodeId("character-mei")]
@@ -98,21 +115,19 @@ class ImportSourceNodeToolTest {
             rig.store, ProjectId("from"), SourceNodeId("character-mei"),
             CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
         )
-        val tool = ImportSourceNodeTool(rig.store)
+        val tool = SourceNodeActionTool(rig.store)
         val firstHash = rig.store.get(ProjectId("from"))!!
             .source.byId[SourceNodeId("character-mei")]!!.contentHash
 
         tool.execute(
-            ImportSourceNodeTool.Input(fromProjectId = "from", fromNodeId = "character-mei", toProjectId = "to"),
+            importInput(toProjectId = "to", fromProjectId = "from", fromNodeId = "character-mei"),
             rig.ctx,
         )
-        // Second call: target already has the node with same contentHash → skip.
         val second = tool.execute(
-            ImportSourceNodeTool.Input(fromProjectId = "from", fromNodeId = "character-mei", toProjectId = "to"),
+            importInput(toProjectId = "to", fromProjectId = "from", fromNodeId = "character-mei"),
             rig.ctx,
         )
-        assertTrue(second.data.nodes.single().skippedDuplicate, second.outputForLlm)
-        // Target ended up with exactly one node — no duplicate insertion.
+        assertTrue(second.data.imported.single().skippedDuplicate, second.outputForLlm)
         val target = rig.store.get(ProjectId("to"))!!
         assertEquals(1, target.source.nodes.size)
         assertEquals(firstHash, target.source.nodes.single().contentHash)
@@ -120,7 +135,6 @@ class ImportSourceNodeToolTest {
 
     @Test fun parentChainIsImportedTopologically() = runTest {
         val rig = rig()
-        // Style bible (parent) + character_ref that references it.
         rig.store.mutateSource(ProjectId("from")) { src ->
             src.addStyleBible(
                 SourceNodeId("style-warm"),
@@ -134,12 +148,11 @@ class ImportSourceNodeToolTest {
                 ),
             )
         }
-        val out = ImportSourceNodeTool(rig.store).execute(
-            ImportSourceNodeTool.Input(fromProjectId = "from", fromNodeId = "scene-opening", toProjectId = "to"),
+        val out = SourceNodeActionTool(rig.store).execute(
+            importInput(toProjectId = "to", fromProjectId = "from", fromNodeId = "scene-opening"),
             rig.ctx,
         )
-        // Parent first, then leaf.
-        assertEquals(listOf("style-warm", "scene-opening"), out.data.nodes.map { it.originalId })
+        assertEquals(listOf("style-warm", "scene-opening"), out.data.imported.map { it.originalId })
         val target = rig.store.get(ProjectId("to"))!!
         assertEquals(2, target.source.nodes.size)
         val scene = target.source.byId[SourceNodeId("scene-opening")]!!
@@ -148,7 +161,6 @@ class ImportSourceNodeToolTest {
 
     @Test fun parentDedupRemapsChildReferences() = runTest {
         val rig = rig()
-        // Source side: parent style with id "style-warm".
         rig.store.mutateSource(ProjectId("from")) { src ->
             src.addStyleBible(
                 SourceNodeId("style-warm"),
@@ -162,24 +174,21 @@ class ImportSourceNodeToolTest {
                 ),
             )
         }
-        // Target already has the *same* style under a different id → import
-        // should reuse it and remap the child's parent ref.
         rig.store.mutateSource(ProjectId("to")) { src ->
             src.addStyleBible(
                 SourceNodeId("style-vibe-1"),
                 StyleBibleBody(name = "Warm", description = "warm grain"),
             )
         }
-        val out = ImportSourceNodeTool(rig.store).execute(
-            ImportSourceNodeTool.Input(fromProjectId = "from", fromNodeId = "scene-opening", toProjectId = "to"),
+        val out = SourceNodeActionTool(rig.store).execute(
+            importInput(toProjectId = "to", fromProjectId = "from", fromNodeId = "scene-opening"),
             rig.ctx,
         )
-        val parentReport = out.data.nodes.first { it.originalId == "style-warm" }
+        val parentReport = out.data.imported.first { it.originalId == "style-warm" }
         assertTrue(parentReport.skippedDuplicate)
         assertEquals("style-vibe-1", parentReport.importedId)
         val target = rig.store.get(ProjectId("to"))!!
         val scene = target.source.byId[SourceNodeId("scene-opening")]!!
-        // Child's parent ref points at the *target's* existing style, not the source id.
         assertEquals(listOf(SourceNodeId("style-vibe-1")), scene.parents.map { it.nodeId })
     }
 
@@ -194,8 +203,8 @@ class ImportSourceNodeToolTest {
             CharacterRefBody(name = "Mei", visualDescription = "BLONDE hair"),
         )
         val ex = assertFailsWith<IllegalStateException> {
-            ImportSourceNodeTool(rig.store).execute(
-                ImportSourceNodeTool.Input(fromProjectId = "from", fromNodeId = "character-mei", toProjectId = "to"),
+            SourceNodeActionTool(rig.store).execute(
+                importInput(toProjectId = "to", fromProjectId = "from", fromNodeId = "character-mei"),
                 rig.ctx,
             )
         }
@@ -209,21 +218,20 @@ class ImportSourceNodeToolTest {
             rig.store, ProjectId("from"), SourceNodeId("character-mei"),
             CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
         )
-        // Pre-occupy the original id with a *different* character — forces rename.
         seedCharacter(
             rig.store, ProjectId("to"), SourceNodeId("character-mei"),
             CharacterRefBody(name = "Other", visualDescription = "different look"),
         )
-        val out = ImportSourceNodeTool(rig.store).execute(
-            ImportSourceNodeTool.Input(
+        val out = SourceNodeActionTool(rig.store).execute(
+            importInput(
+                toProjectId = "to",
                 fromProjectId = "from",
                 fromNodeId = "character-mei",
-                toProjectId = "to",
                 newNodeId = "character-mei-narrative",
             ),
             rig.ctx,
         )
-        assertEquals("character-mei-narrative", out.data.nodes.single().importedId)
+        assertEquals("character-mei-narrative", out.data.imported.single().importedId)
         val target = rig.store.get(ProjectId("to"))!!
         assertTrue(SourceNodeId("character-mei-narrative") in target.source.byId)
     }
@@ -235,8 +243,8 @@ class ImportSourceNodeToolTest {
             CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
         )
         val ex = assertFailsWith<IllegalArgumentException> {
-            ImportSourceNodeTool(rig.store).execute(
-                ImportSourceNodeTool.Input(fromProjectId = "from", fromNodeId = "character-mei", toProjectId = "from"),
+            SourceNodeActionTool(rig.store).execute(
+                importInput(toProjectId = "from", fromProjectId = "from", fromNodeId = "character-mei"),
                 rig.ctx,
             )
         }
@@ -246,8 +254,8 @@ class ImportSourceNodeToolTest {
     @Test fun missingSourceProjectFailsLoudly() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            ImportSourceNodeTool(rig.store).execute(
-                ImportSourceNodeTool.Input(fromProjectId = "ghost", fromNodeId = "x", toProjectId = "to"),
+            SourceNodeActionTool(rig.store).execute(
+                importInput(toProjectId = "to", fromProjectId = "ghost", fromNodeId = "x"),
                 rig.ctx,
             )
         }
@@ -261,8 +269,8 @@ class ImportSourceNodeToolTest {
             CharacterRefBody(name = "Mei", visualDescription = "teal hair"),
         )
         val ex = assertFailsWith<IllegalStateException> {
-            ImportSourceNodeTool(rig.store).execute(
-                ImportSourceNodeTool.Input(fromProjectId = "from", fromNodeId = "character-mei", toProjectId = "ghost"),
+            SourceNodeActionTool(rig.store).execute(
+                importInput(toProjectId = "ghost", fromProjectId = "from", fromNodeId = "character-mei"),
                 rig.ctx,
             )
         }
@@ -272,11 +280,38 @@ class ImportSourceNodeToolTest {
     @Test fun missingSourceNodeFailsLoudly() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            ImportSourceNodeTool(rig.store).execute(
-                ImportSourceNodeTool.Input(fromProjectId = "from", fromNodeId = "ghost-node", toProjectId = "to"),
+            SourceNodeActionTool(rig.store).execute(
+                importInput(toProjectId = "to", fromProjectId = "from", fromNodeId = "ghost-node"),
                 rig.ctx,
             )
         }
         assertTrue("ghost-node" in ex.message!!)
+    }
+
+    @Test fun rejectsBothShapesSetAtOnce() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalArgumentException> {
+            SourceNodeActionTool(rig.store).execute(
+                importInput(
+                    toProjectId = "to",
+                    fromProjectId = "from",
+                    fromNodeId = "character-mei",
+                    envelope = "{}",
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue("exactly one input shape" in ex.message!!, ex.message)
+    }
+
+    @Test fun rejectsNeitherShapeSet() = runTest {
+        val rig = rig()
+        val ex = assertFailsWith<IllegalArgumentException> {
+            SourceNodeActionTool(rig.store).execute(
+                importInput(toProjectId = "to"),
+                rig.ctx,
+            )
+        }
+        assertTrue("exactly one input shape" in ex.message!!, ex.message)
     }
 }

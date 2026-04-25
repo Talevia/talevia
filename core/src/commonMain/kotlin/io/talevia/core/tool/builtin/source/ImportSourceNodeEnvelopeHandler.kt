@@ -8,7 +8,6 @@ import io.talevia.core.domain.source.SourceNode
 import io.talevia.core.domain.source.SourceRef
 import io.talevia.core.domain.source.addNode
 import io.talevia.core.domain.source.mutateSource
-import io.talevia.core.tool.ToolResult
 import kotlinx.serialization.SerializationException
 
 /**
@@ -18,19 +17,17 @@ import kotlinx.serialization.SerializationException
  * collision contract, different traversal source (envelope is pre-
  * ordered by the exporter's contract; no topo-walk needed here).
  *
- * Extracted from [ImportSourceNodeTool] so the dispatcher class stays
- * focused on (input shape → handler) routing — see the
- * `debt-split-import-source-node-tool` commit body for the axis
- * rationale. Same handler-extract pattern used for
- * `ClipCreateHandlers` / `ClipMutateHandlers`.
+ * Cycle 136: takes [SourceNodeImportRequest] / returns
+ * [SourceNodeImportOutcome] so the standalone `ImportSourceNodeTool`
+ * could be folded into `source_node_action(action="import")`.
  */
 internal suspend fun executeEnvelopeImport(
     projects: ProjectStore,
-    input: ImportSourceNodeTool.Input,
+    request: SourceNodeImportRequest,
     toPid: ProjectId,
-): ToolResult<ImportSourceNodeTool.Output> {
+): SourceNodeImportOutcome {
     val decoded: SourceNodeEnvelope = try {
-        JsonConfig.default.decodeFromString(SourceNodeEnvelope.serializer(), input.envelope!!)
+        JsonConfig.default.decodeFromString(SourceNodeEnvelope.serializer(), request.envelope!!)
     } catch (e: SerializationException) {
         error("Envelope is not valid JSON for the source-export schema: ${e.message}")
     }
@@ -45,8 +42,8 @@ internal suspend fun executeEnvelopeImport(
         "Envelope rootNodeId='${decoded.rootNodeId}' not present in its own nodes list — envelope corrupt."
     }
 
-    val rootRename = input.newNodeId?.takeIf { it.isNotBlank() }
-    val imported = mutableListOf<ImportSourceNodeTool.ImportedNode>()
+    val rootRename = request.newNodeId?.takeIf { it.isNotBlank() }
+    val imported = mutableListOf<SourceNodeImportedNode>()
     projects.mutateSource(toPid) { source ->
         var working = source
         val remap = mutableMapOf<SourceNodeId, SourceNodeId>()
@@ -73,7 +70,7 @@ internal suspend fun executeEnvelopeImport(
             when {
                 existingByHash != null -> {
                     remap[originalId] = existingByHash.id
-                    imported += ImportSourceNodeTool.ImportedNode(
+                    imported += SourceNodeImportedNode(
                         originalId = exported.id,
                         importedId = existingByHash.id.value,
                         kind = exported.kind,
@@ -88,7 +85,7 @@ internal suspend fun executeEnvelopeImport(
                 else -> {
                     working = working.addNode(candidate)
                     remap[originalId] = proposedId
-                    imported += ImportSourceNodeTool.ImportedNode(
+                    imported += SourceNodeImportedNode(
                         originalId = exported.id,
                         importedId = proposedId.value,
                         kind = exported.kind,
@@ -105,15 +102,14 @@ internal suspend fun executeEnvelopeImport(
     val dedupNote = imported.count { it.skippedDuplicate }.takeIf { it > 0 }
         ?.let { " — $it already-present node(s) reused" }
         .orEmpty()
-    return ToolResult(
-        title = "import envelope ${leaf.kind} ${leaf.importedId}",
+    return SourceNodeImportOutcome(
+        fromProjectId = null,
+        toProjectId = toPid.value,
+        formatVersion = decoded.formatVersion,
+        nodes = imported,
         outputForLlm = "Ingested ${decoded.rootNodeId} (${decoded.formatVersion}) into " +
             "${toPid.value} as ${leaf.importedId}$parentNote.$dedupNote " +
             "Pass importedId=${leaf.importedId} in consistencyBindingIds for AIGC calls.",
-        data = ImportSourceNodeTool.Output(
-            toProjectId = toPid.value,
-            formatVersion = decoded.formatVersion,
-            nodes = imported,
-        ),
+        title = "import envelope ${leaf.kind} ${leaf.importedId}",
     )
 }
