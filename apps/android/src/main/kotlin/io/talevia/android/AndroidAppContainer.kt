@@ -181,7 +181,15 @@ class AndroidAppContainer(context: Context) {
         .build()
 
     init {
-        tools.register(io.talevia.core.tool.builtin.provider.ProviderQueryTool(providers, warmupStats, projects, rateLimitHistory))
+        tools.register(
+            io.talevia.core.tool.builtin.provider.ProviderQueryTool(
+                providers, warmupStats, projects, rateLimitHistory,
+                // Android doesn't wire AIGC engines today — snapshot publishes
+                // all-false rows so the agent sees missingEnvVar names rather
+                // than an empty table that would be ambiguous with "not wired".
+                engineReadiness = io.talevia.core.platform.buildEngineReadinessSnapshot(),
+            ),
+        )
         tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
     }
 

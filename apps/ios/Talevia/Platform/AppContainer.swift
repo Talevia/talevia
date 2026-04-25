@@ -179,7 +179,20 @@ final class AppContainer {
         self.providers = buildIosProviderRegistry(httpClient: self.httpClient)
 
         // Provider-dependent tools land after providers is initialised.
-        registry.register(tool: ProviderQueryTool(providers: self.providers, warmupStats: self.warmupStats, projects: self.projects, rateLimitHistory: self.rateLimitHistory))
+        // iOS doesn't wire AIGC engines today — snapshot publishes
+        // all-false rows so the agent sees missingEnvVar names rather
+        // than an empty table that would be ambiguous with "not wired".
+        let engineReadiness = EngineReadinessSnapshotKt.buildEngineReadinessSnapshot(
+            imageGen: nil, videoGen: nil, musicGen: nil,
+            tts: nil, asr: nil, vision: nil, upscale: nil, search: nil
+        )
+        registry.register(tool: ProviderQueryTool(
+            providers: self.providers,
+            warmupStats: self.warmupStats,
+            projects: self.projects,
+            rateLimitHistory: self.rateLimitHistory,
+            engineReadiness: engineReadiness
+        ))
         registry.register(tool: CompactSessionTool(providers: self.providers, sessions: self.sessions, bus: self.bus))
     }
 }

@@ -307,7 +307,21 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         // Tools that depend on the ProviderRegistry land after providers
         // is initialised — the property-initialiser ordering puts them
         // past the main `tools` block.
-        tools.register(io.talevia.core.tool.builtin.provider.ProviderQueryTool(providers, warmupStats, projects, rateLimitHistory))
+        tools.register(
+            io.talevia.core.tool.builtin.provider.ProviderQueryTool(
+                providers, warmupStats, projects, rateLimitHistory,
+                engineReadiness = io.talevia.core.platform.buildEngineReadinessSnapshot(
+                    imageGen = imageGen,
+                    videoGen = videoGen,
+                    musicGen = musicGen,
+                    tts = tts,
+                    asr = asr,
+                    vision = vision,
+                    upscale = upscale,
+                    search = search,
+                ),
+            ),
+        )
         tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
     }
 

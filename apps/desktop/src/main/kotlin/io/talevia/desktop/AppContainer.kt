@@ -250,7 +250,21 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
     }
 
     init {
-        tools.register(io.talevia.core.tool.builtin.provider.ProviderQueryTool(providers, warmupStats, projects, rateLimitHistory))
+        tools.register(
+            io.talevia.core.tool.builtin.provider.ProviderQueryTool(
+                providers, warmupStats, projects, rateLimitHistory,
+                engineReadiness = io.talevia.core.platform.buildEngineReadinessSnapshot(
+                    imageGen = imageGen,
+                    videoGen = videoGen,
+                    musicGen = musicGen,
+                    tts = tts,
+                    asr = asr,
+                    vision = vision,
+                    upscale = upscale,
+                    search = search,
+                ),
+            ),
+        )
         tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
     }
 

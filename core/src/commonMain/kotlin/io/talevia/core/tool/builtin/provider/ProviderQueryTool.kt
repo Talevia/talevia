@@ -10,6 +10,7 @@ import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.provider.query.AigcCostEstimateRow
 import io.talevia.core.tool.builtin.provider.query.CostCompareRow
 import io.talevia.core.tool.builtin.provider.query.CostHistoryRow
+import io.talevia.core.tool.builtin.provider.query.EngineReadinessRow
 import io.talevia.core.tool.builtin.provider.query.ModelRow
 import io.talevia.core.tool.builtin.provider.query.ProviderRow
 import io.talevia.core.tool.builtin.provider.query.RateLimitHistoryRow
@@ -17,6 +18,7 @@ import io.talevia.core.tool.builtin.provider.query.WarmupStatsRow
 import io.talevia.core.tool.builtin.provider.query.runAigcCostEstimateQuery
 import io.talevia.core.tool.builtin.provider.query.runCostCompareQuery
 import io.talevia.core.tool.builtin.provider.query.runCostHistoryQuery
+import io.talevia.core.tool.builtin.provider.query.runEngineReadinessQuery
 import io.talevia.core.tool.builtin.provider.query.runModelsQuery
 import io.talevia.core.tool.builtin.provider.query.runProvidersQuery
 import io.talevia.core.tool.builtin.provider.query.runRateLimitHistoryQuery
@@ -73,6 +75,15 @@ class ProviderQueryTool(
      * wires.
      */
     private val rateLimitHistory: io.talevia.core.provider.RateLimitHistoryRecorder? = null,
+    /**
+     * Optional per-engine readiness snapshot built by the container at
+     * bootstrap. Each row reports `(engineKind, providerId, wired,
+     * missingEnvVar?)`. Required for `select=engine_readiness`; null
+     * in test rigs that don't compose engines. When null the select
+     * reports zero rows with a "not wired" note rather than failing —
+     * same convention as the other optional aggregator wires.
+     */
+    private val engineReadiness: List<EngineReadinessRow>? = null,
 ) : QueryDispatcher<ProviderQueryTool.Input, ProviderQueryTool.Output>() {
 
     @Serializable data class Input(
@@ -160,7 +171,10 @@ class ProviderQueryTool(
             "modelId, inputs); inputs mirror the tool's baseInputs. Row: {…, cents, priceBasis, " +
             "pricedInputs}. cents=null = no rule matched (≠ free).\n" +
             "  • rate_limit_history — per-provider 429 retry summary {providerId, count, " +
-            "firstEpochMs, lastEpochMs, totalWaitMs, mostRecentReason}."
+            "firstEpochMs, lastEpochMs, totalWaitMs, mostRecentReason}.\n" +
+            "  • engine_readiness — per-engine wiring {engineKind, providerId, wired, " +
+            "missingEnvVar?}. engineKind: image_gen|video_gen|music_gen|tts|asr|vision|" +
+            "upscale|search."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("provider.read")
@@ -185,6 +199,7 @@ class ProviderQueryTool(
                         add(JsonPrimitive(SELECT_COST_HISTORY))
                         add(JsonPrimitive(SELECT_AIGC_COST_ESTIMATE))
                         add(JsonPrimitive(SELECT_RATE_LIMIT_HISTORY))
+                        add(JsonPrimitive(SELECT_ENGINE_READINESS))
                     },
                 )
             }
@@ -244,6 +259,7 @@ class ProviderQueryTool(
         SELECT_COST_HISTORY -> CostHistoryRow.serializer()
         SELECT_AIGC_COST_ESTIMATE -> AigcCostEstimateRow.serializer()
         SELECT_RATE_LIMIT_HISTORY -> RateLimitHistoryRow.serializer()
+        SELECT_ENGINE_READINESS -> EngineReadinessRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
 
@@ -271,6 +287,7 @@ class ProviderQueryTool(
                 inputs = input.inputs ?: JsonObject(emptyMap()),
             )
             SELECT_RATE_LIMIT_HISTORY -> runRateLimitHistoryQuery(rateLimitHistory)
+            SELECT_ENGINE_READINESS -> runEngineReadinessQuery(engineReadiness)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -376,9 +393,11 @@ class ProviderQueryTool(
         const val SELECT_COST_HISTORY = "cost_history"
         const val SELECT_AIGC_COST_ESTIMATE = "aigc_cost_estimate"
         const val SELECT_RATE_LIMIT_HISTORY = "rate_limit_history"
+        const val SELECT_ENGINE_READINESS = "engine_readiness"
         internal val ALL_SELECTS = setOf(
             SELECT_PROVIDERS, SELECT_MODELS, SELECT_COST_COMPARE, SELECT_WARMUP_STATS,
             SELECT_COST_HISTORY, SELECT_AIGC_COST_ESTIMATE, SELECT_RATE_LIMIT_HISTORY,
+            SELECT_ENGINE_READINESS,
         )
     }
 }
