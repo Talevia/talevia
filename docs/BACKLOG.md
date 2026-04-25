@@ -15,7 +15,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **debt-split-session-action-tool** — `SessionActionTool.kt` 422 LOC, core 当前最长 (cycle-103 scan); ALL_ACTIONS 已含 10+ verb (revert / fork / spend_cap / tool_enabled / switch_project / remove_permission_rule / …)。每个新 action 加 helper + dispatch case。**方向：** 按 verb 簇抽到 `session/action/<group>Handlers.kt` (lifecycle / permission / spend / projectBinding 四簇)，dispatcher 主类回到 ≤300 LOC。Rubric §5.6。Milestone §later.
 - **debt-bound-lockfile-entries** — `Lockfile.entries: List<LockfileEntry>` append-only，cycle 越长越大；`project_query(select=lockfile_orphans)` 已识别可 GC 候选，但**没有 writer 删除它们**。长寿项目的 talevia.json blob 持续膨胀 → re-encode 成本 O(N)。**方向：** `project_action(action=gc_lockfile)` 或新 `delete_lockfile_entries` 接口接收 `inputHash[]` / 时间窗 / `onlyOrphaned` 过滤。带 dry-run + 删除前 require permission。Rubric §5.6 / §5.7 / §3a-3。Milestone §later.
 - **session-text-search** — 操作者打开旧 session 时只能按 sessionId 列表 + recap 过一遍，没法按内容过滤"我那次问了 X 的 session 是哪个"。当前 fallback：手动 grep `~/.talevia/talevia.db` SQLite。**方向：** `session_query(select=text_search, query, sessionId?, role?)` 走 message body 子串匹配 (在 SqlDelight `messages.data` blob 上 LIKE) 返 (messageId, sessionId, snippet, matchOffset)。Rubric §5.4。Milestone §later.
 - **agent-parallel-tool-dispatch** — assistant turn 包含 N 个 tool_use 时当前逐个串行 dispatch；其中互相不依赖的 (e.g. 两个 `read_part`) 完全可以并行。Long-tail tool 串行严重拖慢 turn。**方向：** ToolDispatcher 接收一批 tool_use → 用 `coroutineScope { ... async { ... } }` 并行；保持 result 顺序匹配 input 顺序写回 message。Rubric §5.7。Milestone §later.

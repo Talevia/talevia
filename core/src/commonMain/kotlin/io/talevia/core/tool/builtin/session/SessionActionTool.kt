@@ -1,12 +1,16 @@
 package io.talevia.core.tool.builtin.session
 
-import io.talevia.core.SessionId
 import io.talevia.core.permission.PermissionRulesPersistence
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.session.action.executeRemovePermissionRule
+import io.talevia.core.tool.builtin.session.action.executeSessionArchive
+import io.talevia.core.tool.builtin.session.action.executeSessionDelete
+import io.talevia.core.tool.builtin.session.action.executeSessionRename
+import io.talevia.core.tool.builtin.session.action.executeSessionUnarchive
 import kotlinx.datetime.Clock
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -202,207 +206,17 @@ class SessionActionTool(
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         return when (input.action) {
-            "archive" -> executeArchive(input, ctx)
-            "unarchive" -> executeUnarchive(input, ctx)
-            "rename" -> executeRename(input, ctx)
-            "delete" -> executeDelete(input)
-            "remove_permission_rule" -> executeRemovePermissionRule(input, ctx)
+            "archive" -> executeSessionArchive(sessions, clock, input, ctx)
+            "unarchive" -> executeSessionUnarchive(sessions, clock, input, ctx)
+            "rename" -> executeSessionRename(sessions, clock, input, ctx)
+            "delete" -> executeSessionDelete(sessions, input)
+            "remove_permission_rule" -> executeRemovePermissionRule(
+                sessions, permissionRulesPersistence, input, ctx,
+            )
             else -> error(
                 "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, remove_permission_rule",
             )
         }
-    }
-
-    private suspend fun executeArchive(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val sid = ctx.resolveSessionId(input.sessionId)
-        val session = sessions.getSession(sid)
-            ?: error(
-                "Session ${sid.value} not found. Call session_query(select=sessions) to discover valid session ids.",
-            )
-
-        val wasArchived = session.archived
-        if (!wasArchived) {
-            sessions.updateSession(session.copy(archived = true, updatedAt = clock.now()))
-        }
-
-        val verb = if (wasArchived) "was already archived" else "archived"
-        return ToolResult(
-            title = "archive session ${sid.value}",
-            outputForLlm = "Session ${sid.value} '${session.title}' ($verb). session_query(select=sessions) will now " +
-                "exclude it; use session_action(action=unarchive) to restore.",
-            data = Output(
-                sessionId = sid.value,
-                action = "archive",
-                title = session.title,
-                wasAlreadyInTargetState = wasArchived,
-            ),
-        )
-    }
-
-    private suspend fun executeUnarchive(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val sid = ctx.resolveSessionId(input.sessionId)
-        val session = sessions.getSession(sid)
-            ?: error(
-                "Session ${sid.value} not found. The archived-session recovery handle is its " +
-                    "id — make sure the caller has the right string.",
-            )
-
-        val wasUnarchived = !session.archived
-        if (session.archived) {
-            sessions.updateSession(session.copy(archived = false, updatedAt = clock.now()))
-        }
-
-        val verb = if (wasUnarchived) "was already live" else "unarchived"
-        return ToolResult(
-            title = "unarchive session ${sid.value}",
-            outputForLlm = "Session ${sid.value} '${session.title}' ($verb). Now visible in session_query(select=sessions) again.",
-            data = Output(
-                sessionId = sid.value,
-                action = "unarchive",
-                title = session.title,
-                wasAlreadyInTargetState = wasUnarchived,
-            ),
-        )
-    }
-
-    private suspend fun executeRename(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val newTitle = input.newTitle
-            ?: error("action=rename requires `newTitle`")
-        require(newTitle.isNotBlank()) { "newTitle must not be blank" }
-
-        val sid = ctx.resolveSessionId(input.sessionId)
-        val session = sessions.getSession(sid)
-            ?: error(
-                "Session ${sid.value} not found. Call session_query(select=sessions) to discover valid session ids.",
-            )
-
-        val previousTitle = session.title
-        if (previousTitle == newTitle) {
-            return ToolResult(
-                title = "rename session (no-op)",
-                outputForLlm = "Session ${sid.value} already titled '$previousTitle' — nothing to do.",
-                data = Output(
-                    sessionId = sid.value,
-                    action = "rename",
-                    title = previousTitle,
-                    previousTitle = previousTitle,
-                    newTitle = newTitle,
-                ),
-            )
-        }
-
-        sessions.updateSession(
-            session.copy(
-                title = newTitle,
-                updatedAt = clock.now(),
-            ),
-        )
-
-        return ToolResult(
-            title = "rename session ${sid.value}",
-            outputForLlm = "Renamed session ${sid.value}: '$previousTitle' → '$newTitle'.",
-            data = Output(
-                sessionId = sid.value,
-                action = "rename",
-                title = newTitle,
-                previousTitle = previousTitle,
-                newTitle = newTitle,
-            ),
-        )
-    }
-
-    private suspend fun executeDelete(input: Input): ToolResult<Output> {
-        val rawSessionId = input.sessionId
-            ?: error(
-                "action=delete requires explicit `sessionId` (the owning session can't self-delete mid-dispatch).",
-            )
-        val sid = SessionId(rawSessionId)
-        val session = sessions.getSession(sid)
-            ?: error(
-                "Session $rawSessionId not found. Call session_query(select=sessions) to discover valid session ids.",
-            )
-
-        val snapshot = Output(
-            sessionId = session.id.value,
-            action = "delete",
-            title = session.title,
-            archived = session.archived,
-        )
-
-        sessions.deleteSession(sid)
-
-        val archivedNote = if (session.archived) " (was archived)" else ""
-        return ToolResult(
-            title = "delete session ${session.id.value}",
-            outputForLlm = "Deleted session ${session.id.value} '${session.title}'$archivedNote. " +
-                "Every message + part on it is gone. This cannot be undone.",
-            data = snapshot,
-        )
-    }
-
-    /**
-     * `action=remove_permission_rule` — drop a persisted Always rule
-     * matching `(permission, pattern)`. Symmetrical with the
-     * interactive `[Always]` add path (which appends to
-     * [PermissionRulesPersistence]); without this, removing a previously-
-     * granted rule required hand-editing
-     * `~/.talevia/permission-rules.json`.
-     *
-     * Match semantics: exact-match on both `permission` AND `pattern`.
-     * Multiple persisted rules with the same pair (legitimate when the
-     * user clicked Always on the same prompt twice across sessions) all
-     * get removed in one call; `removedRuleCount` carries the dropped
-     * count so the agent sees it.
-     *
-     * No-match is a successful no-op with `removedRuleCount=0` —
-     * agents can re-issue without worrying about pre-checking.
-     */
-    private suspend fun executeRemovePermissionRule(input: Input, ctx: ToolContext): ToolResult<Output> {
-        val permission = input.permission?.takeIf { it.isNotBlank() }
-            ?: error(
-                "action=remove_permission_rule requires `permission` (the rule keyword to drop, " +
-                    "e.g. fs.write). Call session_query(select=permission_rules) to list active rules.",
-            )
-        val pattern = input.pattern?.takeIf { it.isNotBlank() }
-            ?: error(
-                "action=remove_permission_rule requires `pattern` (the rule pattern to drop, " +
-                    "e.g. /tmp/*). Call session_query(select=permission_rules) to list active rules.",
-            )
-        // sessionId resolution stays consistent with the other actions —
-        // the operation is process-wide (rules persistence is per-machine,
-        // not per-session) but we still echo a sessionId in the output for
-        // the standard SessionActionTool.Output shape.
-        val sid = ctx.resolveSessionId(input.sessionId)
-        val session = sessions.getSession(sid)
-            ?: error(
-                "Session ${sid.value} not found. Call session_query(select=sessions) to discover valid session ids.",
-            )
-
-        val before = permissionRulesPersistence.load()
-        val matched = before.filter { it.permission == permission && it.pattern == pattern }
-        val after = before.filterNot { it.permission == permission && it.pattern == pattern }
-        if (matched.isNotEmpty()) {
-            permissionRulesPersistence.save(after)
-        }
-
-        val verb = when {
-            matched.isEmpty() -> "no matching rule"
-            matched.size == 1 -> "removed 1 rule"
-            else -> "removed ${matched.size} duplicate rules"
-        }
-        return ToolResult(
-            title = "remove_permission_rule $permission $pattern",
-            outputForLlm = "Persisted Always rules: $verb for ($permission, $pattern). " +
-                "${after.size} rule(s) remain in the file. Re-grant via the next interactive " +
-                "permission prompt if needed.",
-            data = Output(
-                sessionId = sid.value,
-                action = "remove_permission_rule",
-                title = session.title,
-                removedRuleCount = matched.size,
-                remainingRuleCount = after.size,
-            ),
-        )
     }
 
     private companion object {
