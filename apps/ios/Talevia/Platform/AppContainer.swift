@@ -117,7 +117,7 @@ final class AppContainer {
         registry.register(tool: ExportSessionTool(sessions: self.sessions))
         registry.register(tool: EstimateSessionTokensTool(sessions: self.sessions))
         registry.register(tool: ForkSessionTool(sessions: self.sessions))
-        registry.register(tool: SessionActionTool(sessions: self.sessions, clock: clock))
+        registry.register(tool: SessionActionTool(sessions: self.sessions, clock: clock, projects: self.projects))
         registry.register(tool: SetSessionSpendCapTool(sessions: self.sessions, clock: clock))
         registry.register(tool: SetToolEnabledTool(sessions: self.sessions, clock: clock))
         registry.register(tool: SwitchProjectTool(sessions: self.sessions, projects: self.projects, clock: clock, bus: self.bus))

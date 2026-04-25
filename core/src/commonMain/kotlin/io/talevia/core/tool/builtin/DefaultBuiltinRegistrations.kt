@@ -161,7 +161,13 @@ fun ToolRegistry.registerSessionAndMetaTools(
     register(SetToolEnabledTool(sessions))
     register(SwitchProjectTool(sessions, projects, bus = bus, agentStates = agentStates))
     register(RevertSessionTool(sessions, projects, bus))
-    register(SessionActionTool(sessions, permissionRulesPersistence = permissionRulesPersistence))
+    register(
+        SessionActionTool(
+            sessions = sessions,
+            permissionRulesPersistence = permissionRulesPersistence,
+            projects = projects,
+        ),
+    )
     register(ReadPartTool(sessions))
 }
 

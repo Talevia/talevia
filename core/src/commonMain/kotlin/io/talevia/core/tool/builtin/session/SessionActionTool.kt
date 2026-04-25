@@ -9,6 +9,7 @@ import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.action.executeRemovePermissionRule
 import io.talevia.core.tool.builtin.session.action.executeSessionArchive
 import io.talevia.core.tool.builtin.session.action.executeSessionDelete
+import io.talevia.core.tool.builtin.session.action.executeSessionImport
 import io.talevia.core.tool.builtin.session.action.executeSessionRename
 import io.talevia.core.tool.builtin.session.action.executeSessionUnarchive
 import kotlinx.datetime.Clock
@@ -71,6 +72,14 @@ class SessionActionTool(
      * the other optional aggregator wires.
      */
     private val permissionRulesPersistence: PermissionRulesPersistence = PermissionRulesPersistence.Noop,
+    /**
+     * Project store used by `action=import` to verify the envelope's
+     * target project exists on this machine before creating the
+     * imported session. Default `null` keeps test rigs that only
+     * exercise lifecycle actions source-compatible; `import` fails
+     * loud at dispatch time when the field is missing.
+     */
+    private val projects: io.talevia.core.domain.ProjectStore? = null,
 ) : Tool<SessionActionTool.Input, SessionActionTool.Output> {
 
     @Serializable data class Input(
@@ -81,7 +90,7 @@ class SessionActionTool(
          * the dispatch is running.
          */
         val sessionId: String? = null,
-        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, or `"remove_permission_rule"`. */
+        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, or `"import"`. */
         val action: String,
         /** Required for `action="rename"`. Must be non-blank. Ignored on other actions. */
         val newTitle: String? = null,
@@ -103,6 +112,19 @@ class SessionActionTool(
          * and remove each pair in turn.
          */
         val pattern: String? = null,
+        /**
+         * Required for `action=import`. The serialized envelope
+         * produced by `export_session` (format
+         * `talevia-session-export-v1`). The import path verifies
+         * `formatVersion`, requires the envelope's target
+         * `projectId` to already exist on this machine (import a
+         * project first if the target is missing — this tool
+         * does not create projects), refuses to overwrite an
+         * existing session id (delete the existing one first if
+         * that's the intent), then materialises the session +
+         * messages + parts verbatim. Ignored on every other action.
+         */
+        val envelope: String? = null,
     )
 
     @Serializable data class Output(
@@ -130,14 +152,27 @@ class SessionActionTool(
          * still active".
          */
         val remainingRuleCount: Int = 0,
+        /**
+         * `import` only: the envelope's `formatVersion` echoed back
+         * after a successful round-trip. Empty string when the
+         * action is not import.
+         */
+        val importedFormatVersion: String = "",
+        /** `import` only: number of messages the envelope landed. Zero otherwise. */
+        val importedMessageCount: Int = 0,
+        /** `import` only: number of parts the envelope landed. Zero otherwise. */
+        val importedPartCount: Int = 0,
     )
 
     override val id: String = "session_action"
     override val helpText: String =
         "Session lifecycle: `archive`/`unarchive` (idempotent), `rename`+`newTitle`, " +
             "`delete`+required `sessionId` (irreversible), `remove_permission_rule`+" +
-            "(`permission`,`pattern`) drops a persisted Always rule. sessionId defaults to " +
-            "owning session except on delete. Permission: session.write (delete=session.destructive)."
+            "(`permission`,`pattern`) drops a persisted Always rule, `import`+`envelope` " +
+            "materialises a previously-exported session (format `talevia-session-export-v1`; " +
+            "envelope's target projectId must already exist; refuses to overwrite an existing " +
+            "session id). sessionId defaults to owning session except on delete and import. " +
+            "Permission: session.write (delete=session.destructive)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
 
@@ -172,7 +207,7 @@ class SessionActionTool(
                 put("type", "string")
                 put(
                     "description",
-                    "`archive`, `unarchive`, `rename`, `delete`, or `remove_permission_rule`.",
+                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, or `import`.",
                 )
                 put(
                     "enum",
@@ -183,6 +218,7 @@ class SessionActionTool(
                             JsonPrimitive("rename"),
                             JsonPrimitive("delete"),
                             JsonPrimitive("remove_permission_rule"),
+                            JsonPrimitive("import"),
                         ),
                     ),
                 )
@@ -199,6 +235,16 @@ class SessionActionTool(
                 put("type", "string")
                 put("description", "Required for action=remove_permission_rule. Exact-match.")
             }
+            putJsonObject("envelope") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Required for action=import. The exact envelope string returned by " +
+                        "export_session(format=json) — formatVersion will be checked, target " +
+                        "projectId must already exist on this machine, sessionId collision " +
+                        "fails loud.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("action"))))
         put("additionalProperties", false)
@@ -213,8 +259,9 @@ class SessionActionTool(
             "remove_permission_rule" -> executeRemovePermissionRule(
                 sessions, permissionRulesPersistence, input, ctx,
             )
+            "import" -> executeSessionImport(sessions, projects, input)
             else -> error(
-                "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, remove_permission_rule",
+                "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, remove_permission_rule, import",
             )
         }
     }
