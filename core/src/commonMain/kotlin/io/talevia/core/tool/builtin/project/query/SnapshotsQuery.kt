@@ -13,7 +13,7 @@ import kotlinx.serialization.builtins.ListSerializer
  * `list_project_snapshots` tool. Filters: [ProjectQueryTool.Input.maxAgeDays]
  * + [ProjectQueryTool.Input.limit] (default 50, clamped 1..500). Returns
  * compact summaries — the full captured `Project` payload is not surfaced
- * here; callers that need the live state still use `get_project_state` /
+ * here; callers that need the live state still use `project_query(select=project_metadata)` /
  * `project_snapshot_action(action=restore)`.
  */
 @Serializable data class SnapshotRow(

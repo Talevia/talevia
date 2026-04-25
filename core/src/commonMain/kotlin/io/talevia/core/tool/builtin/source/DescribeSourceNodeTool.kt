@@ -33,7 +33,7 @@ import kotlinx.serialization.serializer
  * parents and their kinds, its direct child nodes in the DAG, which clips on the
  * timeline it binds, and whether those clips are direct or transitively bound.
  *
- * Pulling this into `get_project_state` bloats every caller; pulling it per-field
+ * Pulling this into `project_query(select=project_metadata)` bloats every caller; pulling it per-field
  * (`source_query(select=nodes) includeBody=true` for body, then `project_query(select=clips_for_source)` for
  * bindings, then a third call to resolve parent kinds) is three round-trips.
  * This tool is the cheap single read.
@@ -102,7 +102,7 @@ class DescribeSourceNodeTool(
             "direct children in the DAG, every clip whose sourceBinding intersects this node's " +
             "transitive-downstream closure (with `directly` flag), and a one-line humanised " +
             "summary. Use this before editing a node to see exactly what it looks like and what " +
-            "depends on it. Read-only; cheaper than get_project_state for single-node lookups."
+            "depends on it. Read-only; cheaper than project_query(select=project_metadata) for single-node lookups."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.read")

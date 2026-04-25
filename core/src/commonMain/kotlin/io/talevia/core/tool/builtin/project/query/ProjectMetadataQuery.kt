@@ -48,6 +48,21 @@ import kotlinx.serialization.builtins.ListSerializer
     val snapshotCount: Int,
     val recentSnapshots: List<ProjectMetadataSnapshotSummary> = emptyList(),
     val outputProfile: ProjectMetadataProfile? = null,
+    /**
+     * Monotonic source-DAG revision counter — same value the deleted
+     * `get_project_state` exposed. Lets the agent detect "did the
+     * source layer change since I last looked?" without re-decoding
+     * the full DAG. Defaulted to 0 for serialization compat with rows
+     * persisted before this field landed.
+     */
+    val sourceRevision: Long = 0L,
+    /**
+     * Per-clip mezzanine cache size (FFmpeg engine only — see
+     * `ExportTool.runPerClipRender`). Same field the deleted
+     * `get_project_state` exposed; useful before a `gc_render_cache`
+     * to estimate reclaimable disk. Defaulted to 0 for back-compat.
+     */
+    val renderCacheEntryCount: Int = 0,
     /** Pre-rendered ~300-char human summary, LLM-quotable verbatim. */
     val summaryText: String,
 )
@@ -169,6 +184,8 @@ internal suspend fun runProjectMetadataQuery(
         snapshotCount = project.snapshots.size,
         recentSnapshots = recentSnapshots,
         outputProfile = profileSummary,
+        sourceRevision = project.source.revision,
+        renderCacheEntryCount = project.renderCache.entries.size,
         summaryText = summaryText,
     )
     val rows = encodeRows(

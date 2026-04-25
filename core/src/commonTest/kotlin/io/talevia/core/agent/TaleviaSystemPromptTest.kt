@@ -47,7 +47,10 @@ class TaleviaSystemPromptTest {
         // Project lifecycle — the agent must know it can bootstrap projects itself.
         "create_project",
         "list_projects",
-        "get_project_state",
+        // Cycle 129: `get_project_state` was folded into
+        // `project_query(select=project_metadata)`; the system prompt
+        // teaches the new path now.
+        "project_query(select=project_metadata)",
         // ML enhancement lane — ASR transcription is the first ML tool.
         "transcribe_asset",
         // Vision describe — the image-side counterpart to ASR.

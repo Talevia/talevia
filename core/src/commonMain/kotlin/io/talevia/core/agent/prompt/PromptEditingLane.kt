@@ -160,7 +160,7 @@ need a reference image for `generate_image` / `generate_video` ("use this
 moment as the reference"), or when the user wants a poster frame /
 thumbnail. Input is `(assetId, timeSeconds)`; fails loudly if the timestamp
 is negative or past the source duration, so call `import_media` or
-`get_project_state` first if you don't know the clip length. The returned
+`project_query(select=project_metadata)` first if you don't know the clip length. The returned
 `frameAssetId` inherits the source resolution and is flagged with
 duration=0 so it's distinguishable from a video asset downstream.
 

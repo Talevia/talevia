@@ -15,9 +15,9 @@ internal val PROMPT_PROJECT: String = """
 returns a `projectId` you'll thread through every subsequent tool call. Default
 output is 1080p/30; pass `resolutionPreset` (720p/1080p/4k) + `fps` (24/30/60) to
 override. `list_projects` enumerates the catalog (id + title + timestamps);
-`get_project_state` returns counts (assets, source nodes, lockfile, render cache,
-tracks) for one project — call it before planning multi-step edits so you don't
-guess about what already exists. `delete_project` is destructive (asks the user)
+`project_query(select=project_metadata)` returns counts (assets, source nodes,
+lockfile, render cache, tracks) for one project — call it before planning
+multi-step edits so you don't guess about what already exists. `delete_project` is destructive (asks the user)
 and orphans any sessions referencing the project; warn before invoking.
 `rename_project` changes only the human-readable title — the `projectId` never
 changes, so downstream calls keep working. Prefer it over `fork_project` when the
@@ -99,7 +99,7 @@ a `select` discriminator:
     kind (video/audio/image, inferred from codec metadata), duration,
     resolution (when known), `hasVideoTrack`/`hasAudioTrack`, `sourceKind`
     (file/http/platform), and `inUseByClips` count. Answers "what media
-    do I have?" or "what's dangling?" without dumping `get_project_state`.
+    do I have?" or "what's dangling?" without re-decoding the whole project.
     Filter: `kind` (video|audio|image|all), `onlyUnused`. Sort:
     `insertion` (default) | `duration` | `duration-asc` | `id`.
 
@@ -107,9 +107,9 @@ Common controls: `limit` (default 100, clamped to `[1, 500]`), `offset`
 (default 0). Rows are returned in `rows` (an array whose shape matches
 the echoed `select`). Setting a filter that doesn't apply to the chosen
 select fails loud so typos surface instead of silently returning an
-empty list. Prefer `project_query` over `get_project_state` whenever
-you only need a specific slice — `get_project_state` is whole-project
-JSON.
+empty list. Use the right `select`: `project_query(select=project_metadata)`
+is the whole-project orientation snapshot; the other selects scope down
+to one slice.
 
 `remove_asset` drops a single asset row from `Project.assets`. Safe by
 default: refuses when any clip still references the asset, and returns

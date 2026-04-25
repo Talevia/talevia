@@ -18,8 +18,8 @@ import kotlinx.serialization.serializer
 
 /**
  * Catalog read for orientation. Returns lightweight metadata only — no Source DAG
- * or Timeline JSON decode. Pair with `get_project_state` for a single-project deep
- * dive once the LLM has picked which one to operate on.
+ * or Timeline JSON decode. Pair with `project_query(select=project_metadata)` for a
+ * single-project deep dive once the LLM has picked which one to operate on.
  *
  * Input extensions ([Input.sortBy], [Input.limit]) exist so common agent orientation
  * questions — "show me the 5 most recently updated projects", "sort alphabetically
@@ -68,7 +68,7 @@ class ListProjectsTool(
         "List every project in the store with id / title / created+updated timestamps. " +
             "Optional sortBy (updated-desc default | created-desc | title | id) applies a " +
             "deterministic ordering; optional limit caps the response (default 50, max 500). " +
-            "Use this for orientation; call get_project_state for full per-project details."
+            "Use this for orientation; call project_query(select=project_metadata) for full per-project details."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("project.read")

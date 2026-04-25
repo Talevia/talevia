@@ -42,7 +42,6 @@ import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.ExportProjectTool
 import io.talevia.core.tool.builtin.project.FindStaleClipsTool
 import io.talevia.core.tool.builtin.project.ForkProjectTool
-import io.talevia.core.tool.builtin.project.GetProjectStateTool
 import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
 import io.talevia.core.tool.builtin.project.ProjectActionTool
@@ -228,7 +227,6 @@ fun ToolRegistry.registerProjectTools(
     register(ProjectActionTool(projects))
     register(CreateProjectFromTemplateTool(projects))
     register(ListProjectsTool(projects))
-    register(GetProjectStateTool(projects))
     register(FindStaleClipsTool(projects))
     register(ProjectQueryTool(projects))
     register(ValidateProjectTool(projects))

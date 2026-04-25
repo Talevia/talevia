@@ -120,32 +120,50 @@ class ProjectToolsTest {
         assertTrue("create_project" in out.outputForLlm)
     }
 
-    @Test fun getProjectStateReportsCountsAndProfile() = runTest {
+    @Test fun projectMetadataReportsCountsAndProfile() = runTest {
+        // Migrated from the deleted GetProjectStateTool tests (cycle 129).
+        // `project_query(select=project_metadata)` is now the single
+        // whole-project orientation snapshot; the new sourceRevision +
+        // renderCacheEntryCount fields preserve the prior tool's surface.
         val rig = rig()
         ProjectActionTool(rig.store).execute(
             createInput(title = "snap", resolutionPreset = "720p", fps = 24),
             rig.ctx,
         )
-        val out = GetProjectStateTool(rig.store).execute(
-            GetProjectStateTool.Input(projectId = "proj-snap"),
+        val out = io.talevia.core.tool.builtin.project.ProjectQueryTool(rig.store).execute(
+            io.talevia.core.tool.builtin.project.ProjectQueryTool.Input(
+                projectId = "proj-snap",
+                select = io.talevia.core.tool.builtin.project.ProjectQueryTool.SELECT_PROJECT_METADATA,
+            ),
             rig.ctx,
         )
-        assertEquals("snap", out.data.title)
-        assertEquals(1280, out.data.resolutionWidth)
-        assertEquals(720, out.data.resolutionHeight)
-        assertEquals(24, out.data.fps)
-        assertEquals(0, out.data.assetCount)
-        assertEquals(0, out.data.sourceNodeCount)
-        assertEquals(0, out.data.lockfileEntryCount)
-        assertEquals(0, out.data.renderCacheEntryCount)
-        assertEquals(0, out.data.trackCount)
+        val rows = io.talevia.core.JsonConfig.default.decodeFromJsonElement(
+            kotlinx.serialization.builtins.ListSerializer(
+                io.talevia.core.tool.builtin.project.query.ProjectMetadataRow.serializer(),
+            ),
+            out.data.rows,
+        )
+        val row = rows.single()
+        assertEquals("snap", row.title)
+        assertEquals(1280, row.outputProfile?.resolutionWidth)
+        assertEquals(720, row.outputProfile?.resolutionHeight)
+        assertEquals(24, row.outputProfile?.frameRate)
+        assertEquals(0, row.assetCount)
+        assertEquals(0, row.sourceNodeCount)
+        assertEquals(0, row.lockfileEntryCount)
+        assertEquals(0, row.renderCacheEntryCount)
+        assertEquals(0L, row.sourceRevision)
+        assertEquals(0, row.trackCount)
     }
 
-    @Test fun getProjectStateFailsForMissingProject() = runTest {
+    @Test fun projectMetadataFailsForMissingProject() = runTest {
         val rig = rig()
         assertFailsWith<IllegalStateException> {
-            GetProjectStateTool(rig.store).execute(
-                GetProjectStateTool.Input(projectId = "proj-nope"),
+            io.talevia.core.tool.builtin.project.ProjectQueryTool(rig.store).execute(
+                io.talevia.core.tool.builtin.project.ProjectQueryTool.Input(
+                    projectId = "proj-nope",
+                    select = io.talevia.core.tool.builtin.project.ProjectQueryTool.SELECT_PROJECT_METADATA,
+                ),
                 rig.ctx,
             )
         }
