@@ -50,6 +50,7 @@ class Repl(
     private val terminal: Terminal,
     private val reader: LineReader,
     private val bootstrapMode: BootstrapMode = BootstrapMode.Auto,
+    private val argSources: SlashArgSources = SlashArgSources(),
 ) {
     @OptIn(ExperimentalUuidApi::class)
     suspend fun run(): Int = coroutineScope {
@@ -87,6 +88,22 @@ class Repl(
         )
         println(Styles.meta("type /help for commands, /exit to quit (Ctrl+D also works)"))
         println()
+
+        // Wire arg-completer producers now that projectId + sessionId are
+        // settled. The reader was built before the container existed (it's
+        // needed for the secret-bootstrap prompt), so the holder was empty
+        // until this point. Both lambdas runBlocking on the local SQLite
+        // store — completer thread blocks for sub-millisecond reads.
+        argSources.sessionIds = {
+            kotlinx.coroutines.runBlocking {
+                container.sessions.listSessions(projectId).map { it.id.value }
+            }
+        }
+        argSources.messageIds = {
+            kotlinx.coroutines.runBlocking {
+                container.sessions.listMessages(sessionId).map { it.id.value }
+            }
+        }
 
         val renderer = Renderer(
             terminal,

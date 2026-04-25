@@ -8,6 +8,7 @@ import io.talevia.cli.bootstrap.SecretBootstrapResult
 import io.talevia.cli.bootstrap.ensureProviderKey
 import io.talevia.cli.repl.BootstrapMode
 import io.talevia.cli.repl.Repl
+import io.talevia.cli.repl.SlashArgSources
 import io.talevia.cli.repl.buildInteractiveLineReader
 import io.talevia.core.logging.LogLevel
 import kotlinx.coroutines.runBlocking
@@ -50,7 +51,8 @@ private class TaleviaCli : CliktCommand(name = "talevia") {
                 .getOrElse { LogLevel.INFO }
             CliLoggers.install(File(home, ".talevia/cli.log"), logLevel)
             val terminal = TerminalBuilder.builder().system(true).build()
-            val reader = buildInteractiveLineReader(terminal)
+            val argSources = SlashArgSources()
+            val reader = buildInteractiveLineReader(terminal, argSources)
 
             when (ensureProviderKey(env, reader)) {
                 SecretBootstrapResult.Ready -> Unit
@@ -71,7 +73,7 @@ private class TaleviaCli : CliktCommand(name = "talevia") {
                     sessionPrefix = sessionPrefix,
                     forceNew = forceNew,
                 )
-                Repl(container, terminal, reader, bootstrapMode = mode).run()
+                Repl(container, terminal, reader, bootstrapMode = mode, argSources = argSources).run()
             } finally {
                 container.close()
             }
@@ -205,7 +207,8 @@ private fun runProjectFlow(path: String, mode: ProjectMode, title: String?, rest
         .getOrElse { LogLevel.INFO }
     CliLoggers.install(File(home, ".talevia/cli.log"), logLevel)
     val terminal = TerminalBuilder.builder().system(true).build()
-    val reader = buildInteractiveLineReader(terminal)
+    val argSources = SlashArgSources()
+    val reader = buildInteractiveLineReader(terminal, argSources)
 
     when (ensureProviderKey(env, reader)) {
         SecretBootstrapResult.Ready -> Unit
@@ -237,7 +240,7 @@ private fun runProjectFlow(path: String, mode: ProjectMode, title: String?, rest
             sessionPrefix = parseSessionOption(restArgs),
             forceNew = restArgs.contains("--new"),
         )
-        Repl(container, terminal, reader, bootstrapMode = mode).run()
+        Repl(container, terminal, reader, bootstrapMode = mode, argSources = argSources).run()
     } finally {
         container.close()
     }
