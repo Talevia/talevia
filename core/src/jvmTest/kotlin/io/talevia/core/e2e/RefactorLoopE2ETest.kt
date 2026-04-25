@@ -37,7 +37,7 @@ import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import io.talevia.core.tool.builtin.aigc.ReplayLockfileTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
-import io.talevia.core.tool.builtin.source.UpdateSourceNodeBodyTool
+import io.talevia.core.tool.builtin.source.SourceNodeActionTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -200,7 +200,7 @@ class RefactorLoopE2ETest {
 
         val registry = ToolRegistry()
         registry.register(GenerateImageTool(imageEngine, writer, store))
-        registry.register(UpdateSourceNodeBodyTool(store))
+        registry.register(SourceNodeActionTool(store))
         registry.register(RegenerateStaleClipsTool(store, registry))
         registry.register(ExportTool(store, videoEngine))
 
@@ -284,11 +284,13 @@ class RefactorLoopE2ETest {
         assertEquals(1, videoEngine.renderCalls)
 
         // --- 2. edit the character — this is the §6 "rename Mei's hair" step.
-        // update_source_node_body is full-replacement; re-supply every character_ref
-        // field we want to keep (name) alongside the mutated visualDescription.
-        registry["update_source_node_body"]!!.dispatch(
+        // source_node_action(action="update_body") is full-replacement; re-supply
+        // every character_ref field we want to keep (name) alongside the mutated
+        // visualDescription.
+        registry["source_node_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", pid.value)
+                put("action", "update_body")
                 put("nodeId", "mei")
                 put(
                     "body",

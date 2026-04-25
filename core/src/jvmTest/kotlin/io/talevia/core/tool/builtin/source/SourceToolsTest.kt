@@ -120,7 +120,7 @@ class SourceToolsTest {
     @Test fun updateSourceNodeBodyBumpsContentHashAndReplacesBody() = runTest {
         val rig = rig()
         val add = SourceNodeActionTool(rig.store)
-        val update = UpdateSourceNodeBodyTool(rig.store)
+        val update = SourceNodeActionTool(rig.store)
 
         add.execute(
             SourceNodeActionTool.Input(
@@ -135,7 +135,8 @@ class SourceToolsTest {
         val before = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("character-mei")]!!.contentHash
 
         update.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "character-mei",
                 body = characterBody("Mei", "v2"),
@@ -153,7 +154,7 @@ class SourceToolsTest {
     @Test fun characterRefVoiceIdSurvivesCreateAndIsClearedOnFullReplacement() = runTest {
         val rig = rig()
         val add = SourceNodeActionTool(rig.store)
-        val update = UpdateSourceNodeBodyTool(rig.store)
+        val update = SourceNodeActionTool(rig.store)
 
         add.execute(
             SourceNodeActionTool.Input(
@@ -170,7 +171,8 @@ class SourceToolsTest {
         // Full-body replacement without voiceId → the field drops (update_source_node_body is
         // full replacement, not partial patch, per its helpText contract).
         update.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "character-mei",
                 body = characterBody("Mei", "x"),
@@ -466,8 +468,9 @@ class SourceToolsTest {
         // (kind, body, parents) where parents are nodeId refs, so the child's own hash is
         // unchanged. The derivation relationship is expressed via Source.stale() which walks
         // ancestry.
-        UpdateSourceNodeBodyTool(rig.store).execute(
-            UpdateSourceNodeBodyTool.Input(
+        SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "brand-acme",
                 body = brandBody("Acme", listOf("#FF3B30")),
@@ -538,8 +541,9 @@ class SourceToolsTest {
         )
         // Attach parents after creation via set_source_node_parents — the kind-agnostic
         // parent-editing path.
-        SetSourceNodeParentsTool(rig.store).execute(
-            SetSourceNodeParentsTool.Input(
+        SourceNodeActionTool(rig.store).execute(
+            SourceNodeActionTool.Input(
+                action = "set_parents",
                 projectId = rig.pid.value,
                 nodeId = "character-mei",
                 parentIds = listOf("style-warm", "brand-acme"),

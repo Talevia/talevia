@@ -7,9 +7,9 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 
 /**
- * Captures the post-validation outcome of resolving an
- * [UpdateSourceNodeBodyTool.Input] to a concrete operation against the
- * source node. Two shapes:
+ * Captures the post-validation outcome of resolving a
+ * [SourceNodeActionTool.Input] (action="update_body") to a concrete
+ * operation against the source node. Two shapes:
  *
  *  - [Replace] — body / restore modes both end up here. The caller's
  *    [body] field already holds the final JsonElement that should land
@@ -35,21 +35,22 @@ internal sealed class BodyResolution {
 
 /**
  * Validate the three-mode mutual-exclusion contract on
- * [UpdateSourceNodeBodyTool.Input] and resolve the historical-body
- * lookup needed for restore / merge modes. Throws with an
- * agent-friendly message on any contract violation; otherwise returns
- * a [BodyResolution] capturing what the mutateSource block should do.
+ * `source_node_action(action="update_body")` and resolve the
+ * historical-body lookup needed for restore / merge modes. Throws with
+ * an agent-friendly message on any contract violation; otherwise
+ * returns a [BodyResolution] capturing what the mutateSource block
+ * should do.
  *
- * Pre-fetches the historical body for restore + merge modes so the
- * IO doesn't sit inside the source mutex.
+ * Pre-fetches the historical body for restore + merge modes so the IO
+ * doesn't sit inside the source mutex.
  *
- * Behaviour byte-identical to the pre-split inline path.
+ * Behaviour byte-identical to the pre-fold inline path.
  */
 internal suspend fun resolveBodyEdit(
     projects: ProjectStore,
     pid: ProjectId,
     nodeId: SourceNodeId,
-    input: UpdateSourceNodeBodyTool.Input,
+    input: SourceNodeActionTool.Input,
 ): BodyResolution {
     val hasBody = input.body != null
     val hasRestore = input.restoreFromRevisionIndex != null
@@ -57,16 +58,17 @@ internal suspend fun resolveBodyEdit(
     val modeCount = listOf(hasBody, hasRestore, hasMerge).count { it }
     if (modeCount > 1) {
         error(
-            "update_source_node_body takes exactly one of `body` / `restoreFromRevisionIndex` " +
-                "/ `mergeFromRevisionIndex` (got $modeCount). Drop the extras; " +
-                "body passes an explicit new state, restore replaces the whole body from " +
-                "history, merge copies named fields from history over the current body.",
+            "source_node_action(action=\"update_body\") takes exactly one of `body` / " +
+                "`restoreFromRevisionIndex` / `mergeFromRevisionIndex` (got $modeCount). " +
+                "Drop the extras; body passes an explicit new state, restore replaces the " +
+                "whole body from history, merge copies named fields from history over the " +
+                "current body.",
         )
     }
     if (modeCount == 0) {
         error(
-            "update_source_node_body requires one of `body` (full replacement) / " +
-                "`restoreFromRevisionIndex` (whole-body rollback, 0=newest) / " +
+            "source_node_action(action=\"update_body\") requires one of `body` (full " +
+                "replacement) / `restoreFromRevisionIndex` (whole-body rollback, 0=newest) / " +
                 "`mergeFromRevisionIndex` + `mergeFieldPaths` (per-field merge from history). " +
                 "Call source_query(select=history, root=${nodeId.value}) to discover " +
                 "available indices.",

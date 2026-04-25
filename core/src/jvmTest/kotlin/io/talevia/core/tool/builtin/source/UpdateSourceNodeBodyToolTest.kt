@@ -36,7 +36,7 @@ class UpdateSourceNodeBodyToolTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: UpdateSourceNodeBodyTool,
+        val tool: SourceNodeActionTool,
         val ctx: ToolContext,
         val pid: ProjectId,
     )
@@ -53,7 +53,7 @@ class UpdateSourceNodeBodyToolTest {
             emitPart = { },
             messages = emptyList(),
         )
-        return Rig(store, UpdateSourceNodeBodyTool(store), ctx, pid)
+        return Rig(store, SourceNodeActionTool(store), ctx, pid)
     }
 
     private suspend fun seedShot(
@@ -109,7 +109,8 @@ class UpdateSourceNodeBodyToolTest {
         val before = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("shot-1")]!!.contentHash
 
         val out = rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 body = buildJsonObject {
@@ -123,8 +124,8 @@ class UpdateSourceNodeBodyToolTest {
         val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("shot-1")]!!
         assertEquals("close-up", (node.body as kotlinx.serialization.json.JsonObject)["framing"]!!.toString().trim('"'))
         assertNotEquals(before, node.contentHash)
-        assertEquals(before, out.previousContentHash)
-        assertEquals(node.contentHash, out.newContentHash)
+        assertEquals(before, out.updatedBody.single().previousContentHash)
+        assertEquals(node.contentHash, out.updatedBody.single().newContentHash)
     }
 
     @Test fun preservesKindAndParents() = runTest {
@@ -148,7 +149,8 @@ class UpdateSourceNodeBodyToolTest {
         }
 
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 body = buildJsonObject { put("framing", JsonPrimitive("close")) },
@@ -165,7 +167,8 @@ class UpdateSourceNodeBodyToolTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                UpdateSourceNodeBodyTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "update_body",
                     projectId = rig.pid.value,
                     nodeId = "nope",
                     body = buildJsonObject { put("k", JsonPrimitive("v")) },
@@ -180,7 +183,8 @@ class UpdateSourceNodeBodyToolTest {
         val rig = rig()
         assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                UpdateSourceNodeBodyTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "update_body",
                     projectId = "no-such-project",
                     nodeId = "whatever",
                     body = buildJsonObject { put("k", JsonPrimitive("v")) },
@@ -203,7 +207,8 @@ class UpdateSourceNodeBodyToolTest {
         val before = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("mei")]!!.contentHash
 
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "mei",
                 body = buildJsonObject {
@@ -228,7 +233,8 @@ class UpdateSourceNodeBodyToolTest {
         seedVideoClip(rig.store, rig.pid, clipId = "c3", trackId = "t1", binding = emptySet())
 
         val out = rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 body = buildJsonObject { put("framing", JsonPrimitive("wide")) },
@@ -236,21 +242,22 @@ class UpdateSourceNodeBodyToolTest {
             rig.ctx,
         ).data
 
-        assertEquals(2, out.boundClipCount)
+        assertEquals(2, out.updatedBody.single().boundClipCount)
     }
 
     @Test fun zeroBoundClipsReportedWhenNoneBind() = runTest {
         val rig = rig()
         seedShot(rig.store, rig.pid, "shot-1")
         val out = rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 body = buildJsonObject { put("framing", JsonPrimitive("wide")) },
             ),
             rig.ctx,
         ).data
-        assertEquals(0, out.boundClipCount)
+        assertEquals(0, out.updatedBody.single().boundClipCount)
     }
 
     @Test fun bumpsNodeRevision() = runTest {
@@ -258,7 +265,8 @@ class UpdateSourceNodeBodyToolTest {
         seedShot(rig.store, rig.pid, "shot-1")
         val before = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("shot-1")]!!.revision
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 body = buildJsonObject { put("framing", JsonPrimitive("wide")) },
@@ -276,7 +284,8 @@ class UpdateSourceNodeBodyToolTest {
         val before = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("shot-1")]!!.contentHash
 
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 body = body,
@@ -299,6 +308,7 @@ class UpdateSourceNodeBodyToolTest {
 
         val flatRaw = buildJsonObject {
             put("projectId", kotlinx.serialization.json.JsonPrimitive(rig.pid.value))
+            put("action", kotlinx.serialization.json.JsonPrimitive("update_body"))
             put("nodeId", kotlinx.serialization.json.JsonPrimitive("shot-1"))
             // Deliberately no `body` wrapper — fields at the top level.
             put("framing", kotlinx.serialization.json.JsonPrimitive("close-up"))
@@ -306,7 +316,7 @@ class UpdateSourceNodeBodyToolTest {
         }
 
         val decoded = io.talevia.core.JsonConfig.default
-            .decodeFromJsonElement(UpdateSourceNodeBodyTool.InputCompatSerializer, flatRaw)
+            .decodeFromJsonElement(SourceNodeActionTool.InputCompatSerializer, flatRaw)
         rig.tool.execute(decoded, rig.ctx)
 
         val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("shot-1")]!!
@@ -328,7 +338,8 @@ class UpdateSourceNodeBodyToolTest {
         )
 
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 body = buildJsonObject { put("framing", JsonPrimitive("close-up")) },
@@ -336,7 +347,8 @@ class UpdateSourceNodeBodyToolTest {
             rig.ctx,
         )
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 body = buildJsonObject { put("framing", JsonPrimitive("medium")) },
@@ -377,7 +389,8 @@ class UpdateSourceNodeBodyToolTest {
         )
 
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 body = buildJsonObject { put("framing", JsonPrimitive("wide")) },
@@ -408,7 +421,8 @@ class UpdateSourceNodeBodyToolTest {
         )
 
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 body = buildJsonObject { put("framing", JsonPrimitive("v1-medium")) },
@@ -416,7 +430,8 @@ class UpdateSourceNodeBodyToolTest {
             rig.ctx,
         )
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 body = buildJsonObject { put("framing", JsonPrimitive("v2-close-up")) },
@@ -426,7 +441,8 @@ class UpdateSourceNodeBodyToolTest {
         // At this point: current = v2-close-up; history (newest-first) = [v1-medium, v0-seed].
 
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 restoreFromRevisionIndex = 0,
@@ -462,7 +478,8 @@ class UpdateSourceNodeBodyToolTest {
         seedShot(rig.store, rig.pid, "shot-1")
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                UpdateSourceNodeBodyTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "update_body",
                     projectId = rig.pid.value,
                     nodeId = "shot-1",
                     body = buildJsonObject { put("framing", JsonPrimitive("boom")) },
@@ -482,7 +499,8 @@ class UpdateSourceNodeBodyToolTest {
         seedShot(rig.store, rig.pid, "shot-1")
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                UpdateSourceNodeBodyTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "update_body",
                     projectId = rig.pid.value,
                     nodeId = "shot-1",
                     // both null
@@ -504,7 +522,8 @@ class UpdateSourceNodeBodyToolTest {
         seedShot(rig.store, rig.pid, "shot-1")
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                UpdateSourceNodeBodyTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "update_body",
                     projectId = rig.pid.value,
                     nodeId = "shot-1",
                     restoreFromRevisionIndex = 0,
@@ -526,7 +545,8 @@ class UpdateSourceNodeBodyToolTest {
 
         // Populate exactly 2 revisions.
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 body = buildJsonObject { put("framing", JsonPrimitive("v1")) },
@@ -534,7 +554,8 @@ class UpdateSourceNodeBodyToolTest {
             rig.ctx,
         )
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 body = buildJsonObject { put("framing", JsonPrimitive("v2")) },
@@ -544,7 +565,8 @@ class UpdateSourceNodeBodyToolTest {
 
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                UpdateSourceNodeBodyTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "update_body",
                     projectId = rig.pid.value,
                     nodeId = "shot-1",
                     restoreFromRevisionIndex = 5,
@@ -567,7 +589,8 @@ class UpdateSourceNodeBodyToolTest {
         seedShot(rig.store, rig.pid, "shot-1")
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                UpdateSourceNodeBodyTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "update_body",
                     projectId = rig.pid.value,
                     nodeId = "shot-1",
                     restoreFromRevisionIndex = -1,
@@ -588,6 +611,7 @@ class UpdateSourceNodeBodyToolTest {
 
         val nestedRaw = buildJsonObject {
             put("projectId", kotlinx.serialization.json.JsonPrimitive(rig.pid.value))
+            put("action", kotlinx.serialization.json.JsonPrimitive("update_body"))
             put("nodeId", kotlinx.serialization.json.JsonPrimitive("shot-1"))
             put(
                 "body",
@@ -596,7 +620,7 @@ class UpdateSourceNodeBodyToolTest {
         }
 
         val decoded = io.talevia.core.JsonConfig.default
-            .decodeFromJsonElement(UpdateSourceNodeBodyTool.InputCompatSerializer, nestedRaw)
+            .decodeFromJsonElement(SourceNodeActionTool.InputCompatSerializer, nestedRaw)
         rig.tool.execute(decoded, rig.ctx)
 
         val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("shot-1")]!!
@@ -625,14 +649,16 @@ class UpdateSourceNodeBodyToolTest {
         // v3 lands, history has [v2-overwritten, v1-overwritten] — index 0
         // is v2, index 1 is v1.
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value, nodeId = "char-1",
                 body = characterBody("brown", "robe-v2", "p2"),
             ),
             rig.ctx,
         )
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value, nodeId = "char-1",
                 body = characterBody("blonde", "robe-v3", "p3"),
             ),
@@ -641,7 +667,8 @@ class UpdateSourceNodeBodyToolTest {
         // Merge hair from index 1 (= v1's body — hair="red") over current
         // body. outfit / prompt keep their current values.
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value, nodeId = "char-1",
                 mergeFromRevisionIndex = 1,
                 mergeFieldPaths = listOf("hair"),
@@ -659,7 +686,8 @@ class UpdateSourceNodeBodyToolTest {
         val rig = rig()
         seedShot(rig.store, rig.pid, "char-1", body = characterBody("red", "robe-v1", "p1"))
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value, nodeId = "char-1",
                 body = characterBody("blonde", "robe-v2", "p2"),
             ),
@@ -667,7 +695,8 @@ class UpdateSourceNodeBodyToolTest {
         )
         // Merge both hair AND outfit from index 0 (= v1). prompt stays current ("p2").
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value, nodeId = "char-1",
                 mergeFromRevisionIndex = 0,
                 mergeFieldPaths = listOf("hair", "outfit"),
@@ -686,7 +715,8 @@ class UpdateSourceNodeBodyToolTest {
         seedShot(rig.store, rig.pid, "char-1", body = buildJsonObject { put("hair", JsonPrimitive("red")) })
         // History entry will only have `hair`; merging `outfit` must fail.
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value, nodeId = "char-1",
                 body = buildJsonObject {
                     put("hair", JsonPrimitive("blonde"))
@@ -697,7 +727,8 @@ class UpdateSourceNodeBodyToolTest {
         )
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                UpdateSourceNodeBodyTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "update_body",
                     projectId = rig.pid.value, nodeId = "char-1",
                     mergeFromRevisionIndex = 0,
                     mergeFieldPaths = listOf("outfit"),
@@ -715,7 +746,8 @@ class UpdateSourceNodeBodyToolTest {
         val rig = rig()
         seedShot(rig.store, rig.pid, "char-1")
         rig.tool.execute(
-            UpdateSourceNodeBodyTool.Input(
+            SourceNodeActionTool.Input(
+                action = "update_body",
                 projectId = rig.pid.value, nodeId = "char-1",
                 body = buildJsonObject { put("framing", JsonPrimitive("wide")) },
             ),
@@ -723,7 +755,8 @@ class UpdateSourceNodeBodyToolTest {
         )
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                UpdateSourceNodeBodyTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "update_body",
                     projectId = rig.pid.value, nodeId = "char-1",
                     mergeFromRevisionIndex = 0,
                     mergeFieldPaths = emptyList(),
@@ -742,7 +775,8 @@ class UpdateSourceNodeBodyToolTest {
         seedShot(rig.store, rig.pid, "char-1")
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                UpdateSourceNodeBodyTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "update_body",
                     projectId = rig.pid.value, nodeId = "char-1",
                     body = buildJsonObject { put("a", JsonPrimitive("b")) },
                     mergeFieldPaths = listOf("a"),
@@ -761,7 +795,8 @@ class UpdateSourceNodeBodyToolTest {
         seedShot(rig.store, rig.pid, "char-1")
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                UpdateSourceNodeBodyTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "update_body",
                     projectId = rig.pid.value, nodeId = "char-1",
                     body = buildJsonObject { put("a", JsonPrimitive("b")) },
                     mergeFromRevisionIndex = 0,

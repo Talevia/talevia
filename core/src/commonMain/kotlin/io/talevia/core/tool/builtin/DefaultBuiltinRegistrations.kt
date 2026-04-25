@@ -67,10 +67,8 @@ import io.talevia.core.tool.builtin.source.DescribeSourceNodeTool
 import io.talevia.core.tool.builtin.source.DiffSourceNodesTool
 import io.talevia.core.tool.builtin.source.ExportSourceNodeTool
 import io.talevia.core.tool.builtin.source.ImportSourceNodeTool
-import io.talevia.core.tool.builtin.source.SetSourceNodeParentsTool
 import io.talevia.core.tool.builtin.source.SourceNodeActionTool
 import io.talevia.core.tool.builtin.source.SourceQueryTool
-import io.talevia.core.tool.builtin.source.UpdateSourceNodeBodyTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
@@ -249,8 +247,6 @@ fun ToolRegistry.registerSourceNodeTools(projects: ProjectStore) {
     register(ImportSourceNodeTool(projects))
     register(ExportSourceNodeTool(projects))
     register(SourceNodeActionTool(projects))
-    register(SetSourceNodeParentsTool(projects))
-    register(UpdateSourceNodeBodyTool(projects))
 }
 
 /**

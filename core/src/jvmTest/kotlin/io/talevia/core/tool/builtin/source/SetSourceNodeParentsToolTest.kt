@@ -32,7 +32,7 @@ class SetSourceNodeParentsToolTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: SetSourceNodeParentsTool,
+        val tool: SourceNodeActionTool,
         val ctx: ToolContext,
         val pid: ProjectId,
     )
@@ -49,7 +49,7 @@ class SetSourceNodeParentsToolTest {
             emitPart = { },
             messages = emptyList(),
         )
-        return Rig(store, SetSourceNodeParentsTool(store), ctx, pid)
+        return Rig(store, SourceNodeActionTool(store), ctx, pid)
     }
 
     private suspend fun seedCharacter(
@@ -103,7 +103,8 @@ class SetSourceNodeParentsToolTest {
         seedShot(rig.store, rig.pid, "shot-1", parents = listOf("mei"))
 
         val out = rig.tool.execute(
-            SetSourceNodeParentsTool.Input(
+            SourceNodeActionTool.Input(
+                action = "set_parents",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 parentIds = listOf("mei", "style-warm"),
@@ -111,8 +112,8 @@ class SetSourceNodeParentsToolTest {
             rig.ctx,
         ).data
 
-        assertEquals(listOf("mei"), out.previousParentIds)
-        assertEquals(listOf("mei", "style-warm"), out.newParentIds)
+        assertEquals(listOf("mei"), out.parentsSet.single().previousParentIds)
+        assertEquals(listOf("mei", "style-warm"), out.parentsSet.single().newParentIds)
         val node = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("shot-1")]!!
         assertEquals(listOf("mei", "style-warm"), node.parents.map { it.nodeId.value })
     }
@@ -123,7 +124,8 @@ class SetSourceNodeParentsToolTest {
         seedShot(rig.store, rig.pid, "shot-1", parents = listOf("mei"))
 
         rig.tool.execute(
-            SetSourceNodeParentsTool.Input(
+            SourceNodeActionTool.Input(
+                action = "set_parents",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 parentIds = emptyList(),
@@ -142,7 +144,8 @@ class SetSourceNodeParentsToolTest {
         val hashBefore = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("shot-1")]!!.contentHash
 
         rig.tool.execute(
-            SetSourceNodeParentsTool.Input(
+            SourceNodeActionTool.Input(
+                action = "set_parents",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 parentIds = listOf("mei", "style-warm"),
@@ -160,7 +163,8 @@ class SetSourceNodeParentsToolTest {
         seedShot(rig.store, rig.pid, "shot-1")
 
         rig.tool.execute(
-            SetSourceNodeParentsTool.Input(
+            SourceNodeActionTool.Input(
+                action = "set_parents",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 parentIds = listOf("mei", "style-warm", "mei"), // duplicate
@@ -176,7 +180,8 @@ class SetSourceNodeParentsToolTest {
         seedShot(rig.store, rig.pid, "shot-1")
         val ex = assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(
-                SetSourceNodeParentsTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "set_parents",
                     projectId = rig.pid.value,
                     nodeId = "shot-1",
                     parentIds = listOf("shot-1"),
@@ -192,7 +197,8 @@ class SetSourceNodeParentsToolTest {
         seedShot(rig.store, rig.pid, "shot-1")
         val ex = assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(
-                SetSourceNodeParentsTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "set_parents",
                     projectId = rig.pid.value,
                     nodeId = "shot-1",
                     parentIds = listOf("does-not-exist"),
@@ -213,7 +219,8 @@ class SetSourceNodeParentsToolTest {
 
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                SetSourceNodeParentsTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "set_parents",
                     projectId = rig.pid.value,
                     nodeId = "shot-c",
                     parentIds = listOf("shot-a"),
@@ -228,7 +235,8 @@ class SetSourceNodeParentsToolTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                SetSourceNodeParentsTool.Input(
+                SourceNodeActionTool.Input(
+                    action = "set_parents",
                     projectId = rig.pid.value,
                     nodeId = "not-there",
                     parentIds = emptyList(),
@@ -247,7 +255,8 @@ class SetSourceNodeParentsToolTest {
         seedStyle(rig.store, rig.pid, "style-warm")
 
         rig.tool.execute(
-            SetSourceNodeParentsTool.Input(
+            SourceNodeActionTool.Input(
+                action = "set_parents",
                 projectId = rig.pid.value,
                 nodeId = "mei",
                 parentIds = listOf("style-warm"),
@@ -264,7 +273,8 @@ class SetSourceNodeParentsToolTest {
         seedShot(rig.store, rig.pid, "shot-1")
         val before = rig.store.get(rig.pid)!!.source.revision
         rig.tool.execute(
-            SetSourceNodeParentsTool.Input(
+            SourceNodeActionTool.Input(
+                action = "set_parents",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 parentIds = listOf("mei"),
@@ -282,7 +292,8 @@ class SetSourceNodeParentsToolTest {
         seedShot(rig.store, rig.pid, "shot-1", parents = listOf("mei"))
 
         val out = rig.tool.execute(
-            SetSourceNodeParentsTool.Input(
+            SourceNodeActionTool.Input(
+                action = "set_parents",
                 projectId = rig.pid.value,
                 nodeId = "shot-1",
                 parentIds = listOf("style-warm"),
@@ -290,8 +301,8 @@ class SetSourceNodeParentsToolTest {
             rig.ctx,
         ).data
 
-        assertEquals("shot-1", out.nodeId)
-        assertEquals(listOf("mei"), out.previousParentIds)
-        assertEquals(listOf("style-warm"), out.newParentIds)
+        assertEquals("shot-1", out.parentsSet.single().nodeId)
+        assertEquals(listOf("mei"), out.parentsSet.single().previousParentIds)
+        assertEquals(listOf("style-warm"), out.parentsSet.single().newParentIds)
     }
 }
