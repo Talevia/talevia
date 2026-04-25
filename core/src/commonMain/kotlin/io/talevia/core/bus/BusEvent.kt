@@ -432,7 +432,7 @@ sealed interface BusEvent {
      * Why duplicate the progress signal across Part + BusEvent:
      *
      * - `Part.RenderProgress` is **session-history persistent** — every
-     *   tick lands in `messages_parts.data` so `revert_session` /
+     *   tick lands in `messages_parts.data` so `session_action(action="revert")` /
      *   `replay_lockfile` / cross-machine re-runs see the same audit
      *   trail. The CLI Renderer already paints a one-liner from those
      *   parts (see `EventRouter` → `renderer.renderProgress`).

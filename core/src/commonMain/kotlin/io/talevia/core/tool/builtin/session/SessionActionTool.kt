@@ -14,6 +14,7 @@ import io.talevia.core.tool.builtin.session.action.executeSessionExportBusTrace
 import io.talevia.core.tool.builtin.session.action.executeSessionFork
 import io.talevia.core.tool.builtin.session.action.executeSessionImport
 import io.talevia.core.tool.builtin.session.action.executeSessionRename
+import io.talevia.core.tool.builtin.session.action.executeSessionRevert
 import io.talevia.core.tool.builtin.session.action.executeSessionSetSpendCap
 import io.talevia.core.tool.builtin.session.action.executeSessionSetSystemPrompt
 import io.talevia.core.tool.builtin.session.action.executeSessionSetToolEnabled
@@ -94,6 +95,14 @@ class SessionActionTool(
      * the `import` / `remove_permission_rule` "missing dep" pattern.
      */
     private val busTrace: io.talevia.core.bus.BusEventTraceRecorder? = null,
+    /**
+     * Bus used by `action=revert` to publish
+     * `BusEvent.SessionReverted` so UIs refresh atomically. Default
+     * `null` keeps existing test rigs source-compatible; revert
+     * fails loud when missing, mirroring the other "missing dep"
+     * patterns above.
+     */
+    private val bus: io.talevia.core.bus.EventBus? = null,
 ) : Tool<SessionActionTool.Input, SessionActionTool.Output> {
 
     @Serializable data class Input(
@@ -104,7 +113,7 @@ class SessionActionTool(
          * the dispatch is running.
          */
         val sessionId: String? = null,
-        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, `"set_system_prompt"`, `"export_bus_trace"`, `"set_tool_enabled"`, `"set_spend_cap"`, `"fork"`, or `"export"`. */
+        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, `"set_system_prompt"`, `"export_bus_trace"`, `"set_tool_enabled"`, `"set_spend_cap"`, `"fork"`, `"export"`, or `"revert"`. */
         val action: String,
         /**
          * `action="rename"`: required, must be non-blank — the renamed
@@ -216,14 +225,19 @@ class SessionActionTool(
          */
         val capCents: Long? = null,
         /**
-         * `action=fork` only. Optional anchor — only messages
-         * at-or-before this id (in parent's `(createdAt, id)` order)
-         * are copied to the branch. Everything after the anchor is
-         * dropped from the branch. Omit / null to copy the whole
-         * parent history. Ignored on every other action.
+         * Used by `action=fork` and `action=revert`.
          *
-         * Anchor that doesn't belong to the parent session fails loud
-         * (the store's `require` surfaces it verbatim).
+         * `fork`: optional anchor — only messages at-or-before this id
+         * (in parent's `(createdAt, id)` order) are copied to the branch.
+         * Everything after is dropped. Omit / null to copy the whole
+         * parent history.
+         *
+         * `revert`: REQUIRED. Rewind target — every message strictly
+         * after this id (in the session's `(createdAt, id)` order)
+         * is deleted, parts included.
+         *
+         * Anchor that doesn't belong to the action's session fails
+         * loud (the store's `require` surfaces it verbatim).
          */
         val anchorMessageId: String? = null,
         /**
@@ -233,6 +247,17 @@ class SessionActionTool(
          * variant). Ignored on every other action.
          */
         val prettyPrint: Boolean = false,
+        /**
+         * `action=revert` only. Project whose timeline is rolled back
+         * to the most recent `Part.TimelineSnapshot` at-or-before
+         * `anchorMessageId`. Required for revert; ignored on every
+         * other action. The session's own `Session.projectId` binding
+         * is the natural source — pass it through explicitly so the
+         * caller can audit the cross-store mutation; mismatch is
+         * caller's responsibility (no implicit derive, no §3a #6
+         * silent fallback).
+         */
+        val projectId: String? = null,
     )
 
     @Serializable data class Output(
@@ -387,6 +412,29 @@ class SessionActionTool(
          * every other action.
          */
         val exportedSessionProjectId: String = "",
+        /**
+         * `revert` only: number of messages strictly after the anchor
+         * that were deleted from the session (parts included). Zero
+         * on every other action.
+         */
+        val revertDeletedMessages: Int = 0,
+        /**
+         * `revert` only: id of the `Part.TimelineSnapshot` whose body
+         * was applied to the project's timeline. Null when no
+         * snapshot existed at-or-before the anchor (timeline left
+         * untouched), or when the action is not revert.
+         */
+        val revertAppliedSnapshotPartId: String? = null,
+        /**
+         * `revert` only: number of clips in the timeline after the
+         * snapshot restore. Zero on every other action.
+         */
+        val revertRestoredClipCount: Int = 0,
+        /**
+         * `revert` only: number of tracks in the timeline after the
+         * snapshot restore. Zero on every other action.
+         */
+        val revertRestoredTrackCount: Int = 0,
     )
 
     override val id: String = "session_action"
@@ -412,7 +460,11 @@ class SessionActionTool(
             "the session (metadata + every message + every part, including compacted) into " +
             "a portable JSON envelope (`format=json`, default — pair with action=import for " +
             "round-trip) or a human-readable markdown transcript (`format=markdown`, alias " +
-            "`md`). sessionId defaults to owning session except on delete and import. " +
+            "`md`). `revert`+`sessionId`+`anchorMessageId`+`projectId` DESTRUCTIVELY rewinds: " +
+            "deletes every message strictly after the anchor and rolls the project timeline " +
+            "back to the most recent `Part.TimelineSnapshot` at-or-before the anchor (no " +
+            "un-revert; pair with project_snapshot_action(action=save) for project-level " +
+            "safety nets). sessionId defaults to owning session except on delete and import. " +
             "Permission: session.write (delete=session.destructive, " +
             "export/export_bus_trace=session.read)."
     override val inputSerializer: KSerializer<Input> = serializer()
@@ -456,7 +508,7 @@ class SessionActionTool(
                 put("type", "string")
                 put(
                     "description",
-                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, `set_system_prompt`, `export_bus_trace`, `set_tool_enabled`, `set_spend_cap`, `fork`, or `export`.",
+                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, `set_system_prompt`, `export_bus_trace`, `set_tool_enabled`, `set_spend_cap`, `fork`, `export`, or `revert`.",
                 )
                 put(
                     "enum",
@@ -474,6 +526,7 @@ class SessionActionTool(
                             JsonPrimitive("set_spend_cap"),
                             JsonPrimitive("fork"),
                             JsonPrimitive("export"),
+                            JsonPrimitive("revert"),
                         ),
                     ),
                 )
@@ -578,10 +631,10 @@ class SessionActionTool(
                 put("type", "string")
                 put(
                     "description",
-                    "Used by action=fork. Optional anchor — only messages at-or-before " +
-                        "this id (in parent's (createdAt, id) order) are copied to the " +
-                        "branch. Omit to copy the whole parent history. Anchor that doesn't " +
-                        "belong to the parent session fails loud.",
+                    "Used by action=fork (optional — anchor for partial copy; omit to copy " +
+                        "whole history) and action=revert (REQUIRED — rewind target; every " +
+                        "message strictly after this id is deleted). Anchor that doesn't " +
+                        "belong to the action's session fails loud.",
                 )
             }
             putJsonObject("prettyPrint") {
@@ -590,6 +643,16 @@ class SessionActionTool(
                     "description",
                     "Used by action=export. Pretty-print the JSON envelope. Default false " +
                         "(compact wire shape). Markdown format ignores this flag.",
+                )
+            }
+            putJsonObject("projectId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Required for action=revert. Project whose timeline rolls back to the " +
+                        "most recent `Part.TimelineSnapshot` at-or-before anchorMessageId. " +
+                        "Pass through the session's bound projectId — mismatch is caller's " +
+                        "responsibility (no implicit derive).",
                 )
             }
         }
@@ -613,10 +676,11 @@ class SessionActionTool(
             "set_spend_cap" -> executeSessionSetSpendCap(sessions, clock, input, ctx)
             "fork" -> executeSessionFork(sessions, input, ctx)
             "export" -> executeSessionExport(sessions, input, ctx)
+            "revert" -> executeSessionRevert(sessions, projects, bus, input)
             else -> error(
                 "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, " +
                     "remove_permission_rule, import, set_system_prompt, export_bus_trace, " +
-                    "set_tool_enabled, set_spend_cap, fork, export",
+                    "set_tool_enabled, set_spend_cap, fork, export, revert",
             )
         }
     }

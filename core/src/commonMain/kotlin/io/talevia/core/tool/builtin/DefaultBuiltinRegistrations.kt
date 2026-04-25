@@ -49,7 +49,6 @@ import io.talevia.core.tool.builtin.project.ProjectQueryTool
 import io.talevia.core.tool.builtin.project.ProjectSnapshotActionTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
 import io.talevia.core.tool.builtin.session.ReadPartTool
-import io.talevia.core.tool.builtin.session.RevertSessionTool
 import io.talevia.core.tool.builtin.session.SessionActionTool
 import io.talevia.core.tool.builtin.session.SessionQueryTool
 import io.talevia.core.tool.builtin.session.SwitchProjectTool
@@ -144,13 +143,13 @@ fun ToolRegistry.registerSessionAndMetaTools(
         ),
     )
     register(SwitchProjectTool(sessions, projects, bus = bus, agentStates = agentStates))
-    register(RevertSessionTool(sessions, projects, bus))
     register(
         SessionActionTool(
             sessions = sessions,
             permissionRulesPersistence = permissionRulesPersistence,
             projects = projects,
             busTrace = busTrace,
+            bus = bus,
         ),
     )
     register(ReadPartTool(sessions))

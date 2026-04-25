@@ -28,7 +28,7 @@ import kotlin.test.assertTrue
 class RevertSessionToolTest {
 
     private data class Rig(
-        val tool: RevertSessionTool,
+        val tool: SessionActionTool,
         val sessions: SqlDelightSessionStore,
         val projects: FileProjectStore,
         val ctx: ToolContext,
@@ -49,7 +49,7 @@ class RevertSessionToolTest {
             emitPart = { },
             messages = emptyList(),
         )
-        return Rig(RevertSessionTool(sessions, projects, bus), sessions, projects, ctx)
+        return Rig(SessionActionTool(sessions = sessions, projects = projects, bus = bus), sessions, projects, ctx)
     }
 
     private suspend fun seed(rig: Rig) {
@@ -90,7 +90,8 @@ class RevertSessionToolTest {
         appendUser(rig, "u-3", atMs = 3_000L)
 
         val out = rig.tool.execute(
-            RevertSessionTool.Input(
+            SessionActionTool.Input(
+                action = "revert",
                 sessionId = "s-1",
                 anchorMessageId = "u-1",
                 projectId = "p",
@@ -98,11 +99,14 @@ class RevertSessionToolTest {
             rig.ctx,
         ).data
 
-        assertEquals(2, out.deletedMessages)
-        assertEquals("u-1", out.anchorMessageId)
-        // No timeline snapshot existed → appliedSnapshotPartId null, counts zero.
-        assertNull(out.appliedSnapshotPartId)
-        assertEquals(0, out.restoredClipCount)
+        assertEquals(2, out.revertDeletedMessages)
+        // Output.sessionId echoes the action's input target (matches every other
+        // dispatcher Output convention); the anchor isn't echoed in the dispatcher
+        // Output — the input field is the caller's audit trail.
+        assertEquals("s-1", out.sessionId)
+        // No timeline snapshot existed → revertAppliedSnapshotPartId null, counts zero.
+        assertNull(out.revertAppliedSnapshotPartId)
+        assertEquals(0, out.revertRestoredClipCount)
 
         val remaining = rig.sessions.listMessages(SessionId("s-1")).map { it.id.value }
         assertEquals(listOf("u-1"), remaining)
@@ -114,7 +118,8 @@ class RevertSessionToolTest {
         appendUser(rig, "u-1", atMs = 1_000L)
 
         val out = rig.tool.execute(
-            RevertSessionTool.Input(
+            SessionActionTool.Input(
+                action = "revert",
                 sessionId = "s-1",
                 anchorMessageId = "u-1",
                 projectId = "p",
@@ -122,7 +127,7 @@ class RevertSessionToolTest {
             rig.ctx,
         ).data
 
-        assertEquals(0, out.deletedMessages)
+        assertEquals(0, out.revertDeletedMessages)
     }
 
     @Test fun unknownAnchorFailsLoud() = runTest {
@@ -131,7 +136,8 @@ class RevertSessionToolTest {
 
         val ex = assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(
-                RevertSessionTool.Input(
+                SessionActionTool.Input(
+                    action = "revert",
                     sessionId = "s-1",
                     anchorMessageId = "ghost",
                     projectId = "p",
@@ -168,7 +174,8 @@ class RevertSessionToolTest {
 
         val ex = assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(
-                RevertSessionTool.Input(
+                SessionActionTool.Input(
+                    action = "revert",
                     sessionId = "s-1",
                     anchorMessageId = "u-other",
                     projectId = "p",
