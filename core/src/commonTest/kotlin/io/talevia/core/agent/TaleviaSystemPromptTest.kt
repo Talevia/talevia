@@ -149,8 +149,8 @@ class TaleviaSystemPromptTest {
             "# AIGC video (text-to-video)",
             "# Project lifecycle", // PROMPT_PROJECT starts
             "# Project snapshots",
-            "# Removing clips", // PROMPT_EDITING_AND_EXTERNAL starts
-            "# External files (fs tools)",
+            "# Removing clips", // PROMPT_EDITING_LANE starts
+            "# External files (fs tools)", // PROMPT_EXTERNAL_LANE starts
             "# Session-project binding",
             "# Rules",
             "# Bias toward action",

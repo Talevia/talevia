@@ -17,7 +17,7 @@ package io.talevia.core.agent.prompt
  * token surcharge (~300 tokens) is paid only while it's load-bearing.
  *
  * It complements rather than contradicts the `# Bias toward action` section
- * in [PROMPT_EDITING_AND_EXTERNAL]: both agree the agent should commit to
+ * in [PROMPT_EXTERNAL_LANE]: both agree the agent should commit to
  * sensible defaults instead of chaining bullet-list menus. This lane just
  * scopes *what* to commit to when there is no prior structure to anchor on.
  */
