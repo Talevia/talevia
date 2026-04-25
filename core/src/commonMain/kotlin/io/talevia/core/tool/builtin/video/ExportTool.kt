@@ -1,12 +1,8 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
-import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
-import io.talevia.core.domain.Timeline
-import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.render.ProvenanceManifest
 import io.talevia.core.domain.render.RenderCacheEntry
 import io.talevia.core.domain.staleClipsFromLockfile
@@ -19,10 +15,13 @@ import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.video.export.PerClipStats
+import io.talevia.core.tool.builtin.video.export.buildPerClipCostAttribution
+import io.talevia.core.tool.builtin.video.export.fingerprintOf
+import io.talevia.core.tool.builtin.video.export.mimeTypeFor
+import io.talevia.core.tool.builtin.video.export.provenanceOf
 import io.talevia.core.tool.builtin.video.export.runPerClipRender
 import io.talevia.core.tool.builtin.video.export.runWholeTimelineRender
 import io.talevia.core.tool.builtin.video.export.timelineFitsPerClipPath
-import io.talevia.core.util.fnv1a64Hex
 import kotlinx.datetime.Clock
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -323,88 +322,5 @@ class ExportTool(
                 ),
             ),
         )
-    }
-
-    private fun fingerprintOf(timeline: Timeline, output: OutputSpec): String {
-        val json = JsonConfig.default
-        val canonical = buildString {
-            append(json.encodeToString(Timeline.serializer(), timeline))
-            append('|')
-            append("path=").append(output.targetPath)
-            append("|res=").append(output.resolution.width).append('x').append(output.resolution.height)
-            append("|fps=").append(output.frameRate)
-            append("|vc=").append(output.videoCodec)
-            append("|ac=").append(output.audioCodec)
-        }
-        return fnv1a64Hex(canonical)
-    }
-
-    /**
-     * Build the [ProvenanceManifest] for [project]. Two hashes:
-     *  - `timelineHash` over the canonical Timeline JSON alone (no output
-     *    spec, no lockfile) — a Timeline edit flips it, nothing else.
-     *  - `lockfileHash` over the canonical `Lockfile` JSON — new AIGC
-     *    generation or pin/unpin flips it.
-     *
-     * Both via `JsonConfig.default` so bit-exact re-exports produce
-     * bit-exact hashes (ExportDeterminismTest relies on this).
-     */
-    private fun provenanceOf(project: Project): ProvenanceManifest {
-        val json = JsonConfig.default
-        val timelineHash = fnv1a64Hex(json.encodeToString(Timeline.serializer(), project.timeline))
-        val lockfileHash = fnv1a64Hex(json.encodeToString(Lockfile.serializer(), project.lockfile))
-        return ProvenanceManifest(
-            projectId = project.id.value,
-            timelineHash = timelineHash,
-            lockfileHash = lockfileHash,
-        )
-    }
-
-    /** MIME type from filename extension; falls back to a generic container. */
-    internal fun mimeTypeFor(path: String): String =
-        when (path.substringAfterLast('.', "").lowercase()) {
-            "mp4", "m4v" -> "video/mp4"
-            "mov" -> "video/quicktime"
-            "webm" -> "video/webm"
-            "mkv" -> "video/x-matroska"
-            "avi" -> "video/x-msvideo"
-            "gif" -> "image/gif"
-            "mp3" -> "audio/mpeg"
-            "m4a" -> "audio/mp4"
-            "wav" -> "audio/wav"
-            else -> "application/octet-stream"
-        }
-
-    /**
-     * Build the per-clip cost map for [Output.perClipCostCents] +
-     * [Output.totalCostCents].
-     *
-     * Lookup is via `lockfile.byAssetId[clip.assetId]` — exact
-     * one-to-one keying. A clip whose asset wasn't AIGC-produced has
-     * no lockfile entry → null cents (still in the map; the agent can
-     * see "this clip is unpriced" distinct from "0 cents"). Clips
-     * sharing an asset report the same cents per clip; the sum is
-     * intentional because each clip references the same paid output.
-     *
-     * Returns the (map, total) pair so the caller doesn't have to
-     * reduce twice. Empty inputs and clips without `assetId` (text
-     * clips) are skipped — they'd never have a lockfile entry anyway.
-     */
-    private fun buildPerClipCostAttribution(project: Project): Pair<Map<String, Long?>, Long> {
-        val perClip = mutableMapOf<String, Long?>()
-        var total = 0L
-        for (track in project.timeline.tracks) {
-            for (clip in track.clips) {
-                val assetId = when (clip) {
-                    is io.talevia.core.domain.Clip.Video -> clip.assetId
-                    is io.talevia.core.domain.Clip.Audio -> clip.assetId
-                    is io.talevia.core.domain.Clip.Text -> null
-                }
-                val cents = assetId?.let { project.lockfile.byAssetId[it]?.costCents }
-                perClip[clip.id.value] = cents
-                if (cents != null) total += cents
-            }
-        }
-        return perClip to total
     }
 }

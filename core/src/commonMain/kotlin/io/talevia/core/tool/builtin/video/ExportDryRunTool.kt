@@ -1,17 +1,15 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
-import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.staleClipsFromLockfile
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.OutputSpec
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
-import io.talevia.core.util.fnv1a64Hex
+import io.talevia.core.tool.builtin.video.export.fingerprintOf
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -189,27 +187,5 @@ class ExportDryRunTool(
             outputForLlm = summary,
             data = out,
         )
-    }
-
-    /**
-     * Canonical `(timeline, output)` fingerprint used by [ExportTool]'s render cache.
-     *
-     * Mirrored from ExportTool.kt for dry-run parity; keep in sync. We intentionally
-     * duplicate the helper rather than making ExportTool's private copy public — the
-     * public surface of a render tool should not leak fingerprinting. If the ExportTool
-     * hash format ever changes, update both sites together.
-     */
-    private fun fingerprintOf(timeline: Timeline, output: OutputSpec): String {
-        val json = JsonConfig.default
-        val canonical = buildString {
-            append(json.encodeToString(Timeline.serializer(), timeline))
-            append('|')
-            append("path=").append(output.targetPath)
-            append("|res=").append(output.resolution.width).append('x').append(output.resolution.height)
-            append("|fps=").append(output.frameRate)
-            append("|vc=").append(output.videoCodec)
-            append("|ac=").append(output.audioCodec)
-        }
-        return fnv1a64Hex(canonical)
     }
 }
