@@ -112,6 +112,7 @@ internal class SlashCommandDispatcher(
             "metrics" -> renderer.println(metricsSummary())
             "permissions" -> renderer.println(permissionsSummary(currentSession))
             "trace" -> renderer.println(traceSummary(currentSession, args))
+            "summary" -> renderer.println(summarySlashSummary(currentSession))
             "todos" -> renderer.println(todosSummary(currentSession))
             "status" -> renderer.println(statusLine(projectId, currentSession, currentModel))
             "history" -> renderer.println(historyTable(currentSession))
@@ -549,6 +550,52 @@ internal class SlashCommandDispatcher(
         }
         return "in=${tokens.input} · out=${tokens.output} · reasoning=${tokens.reasoning} · " +
             "cache r/w=${tokens.cacheRead}/${tokens.cacheWrite} · usd=${"%.5f".format(usd)}"
+    }
+
+    /**
+     * `/summary` surfaces the latest `Part.Compaction` summary for the
+     * active session via `session_query(select=compactions, limit=1)`.
+     * The compactions select returns the full summary text (parts
+     * select truncates at 80 chars) — exactly what the user wants when
+     * they're auditing what auto-compaction just dropped or which
+     * range a manual `/compact` collapsed.
+     */
+    private suspend fun summarySlashSummary(sessionId: SessionId): String {
+        val tool = io.talevia.core.tool.builtin.session.SessionQueryTool(
+            sessions = container.sessions,
+            busTrace = container.busTrace,
+        )
+        val ctx = io.talevia.core.tool.ToolContext(
+            sessionId = sessionId,
+            messageId = io.talevia.core.MessageId("slash-summary"),
+            callId = io.talevia.core.CallId("slash-summary"),
+            askPermission = { io.talevia.core.permission.PermissionDecision.Once },
+            emitPart = { },
+            messages = emptyList(),
+        )
+        val out = runCatching {
+            tool.execute(
+                io.talevia.core.tool.builtin.session.SessionQueryTool.Input(
+                    select = io.talevia.core.tool.builtin.session.SessionQueryTool.SELECT_COMPACTIONS,
+                    sessionId = sessionId.value,
+                    limit = 1,
+                ),
+                ctx,
+            )
+        }.getOrElse { e ->
+            return Styles.meta("/summary: ${e.message ?: e::class.simpleName}")
+        }
+        val rows = runCatching {
+            io.talevia.core.JsonConfig.default.decodeFromJsonElement(
+                kotlinx.serialization.builtins.ListSerializer(
+                    io.talevia.core.tool.builtin.session.query.CompactionRow.serializer(),
+                ),
+                out.data.rows,
+            )
+        }.getOrElse { e ->
+            return Styles.meta("/summary: failed to decode rows — ${e.message}")
+        }
+        return formatCompactionSummary(rows)
     }
 
     private companion object {

@@ -92,6 +92,11 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         category = SlashCategory.MODEL,
     ),
     SlashCommandSpec(
+        "/summary",
+        "show the latest compaction summary for this session",
+        category = SlashCategory.HISTORY,
+    ),
+    SlashCommandSpec(
         "/todos",
         "show the agent's current todo list for this session",
         category = SlashCategory.MODEL,
