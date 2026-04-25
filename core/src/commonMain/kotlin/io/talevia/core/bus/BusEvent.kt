@@ -341,13 +341,13 @@ sealed interface BusEvent {
      * metrics sink, audit log) can surface the issue so it doesn't rot
      * unnoticed. Emitted by `FileProjectStore.get` right after the
      * blob decode on every read; issues are computed via a lightweight
-     * sublsubset of `ValidateProjectTool`'s DAG check (no full
+     * sublsubset of `project_query(select=validation)`'s DAG check (no full
      * clip/asset/audio validation, see that tool for exhaustive linting).
      *
      * Not a [SessionEvent] — validation runs at project load time,
      * independent of any active session. Each issue in [issues] is a
      * human-readable message that already includes the offending node id,
-     * matching `Issue.message` shape from `ValidateProjectTool` so UI
+     * matching `Issue.message` shape from `project_query(select=validation)` so UI
      * consumers can render either source uniformly.
      */
     data class ProjectValidationWarning(

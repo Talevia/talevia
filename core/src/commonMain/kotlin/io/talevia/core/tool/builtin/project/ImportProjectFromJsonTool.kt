@@ -3,6 +3,8 @@ package io.talevia.core.tool.builtin.project
 import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.domain.ProjectStore
+import io.talevia.core.domain.computeProjectValidationIssues
+import io.talevia.core.domain.renderProjectValidationIssues
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
@@ -36,7 +38,7 @@ import okio.Path.Companion.toPath
  * produces a structured error with the underlying parser message.
  *
  * **Integrity validation.** Before the project is upserted the envelope
- * is run through the same structural checks as [ValidateProjectTool]
+ * is run through the same structural checks as project_query(select=validation)
  * (clip → asset / source-binding references, source DAG parent integrity,
  * audio envelope ranges, etc.). Any `error`-severity issue aborts the
  * import with a rendered summary rather than upserting a project the
@@ -176,7 +178,7 @@ class ImportProjectFromJsonTool(
         // so structural errors (dangling refs, source-DAG corruption) must
         // not leak into the store where the rest of the stack assumes them
         // absent. `force=true` bypasses the gate for import-to-fix flows.
-        val issues = ValidateProjectTool.computeIssues(rehomed)
+        val issues = computeProjectValidationIssues(rehomed)
         val errorIssues = issues.filter { it.severity == "error" }
         val warnIssues = issues.filter { it.severity == "warn" }
         val issueCodes = issues.take(10).map { it.code }
@@ -185,7 +187,7 @@ class ImportProjectFromJsonTool(
                 "Envelope failed integrity checks (${errorIssues.size} error(s), " +
                     "${warnIssues.size} warning(s)); refusing to import. Fix the envelope, pass " +
                     "force=true to import-then-fix, or re-export from a clean project.\n" +
-                    ValidateProjectTool.renderIssues(issues),
+                    renderProjectValidationIssues(issues),
             )
         }
 

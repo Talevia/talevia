@@ -12,7 +12,7 @@ import kotlin.test.assertTrue
 
 /**
  * Unit-level coverage of the shared DAG-only validator. Separate from
- * `ValidateProjectToolTest` because load-path warnings rely on this
+ * `ProjectQueryValidationTest` because load-path warnings rely on this
  * narrow subset — we want regressions here to surface immediately, not
  * via the full tool's broader clip/asset check.
  */

@@ -42,7 +42,7 @@ import kotlinx.serialization.serializer
  * - `action="remove_asset"` (permission `project.write`) — drop an
  *   asset from `project.assets`. Refuses by default if any clip
  *   references the asset; `force=true` removes anyway leaving dangling
- *   clips for `validate_project` to surface. Required: `projectId`,
+ *   clips for `project_query(select=validation)` to surface. Required: `projectId`,
  *   `assetId`. Optional: `force` (default `false`).
  *
  * Permission base tier is `project.write` (the most common).

@@ -55,6 +55,11 @@ internal val PROJECT_QUERY_HELP_TEXT: String =
         "whose lockfile-snapshot of bound source-node hashes no longer matches the project's " +
         "current value. Sorted by clipId. Use after editing a source node to plan which clips " +
         "to regenerate (call regenerate_stale_clips for the batch verb).\n" +
+        "  • validation — rows: {severity, code, message, trackId?, clipId?}. Structural " +
+        "lint over the project: dangling asset / source-binding refs, non-positive durations, " +
+        "audio volume / fade out of range, timeline duration mismatch, source DAG dangling " +
+        "parents / cycles. severity in {error, warn}; passed iff zero errors (read total). " +
+        "Run before export. Does NOT cover content staleness — use select=stale_clips.\n" +
         "Common: limit (1..500, default 100), offset. Filter-on-wrong-select fails loud."
 
 internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
@@ -75,7 +80,8 @@ internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
                     "lockfile_entries | clips_for_asset | clips_for_source | " +
                     "clip | lockfile_entry | project_metadata | consistency_propagation | " +
                     "spend | lockfile_cache_stats | lockfile_diff | lockfile_orphans | snapshots | " +
-                    "timeline_diff | source_binding_stats | stale_clips (case-insensitive).",
+                    "timeline_diff | source_binding_stats | stale_clips | validation " +
+                    "(case-insensitive).",
             )
         }
         putJsonObject("trackKind") {

@@ -2,6 +2,7 @@ package io.talevia.core.tool.builtin.project
 
 import io.talevia.core.JsonConfig
 import io.talevia.core.domain.ProjectStore
+import io.talevia.core.domain.ValidationIssue
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
@@ -45,6 +46,7 @@ import io.talevia.core.tool.builtin.project.query.runTimelineClipsQuery
 import io.talevia.core.tool.builtin.project.query.runTimelineDiffQuery
 import io.talevia.core.tool.builtin.project.query.runTracksQuery
 import io.talevia.core.tool.builtin.project.query.runTransitionsQuery
+import io.talevia.core.tool.builtin.project.query.runValidationQuery
 import io.talevia.core.tool.query.QueryDispatcher
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -234,6 +236,7 @@ class ProjectQueryTool(
         SELECT_TIMELINE_DIFF -> TimelineDiffRow.serializer()
         SELECT_SOURCE_BINDING_STATS -> SourceBindingStatsRow.serializer()
         SELECT_STALE_CLIPS -> StaleClipReportRow.serializer()
+        SELECT_VALIDATION -> ValidationIssue.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
 
@@ -268,6 +271,7 @@ class ProjectQueryTool(
             SELECT_TIMELINE_DIFF -> runTimelineDiffQuery(project, input)
             SELECT_SOURCE_BINDING_STATS -> runSourceBindingStatsQuery(project, limit, offset)
             SELECT_STALE_CLIPS -> runStaleClipsQuery(project, limit, offset)
+            SELECT_VALIDATION -> runValidationQuery(project)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -292,6 +296,7 @@ class ProjectQueryTool(
         const val SELECT_TIMELINE_DIFF = "timeline_diff"
         const val SELECT_SOURCE_BINDING_STATS = "source_binding_stats"
         const val SELECT_STALE_CLIPS = "stale_clips"
+        const val SELECT_VALIDATION = "validation"
         internal val ALL_SELECTS = setOf(
             SELECT_TRACKS, SELECT_TIMELINE_CLIPS, SELECT_ASSETS,
             SELECT_TRANSITIONS, SELECT_LOCKFILE_ENTRIES,
@@ -300,7 +305,7 @@ class ProjectQueryTool(
             SELECT_CONSISTENCY_PROPAGATION, SELECT_SPEND,
             SELECT_LOCKFILE_CACHE_STATS, SELECT_LOCKFILE_DIFF, SELECT_LOCKFILE_ORPHANS,
             SELECT_SNAPSHOTS, SELECT_TIMELINE_DIFF, SELECT_SOURCE_BINDING_STATS,
-            SELECT_STALE_CLIPS,
+            SELECT_STALE_CLIPS, SELECT_VALIDATION,
         )
 
         private const val DEFAULT_LIMIT = 100

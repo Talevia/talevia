@@ -25,7 +25,7 @@ import kotlin.test.assertTrue
  * every successful load and publishes `BusEvent.ProjectValidationWarning`
  * if issues surface. The load itself **does not throw** — the project is
  * returned verbatim, so pre-existing bad blobs stay readable and the user
- * can fix incrementally via `validate_project` + source-mutation tools.
+ * can fix incrementally via `project_query(select=validation)` + source-mutation tools.
  */
 class ProjectStoreAutoValidationTest {
 

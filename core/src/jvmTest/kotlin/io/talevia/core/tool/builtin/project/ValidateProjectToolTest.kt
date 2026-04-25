@@ -3,6 +3,7 @@ package io.talevia.core.tool.builtin.project
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.ClipId
+import io.talevia.core.JsonConfig
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
@@ -19,12 +20,14 @@ import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
+import io.talevia.core.domain.ValidationIssue
 import io.talevia.core.domain.source.Source
 import io.talevia.core.domain.source.SourceNode
 import io.talevia.core.domain.source.SourceRef
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
+import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -34,15 +37,23 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Exercises [ValidateProjectTool] on the full rule vocabulary — passed-case,
- * dangling asset, dangling source binding, volume out of range, fade overlap,
- * non-positive duration, timeline duration mismatch. One test per code so a
- * rule regression points at exactly the rule that broke.
+ * Cycle 139 folded `validate_project` into
+ * `project_query(select=validation)`. This suite continues to exercise
+ * the full structural-lint rule vocabulary — passed-case, dangling
+ * asset, dangling source binding, volume out of range, fade overlap,
+ * non-positive duration, timeline duration mismatch, source DAG
+ * dangling parents / cycles, multi-issue clips — but routes everything
+ * through the unified `project_query` dispatcher and decodes rows as
+ * top-level `ValidationIssue` (lifted out of the deleted tool's
+ * `Companion.Issue`).
+ *
+ * One test per code so a rule regression points at exactly the rule
+ * that broke.
  */
 class ValidateProjectToolTest {
 
     private data class Rig(
-        val tool: ValidateProjectTool,
+        val tool: ProjectQueryTool,
         val ctx: ToolContext,
     )
 
@@ -57,8 +68,23 @@ class ValidateProjectToolTest {
             emitPart = {},
             messages = emptyList(),
         )
-        return Rig(ValidateProjectTool(store), ctx)
+        return Rig(ProjectQueryTool(store), ctx)
     }
+
+    private fun validationInput(projectId: String) = ProjectQueryTool.Input(
+        projectId = projectId,
+        select = ProjectQueryTool.SELECT_VALIDATION,
+    )
+
+    private fun decodeIssues(out: ProjectQueryTool.Output): List<ValidationIssue> {
+        assertEquals(ProjectQueryTool.SELECT_VALIDATION, out.select)
+        return JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(ValidationIssue.serializer()),
+            out.rows,
+        )
+    }
+
+    private fun List<ValidationIssue>.passed(): Boolean = none { it.severity == "error" }
 
     private fun assetWithId(id: String, duration: Duration = 10.seconds): MediaAsset =
         MediaAsset(
@@ -104,9 +130,11 @@ class ValidateProjectToolTest {
             assets = listOf(asset),
         )
         val rig = newRig(project)
-        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
-        assertTrue(out.data.passed)
-        assertEquals(0, out.data.issueCount)
+        val out = rig.tool.execute(validationInput("p"), rig.ctx).data
+        val issues = decodeIssues(out)
+        assertTrue(issues.passed())
+        assertEquals(0, out.total)
+        assertEquals(0, issues.size)
     }
 
     @Test fun flagsDanglingAssetId() = runTest {
@@ -115,9 +143,9 @@ class ValidateProjectToolTest {
             assets = emptyList(),
         )
         val rig = newRig(project)
-        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
-        assertFalse(out.data.passed)
-        val issue = out.data.issues.single { it.code == "dangling-asset" }
+        val issues = decodeIssues(rig.tool.execute(validationInput("p"), rig.ctx).data)
+        assertFalse(issues.passed())
+        val issue = issues.single { it.code == "dangling-asset" }
         assertEquals("error", issue.severity)
         assertEquals("c1", issue.clipId)
         assertEquals("v1", issue.trackId)
@@ -134,9 +162,9 @@ class ValidateProjectToolTest {
         )
         val project = baseProject(clips = listOf(v), assets = listOf(asset))
         val rig = newRig(project)
-        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
-        assertFalse(out.data.passed)
-        val issue = out.data.issues.single { it.code == "dangling-source-binding" }
+        val issues = decodeIssues(rig.tool.execute(validationInput("p"), rig.ctx).data)
+        assertFalse(issues.passed())
+        val issue = issues.single { it.code == "dangling-source-binding" }
         assertTrue("ghost" in issue.message, issue.message)
     }
 
@@ -160,8 +188,8 @@ class ValidateProjectToolTest {
             source = Source(nodes = listOf(node)),
         )
         val rig = newRig(project)
-        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
-        assertTrue(out.data.passed)
+        val issues = decodeIssues(rig.tool.execute(validationInput("p"), rig.ctx).data)
+        assertTrue(issues.passed())
     }
 
     @Test fun flagsAudioVolumeOutOfRange() = runTest {
@@ -182,8 +210,8 @@ class ValidateProjectToolTest {
             assets = listOf(a),
         )
         val rig = newRig(project)
-        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
-        val issue = out.data.issues.single { it.code == "volume-range" }
+        val issues = decodeIssues(rig.tool.execute(validationInput("p"), rig.ctx).data)
+        val issue = issues.single { it.code == "volume-range" }
         assertEquals("error", issue.severity)
         assertEquals("a1", issue.clipId)
     }
@@ -207,8 +235,8 @@ class ValidateProjectToolTest {
             assets = listOf(a),
         )
         val rig = newRig(project)
-        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
-        val issue = out.data.issues.single { it.code == "fade-overlap" }
+        val issues = decodeIssues(rig.tool.execute(validationInput("p"), rig.ctx).data)
+        val issue = issues.single { it.code == "fade-overlap" }
         assertEquals("error", issue.severity)
     }
 
@@ -230,14 +258,13 @@ class ValidateProjectToolTest {
             assets = listOf(a),
         )
         val rig = newRig(project)
-        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
-        assertTrue(out.data.issues.any { it.code == "fade-negative" })
+        val issues = decodeIssues(rig.tool.execute(validationInput("p"), rig.ctx).data)
+        assertTrue(issues.any { it.code == "fade-negative" })
     }
 
     @Test fun warnsOnTimelineDurationMismatch() = runTest {
         val asset = assetWithId("a")
         val v = videoClip("c1", "a", Duration.ZERO, 5.seconds)
-        // Timeline duration shorter than max clip end — engines would truncate.
         val project = Project(
             id = ProjectId("p"),
             timeline = Timeline(
@@ -247,10 +274,10 @@ class ValidateProjectToolTest {
             assets = listOf(asset),
         )
         val rig = newRig(project)
-        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
-        val issue = out.data.issues.single { it.code == "duration-mismatch" }
+        val issues = decodeIssues(rig.tool.execute(validationInput("p"), rig.ctx).data)
+        val issue = issues.single { it.code == "duration-mismatch" }
         assertEquals("warn", issue.severity)
-        assertTrue(out.data.passed) // warnings do not block
+        assertTrue(issues.passed()) // warnings do not block
     }
 
     @Test fun flagsDanglingParentRef() = runTest {
@@ -262,16 +289,15 @@ class ValidateProjectToolTest {
         )
         val project = baseProject(source = Source(nodes = listOf(child)))
         val rig = newRig(project)
-        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
-        assertFalse(out.data.passed)
-        val issue = out.data.issues.single { it.code == "source-parent-dangling" }
+        val issues = decodeIssues(rig.tool.execute(validationInput("p"), rig.ctx).data)
+        assertFalse(issues.passed())
+        val issue = issues.single { it.code == "source-parent-dangling" }
         assertEquals("error", issue.severity)
         assertTrue("child" in issue.message, issue.message)
         assertTrue("ghost-parent" in issue.message, issue.message)
     }
 
     @Test fun flagsSourceCycle() = runTest {
-        // a → b → c → a
         val a = SourceNode(
             id = SourceNodeId("a"),
             kind = "narrative.scene",
@@ -292,11 +318,10 @@ class ValidateProjectToolTest {
         )
         val project = baseProject(source = Source(nodes = listOf(a, b, c)))
         val rig = newRig(project)
-        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
-        assertFalse(out.data.passed)
-        val cycleIssues = out.data.issues.filter { it.code == "source-parent-cycle" }
+        val issues = decodeIssues(rig.tool.execute(validationInput("p"), rig.ctx).data)
+        assertFalse(issues.passed())
+        val cycleIssues = issues.filter { it.code == "source-parent-cycle" }
         assertTrue(cycleIssues.isNotEmpty(), "must emit at least one source-parent-cycle issue")
-        // The rendered message should mention all three nodes in the cycle.
         val combined = cycleIssues.joinToString { it.message }
         assertTrue("a" in combined && "b" in combined && "c" in combined, combined)
     }
@@ -321,9 +346,9 @@ class ValidateProjectToolTest {
         )
         val project = baseProject(source = Source(nodes = listOf(world, scene, shot)))
         val rig = newRig(project)
-        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
-        assertTrue(out.data.passed)
-        assertTrue(out.data.issues.none { it.code.startsWith("source-") })
+        val issues = decodeIssues(rig.tool.execute(validationInput("p"), rig.ctx).data)
+        assertTrue(issues.passed())
+        assertTrue(issues.none { it.code.startsWith("source-") })
     }
 
     @Test fun selfLoopIsCycle() = runTest {
@@ -335,8 +360,8 @@ class ValidateProjectToolTest {
         )
         val project = baseProject(source = Source(nodes = listOf(self)))
         val rig = newRig(project)
-        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
-        assertTrue(out.data.issues.any { it.code == "source-parent-cycle" })
+        val issues = decodeIssues(rig.tool.execute(validationInput("p"), rig.ctx).data)
+        assertTrue(issues.any { it.code == "source-parent-cycle" })
     }
 
     @Test fun collectsMultipleIssuesPerClip() = runTest {
@@ -353,13 +378,12 @@ class ValidateProjectToolTest {
                 tracks = listOf(Track.Audio(TrackId("at"), listOf(bad))),
                 duration = 1.seconds,
             ),
-            // asset "missing" is not in project.assets — dangling too
         )
         val rig = newRig(project)
-        val out = rig.tool.execute(ValidateProjectTool.Input("p"), rig.ctx)
-        val codes = out.data.issues.map { it.code }.toSet()
+        val issues = decodeIssues(rig.tool.execute(validationInput("p"), rig.ctx).data)
+        val codes = issues.map { it.code }.toSet()
         assertTrue("dangling-asset" in codes)
         assertTrue("volume-range" in codes)
-        assertFalse(out.data.passed)
+        assertFalse(issues.passed())
     }
 }

@@ -46,7 +46,7 @@ fun Source.cycleAt(): List<SourceNodeId>? {
             }
             val parent = frame.parentsLeft.next()
             // Skip dangling refs — they're a separate diagnostic
-            // surfaced by ValidateProjectTool, not a cycle.
+            // surfaced by project_query(select=validation), not a cycle.
             if (parent !in byId) continue
             when (state[parent]) {
                 1 -> {

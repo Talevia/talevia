@@ -61,7 +61,7 @@ in-use cache hits survive the sweep. Pass `dryRun=true` on either tool to
 preview. Both are read-only when dryRun is set but share the same
 `project.write` permission.
 
-`validate_project` lints the project for structural invariants before
+`project_query(select=validation)` lints the project for structural invariants before
 export: dangling `assetId` (clip references an asset not in
 `project.assets`), dangling `sourceBinding` (references a source node
 that no longer exists), non-positive clip duration, audio `volume`
@@ -115,7 +115,7 @@ to one slice.
 default: refuses when any clip still references the asset, and returns
 the dependent clipIds in the error so you can prune them first. Pass
 `force=true` to remove anyway (Unix `rm -f` — leaves dangling clips
-that `validate_project` will flag). Does **not** delete bytes from
+that `project_query(select=validation)` will flag). Does **not** delete bytes from
 shared media storage; the same AssetId may live in snapshots or other
 projects. Typical flow: `project_query(select=assets, onlyUnused=true)` →
 `remove_asset`. For a broad sweep of dangling AIGC regenerations,

@@ -4,34 +4,35 @@ import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.Track
+import io.talevia.core.domain.ValidationIssue
 import kotlin.time.Duration
 
 /**
- * Per-axis structural lint checks for [ValidateProjectTool].
+ * Per-axis structural lint checks for [io.talevia.core.domain.computeProjectValidationIssues].
  *
  * Three axes today: timeline duration consistency, per-clip integrity
  * (asset / source-binding / volume / fade), and source-DAG integrity
  * (dangling parents, parent cycles). Extracted from
- * `ValidateProjectTool.kt` so the dispatcher class stays focused on
+ * `ValidateProjectTool.kt` (now folded into project_query select=validation) so the dispatcher class stays focused on
  * (input → checks → output) plumbing — each axis check is a pure
- * function over [Project] returning a list of [ValidateProjectTool.Issue].
+ * function over [Project] returning a list of [ValidationIssue].
  *
- * Composition by [ValidateProjectTool.Companion.computeIssues] (and
- * `ImportProjectFromJsonTool` at envelope-import time) — both call
+ * Composition by [io.talevia.core.domain.computeProjectValidationIssues]
+ * (and `ImportProjectFromJsonTool` at envelope-import time) — both call
  * sites concatenate the per-axis lists so an envelope import that
  * passes the linter must also pass on the target project.
  *
  * Behaviour is byte-identical to the previous file-private helpers.
  */
 
-internal fun timelineDurationIssues(project: Project): List<ValidateProjectTool.Issue> {
+internal fun timelineDurationIssues(project: Project): List<ValidationIssue> {
     val actualMax = project.timeline.tracks
         .flatMap { it.clips }
         .maxOfOrNull { it.timeRange.end }
         ?: Duration.ZERO
     if (project.timeline.duration < actualMax) {
         return listOf(
-            ValidateProjectTool.Issue(
+            ValidationIssue(
                 severity = "warn",
                 code = "duration-mismatch",
                 message = "timeline.duration (${project.timeline.duration.secondsString()}s) " +
@@ -47,13 +48,13 @@ internal fun clipIssues(
     project: Project,
     track: Track,
     clip: Clip,
-): List<ValidateProjectTool.Issue> {
-    val result = mutableListOf<ValidateProjectTool.Issue>()
+): List<ValidationIssue> {
+    val result = mutableListOf<ValidationIssue>()
     val trackIdValue = track.id.value
     val clipIdValue = clip.id.value
 
     if (clip.timeRange.duration <= Duration.ZERO) {
-        result += ValidateProjectTool.Issue(
+        result += ValidationIssue(
             severity = "error",
             code = "non-positive-duration",
             message = "clip duration must be > 0 (got ${clip.timeRange.duration.secondsString()}s)",
@@ -68,7 +69,7 @@ internal fun clipIssues(
         is Clip.Text -> null
     }
     if (assetId != null && project.assets.none { it.id.value == assetId }) {
-        result += ValidateProjectTool.Issue(
+        result += ValidationIssue(
             severity = "error",
             code = "dangling-asset",
             message = "clip references assetId '$assetId' which is not in project.assets",
@@ -79,7 +80,7 @@ internal fun clipIssues(
 
     for (nodeId in clip.sourceBinding) {
         if (nodeId !in project.source.byId) {
-            result += ValidateProjectTool.Issue(
+            result += ValidationIssue(
                 severity = "error",
                 code = "dangling-source-binding",
                 message = "clip binds source node '${nodeId.value}' which is not in project.source",
@@ -91,7 +92,7 @@ internal fun clipIssues(
 
     if (clip is Clip.Audio) {
         if (clip.volume < 0f || clip.volume > 4f) {
-            result += ValidateProjectTool.Issue(
+            result += ValidationIssue(
                 severity = "error",
                 code = "volume-range",
                 message = "audio clip volume ${clip.volume} is outside the [0, 4] range",
@@ -100,7 +101,7 @@ internal fun clipIssues(
             )
         }
         if (clip.fadeInSeconds < 0f || clip.fadeOutSeconds < 0f) {
-            result += ValidateProjectTool.Issue(
+            result += ValidationIssue(
                 severity = "error",
                 code = "fade-negative",
                 message = "audio clip has negative fade (in=${clip.fadeInSeconds}s, out=${clip.fadeOutSeconds}s)",
@@ -111,7 +112,7 @@ internal fun clipIssues(
         val durSec = clip.timeRange.duration.inWholeMilliseconds / 1000.0
         val fadeTotal = (clip.fadeInSeconds + clip.fadeOutSeconds).toDouble()
         if (fadeTotal > durSec) {
-            result += ValidateProjectTool.Issue(
+            result += ValidationIssue(
                 severity = "error",
                 code = "fade-overlap",
                 message = "audio fade-in + fade-out (${fadeTotal}s) exceeds clip duration (${durSec}s)",
@@ -155,17 +156,17 @@ private fun Duration.secondsString(): String {
  * staleness detection), and `passed=false` should block an export until
  * the agent fixes the DAG.
  */
-internal fun sourceDagIssues(project: Project): List<ValidateProjectTool.Issue> {
+internal fun sourceDagIssues(project: Project): List<ValidationIssue> {
     val nodes = project.source.nodes
     if (nodes.isEmpty()) return emptyList()
     val byId = project.source.byId
-    val issues = mutableListOf<ValidateProjectTool.Issue>()
+    val issues = mutableListOf<ValidationIssue>()
 
     // Tier 1 — dangling parents, reported per-edge.
     for (node in nodes) {
         for (parent in node.parents) {
             if (parent.nodeId !in byId) {
-                issues += ValidateProjectTool.Issue(
+                issues += ValidationIssue(
                     severity = "error",
                     code = "source-parent-dangling",
                     message = "source node '${node.id.value}' references missing parent " +
@@ -225,7 +226,7 @@ internal fun sourceDagIssues(project: Project): List<ValidateProjectTool.Issue> 
                 if (reported.add(cycleNodes)) {
                     val rendered = cycleNodes.joinToString(" → ") { it.value } +
                         " → ${next.value}"
-                    issues += ValidateProjectTool.Issue(
+                    issues += ValidationIssue(
                         severity = "error",
                         code = "source-parent-cycle",
                         message = "source DAG has a parent-cycle involving: $rendered. Use " +

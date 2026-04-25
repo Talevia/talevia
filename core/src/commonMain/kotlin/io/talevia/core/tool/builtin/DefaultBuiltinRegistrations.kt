@@ -49,7 +49,6 @@ import io.talevia.core.tool.builtin.project.ProjectPinActionTool
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
 import io.talevia.core.tool.builtin.project.ProjectSnapshotActionTool
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
-import io.talevia.core.tool.builtin.project.ValidateProjectTool
 import io.talevia.core.tool.builtin.session.EstimateSessionTokensTool
 import io.talevia.core.tool.builtin.session.ExportSessionTool
 import io.talevia.core.tool.builtin.session.ForkSessionTool
@@ -226,7 +225,6 @@ fun ToolRegistry.registerProjectTools(
     register(CreateProjectFromTemplateTool(projects))
     register(ListProjectsTool(projects))
     register(ProjectQueryTool(projects))
-    register(ValidateProjectTool(projects))
     register(RegenerateStaleClipsTool(projects, this))
     register(ProjectMaintenanceActionTool(projects, engine))
     register(ProjectPinActionTool(projects))

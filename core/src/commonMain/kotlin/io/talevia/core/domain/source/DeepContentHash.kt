@@ -27,7 +27,7 @@ import io.talevia.core.util.fnv1a64Hex
  * shared ancestors (typical: one `style_bible` parents five `character_ref`s)
  * pays O(nodes) not O(nodes × depth). A missing parent (dangling ref) is
  * folded as the sentinel `missing:<id>` so the deep hash stays deterministic
- * even when the DAG is mid-edit; `ValidateProjectTool` is the lane that
+ * even when the DAG is mid-edit; `project_query(select=validation)` is the lane that
  * surfaces the dangling-ref issue separately.
  *
  * Kept deliberately as a free function on [Source] rather than a computed
@@ -42,7 +42,7 @@ fun Source.deepContentHashOf(
     cache[nodeId]?.let { return it }
     val node = byId[nodeId] ?: run {
         // Dangling ref: fold a stable sentinel so partial DAGs still hash
-        // deterministically. ValidateProjectTool reports dangling refs
+        // deterministically. project_query(select=validation) reports dangling refs
         // through its own warning channel.
         val sentinel = "missing:${nodeId.value}"
         cache[nodeId] = sentinel

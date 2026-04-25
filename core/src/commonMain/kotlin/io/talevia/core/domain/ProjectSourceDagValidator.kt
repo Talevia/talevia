@@ -7,15 +7,15 @@ import io.talevia.core.domain.source.Source
  * Lightweight structural check over `Project.source`: detects dangling
  * parent refs and parent cycles. Intended for the load-path auto-validation
  * in `FileProjectStore.get` — much narrower than
- * `ValidateProjectTool.sourceDagIssues` (which also walks clips, assets,
+ * `project_query(select=validation).sourceDagIssues` (which also walks clips, assets,
  * audio envelopes, etc.) so the cost is `O(nodes + edges)` per load.
  *
  * Returns a list of human-readable issue strings. Empty list → clean DAG.
  *
  * Kept as a plain `object` (not inside a class) so the production store,
- * `ValidateProjectTool`, and tests can all share the same algorithm
+ * `project_query(select=validation)`, and tests can all share the same algorithm
  * without duplicating DFS logic. The tool's equivalent branch delegates
- * to this helper; drift between the two would mean "validate_project
+ * to this helper; drift between the two would mean "project_query(select=validation)
  * passed but load-time warning fired" (or vice versa), which confuses
  * users reading logs.
  */

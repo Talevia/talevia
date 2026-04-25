@@ -16,7 +16,7 @@ import io.talevia.core.tool.ToolResult
  * - Refuses by default when any clip still references the asset; the
  *   error lists dependent clip ids so the agent can prune them first.
  * - With `force=true`, removes anyway leaving dangling clips for
- *   `validate_project` to surface (Unix `rm -f` semantics).
+ *   `project_query(select=validation)` to surface (Unix `rm -f` semantics).
  * - **Does NOT touch asset bytes** (cross-project sharing is real;
  *   byte-level GC is a separate concern).
  * - **Does NOT cascade to dependent clips** — keeping the surface
@@ -79,7 +79,7 @@ internal suspend fun executeRemoveAsset(
     } else {
         "Removed asset ${targetId.value} from project ${pid.value}. " +
             "${dependentClips.size} clip(s) now dangle: ${dependentClips.joinToString(", ")}. " +
-            "Run validate_project to see the fallout."
+            "Run project_query(select=validation) to see the fallout."
     }
     return ToolResult(
         title = "remove asset ${targetId.value}",

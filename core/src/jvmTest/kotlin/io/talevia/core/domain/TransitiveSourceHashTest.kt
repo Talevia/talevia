@@ -86,7 +86,7 @@ class TransitiveSourceHashTest {
     @Test fun danglingParentFoldsAsSentinelRatherThanThrowing() {
         // Source references a parent that isn't in byId. deepContentHashOf
         // must fold a stable "missing:<id>" sentinel instead of crashing —
-        // ValidateProjectTool is the lane that surfaces dangling refs.
+        // project_query(select=validation) is the lane that surfaces dangling refs.
         val source = Source(
             nodes = listOf(
                 genericNode("only-child", bodyWith("c1"), parents = listOf("ghost-parent")),
