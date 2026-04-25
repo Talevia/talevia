@@ -28,7 +28,7 @@ import kotlinx.serialization.serializer
  * agent itself couldn't call.
  *
  * Closes the session-lane write verb set:
- *  - `fork_session` — branch from a point, parent unchanged.
+ *  - `session_action(action="fork")` — branch from a point, parent unchanged.
  *  - `rename_session` — cosmetic metadata edit.
  *  - `revert_session` — **this** — destructive rewind of a single session.
  *
@@ -55,7 +55,7 @@ import kotlinx.serialization.serializer
  * implicit because the agent is the only one running in that session.
  *
  * Permission: `session.write` (reuses the keyword introduced for
- * `fork_session`).
+ * `session_action(action="fork")`).
  */
 class RevertSessionTool(
     private val sessions: SessionStore,

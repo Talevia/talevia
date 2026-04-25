@@ -31,7 +31,7 @@ object DefaultPermissionRuleset {
         // Session introspection — reading session metadata (session_query) is
         // local-only, no I/O, no cost. Silent by default.
         PermissionRule(permission = "session.read", pattern = "*", action = PermissionAction.ALLOW),
-        // Session mutation (fork_session). Purely local state: a new SessionId plus
+        // Session mutation (session_action(action="fork")). Purely local state: a new SessionId plus
         // copied messages. No external cost, no network, no filesystem leak —
         // match `source.write` / `project.write` and default to ALLOW. Server
         // deployments can flip this to ASK if they want a paper-trail prompt.

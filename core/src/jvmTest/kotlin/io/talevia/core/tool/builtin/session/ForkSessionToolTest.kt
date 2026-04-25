@@ -22,6 +22,14 @@ import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/**
+ * Cycle 144 folded `fork_session` into
+ * `session_action(action="fork")`. This suite continues to pin the
+ * fork semantics — whole-history default, custom title override,
+ * anchor-truncation, missing-parent + wrong-session-anchor errors,
+ * fresh-id guarantee — but routes through the unified action
+ * dispatcher.
+ */
 class ForkSessionToolTest {
 
     private data class Rig(
@@ -73,24 +81,37 @@ class ForkSessionToolTest {
         }
     }
 
+    private fun forkInput(
+        sessionId: String,
+        anchorMessageId: String? = null,
+        newTitle: String? = null,
+    ) = SessionActionTool.Input(
+        action = "fork",
+        sessionId = sessionId,
+        anchorMessageId = anchorMessageId,
+        newTitle = newTitle,
+    )
+
     @Test fun forksWholeHistoryByDefault() = runTest {
         val rig = rig()
         seedSession(rig.store)
 
-        val out = ForkSessionTool(rig.store).execute(
-            ForkSessionTool.Input(sessionId = "s-parent"),
+        val out = SessionActionTool(rig.store).execute(
+            forkInput(sessionId = "s-parent"),
             rig.ctx,
         ).data
 
-        assertEquals("s-parent", out.parentSessionId)
-        assertEquals(3, out.copiedMessageCount)
-        assertNull(out.anchorMessageId)
-        assertNotEquals("s-parent", out.newSessionId)
-        // Default title = "<parent title> (fork)"
+        // Output.sessionId carries the parent (the action's input target).
+        assertEquals("s-parent", out.sessionId)
+        assertEquals(3, out.forkCopiedMessageCount)
+        assertNull(out.forkAnchorMessageId)
+        assertNotNull(out.forkedSessionId)
+        assertNotEquals("s-parent", out.forkedSessionId)
+        // Default branch title = "<parent title> (fork)".
         assertEquals("my-session (fork)", out.newTitle)
 
         // Branch exists in the store with parentId backlink.
-        val branch = rig.store.getSession(SessionId(out.newSessionId))!!
+        val branch = rig.store.getSession(SessionId(out.forkedSessionId!!))!!
         assertEquals(SessionId("s-parent"), branch.parentId)
         assertEquals("my-session (fork)", branch.title)
     }
@@ -98,35 +119,35 @@ class ForkSessionToolTest {
     @Test fun customTitleOverridesDefault() = runTest {
         val rig = rig()
         seedSession(rig.store)
-        val out = ForkSessionTool(rig.store).execute(
-            ForkSessionTool.Input(sessionId = "s-parent", newTitle = "Mei arc"),
+        val out = SessionActionTool(rig.store).execute(
+            forkInput(sessionId = "s-parent", newTitle = "Mei arc"),
             rig.ctx,
         ).data
         assertEquals("Mei arc", out.newTitle)
-        assertEquals("Mei arc", rig.store.getSession(SessionId(out.newSessionId))!!.title)
+        assertEquals("Mei arc", rig.store.getSession(SessionId(out.forkedSessionId!!))!!.title)
     }
 
     @Test fun anchorTruncatesBranchHistory() = runTest {
         val rig = rig()
         seedSession(rig.store, messages = listOf(1_000L, 2_000L, 3_000L, 4_000L))
 
-        val out = ForkSessionTool(rig.store).execute(
-            ForkSessionTool.Input(
+        val out = SessionActionTool(rig.store).execute(
+            forkInput(
                 sessionId = "s-parent",
                 anchorMessageId = "m-s-parent-1", // second message
             ),
             rig.ctx,
         ).data
 
-        assertEquals(2, out.copiedMessageCount)
-        assertEquals("m-s-parent-1", out.anchorMessageId)
+        assertEquals(2, out.forkCopiedMessageCount)
+        assertEquals("m-s-parent-1", out.forkAnchorMessageId)
     }
 
     @Test fun unknownSessionFailsLoud() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            ForkSessionTool(rig.store).execute(
-                ForkSessionTool.Input(sessionId = "ghost"),
+            SessionActionTool(rig.store).execute(
+                forkInput(sessionId = "ghost"),
                 rig.ctx,
             )
         }
@@ -141,8 +162,8 @@ class ForkSessionToolTest {
 
         // Anchor belongs to s-b, not s-a.
         val ex = assertFailsWith<IllegalArgumentException> {
-            ForkSessionTool(rig.store).execute(
-                ForkSessionTool.Input(
+            SessionActionTool(rig.store).execute(
+                forkInput(
                     sessionId = "s-a",
                     anchorMessageId = "m-s-b-0",
                 ),
@@ -155,12 +176,18 @@ class ForkSessionToolTest {
     @Test fun forkedSessionHasFreshId() = runTest {
         val rig = rig()
         seedSession(rig.store)
-        val out = ForkSessionTool(rig.store).execute(
-            ForkSessionTool.Input(sessionId = "s-parent"),
+        val out = SessionActionTool(rig.store).execute(
+            forkInput(sessionId = "s-parent"),
             rig.ctx,
         ).data
         // Fresh UUID — isn't a reuse of parent id.
-        assertTrue(out.newSessionId.isNotBlank())
-        assertNotEquals("s-parent", out.newSessionId)
+        assertNotNull(out.forkedSessionId)
+        assertTrue(out.forkedSessionId!!.isNotBlank())
+        assertNotEquals("s-parent", out.forkedSessionId)
+    }
+
+    private fun <T : Any> assertNotNull(value: T?): T {
+        assertTrue(value != null, "expected non-null")
+        return value!!
     }
 }

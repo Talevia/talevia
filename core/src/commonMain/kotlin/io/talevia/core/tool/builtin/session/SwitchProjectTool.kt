@@ -70,7 +70,7 @@ class SwitchProjectTool(
          * Optional — omit to default to the tool's owning session
          * (`ToolContext.sessionId`). Pass an explicit id only to rebind a
          * different session than the one currently dispatching. Matches the
-         * [SessionActionTool] / [ForkSessionTool] / [CompactSessionTool]
+         * [SessionActionTool] / [SessionActionTool] / [CompactSessionTool]
          * pattern so the agent never has to guess the current sessionId.
          */
         val sessionId: String? = null,

@@ -8,7 +8,7 @@ import io.talevia.core.agent.prompt.PROMPT_ONBOARDING_LANE
  * Prepend a two-line identity banner ("Current project" + "Current session")
  * to the configured system prompt so every turn reminds the model of the
  * session's current binding (VISION §5.4) *and* the session id it should pass
- * to tools that require one (switch_project, fork_session, etc.). Without the
+ * to tools that require one (switch_project, session_action(action="fork"), etc.). Without the
  * session line the model tends to invent ids like "current" or
  * "session-unknown", which every session-scoped tool correctly rejects.
  *

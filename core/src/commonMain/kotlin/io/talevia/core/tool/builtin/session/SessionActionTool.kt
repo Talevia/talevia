@@ -10,6 +10,7 @@ import io.talevia.core.tool.builtin.session.action.executeRemovePermissionRule
 import io.talevia.core.tool.builtin.session.action.executeSessionArchive
 import io.talevia.core.tool.builtin.session.action.executeSessionDelete
 import io.talevia.core.tool.builtin.session.action.executeSessionExportBusTrace
+import io.talevia.core.tool.builtin.session.action.executeSessionFork
 import io.talevia.core.tool.builtin.session.action.executeSessionImport
 import io.talevia.core.tool.builtin.session.action.executeSessionRename
 import io.talevia.core.tool.builtin.session.action.executeSessionSetSpendCap
@@ -102,9 +103,15 @@ class SessionActionTool(
          * the dispatch is running.
          */
         val sessionId: String? = null,
-        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, `"set_system_prompt"`, `"export_bus_trace"`, `"set_tool_enabled"`, or `"set_spend_cap"`. */
+        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, `"set_system_prompt"`, `"export_bus_trace"`, `"set_tool_enabled"`, `"set_spend_cap"`, or `"fork"`. */
         val action: String,
-        /** Required for `action="rename"`. Must be non-blank. Ignored on other actions. */
+        /**
+         * `action="rename"`: required, must be non-blank — the renamed
+         * session's new title.
+         * `action="fork"`: optional new title for the branch. Defaults
+         * to `"<parent title> (fork)"` when null/blank.
+         * Ignored on every other action.
+         */
         val newTitle: String? = null,
         /**
          * Permission keyword (e.g. `"fs.write"`) the rule to remove
@@ -195,6 +202,17 @@ class SessionActionTool(
          * `session_query(select=spend)`.
          */
         val capCents: Long? = null,
+        /**
+         * `action=fork` only. Optional anchor — only messages
+         * at-or-before this id (in parent's `(createdAt, id)` order)
+         * are copied to the branch. Everything after the anchor is
+         * dropped from the branch. Omit / null to copy the whole
+         * parent history. Ignored on every other action.
+         *
+         * Anchor that doesn't belong to the parent session fails loud
+         * (the store's `require` surfaces it verbatim).
+         */
+        val anchorMessageId: String? = null,
     )
 
     @Serializable data class Output(
@@ -295,6 +313,23 @@ class SessionActionTool(
          * (the cap was cleared). The action echo discriminates.
          */
         val spendCapCents: Long? = null,
+        /**
+         * `fork` only: id of the new branch session minted by the
+         * fork. The parent session id is in [sessionId] (the action's
+         * input target). Null on every other action.
+         */
+        val forkedSessionId: String? = null,
+        /**
+         * `fork` only: anchor message id echoed for caller convenience
+         * — null means the whole parent history was copied. Always-null
+         * on every other action.
+         */
+        val forkAnchorMessageId: String? = null,
+        /**
+         * `fork` only: number of parent messages copied into the
+         * branch. Zero on every other action.
+         */
+        val forkCopiedMessageCount: Int = 0,
     )
 
     override val id: String = "session_action"
@@ -312,9 +347,12 @@ class SessionActionTool(
             "session's `disabledToolIds` set (disabled tools are filtered from the next " +
             "turn's tool spec — use to enforce 'stop using <tool>'; no-op when already in " +
             "the requested state), `set_spend_cap`+`capCents` configures the AIGC spend " +
-            "cap (capCents=null clears, 0 blocks, positive = cents). sessionId defaults " +
-            "to owning session except on delete and import. Permission: session.write " +
-            "(delete=session.destructive)."
+            "cap (capCents=null clears, 0 blocks, positive = cents), `fork` branches the " +
+            "session — creates a new session with parentId pointing at the source, copies " +
+            "messages up to optional `anchorMessageId` (omit to copy whole history); use " +
+            "for 'try a different approach from here' flows. `newTitle` optional (defaults " +
+            "to '<parent title> (fork)'). sessionId defaults to owning session except on " +
+            "delete and import. Permission: session.write (delete=session.destructive)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
 
@@ -349,7 +387,7 @@ class SessionActionTool(
                 put("type", "string")
                 put(
                     "description",
-                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, `set_system_prompt`, `export_bus_trace`, `set_tool_enabled`, or `set_spend_cap`.",
+                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, `set_system_prompt`, `export_bus_trace`, `set_tool_enabled`, `set_spend_cap`, or `fork`.",
                 )
                 put(
                     "enum",
@@ -365,13 +403,18 @@ class SessionActionTool(
                             JsonPrimitive("export_bus_trace"),
                             JsonPrimitive("set_tool_enabled"),
                             JsonPrimitive("set_spend_cap"),
+                            JsonPrimitive("fork"),
                         ),
                     ),
                 )
             }
             putJsonObject("newTitle") {
                 put("type", "string")
-                put("description", "Required for action=rename. Must be non-blank.")
+                put(
+                    "description",
+                    "Required for action=rename (must be non-blank). Optional for action=fork " +
+                        "(defaults to '<parent title> (fork)').",
+                )
             }
             putJsonObject("permission") {
                 put("type", "string")
@@ -452,6 +495,16 @@ class SessionActionTool(
                         "non-null. No-op when already in the requested state.",
                 )
             }
+            putJsonObject("anchorMessageId") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Used by action=fork. Optional anchor — only messages at-or-before " +
+                        "this id (in parent's (createdAt, id) order) are copied to the " +
+                        "branch. Omit to copy the whole parent history. Anchor that doesn't " +
+                        "belong to the parent session fails loud.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("action"))))
         put("additionalProperties", false)
@@ -471,10 +524,11 @@ class SessionActionTool(
             "export_bus_trace" -> executeSessionExportBusTrace(busTrace, input, ctx)
             "set_tool_enabled" -> executeSessionSetToolEnabled(sessions, clock, input, ctx)
             "set_spend_cap" -> executeSessionSetSpendCap(sessions, clock, input, ctx)
+            "fork" -> executeSessionFork(sessions, input, ctx)
             else -> error(
                 "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, " +
                     "remove_permission_rule, import, set_system_prompt, export_bus_trace, " +
-                    "set_tool_enabled, set_spend_cap",
+                    "set_tool_enabled, set_spend_cap, fork",
             )
         }
     }
