@@ -26,7 +26,8 @@ internal val SESSION_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
                     "cache_stats | " +
                     "context_pressure | run_state_history | tool_spec_budget | run_failure | " +
                     "fallback_history | cancellation_history | permission_history | " +
-                    "permission_rules | preflight_summary | recap | step_history | active_run_summary | bus_trace | text_search.",
+                    "permission_rules | preflight_summary | recap | step_history | active_run_summary | " +
+                    "bus_trace | text_search | token_estimate.",
             )
         }
         putJsonObject("sessionId") {
@@ -102,6 +103,15 @@ internal val SESSION_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
         putJsonObject("query") {
             put("type", "string")
             put("description", "Required for text_search; case-insensitive substring.")
+        }
+        putJsonObject("includeBreakdown") {
+            put("type", "boolean")
+            put(
+                "description",
+                "select=token_estimate only. When true, include per-message token rows " +
+                    "(most-recent first) on the single output row. Default false for a terse " +
+                    "totals-only response — large sessions would produce a big payload otherwise.",
+            )
         }
     }
     put("required", JsonArray(listOf(JsonPrimitive("select"))))

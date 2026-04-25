@@ -34,6 +34,7 @@ import io.talevia.core.tool.builtin.session.query.SpendSummaryRow
 import io.talevia.core.tool.builtin.session.query.StatusRow
 import io.talevia.core.tool.builtin.session.query.StepHistoryRow
 import io.talevia.core.tool.builtin.session.query.TextSearchMatchRow
+import io.talevia.core.tool.builtin.session.query.TokenEstimateRow
 import io.talevia.core.tool.builtin.session.query.ToolCallRow
 import io.talevia.core.tool.builtin.session.query.ToolSpecBudgetRow
 import io.talevia.core.tool.builtin.session.query.runActiveRunSummaryQuery
@@ -61,6 +62,7 @@ import io.talevia.core.tool.builtin.session.query.runSpendSummaryQuery
 import io.talevia.core.tool.builtin.session.query.runStatusQuery
 import io.talevia.core.tool.builtin.session.query.runStepHistoryQuery
 import io.talevia.core.tool.builtin.session.query.runTextSearchQuery
+import io.talevia.core.tool.builtin.session.query.runTokenEstimateQuery
 import io.talevia.core.tool.builtin.session.query.runToolCallsQuery
 import io.talevia.core.tool.builtin.session.query.runToolSpecBudgetQuery
 import io.talevia.core.tool.query.QueryDispatcher
@@ -187,6 +189,14 @@ class SessionQueryTool(
          * the search is cross-session, otherwise scoped to that session.
          */
         val query: String? = null,
+        /**
+         * `select=token_estimate` only. When true, include per-message
+         * token rows (most-recent first) on the single output row. Default
+         * false keeps the response terse so a 1000-message session doesn't
+         * blow up the tool-result payload — agents only reach for the
+         * breakdown when they're debugging *which* message is heavy.
+         */
+        val includeBreakdown: Boolean? = null,
     )
 
     @Serializable data class Output(
@@ -235,7 +245,11 @@ class SessionQueryTool(
             "  • bus_trace — per-session bus event ring buffer {kind, epochMs, summary}; " +
             "filters: kind (event class), sinceEpochMs.\n" +
             "  • text_search — substring grep over Part.Text content {messageId, partId, " +
-            "snippet, matchOffset}; requires query, optional sessionId for scope."
+            "snippet, matchOffset}; requires query, optional sessionId for scope.\n" +
+            "  • token_estimate — pre-compaction session-weight probe {messageCount, " +
+            "totalTokens, largestMessageTokens, breakdown?}. Heuristic via TokenEstimator " +
+            "(matches the compactor's trigger). includeBreakdown=true adds per-message rows " +
+            "(most-recent first); default terse."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.read")
@@ -272,6 +286,7 @@ class SessionQueryTool(
         SELECT_TEXT_SEARCH -> TextSearchMatchRow.serializer()
         SELECT_STEP_HISTORY -> StepHistoryRow.serializer()
         SELECT_ACTIVE_RUN_SUMMARY -> ActiveRunSummaryRow.serializer()
+        SELECT_TOKEN_ESTIMATE -> TokenEstimateRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
 
@@ -316,6 +331,7 @@ class SessionQueryTool(
             SELECT_BUS_TRACE -> runBusTraceQuery(busTrace, input, limit, offset)
             SELECT_TEXT_SEARCH -> runTextSearchQuery(sessions, input, limit, offset)
             SELECT_ACTIVE_RUN_SUMMARY -> runActiveRunSummaryQuery(sessions, agentStates, input)
+            SELECT_TOKEN_ESTIMATE -> runTokenEstimateQuery(sessions, input)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -360,6 +376,7 @@ class SessionQueryTool(
         const val SELECT_ACTIVE_RUN_SUMMARY = "active_run_summary"
         const val SELECT_BUS_TRACE = "bus_trace"
         const val SELECT_TEXT_SEARCH = "text_search"
+        const val SELECT_TOKEN_ESTIMATE = "token_estimate"
         internal val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
             SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
@@ -370,6 +387,7 @@ class SessionQueryTool(
             SELECT_PERMISSION_HISTORY, SELECT_PERMISSION_RULES,
             SELECT_PREFLIGHT_SUMMARY, SELECT_RECAP, SELECT_STEP_HISTORY,
             SELECT_ACTIVE_RUN_SUMMARY, SELECT_BUS_TRACE, SELECT_TEXT_SEARCH,
+            SELECT_TOKEN_ESTIMATE,
         )
 
         private const val DEFAULT_LIMIT = 100

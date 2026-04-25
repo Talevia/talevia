@@ -17,8 +17,10 @@ import io.talevia.core.session.Part
 import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolContext
+import io.talevia.core.tool.builtin.session.query.TokenEstimateRow
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Instant
+import kotlinx.serialization.builtins.ListSerializer
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -26,6 +28,14 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
+/**
+ * Cycle 141 folded `estimate_session_tokens` into
+ * `session_query(select=token_estimate)`. This suite continues to
+ * exercise the pre-compaction session-weight probe — empty session,
+ * heuristic-tracked totals, optional per-message breakdown,
+ * largest-message tracking, missing-session error — but routes
+ * through the unified dispatcher.
+ */
 class EstimateSessionTokensToolTest {
 
     private data class Rig(
@@ -123,18 +133,38 @@ class EstimateSessionTokensToolTest {
         )
     }
 
+    private fun tokenEstimateInput(sessionId: String, includeBreakdown: Boolean? = null) =
+        SessionQueryTool.Input(
+            select = SessionQueryTool.SELECT_TOKEN_ESTIMATE,
+            sessionId = sessionId,
+            includeBreakdown = includeBreakdown,
+        )
+
+    private fun decodeRow(out: SessionQueryTool.Output): TokenEstimateRow {
+        assertEquals(SessionQueryTool.SELECT_TOKEN_ESTIMATE, out.select)
+        assertEquals(1, out.total)
+        assertEquals(1, out.returned)
+        val rows = JsonConfig.default.decodeFromJsonElement(
+            ListSerializer(TokenEstimateRow.serializer()),
+            out.rows,
+        )
+        return rows.single()
+    }
+
     @Test fun emptySessionReturnsZero() = runTest {
         val rig = rig()
         newSession(rig.store)
-        val out = EstimateSessionTokensTool(rig.store).execute(
-            EstimateSessionTokensTool.Input(sessionId = "s-1"),
-            rig.ctx,
-        ).data
-        assertEquals("s-1", out.sessionId)
-        assertEquals(0, out.messageCount)
-        assertEquals(0, out.totalTokens)
-        assertEquals(0, out.largestMessageTokens)
-        assertNull(out.messages)
+        val row = decodeRow(
+            SessionQueryTool(rig.store).execute(
+                tokenEstimateInput("s-1"),
+                rig.ctx,
+            ).data,
+        )
+        assertEquals("s-1", row.sessionId)
+        assertEquals(0, row.messageCount)
+        assertEquals(0, row.totalTokens)
+        assertEquals(0, row.largestMessageTokens)
+        assertNull(row.breakdown)
     }
 
     @Test fun wellPopulatedSessionSumsTokens() = runTest {
@@ -148,19 +178,18 @@ class EstimateSessionTokensToolTest {
             parentId = "u-1", atMs = 2_000L, text = asstText,
         )
 
-        val out = EstimateSessionTokensTool(rig.store).execute(
-            EstimateSessionTokensTool.Input(sessionId = "s-1"),
-            rig.ctx,
-        ).data
+        val row = decodeRow(
+            SessionQueryTool(rig.store).execute(
+                tokenEstimateInput("s-1"),
+                rig.ctx,
+            ).data,
+        )
 
-        assertEquals(2, out.messageCount)
-        // Independent recomputation — `forHistory` drives both sides, so we
-        // compute the expected result directly against the same store view.
+        assertEquals(2, row.messageCount)
         val expected = TokenEstimator.forHistory(rig.store.listMessagesWithParts(SessionId("s-1")))
-        assertEquals(expected, out.totalTokens)
-        // Sanity: token counts track text length via the ~4-char heuristic.
-        assertEquals(TokenEstimator.forText(userText) + TokenEstimator.forText(asstText), out.totalTokens)
-        assertTrue(out.largestMessageTokens > 0)
+        assertEquals(expected, row.totalTokens)
+        assertEquals(TokenEstimator.forText(userText) + TokenEstimator.forText(asstText), row.totalTokens)
+        assertTrue(row.largestMessageTokens > 0)
     }
 
     @Test fun includeBreakdownExposesPerMessageTokens() = runTest {
@@ -172,12 +201,14 @@ class EstimateSessionTokensToolTest {
             parentId = "u-1", atMs = 2_000L, text = "a".repeat(200),
         )
 
-        val out = EstimateSessionTokensTool(rig.store).execute(
-            EstimateSessionTokensTool.Input(sessionId = "s-1", includeBreakdown = true),
-            rig.ctx,
-        ).data
+        val row = decodeRow(
+            SessionQueryTool(rig.store).execute(
+                tokenEstimateInput("s-1", includeBreakdown = true),
+                rig.ctx,
+            ).data,
+        )
 
-        val rows = assertNotNull(out.messages, "breakdown should be non-null when includeBreakdown=true")
+        val rows = assertNotNull(row.breakdown, "breakdown should be non-null when includeBreakdown=true")
         assertEquals(2, rows.size)
         // Most-recent first → assistant then user.
         assertEquals("a-1", rows[0].id)
@@ -191,7 +222,6 @@ class EstimateSessionTokensToolTest {
     @Test fun largestMessageTokensTracksMax() = runTest {
         val rig = rig()
         newSession(rig.store)
-        // Sizes chosen so token counts are strictly ordered under the ~4-char heuristic.
         appendUserWithText(rig.store, "s-1", "u-1", atMs = 1_000L, text = "x".repeat(40))
         appendAssistantWithText(
             rig.store, "s-1", "a-1",
@@ -199,25 +229,26 @@ class EstimateSessionTokensToolTest {
         )
         appendUserWithText(rig.store, "s-1", "u-2", atMs = 3_000L, text = "x".repeat(120))
 
-        val out = EstimateSessionTokensTool(rig.store).execute(
-            EstimateSessionTokensTool.Input(sessionId = "s-1", includeBreakdown = true),
-            rig.ctx,
-        ).data
+        val row = decodeRow(
+            SessionQueryTool(rig.store).execute(
+                tokenEstimateInput("s-1", includeBreakdown = true),
+                rig.ctx,
+            ).data,
+        )
 
-        assertEquals(3, out.messageCount)
-        val rows = assertNotNull(out.messages)
+        assertEquals(3, row.messageCount)
+        val rows = assertNotNull(row.breakdown)
         val expectedMax = rows.maxOf { it.tokens }
-        assertEquals(expectedMax, out.largestMessageTokens)
-        // And that max should belong to the 400-char assistant row.
+        assertEquals(expectedMax, row.largestMessageTokens)
         val asstTokens = TokenEstimator.forText("x".repeat(400))
-        assertEquals(asstTokens, out.largestMessageTokens)
+        assertEquals(asstTokens, row.largestMessageTokens)
     }
 
     @Test fun missingSessionFailsLoudly() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            EstimateSessionTokensTool(rig.store).execute(
-                EstimateSessionTokensTool.Input(sessionId = "ghost"),
+            SessionQueryTool(rig.store).execute(
+                tokenEstimateInput("ghost"),
                 rig.ctx,
             )
         }
@@ -234,20 +265,19 @@ class EstimateSessionTokensToolTest {
             parentId = "u-1", atMs = 2_000L, text = "a".repeat(200),
         )
 
-        val res = EstimateSessionTokensTool(rig.store).execute(
-            EstimateSessionTokensTool.Input(sessionId = "s-1"),
-            rig.ctx,
+        val row = decodeRow(
+            SessionQueryTool(rig.store).execute(
+                tokenEstimateInput("s-1"),
+                rig.ctx,
+            ).data,
         )
-        assertNull(res.data.messages)
+        assertNull(row.breakdown)
 
-        // Serialize the output to JSON and confirm the `messages` key either
-        // doesn't appear or is explicit null — the serialized payload is the
-        // actual tool-result surface the LLM sees, so the terse contract
-        // lives there.
-        val json = JsonConfig.default.encodeToString(EstimateSessionTokensTool.Output.serializer(), res.data)
-        val parsed = JsonConfig.default.parseToJsonElement(json).toString()
-        // Either key absent (default = null, omitted), or key present with null value.
-        val ok = !parsed.contains("\"messages\"") || parsed.contains("\"messages\":null")
-        assertTrue(ok, "expected terse JSON to omit or null-out `messages`; got: $parsed")
+        // Serialize the row to JSON and confirm the `breakdown` key either
+        // doesn't appear or is explicit null — the serialized payload is what
+        // the LLM ultimately consumes, so the terse contract lives there.
+        val json = JsonConfig.default.encodeToString(TokenEstimateRow.serializer(), row)
+        val ok = !json.contains("\"breakdown\"") || json.contains("\"breakdown\":null")
+        assertTrue(ok, "expected terse JSON to omit or null-out `breakdown`; got: $json")
     }
 }

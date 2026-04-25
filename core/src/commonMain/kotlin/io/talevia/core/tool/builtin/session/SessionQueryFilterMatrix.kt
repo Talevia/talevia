@@ -25,6 +25,7 @@ import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_SP
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_STATUS
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_STEP_HISTORY
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_TEXT_SEARCH
+import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_TOKEN_ESTIMATE
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_TOOL_CALLS
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_TOOL_SPEC_BUDGET
 
@@ -77,6 +78,7 @@ internal val SESSION_QUERY_ACCEPTED_FIELDS: Map<String, Set<String>> = mapOf(
     SELECT_ACTIVE_RUN_SUMMARY to setOf("sessionId"),
     SELECT_BUS_TRACE to setOf("sessionId", "kind", "sinceEpochMs"),
     SELECT_TEXT_SEARCH to setOf("query", "sessionId"),
+    SELECT_TOKEN_ESTIMATE to setOf("sessionId", "includeBreakdown"),
 )
 
 /**
@@ -109,6 +111,7 @@ internal fun rejectIncompatibleSessionQueryFilters(
         if (input.messageId != null) add("messageId")
         if (input.sinceEpochMs != null) add("sinceEpochMs")
         if (input.query != null) add("query")
+        if (input.includeBreakdown != null) add("includeBreakdown")
     }
     val misapplied = present.filterNot { it in accepted }
     if (misapplied.isEmpty()) return
