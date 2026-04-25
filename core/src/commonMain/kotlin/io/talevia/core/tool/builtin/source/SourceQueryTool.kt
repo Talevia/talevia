@@ -7,25 +7,9 @@ import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
-import io.talevia.core.tool.builtin.source.query.AsciiTreeRow
-import io.talevia.core.tool.builtin.source.query.BodyRevisionRow
-import io.talevia.core.tool.builtin.source.query.DagSummaryRow
-import io.talevia.core.tool.builtin.source.query.DotRow
-import io.talevia.core.tool.builtin.source.query.LeafRow
-import io.talevia.core.tool.builtin.source.query.NodeDetailRow
-import io.talevia.core.tool.builtin.source.query.NodeRow
-import io.talevia.core.tool.builtin.source.query.OrphanRow
-import io.talevia.core.tool.builtin.source.query.runAncestorsQuery
-import io.talevia.core.tool.builtin.source.query.runAsciiTreeQuery
-import io.talevia.core.tool.builtin.source.query.runDagSummaryQuery
-import io.talevia.core.tool.builtin.source.query.runDescendantsQuery
-import io.talevia.core.tool.builtin.source.query.runDotQuery
-import io.talevia.core.tool.builtin.source.query.runHistoryQuery
-import io.talevia.core.tool.builtin.source.query.runLeavesQuery
-import io.talevia.core.tool.builtin.source.query.runNodeDetailQuery
+import io.talevia.core.tool.builtin.source.query.SOURCE_QUERY_SELECTS_BY_ID
+import io.talevia.core.tool.builtin.source.query.SourceQueryDispatchContext
 import io.talevia.core.tool.builtin.source.query.runNodesAllProjectsQuery
-import io.talevia.core.tool.builtin.source.query.runNodesQuery
-import io.talevia.core.tool.builtin.source.query.runOrphansQuery
 import io.talevia.core.tool.query.QueryDispatcher
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
@@ -218,17 +202,9 @@ class SourceQueryTool(
 
     override val selects: Set<String> = ALL_SELECTS
 
-    override fun rowSerializerFor(select: String): KSerializer<*> = when (select) {
-        SELECT_NODES, SELECT_DESCENDANTS, SELECT_ANCESTORS -> NodeRow.serializer()
-        SELECT_DAG_SUMMARY -> DagSummaryRow.serializer()
-        SELECT_DOT -> DotRow.serializer()
-        SELECT_ASCII_TREE -> AsciiTreeRow.serializer()
-        SELECT_ORPHANS -> OrphanRow.serializer()
-        SELECT_LEAVES -> LeafRow.serializer()
-        SELECT_HISTORY -> BodyRevisionRow.serializer()
-        SELECT_NODE_DETAIL -> NodeDetailRow.serializer()
-        else -> error("No row serializer registered for select='$select'")
-    }
+    override fun rowSerializerFor(select: String): KSerializer<*> =
+        SOURCE_QUERY_SELECTS_BY_ID[select]?.rowSerializer
+            ?: error("No row serializer registered for select='$select'")
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         val select = canonicalSelect(input.select)
@@ -239,7 +215,11 @@ class SourceQueryTool(
         rejectIncompatibleFilters(select, input, scope)
 
         if (scope == SCOPE_ALL_PROJECTS) {
-            // select already validated as SELECT_NODES in rejectIncompatibleFilters
+            // select already validated as SELECT_NODES in rejectIncompatibleFilters.
+            // Cross-project scope doesn't fit the per-select registry shape (no
+            // single resolved Project to thread into SourceQueryDispatchContext);
+            // kept inline as the documented exception (see SourceQuerySelects.kt
+            // header for rationale).
             return runNodesAllProjectsQuery(projects, input)
         }
 
@@ -248,19 +228,18 @@ class SourceQueryTool(
         val pid = ProjectId(projectIdStr)
         val project = projects.get(pid) ?: error("Project $projectIdStr not found")
 
-        return when (select) {
-            SELECT_NODES -> runNodesQuery(project, input)
-            SELECT_DAG_SUMMARY -> runDagSummaryQuery(project, input)
-            SELECT_DOT -> runDotQuery(project)
-            SELECT_ASCII_TREE -> runAsciiTreeQuery(project)
-            SELECT_ORPHANS -> runOrphansQuery(project)
-            SELECT_LEAVES -> runLeavesQuery(project)
-            SELECT_DESCENDANTS -> runDescendantsQuery(project, input)
-            SELECT_ANCESTORS -> runAncestorsQuery(project, input)
-            SELECT_HISTORY -> runHistoryQuery(projects, project, input)
-            SELECT_NODE_DETAIL -> runNodeDetailQuery(project, input)
-            else -> error("unreachable — select validated above: '$select'")
-        }
+        // Plugin-shape dispatch: each select is a per-id object in
+        // `SOURCE_QUERY_SELECTS_BY_ID` carrying its own row serializer
+        // + `run` lambda. Adding a new select means dropping a new
+        // `object FooSourceQuerySelect : SourceQuerySelect` into the
+        // registry — no further edits to this `execute()` body or
+        // `rowSerializerFor()` (the const + ALL_SELECTS still need
+        // updating for filter-validation, see `SourceQuerySelects.kt`
+        // header for the migration recipe).
+        val selectImpl = SOURCE_QUERY_SELECTS_BY_ID[select]
+            ?: error("unreachable — select validated above: '$select'")
+        val dispatchContext = SourceQueryDispatchContext(store = projects, project = project)
+        return selectImpl.run(input, ctx, dispatchContext)
     }
 
     private fun rejectIncompatibleFilters(select: String, input: Input, scope: String) {
