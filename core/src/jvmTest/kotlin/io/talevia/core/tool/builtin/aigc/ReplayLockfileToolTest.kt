@@ -18,6 +18,8 @@ import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -315,5 +317,95 @@ class ReplayLockfileToolTest {
         ).data
         assertEquals(seedHash, out.originalInputHash)
         assertEquals(2, engine.calls)
+    }
+
+    @Test fun concurrentReplayAndGenerateOnSameInputHashIsRaceFree() = runTest {
+        // `debt-add-runtime-test-replay-lockfile-flow` (cycle 132 backlog):
+        // ReplayLockfileTool only had sequential e2e coverage via
+        // RefactorLoopE2ETest. The replay path is mutating: it bypasses
+        // the inputHash cache, calls the producer tool fresh, appends a
+        // new entry. If a concurrent generate_image with the same hash
+        // races with the replay, both touch `Project.lockfile.entries`
+        // through `ProjectStore.mutate(...)`'s per-project mutex —
+        // CLAUDE.md §2 ("Tools mutate Project.timeline via ProjectStore.mutate
+        // under a mutex") promises serialization. This test pins that
+        // promise: under interleaved dispatch, every call lands its
+        // entry, no exception escapes, the lockfile state is consistent.
+        //
+        // Why this matters: a stale-clip regenerate cascade can fire
+        // generate_image AND replay against the same hash within one
+        // agent turn (regenerate hits the live path, an explicit
+        // ReplayLockfileTool call audits provenance). Without the
+        // mutex guarantee these would race the lockfile append; this
+        // test is the regression guard if `mutate` ever drops the
+        // mutex (e.g. someone "optimizes" it to lock-free). Failure
+        // mode is a single dropped entry — the assertion would catch
+        // it via `entries.size == 4` (3 replays + 1 cache-hit-after-
+        // baseline).
+        val tmp = createTempDirectory("replay-concurrent-test").toFile()
+        val engine = countingImageEngine()
+        val writer = FakeBlobWriter(tmp)
+        val store = freshStore()
+        val projectId = ProjectId("p-concurrent")
+        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
+
+        val imageTool = GenerateImageTool(engine, writer, store)
+        val registry = ToolRegistry().apply { register(imageTool) }
+        val replay = ReplayLockfileTool(registry, store)
+
+        // Seed: one entry to anchor the inputHash both calls will hit.
+        val seedInput = GenerateImageTool.Input(
+            prompt = "concurrent lighthouse",
+            seed = 99L,
+            projectId = projectId.value,
+        )
+        imageTool.execute(seedInput, ctx())
+        val seedHash = store.get(projectId)!!.lockfile.entries.single().inputHash
+        assertEquals(1, engine.calls)
+
+        // Three concurrent replays + one cache-hit generate_image. The
+        // generate_image is a cache hit (engine NOT called); the three
+        // replays each force a fresh engine call. Final state must
+        // show exactly 1 + 3 = 4 entries with the same inputHash.
+        coroutineScope {
+            val r1 = async {
+                replay.execute(ReplayLockfileTool.Input(inputHash = seedHash, projectId = projectId.value), ctx())
+            }
+            val r2 = async {
+                replay.execute(ReplayLockfileTool.Input(inputHash = seedHash, projectId = projectId.value), ctx())
+            }
+            val r3 = async {
+                replay.execute(ReplayLockfileTool.Input(inputHash = seedHash, projectId = projectId.value), ctx())
+            }
+            val genCacheHit = async { imageTool.execute(seedInput, ctx()) }
+            r1.await()
+            r2.await()
+            r3.await()
+            val cacheHit = genCacheHit.await()
+            // The cache-hit call may race against the replays' deletes
+            // and re-appends. Either it sees the original entry (cache
+            // hit) or it sees one of the freshly-appended replay
+            // entries (still a cache hit on the same hash). Both are
+            // valid — the assertion is "no fresh engine call from this
+            // generate_image", not "saw the original entry".
+            assertEquals(true, cacheHit.data.cacheHit)
+        }
+
+        // Engine called exactly 4 times: 1 seed + 3 replays. The
+        // generate_image cache-hit must NOT have triggered the engine,
+        // and no replay's append can be lost — that's the invariant
+        // ProjectStore.mutate's mutex guarantees.
+        assertEquals(4, engine.calls, "1 seed + 3 replays; cache-hit generate_image adds 0")
+        val finalEntries = store.get(projectId)!!.lockfile.entries
+        assertEquals(4, finalEntries.size, "every append must survive the race; mutex serializes them")
+        // Every entry must share the seedHash — no spurious hash drift.
+        assertTrue(
+            finalEntries.all { it.inputHash == seedHash },
+            "all four entries must share inputHash $seedHash; got: ${finalEntries.map { it.inputHash }}",
+        )
+        // Every assetId must be unique — replay ALWAYS produces a fresh
+        // asset (CountingImageGenEngine returns distinct bytes per call).
+        val assetIds = finalEntries.map { it.assetId.value }
+        assertEquals(assetIds.size, assetIds.toSet().size, "all asset ids must be distinct; got: $assetIds")
     }
 }
