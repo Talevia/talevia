@@ -141,6 +141,8 @@ fun ToolRegistry.registerSessionAndMetaTools(
     bus: EventBus,
     fallbackTracker: io.talevia.core.agent.AgentProviderFallbackTracker? = null,
     permissionHistory: io.talevia.core.permission.PermissionHistoryRecorder? = null,
+    permissionRulesPersistence: io.talevia.core.permission.PermissionRulesPersistence =
+        io.talevia.core.permission.PermissionRulesPersistence.Noop,
 ) {
     register(ListToolsTool(this))
     register(EstimateTokensTool())
@@ -164,7 +166,7 @@ fun ToolRegistry.registerSessionAndMetaTools(
     register(SetToolEnabledTool(sessions))
     register(SwitchProjectTool(sessions, projects, bus = bus, agentStates = agentStates))
     register(RevertSessionTool(sessions, projects, bus))
-    register(SessionActionTool(sessions))
+    register(SessionActionTool(sessions, permissionRulesPersistence = permissionRulesPersistence))
     register(ReadPartTool(sessions))
 }
 

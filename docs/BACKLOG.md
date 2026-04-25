@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **session-action-remove-permission-rule** — agents 可以通过 interactive `[Always]` 回复留下持久化规则，但没有任何工具撤销已授权的 Always 规则。CLI 用户必须手编 `~/.talevia/permission-rules.json` —— agent 没有办法说"撤销之前给的 fs.write 授权"。**方向：** `session_action(action=remove_permission_rule, permission, pattern)` —— 对称于现有 `[Always]` add 路径，从 `PermissionRulesPersistence.load()` 列表移除匹配条目并 `save()` 写回。Rubric §5.4 / §5.5。Milestone §later.
 - **session-query-recap** — agent 重新连入旧 session 时缺"这个 session 我们做了什么"的快速摘要。当前要 list_messages + parts 拼。**方向：** `session_query(select=recap, sessionId)` 返单行 `{turnCount, totalTokensIn/Out, distinctToolsUsed[], totalCostCents, firstAt, lastAt, lastModelId}`，给 agent 和 operator 同一个开瓶器。Rubric §5.4。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排

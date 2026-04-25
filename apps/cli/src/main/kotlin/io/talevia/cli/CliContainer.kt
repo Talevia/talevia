@@ -287,7 +287,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         ?.let { TavilySearchEngine(httpClient, it) }
 
     val tools: ToolRegistry = ToolRegistry().apply {
-        registerSessionAndMetaTools(sessions, agentStates, projects, bus, fallbackStates, permissionHistory)
+        registerSessionAndMetaTools(sessions, agentStates, projects, bus, fallbackStates, permissionHistory, permissionRulesPersistence)
         registerMediaTools(engine, projects, bundleBlobWriter, FfmpegProxyGenerator())
         registerClipAndTrackTools(projects, sessions)
         registerProjectTools(projects, engine)

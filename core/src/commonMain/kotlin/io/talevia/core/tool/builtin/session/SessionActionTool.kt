@@ -1,6 +1,7 @@
 package io.talevia.core.tool.builtin.session
 
 import io.talevia.core.SessionId
+import io.talevia.core.permission.PermissionRulesPersistence
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.Tool
@@ -55,6 +56,17 @@ import kotlinx.serialization.serializer
 class SessionActionTool(
     private val sessions: SessionStore,
     private val clock: Clock = Clock.System,
+    /**
+     * Permission-rules persistence used by
+     * `action=remove_permission_rule`. Default
+     * [PermissionRulesPersistence.Noop] preserves pre-cycle-95
+     * behaviour for test rigs / containers that don't wire the file-
+     * backed persistence (Desktop / Server / Android / iOS today).
+     * On Noop, remove_permission_rule loads an empty list and reports
+     * `removedRuleCount=0` rather than failing — same convention as
+     * the other optional aggregator wires.
+     */
+    private val permissionRulesPersistence: PermissionRulesPersistence = PermissionRulesPersistence.Noop,
 ) : Tool<SessionActionTool.Input, SessionActionTool.Output> {
 
     @Serializable data class Input(
@@ -65,10 +77,28 @@ class SessionActionTool(
          * the dispatch is running.
          */
         val sessionId: String? = null,
-        /** `"archive"`, `"unarchive"`, `"rename"`, or `"delete"`. */
+        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, or `"remove_permission_rule"`. */
         val action: String,
         /** Required for `action="rename"`. Must be non-blank. Ignored on other actions. */
         val newTitle: String? = null,
+        /**
+         * Permission keyword (e.g. `"fs.write"`) the rule to remove
+         * matches against. Required for `action=remove_permission_rule`;
+         * ignored elsewhere. The persistent ruleset can hold multiple
+         * rules with the same `permission` but different `pattern`s —
+         * pair this with [pattern] to drop one specific entry.
+         */
+        val permission: String? = null,
+        /**
+         * Pattern the rule to remove matches against (e.g.
+         * `https://example.com` or `/tmp/...`). Required for
+         * `action=remove_permission_rule`; ignored elsewhere.
+         * Exact-match against the persisted rule's `pattern`. To
+         * clear every rule for a permission, the caller can list
+         * rules first via `session_query(select=permission_rules)`
+         * and remove each pair in turn.
+         */
+        val pattern: String? = null,
     )
 
     @Serializable data class Output(
@@ -83,18 +113,27 @@ class SessionActionTool(
         val newTitle: String? = null,
         /** `delete` only: `Session.archived` as seen before the session was removed. */
         val archived: Boolean = false,
+        /**
+         * `remove_permission_rule` only: count of persisted rules
+         * removed by this call. Zero when no rule matched (or when
+         * persistence is [PermissionRulesPersistence.Noop]).
+         */
+        val removedRuleCount: Int = 0,
+        /**
+         * `remove_permission_rule` only: count of persisted rules
+         * remaining in the file after the remove. Helpful for the
+         * agent to confirm "rule cleared, N other Always rules
+         * still active".
+         */
+        val remainingRuleCount: Int = 0,
     )
 
     override val id: String = "session_action"
     override val helpText: String =
-        "Session lifecycle verbs in one tool: `action=\"archive\"` hides a session from " +
-            "session_query(select=sessions) (preserves row + messages; idempotent). " +
-            "`action=\"unarchive\"` restores a hidden session (idempotent). `action=\"rename\"` + " +
-            "non-blank `newTitle` updates the session title. `action=\"delete\"` + required " +
-            "`sessionId` IRREVERSIBLY deletes the session and every message/part on it — " +
-            "`archive` is the reversible alternative. On archive/unarchive/rename, `sessionId` " +
-            "defaults to the owning session; on delete it must be explicit. Permission: " +
-            "`session.write` for archive/unarchive/rename; `session.destructive` for delete."
+        "Session lifecycle: `archive`/`unarchive` (idempotent), `rename`+`newTitle`, " +
+            "`delete`+required `sessionId` (irreversible), `remove_permission_rule`+" +
+            "(`permission`,`pattern`) drops a persisted Always rule. sessionId defaults to " +
+            "owning session except on delete. Permission: session.write (delete=session.destructive)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
 
@@ -129,7 +168,7 @@ class SessionActionTool(
                 put("type", "string")
                 put(
                     "description",
-                    "`archive`, `unarchive`, `rename`, or `delete`. delete is irreversible.",
+                    "`archive`, `unarchive`, `rename`, `delete`, or `remove_permission_rule`.",
                 )
                 put(
                     "enum",
@@ -139,6 +178,7 @@ class SessionActionTool(
                             JsonPrimitive("unarchive"),
                             JsonPrimitive("rename"),
                             JsonPrimitive("delete"),
+                            JsonPrimitive("remove_permission_rule"),
                         ),
                     ),
                 )
@@ -146,6 +186,14 @@ class SessionActionTool(
             putJsonObject("newTitle") {
                 put("type", "string")
                 put("description", "Required for action=rename. Must be non-blank.")
+            }
+            putJsonObject("permission") {
+                put("type", "string")
+                put("description", "Required for action=remove_permission_rule. e.g. fs.write.")
+            }
+            putJsonObject("pattern") {
+                put("type", "string")
+                put("description", "Required for action=remove_permission_rule. Exact-match.")
             }
         }
         put("required", JsonArray(listOf(JsonPrimitive("action"))))
@@ -158,8 +206,9 @@ class SessionActionTool(
             "unarchive" -> executeUnarchive(input, ctx)
             "rename" -> executeRename(input, ctx)
             "delete" -> executeDelete(input)
+            "remove_permission_rule" -> executeRemovePermissionRule(input, ctx)
             else -> error(
-                "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete",
+                "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, remove_permission_rule",
             )
         }
     }
@@ -288,6 +337,71 @@ class SessionActionTool(
             outputForLlm = "Deleted session ${session.id.value} '${session.title}'$archivedNote. " +
                 "Every message + part on it is gone. This cannot be undone.",
             data = snapshot,
+        )
+    }
+
+    /**
+     * `action=remove_permission_rule` — drop a persisted Always rule
+     * matching `(permission, pattern)`. Symmetrical with the
+     * interactive `[Always]` add path (which appends to
+     * [PermissionRulesPersistence]); without this, removing a previously-
+     * granted rule required hand-editing
+     * `~/.talevia/permission-rules.json`.
+     *
+     * Match semantics: exact-match on both `permission` AND `pattern`.
+     * Multiple persisted rules with the same pair (legitimate when the
+     * user clicked Always on the same prompt twice across sessions) all
+     * get removed in one call; `removedRuleCount` carries the dropped
+     * count so the agent sees it.
+     *
+     * No-match is a successful no-op with `removedRuleCount=0` —
+     * agents can re-issue without worrying about pre-checking.
+     */
+    private suspend fun executeRemovePermissionRule(input: Input, ctx: ToolContext): ToolResult<Output> {
+        val permission = input.permission?.takeIf { it.isNotBlank() }
+            ?: error(
+                "action=remove_permission_rule requires `permission` (the rule keyword to drop, " +
+                    "e.g. fs.write). Call session_query(select=permission_rules) to list active rules.",
+            )
+        val pattern = input.pattern?.takeIf { it.isNotBlank() }
+            ?: error(
+                "action=remove_permission_rule requires `pattern` (the rule pattern to drop, " +
+                    "e.g. /tmp/*). Call session_query(select=permission_rules) to list active rules.",
+            )
+        // sessionId resolution stays consistent with the other actions —
+        // the operation is process-wide (rules persistence is per-machine,
+        // not per-session) but we still echo a sessionId in the output for
+        // the standard SessionActionTool.Output shape.
+        val sid = ctx.resolveSessionId(input.sessionId)
+        val session = sessions.getSession(sid)
+            ?: error(
+                "Session ${sid.value} not found. Call session_query(select=sessions) to discover valid session ids.",
+            )
+
+        val before = permissionRulesPersistence.load()
+        val matched = before.filter { it.permission == permission && it.pattern == pattern }
+        val after = before.filterNot { it.permission == permission && it.pattern == pattern }
+        if (matched.isNotEmpty()) {
+            permissionRulesPersistence.save(after)
+        }
+
+        val verb = when {
+            matched.isEmpty() -> "no matching rule"
+            matched.size == 1 -> "removed 1 rule"
+            else -> "removed ${matched.size} duplicate rules"
+        }
+        return ToolResult(
+            title = "remove_permission_rule $permission $pattern",
+            outputForLlm = "Persisted Always rules: $verb for ($permission, $pattern). " +
+                "${after.size} rule(s) remain in the file. Re-grant via the next interactive " +
+                "permission prompt if needed.",
+            data = Output(
+                sessionId = sid.value,
+                action = "remove_permission_rule",
+                title = session.title,
+                removedRuleCount = matched.size,
+                remainingRuleCount = after.size,
+            ),
         )
     }
 
