@@ -169,23 +169,27 @@ class ToolSpecBudgetGateTest {
 
     /**
      * Positive control — the measurement path itself must produce a
-     * non-trivial number. A future refactor that accidentally returns 0
-     * (e.g. `registry.all()` swapped for an empty list) would silently
-     * pass the ceiling check; this test catches that regression.
+     * non-trivial number. A future refactor that accidentally returns
+     * 0 (e.g. `registry.all()` swapped for an empty list) would
+     * silently pass the ceiling check above; this test catches that
+     * regression.
+     *
+     * Purpose-bound assertions only: > 0 on both axes. Higher
+     * thresholds belong on the ceiling test
+     * ([registeredToolSpecsFitWithinCeiling]); mixing them here forces
+     * fold cycles to re-tune a bound that was never a budget gate
+     * (cycles 153 / 156 each bumped the threshold for the wrong
+     * reason — see `debt-test-positive-control-vs-gate-split` in the
+     * cycle-154 BACKLOG).
      */
     @Test
-    fun budgetIsNonTrivial() {
+    fun registryIsNotEmpty() {
         val row = measureBudget()
-        // Loose lower bound — purpose is to catch a "registry returns
-        // empty" regression, not to gate fold cycles. The umbrella
-        // `debt-shrink-tool-spec-surface` deliberately drives this
-        // count down (cycle 153: server-side tool count hit 50 after
-        // the apply_lut fold; was 51 before).
-        assertTrue(row.toolCount > 30, "expected > 30 registered tools; got ${row.toolCount}")
+        assertTrue(row.toolCount > 0, "expected ≥ 1 registered tool; got ${row.toolCount}")
         assertTrue(
-            row.estimatedTokens > 5_000,
-            "tool_spec_budget suspiciously low (${row.estimatedTokens} tokens). A zero-spec regression " +
-                "would silently pass the ceiling check — this positive control guards against that.",
+            row.estimatedTokens > 0,
+            "tool_spec_budget = ${row.estimatedTokens}; a zero-spec regression " +
+                "would silently pass the ceiling check above — this positive control guards against that.",
         )
     }
 
