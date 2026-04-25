@@ -176,7 +176,12 @@ class ToolSpecBudgetGateTest {
     @Test
     fun budgetIsNonTrivial() {
         val row = measureBudget()
-        assertTrue(row.toolCount > 50, "expected > 50 registered tools; got ${row.toolCount}")
+        // Loose lower bound — purpose is to catch a "registry returns
+        // empty" regression, not to gate fold cycles. The umbrella
+        // `debt-shrink-tool-spec-surface` deliberately drives this
+        // count down (cycle 153: server-side tool count hit 50 after
+        // the apply_lut fold; was 51 before).
+        assertTrue(row.toolCount > 30, "expected > 30 registered tools; got ${row.toolCount}")
         assertTrue(
             row.estimatedTokens > 5_000,
             "tool_spec_budget suspiciously low (${row.estimatedTokens} tokens). A zero-spec regression " +

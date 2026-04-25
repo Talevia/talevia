@@ -33,19 +33,27 @@ import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
+/**
+ * Cycle 153 absorbed the standalone `ApplyLutTool` into
+ * [FilterActionTool] as `action="apply_lut"`; these tests pin the
+ * same semantics on the dispatcher (rename of class, same fixture,
+ * same assertions) so a future fold doesn't silently lose the
+ * contract — including style_bible resolution + sourceBinding
+ * cascade for VISION §3.3.
+ */
 @OptIn(ExperimentalUuidApi::class)
 class ApplyLutToolTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: ApplyLutTool,
+        val tool: FilterActionTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
     )
 
     private suspend fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val tool = ApplyLutTool(store)
+        val tool = FilterActionTool(store)
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),
@@ -82,8 +90,9 @@ class ApplyLutToolTest {
     )
 
     private fun single(clipId: String, lutAssetId: String? = null, styleBibleId: String? = null) =
-        ApplyLutTool.Input(
+        FilterActionTool.Input(
             projectId = "p",
+            action = "apply_lut",
             clipIds = listOf(clipId),
             lutAssetId = lutAssetId,
             styleBibleId = styleBibleId,
@@ -94,10 +103,11 @@ class ApplyLutToolTest {
         val lutAsset = rig.importLut("/tmp/warm.cube")
 
         val result = rig.tool.execute(single("c-1", lutAssetId = lutAsset.value), rig.ctx).data
-        val only = result.results.single()
+        val only = result.lutResults.single()
         assertEquals("c-1", only.clipId)
         assertEquals(lutAsset.value, result.lutAssetId)
-        assertNull(result.styleBibleId)
+        assertEquals("apply_lut", result.action)
+        assertNull(result.lutStyleBibleId)
         assertEquals(1, only.filterCount)
 
         val updated = rig.store.get(rig.projectId)!!
@@ -122,14 +132,15 @@ class ApplyLutToolTest {
         )
         val lutAsset = rig.importLut("/tmp/warm.cube")
         val result = rig.tool.execute(
-            ApplyLutTool.Input(
+            FilterActionTool.Input(
                 projectId = rig.projectId.value,
+                action = "apply_lut",
                 clipIds = listOf("c-1", "c-2"),
                 lutAssetId = lutAsset.value,
             ),
             rig.ctx,
         ).data
-        assertEquals(2, result.results.size)
+        assertEquals(2, result.lutResults.size)
         val clips = rig.store.get(rig.projectId)!!.timeline.tracks.flatMap { it.clips }
             .filterIsInstance<Clip.Video>().associateBy { it.id.value }
         assertEquals(1, clips["c-1"]!!.filters.size)
@@ -142,8 +153,9 @@ class ApplyLutToolTest {
         val before = rig.store.get(rig.projectId)!!
         assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                ApplyLutTool.Input(
+                FilterActionTool.Input(
                     projectId = rig.projectId.value,
+                    action = "apply_lut",
                     clipIds = listOf("c-1", "ghost"),
                     lutAssetId = lutAsset.value,
                 ),
@@ -173,7 +185,7 @@ class ApplyLutToolTest {
         ).data
 
         assertEquals(lutAsset.value, result.lutAssetId)
-        assertEquals("style-cinematic", result.styleBibleId)
+        assertEquals("style-cinematic", result.lutStyleBibleId)
 
         val updated = rig.store.get(rig.projectId)!!
             .timeline.tracks.flatMap { it.clips }
@@ -213,8 +225,9 @@ class ApplyLutToolTest {
 
         assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(
-                ApplyLutTool.Input(
+                FilterActionTool.Input(
                     projectId = rig.projectId.value,
+                    action = "apply_lut",
                     clipIds = listOf("c-1"),
                     lutAssetId = lutAsset.value,
                     styleBibleId = "style-x",
@@ -228,8 +241,9 @@ class ApplyLutToolTest {
         val rig = newRig(projectWithClip())
         assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(
-                ApplyLutTool.Input(
+                FilterActionTool.Input(
                     projectId = rig.projectId.value,
+                    action = "apply_lut",
                     clipIds = listOf("c-1"),
                 ),
                 rig.ctx,

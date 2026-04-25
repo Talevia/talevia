@@ -157,7 +157,7 @@ final class AppContainer {
         registry.register(tool: ExportTool(store: self.projects, engine: self.engine, clock: clock))
         registry.register(tool: ExportDryRunTool(store: self.projects))
         registry.register(tool: FilterActionTool(store: self.projects))
-        registry.register(tool: ApplyLutTool(store: self.projects))
+        // `ApplyLutTool` folded into `filter_action(action="apply_lut")` (cycle 153).
         registry.register(tool: AddSubtitlesTool(store: self.projects))
         // `EditTextClipTool` folded into `clip_action(action="edit_text")` (cycle 152).
         registry.register(tool: TransitionActionTool(store: self.projects))

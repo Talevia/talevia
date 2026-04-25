@@ -58,7 +58,6 @@ import io.talevia.core.tool.builtin.source.ExportSourceNodeTool
 import io.talevia.core.tool.builtin.source.SourceNodeActionTool
 import io.talevia.core.tool.builtin.source.SourceQueryTool
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
-import io.talevia.core.tool.builtin.video.ApplyLutTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
 import io.talevia.core.tool.builtin.video.ClearTimelineTool
 import io.talevia.core.tool.builtin.video.ClipActionTool
@@ -186,7 +185,6 @@ fun ToolRegistry.registerClipAndTrackTools(
     register(ClipActionTool(projects))
     register(ClipSetActionTool(projects))
     register(FilterActionTool(projects))
-    register(ApplyLutTool(projects))
     register(AddSubtitlesTool(projects))
     register(TransitionActionTool(projects))
     register(TrackActionTool(projects))
