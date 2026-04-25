@@ -47,6 +47,8 @@ internal val PROJECT_QUERY_HELP_TEXT: String =
         "  • lockfile_orphans — gc candidates {assetId, inputHash, toolId, providerId, modelId, " +
         "costCents, createdAtEpochMs, pinned}.\n" +
         "  • timeline_diff — filter: fromSnapshotId, toSnapshotId (≥1).\n" +
+        "  • lockfile_diff — filter: fromSnapshotId, toSnapshotId (≥1). " +
+        "Diffs lockfile entries by inputHash (added / removed / unchangedCount).\n" +
         "  • source_binding_stats — per-kind {kind, totalNodes, boundDirectly, " +
         "boundTransitively, orphans, coverageRatio, orphanNodeIds}.\n" +
         "Common: limit (1..500, default 100), offset. Filter-on-wrong-select fails loud."
@@ -68,8 +70,8 @@ internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
                 "What to query: tracks | timeline_clips | assets | transitions | " +
                     "lockfile_entries | clips_for_asset | clips_for_source | " +
                     "clip | lockfile_entry | project_metadata | consistency_propagation | " +
-                    "spend | lockfile_cache_stats | lockfile_orphans | snapshots | timeline_diff | " +
-                    "source_binding_stats (case-insensitive).",
+                    "spend | lockfile_cache_stats | lockfile_diff | lockfile_orphans | snapshots | " +
+                    "timeline_diff | source_binding_stats (case-insensitive).",
             )
         }
         putJsonObject("trackKind") {
@@ -180,13 +182,13 @@ internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
             put("type", "string")
             put(
                 "description",
-                "\"from\" side of timeline_diff. Null = live state. " +
+                "\"from\" side of timeline_diff or lockfile_diff. Null = live state. " +
                     "≥1 of (fromSnapshotId, toSnapshotId) required.",
             )
         }
         putJsonObject("toSnapshotId") {
             put("type", "string")
-            put("description", "\"to\" side of timeline_diff. Null = live state.")
+            put("description", "\"to\" side of timeline_diff or lockfile_diff. Null = live state.")
         }
     }
     put("required", JsonArray(listOf(JsonPrimitive("select"))))

@@ -13,6 +13,7 @@ import io.talevia.core.tool.builtin.project.query.ClipForSourceRow
 import io.talevia.core.tool.builtin.project.query.ClipRow
 import io.talevia.core.tool.builtin.project.query.ConsistencyPropagationRow
 import io.talevia.core.tool.builtin.project.query.LockfileCacheStatsRow
+import io.talevia.core.tool.builtin.project.query.LockfileDiffRow
 import io.talevia.core.tool.builtin.project.query.LockfileEntryDetailRow
 import io.talevia.core.tool.builtin.project.query.LockfileEntryRow
 import io.talevia.core.tool.builtin.project.query.LockfileOrphanRow
@@ -30,6 +31,7 @@ import io.talevia.core.tool.builtin.project.query.runClipsForAssetQuery
 import io.talevia.core.tool.builtin.project.query.runClipsForSourceQuery
 import io.talevia.core.tool.builtin.project.query.runConsistencyPropagationQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileCacheStatsQuery
+import io.talevia.core.tool.builtin.project.query.runLockfileDiffQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileEntriesQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileEntryDetailQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileOrphansQuery
@@ -224,6 +226,7 @@ class ProjectQueryTool(
         SELECT_CONSISTENCY_PROPAGATION -> ConsistencyPropagationRow.serializer()
         SELECT_SPEND -> SpendSummaryRow.serializer()
         SELECT_LOCKFILE_CACHE_STATS -> LockfileCacheStatsRow.serializer()
+        SELECT_LOCKFILE_DIFF -> LockfileDiffRow.serializer()
         SELECT_LOCKFILE_ORPHANS -> LockfileOrphanRow.serializer()
         SELECT_SNAPSHOTS -> SnapshotRow.serializer()
         SELECT_TIMELINE_DIFF -> TimelineDiffRow.serializer()
@@ -256,6 +259,7 @@ class ProjectQueryTool(
             SELECT_CONSISTENCY_PROPAGATION -> runConsistencyPropagationQuery(project, input, limit, offset)
             SELECT_SPEND -> runSpendQuery(project)
             SELECT_LOCKFILE_CACHE_STATS -> runLockfileCacheStatsQuery(project)
+            SELECT_LOCKFILE_DIFF -> runLockfileDiffQuery(project, input)
             SELECT_LOCKFILE_ORPHANS -> runLockfileOrphansQuery(project, limit, offset)
             SELECT_SNAPSHOTS -> runSnapshotsQuery(project, input, clock)
             SELECT_TIMELINE_DIFF -> runTimelineDiffQuery(project, input)
@@ -278,6 +282,7 @@ class ProjectQueryTool(
         const val SELECT_CONSISTENCY_PROPAGATION = "consistency_propagation"
         const val SELECT_SPEND = "spend"
         const val SELECT_LOCKFILE_CACHE_STATS = "lockfile_cache_stats"
+        const val SELECT_LOCKFILE_DIFF = "lockfile_diff"
         const val SELECT_LOCKFILE_ORPHANS = "lockfile_orphans"
         const val SELECT_SNAPSHOTS = "snapshots"
         const val SELECT_TIMELINE_DIFF = "timeline_diff"
@@ -288,7 +293,7 @@ class ProjectQueryTool(
             SELECT_CLIPS_FOR_ASSET, SELECT_CLIPS_FOR_SOURCE,
             SELECT_CLIP, SELECT_LOCKFILE_ENTRY, SELECT_PROJECT_METADATA,
             SELECT_CONSISTENCY_PROPAGATION, SELECT_SPEND,
-            SELECT_LOCKFILE_CACHE_STATS, SELECT_LOCKFILE_ORPHANS,
+            SELECT_LOCKFILE_CACHE_STATS, SELECT_LOCKFILE_DIFF, SELECT_LOCKFILE_ORPHANS,
             SELECT_SNAPSHOTS, SELECT_TIMELINE_DIFF, SELECT_SOURCE_BINDING_STATS,
         )
 

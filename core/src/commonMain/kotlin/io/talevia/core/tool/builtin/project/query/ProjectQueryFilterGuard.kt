@@ -83,9 +83,14 @@ internal fun rejectIncompatibleProjectQueryFilters(
         if (select != ProjectQueryTool.SELECT_LOCKFILE_ENTRY && input.inputHash != null) {
             add("inputHash (select=lockfile_entry only)")
         }
-        if (select != ProjectQueryTool.SELECT_TIMELINE_DIFF) {
-            if (input.fromSnapshotId != null) add("fromSnapshotId (select=timeline_diff only)")
-            if (input.toSnapshotId != null) add("toSnapshotId (select=timeline_diff only)")
+        // fromSnapshotId / toSnapshotId are valid for timeline_diff AND
+        // lockfile_diff — both diff a project's payload between two
+        // snapshot-anchored revisions.
+        if (select != ProjectQueryTool.SELECT_TIMELINE_DIFF &&
+            select != ProjectQueryTool.SELECT_LOCKFILE_DIFF
+        ) {
+            if (input.fromSnapshotId != null) add("fromSnapshotId (select=timeline_diff or lockfile_diff only)")
+            if (input.toSnapshotId != null) add("toSnapshotId (select=timeline_diff or lockfile_diff only)")
         }
     }
     if (misapplied.isNotEmpty()) {
