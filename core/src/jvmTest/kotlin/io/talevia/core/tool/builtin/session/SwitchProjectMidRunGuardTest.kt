@@ -130,6 +130,50 @@ class SwitchProjectMidRunGuardTest {
         assertEquals(null, refreshed.currentProjectId)
     }
 
+    @Test fun selfRebindDuringAwaitingToolSucceeds() = runTest {
+        // Regression: when the model itself calls switch_project from a tool
+        // batch, the dispatching session is by definition in `AwaitingTool`
+        // — it's executing this very dispatch. Blocking that would mean the
+        // model can NEVER call switch_project (tool calls are the only way),
+        // which made the CLI's "switch to a different existing project" flow
+        // unreachable. The guard's intent is to block EXTERNAL surprise
+        // rebinds; self-rebinds from the running session aren't surprises.
+        val bus = EventBus()
+        val tracker = AgentRunStateTracker(bus, backgroundScope)
+        advanceUntilIdle()
+        yield()
+        val rig = rig(bus)
+        // Use the dispatching session's id (`rig.ctx.sessionId == "s"`) so
+        // input.sessionId resolves to the same session — that's the
+        // self-rebind path.
+        rig.sessions.createSession(
+            io.talevia.core.session.Session(
+                id = SessionId("s"),
+                projectId = ProjectId("p-origin"),
+                title = "Untitled",
+                createdAt = Instant.fromEpochMilliseconds(1_600_000_000_000L),
+                updatedAt = Instant.fromEpochMilliseconds(1_600_000_000_000L),
+                currentProjectId = null,
+            ),
+        )
+        seedProject(rig.projects, "p-target")
+        bus.publish(BusEvent.AgentRunStateChanged(SessionId("s"), AgentRunState.AwaitingTool))
+        advanceUntilIdle()
+        yield()
+        assertEquals(AgentRunState.AwaitingTool, tracker.currentState(SessionId("s")))
+
+        val tool = SwitchProjectTool(
+            rig.sessions, rig.projects, fixedClock, bus = bus, agentStates = tracker,
+        )
+        // input.sessionId omitted → resolves to ctx.sessionId == "s" (self).
+        val out = tool.execute(
+            SwitchProjectTool.Input(projectId = "p-target"),
+            rig.ctx,
+        ).data
+        assertEquals("p-target", out.currentProjectId)
+        assertTrue(out.changed)
+    }
+
     @Test fun rebindIsRejectedDuringAwaitingTool() = runTest {
         val bus = EventBus()
         val tracker = AgentRunStateTracker(bus, backgroundScope)

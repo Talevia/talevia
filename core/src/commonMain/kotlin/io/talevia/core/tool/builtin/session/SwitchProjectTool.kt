@@ -162,13 +162,25 @@ class SwitchProjectTool(
         // (Idle / Cancelled / Failed) and null (no run has started yet) all
         // pass. The same-id no-op path above already returned, so a gate-trip
         // here is always a genuine state change.
-        agentStates?.currentState(sid)?.let { state ->
-            val runTag = agentRunStateSlug(state)
-            if (runTag != null) {
-                error(
-                    "Cannot switch_project while agent is $runTag on session ${sid.value}. " +
-                        "Wait for the current run to finish, or cancel it first, before rebinding.",
-                )
+        //
+        // Self-rebind exception: when the dispatching session IS the target
+        // (sid == ctx.sessionId), the agent calling this tool is by definition
+        // in `AwaitingTool` — it's executing this very dispatch. Blocking
+        // would mean the model can never call `switch_project` from a tool
+        // batch, which is the only way it CAN call switch_project. The
+        // "surprise rebind" scenario the guard exists for is an EXTERNAL
+        // initiator (UI button, REST endpoint, scheduled job, sibling agent)
+        // racing the running session — that's still rejected via cross-
+        // session calls (`input.sessionId` pointing at someone else's run).
+        if (sid != ctx.sessionId) {
+            agentStates?.currentState(sid)?.let { state ->
+                val runTag = agentRunStateSlug(state)
+                if (runTag != null) {
+                    error(
+                        "Cannot switch_project while agent is $runTag on session ${sid.value}. " +
+                            "Wait for the current run to finish, or cancel it first, before rebinding.",
+                    )
+                }
             }
         }
 
