@@ -330,6 +330,16 @@ class ServerContainer(
             ),
         )
         tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
+
+        // Eager-warm every configured LLM provider so the first AIGC dispatch
+        // doesn't pay TLS + auth + model-handshake latency. Best-effort;
+        // failures swallowed (logged) and the agent loop's normal retry path
+        // covers a real first-call.
+        io.talevia.core.provider.kickoffEagerProviderWarmup(
+            providers,
+            bus,
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        )
     }
 
     /** Counter registry scraped by GET /metrics. See [EventBusMetricsSink]. */

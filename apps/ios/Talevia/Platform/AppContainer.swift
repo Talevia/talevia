@@ -196,6 +196,14 @@ final class AppContainer {
             engineReadiness: engineReadiness
         ))
         registry.register(tool: CompactSessionTool(providers: self.providers, sessions: self.sessions, bus: self.bus))
+
+        // Eager-warm LLM providers so first AIGC dispatch doesn't pay
+        // cold-start latency. Best-effort; failures swallowed (logged).
+        ProviderWarmupKickoffKt.kickoffEagerProviderWarmupWithSupervisor(
+            providers: self.providers,
+            bus: self.bus,
+            clock: ClockSystem.shared
+        )
     }
 }
 

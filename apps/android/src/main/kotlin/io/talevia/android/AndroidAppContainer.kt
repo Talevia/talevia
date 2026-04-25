@@ -199,6 +199,14 @@ class AndroidAppContainer(context: Context) {
             ),
         )
         tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
+
+        // Eager-warm LLM providers so first AIGC call doesn't pay
+        // cold-start latency. Best-effort; failures logged.
+        io.talevia.core.provider.kickoffEagerProviderWarmup(
+            providers,
+            bus,
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        )
     }
 
     private val agents = mutableMapOf<String, Agent>()

@@ -274,6 +274,14 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
             ),
         )
         tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
+
+        // Eager-warm every configured LLM provider so first AIGC dispatch
+        // doesn't pay TLS + auth + model-handshake latency. Best-effort.
+        io.talevia.core.provider.kickoffEagerProviderWarmup(
+            providers,
+            bus,
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        )
     }
 
     /**
