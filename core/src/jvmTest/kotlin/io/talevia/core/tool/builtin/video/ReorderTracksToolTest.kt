@@ -25,11 +25,17 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
+/**
+ * Cycle 151 absorbed the standalone `ReorderTracksTool` into
+ * [TrackActionTool] as `action="reorder"`; these tests pin the same
+ * semantics on the dispatcher (rename of class, same fixture, same
+ * assertions) so a future fold doesn't silently lose the contract.
+ */
 class ReorderTracksToolTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: ReorderTracksTool,
+        val tool: TrackActionTool,
         val ctx: ToolContext,
         val snapshots: MutableList<Part.TimelineSnapshot>,
         val projectId: ProjectId,
@@ -67,18 +73,18 @@ class ReorderTracksToolTest {
             timeline = Timeline(tracks = listOf(v1, v2, audio, subs, fx), duration = 5.seconds),
         )
         kotlinx.coroutines.runBlocking { store.upsert("demo", project) }
-        return Rig(store, ReorderTracksTool(store), ctx, snapshots, pid)
+        return Rig(store, TrackActionTool(store), ctx, snapshots, pid)
     }
+
+    private fun reorder(projectId: String, ids: List<String>): TrackActionTool.Input =
+        TrackActionTool.Input(projectId = projectId, action = "reorder", trackIds = ids)
 
     private fun trackOrder(rig: Rig): List<String> =
         kotlinx.coroutines.runBlocking { rig.store.get(rig.projectId)!! }.timeline.tracks.map { it.id.value }
 
     @Test fun movesListedTracksToFront() = runTest {
         val rig = newRig()
-        rig.tool.execute(
-            ReorderTracksTool.Input(rig.projectId.value, listOf("fg")),
-            rig.ctx,
-        )
+        rig.tool.execute(reorder(rig.projectId.value, listOf("fg")), rig.ctx)
         // fg is now first (bottom); rest keep relative order.
         assertEquals(listOf("fg", "bg", "aud", "sub", "fx"), trackOrder(rig))
     }
@@ -86,10 +92,7 @@ class ReorderTracksToolTest {
     @Test fun fullReorder() = runTest {
         val rig = newRig()
         rig.tool.execute(
-            ReorderTracksTool.Input(
-                rig.projectId.value,
-                listOf("fx", "sub", "aud", "fg", "bg"),
-            ),
+            reorder(rig.projectId.value, listOf("fx", "sub", "aud", "fg", "bg")),
             rig.ctx,
         )
         assertEquals(listOf("fx", "sub", "aud", "fg", "bg"), trackOrder(rig))
@@ -98,10 +101,7 @@ class ReorderTracksToolTest {
     @Test fun preservesTailRelativeOrder() = runTest {
         val rig = newRig()
         // Only pin aud; bg/fg/sub/fx keep their order at the tail.
-        rig.tool.execute(
-            ReorderTracksTool.Input(rig.projectId.value, listOf("aud")),
-            rig.ctx,
-        )
+        rig.tool.execute(reorder(rig.projectId.value, listOf("aud")), rig.ctx)
         assertEquals(listOf("aud", "bg", "fg", "sub", "fx"), trackOrder(rig))
     }
 
@@ -109,10 +109,7 @@ class ReorderTracksToolTest {
         val rig = newRig()
         val before = rig.store.get(rig.projectId)!!
             .timeline.tracks.flatMap { it.clips.map { c -> c.id.value } }.toSet()
-        rig.tool.execute(
-            ReorderTracksTool.Input(rig.projectId.value, listOf("fg", "bg")),
-            rig.ctx,
-        )
+        rig.tool.execute(reorder(rig.projectId.value, listOf("fg", "bg")), rig.ctx)
         val after = rig.store.get(rig.projectId)!!
             .timeline.tracks.flatMap { it.clips.map { c -> c.id.value } }.toSet()
         assertEquals(before, after)
@@ -121,10 +118,7 @@ class ReorderTracksToolTest {
     @Test fun emitsOneSnapshot() = runTest {
         val rig = newRig()
         val before = rig.snapshots.size
-        rig.tool.execute(
-            ReorderTracksTool.Input(rig.projectId.value, listOf("fg", "bg")),
-            rig.ctx,
-        )
+        rig.tool.execute(reorder(rig.projectId.value, listOf("fg", "bg")), rig.ctx)
         assertEquals(before + 1, rig.snapshots.size)
         val snap = rig.snapshots.last()
         assertEquals(
@@ -136,10 +130,7 @@ class ReorderTracksToolTest {
     @Test fun rejectsEmptyList() = runTest {
         val rig = newRig()
         val ex = assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(
-                ReorderTracksTool.Input(rig.projectId.value, emptyList()),
-                rig.ctx,
-            )
+            rig.tool.execute(reorder(rig.projectId.value, emptyList()), rig.ctx)
         }
         assertTrue(ex.message!!.contains("empty"))
     }
@@ -147,10 +138,7 @@ class ReorderTracksToolTest {
     @Test fun rejectsDuplicates() = runTest {
         val rig = newRig()
         val ex = assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(
-                ReorderTracksTool.Input(rig.projectId.value, listOf("fg", "fg")),
-                rig.ctx,
-            )
+            rig.tool.execute(reorder(rig.projectId.value, listOf("fg", "fg")), rig.ctx)
         }
         assertTrue(ex.message!!.contains("duplicates"))
     }
@@ -158,10 +146,7 @@ class ReorderTracksToolTest {
     @Test fun rejectsUnknownTrackId() = runTest {
         val rig = newRig()
         val ex = assertFailsWith<IllegalArgumentException> {
-            rig.tool.execute(
-                ReorderTracksTool.Input(rig.projectId.value, listOf("nope")),
-                rig.ctx,
-            )
+            rig.tool.execute(reorder(rig.projectId.value, listOf("nope")), rig.ctx)
         }
         assertTrue(ex.message!!.contains("Unknown"))
     }
@@ -169,20 +154,15 @@ class ReorderTracksToolTest {
     @Test fun rejectsMissingProject() = runTest {
         val rig = newRig()
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(
-                ReorderTracksTool.Input("nope", listOf("fg")),
-                rig.ctx,
-            )
+            rig.tool.execute(reorder("nope", listOf("fg")), rig.ctx)
         }
         assertNotNull(ex.message)
     }
 
     @Test fun outputEchoesFinalOrder() = runTest {
         val rig = newRig()
-        val out = rig.tool.execute(
-            ReorderTracksTool.Input(rig.projectId.value, listOf("fg")),
-            rig.ctx,
-        ).data
+        val out = rig.tool.execute(reorder(rig.projectId.value, listOf("fg")), rig.ctx).data
         assertEquals(listOf("fg", "bg", "aud", "sub", "fx"), out.newOrder)
+        assertEquals("reorder", out.action)
     }
 }

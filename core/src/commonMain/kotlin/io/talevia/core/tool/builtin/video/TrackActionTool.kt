@@ -1,7 +1,9 @@
 package io.talevia.core.tool.builtin.video
 
+import io.talevia.core.ClipId
 import io.talevia.core.ProjectId
 import io.talevia.core.TrackId
+import io.talevia.core.domain.Clip
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Track
 import io.talevia.core.permission.PermissionSpec
@@ -70,7 +72,7 @@ class TrackActionTool(
          * unbound; fail loud points the agent at `switch_project`.
          */
         val projectId: String? = null,
-        /** `"add"` or `"remove"`. Case-sensitive. */
+        /** `"add"`, `"remove"`, `"duplicate"`, or `"reorder"`. Case-sensitive. */
         val action: String,
         /** Add-only. `video` / `audio` / `subtitle` / `effect`; case-insensitive. */
         val trackKind: String? = null,
@@ -79,7 +81,13 @@ class TrackActionTool(
          * Fails if an existing track has the same id.
          */
         val trackId: String? = null,
-        /** Remove-only. Track ids to drop. At least one required. */
+        /**
+         * Remove-only: track ids to drop (at least one required).
+         * Reorder-only: ids in the desired stacking order — first id
+         * becomes the bottom track (index 0), unlisted tracks keep
+         * their current relative order at the tail. Empty list rejected
+         * on either action as a likely caller mistake.
+         */
         val trackIds: List<String> = emptyList(),
         /**
          * Remove-only. Drop tracks even when they hold clips (every clip
@@ -87,12 +95,39 @@ class TrackActionTool(
          * target track is non-empty, leaving the whole batch untouched.
          */
         val force: Boolean = false,
+        /**
+         * Duplicate-only: per-item shape — each entry carries its own
+         * sourceTrackId + optional newTrackId. Cloned tracks are appended
+         * to the timeline in the order listed. Optional per-item
+         * `newTrackId` must not collide with any existing track or any
+         * earlier-in-batch clone; omit to auto-generate
+         * `${sourceTrackId}-copy-${n}`. All-or-nothing; one snapshot per
+         * call. Empty list rejected.
+         */
+        val items: List<DuplicateItem> = emptyList(),
+    )
+
+    /** Per-track payload for `action="duplicate"`. */
+    @Serializable data class DuplicateItem(
+        val sourceTrackId: String,
+        /**
+         * Optional explicit id for the cloned track. Must not collide with an
+         * existing track id nor with another item's newTrackId in the same batch.
+         * Omit to auto-generate `${sourceTrackId}-copy-${n}`.
+         */
+        val newTrackId: String? = null,
     )
 
     @Serializable data class RemoveItemResult(
         val trackId: String,
         val trackKind: String,
         val droppedClipCount: Int,
+    )
+
+    @Serializable data class DuplicateItemResult(
+        val sourceTrackId: String,
+        val newTrackId: String,
+        val clipCount: Int,
     )
 
     @Serializable data class Output(
@@ -110,14 +145,23 @@ class TrackActionTool(
         val forced: Boolean = false,
         /** Both: id of the emitted `Part.TimelineSnapshot`. */
         val snapshotId: String = "",
+        /** Duplicate-only: per-item duplication summary. Empty on every other action. */
+        val duplicateResults: List<DuplicateItemResult> = emptyList(),
+        /** Reorder-only: full track id list after the reorder. Empty on every other action. */
+        val newOrder: List<String> = emptyList(),
     )
 
     override val id: String = "track_action"
     override val helpText: String =
-        "Add or remove tracks atomically. action=add + trackKind (video|audio|subtitle|effect) " +
-            "+ optional trackId (defaults to fresh UUID). action=remove + trackIds + optional " +
-            "force=true (drops clips on non-empty tracks; otherwise batch aborts with clip count). " +
-            "One snapshot per call."
+        "Add, remove, duplicate, or reorder tracks atomically. action=add + trackKind " +
+            "(video|audio|subtitle|effect) + optional trackId (defaults to fresh UUID). " +
+            "action=remove + trackIds + optional force=true (drops clips on non-empty tracks; " +
+            "otherwise batch aborts with clip count). action=duplicate + items=[{sourceTrackId, " +
+            "newTrackId?}…] clones whole tracks (every clip gets a fresh ClipId, all attached " +
+            "state preserved); cloned tracks appended in list order. action=reorder + trackIds " +
+            "(partial ordering; first id becomes bottom track / index 0; unlisted tracks keep " +
+            "relative tail order) — controls PiP stacking, audio sub-mix priority, subtitle " +
+            "fallback. One snapshot per call."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec(
@@ -140,8 +184,23 @@ class TrackActionTool(
             }
             putJsonObject("action") {
                 put("type", "string")
-                put("description", "`add` to create an empty track; `remove` to drop one or many tracks.")
-                put("enum", JsonArray(listOf(JsonPrimitive("add"), JsonPrimitive("remove"))))
+                put(
+                    "description",
+                    "`add` to create an empty track; `remove` to drop one or many tracks; " +
+                        "`duplicate` to clone whole tracks (each clip gets fresh ClipId); " +
+                        "`reorder` to change the timeline track stacking order.",
+                )
+                put(
+                    "enum",
+                    JsonArray(
+                        listOf(
+                            JsonPrimitive("add"),
+                            JsonPrimitive("remove"),
+                            JsonPrimitive("duplicate"),
+                            JsonPrimitive("reorder"),
+                        ),
+                    ),
+                )
             }
             putJsonObject("trackKind") {
                 put("type", "string")
@@ -157,7 +216,12 @@ class TrackActionTool(
             }
             putJsonObject("trackIds") {
                 put("type", "array")
-                put("description", "Remove-only. Track ids to drop. At least one required.")
+                put(
+                    "description",
+                    "Remove-only: track ids to drop (at least one required). " +
+                        "Reorder-only: partial or full ordering — first id becomes the bottom " +
+                        "track; unlisted tracks keep relative tail order.",
+                )
                 putJsonObject("items") { put("type", "string") }
             }
             putJsonObject("force") {
@@ -166,6 +230,30 @@ class TrackActionTool(
                     "description",
                     "Remove-only. Drop tracks even if they hold clips (discards those clips). Default false.",
                 )
+            }
+            putJsonObject("items") {
+                put("type", "array")
+                put(
+                    "description",
+                    "Duplicate-only. Per-item track duplications. At least one required.",
+                )
+                putJsonObject("items") {
+                    put("type", "object")
+                    putJsonObject("properties") {
+                        putJsonObject("sourceTrackId") { put("type", "string") }
+                        putJsonObject("newTrackId") {
+                            put("type", "string")
+                            put(
+                                "description",
+                                "Optional explicit id for the cloned track. Defaults to " +
+                                    "'<sourceTrackId>-copy-<n>'. Fails if collides with " +
+                                    "existing or earlier-in-batch track.",
+                            )
+                        }
+                    }
+                    put("required", JsonArray(listOf(JsonPrimitive("sourceTrackId"))))
+                    put("additionalProperties", false)
+                }
             }
         }
         put("required", JsonArray(listOf(JsonPrimitive("action"))))
@@ -177,7 +265,9 @@ class TrackActionTool(
         return when (input.action) {
             "add" -> executeAdd(pid, input, ctx)
             "remove" -> executeRemove(pid, input, ctx)
-            else -> error("unknown action '${input.action}'; accepted: add, remove")
+            "duplicate" -> executeDuplicate(pid, input, ctx)
+            "reorder" -> executeReorder(pid, input, ctx)
+            else -> error("unknown action '${input.action}'; accepted: add, remove, duplicate, reorder")
         }
     }
 
@@ -278,6 +368,132 @@ class TrackActionTool(
                 snapshotId = snapshotId.value,
             ),
         )
+    }
+
+    private suspend fun executeDuplicate(
+        pid: ProjectId,
+        input: Input,
+        ctx: ToolContext,
+    ): ToolResult<Output> {
+        require(input.items.isNotEmpty()) { "items must not be empty when action=duplicate" }
+        val results = mutableListOf<DuplicateItemResult>()
+
+        val updated = store.mutate(pid) { project ->
+            var tracks = project.timeline.tracks
+            input.items.forEachIndexed { idx, item ->
+                val source = tracks.firstOrNull { it.id.value == item.sourceTrackId }
+                    ?: error(
+                        "items[$idx]: sourceTrackId '${item.sourceTrackId}' not found in project ${pid.value}",
+                    )
+
+                val existingIds = tracks.map { it.id.value }.toSet()
+                val chosenId = if (item.newTrackId != null) {
+                    val requested = item.newTrackId
+                    require(requested !in existingIds) {
+                        "items[$idx] (${item.sourceTrackId}): newTrackId '$requested' collides with an " +
+                            "existing track in project ${pid.value}"
+                    }
+                    requested
+                } else {
+                    generateCopyId(item.sourceTrackId, existingIds)
+                }
+
+                val clonedClips = source.clips.map { cloneClip(it) }
+                val cloned: Track = rebuildTrackWithNewId(source, TrackId(chosenId), clonedClips)
+
+                tracks = tracks + cloned
+                results += DuplicateItemResult(
+                    sourceTrackId = item.sourceTrackId,
+                    newTrackId = chosenId,
+                    clipCount = clonedClips.size,
+                )
+            }
+            project.copy(timeline = project.timeline.copy(tracks = tracks))
+        }
+
+        val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
+        return ToolResult(
+            title = "duplicate ${results.size} track(s)",
+            outputForLlm = "Duplicated ${results.size} track(s). Snapshot: ${snapshotId.value}",
+            data = Output(
+                projectId = pid.value,
+                action = "duplicate",
+                duplicateResults = results,
+                snapshotId = snapshotId.value,
+            ),
+        )
+    }
+
+    private suspend fun executeReorder(
+        pid: ProjectId,
+        input: Input,
+        ctx: ToolContext,
+    ): ToolResult<Output> {
+        require(input.trackIds.isNotEmpty()) {
+            "trackIds must not be empty when action=reorder — nothing to reorder. " +
+                "Omit this tool entirely if the order is already correct."
+        }
+        val dedup = input.trackIds.toSet()
+        require(dedup.size == input.trackIds.size) {
+            "trackIds contains duplicates: ${input.trackIds.groupingBy { it }.eachCount().filterValues { it > 1 }.keys}"
+        }
+
+        var newOrderOut: List<String> = emptyList()
+
+        val updated = store.mutate(pid) { project ->
+            val tracks = project.timeline.tracks
+            val byId = tracks.associateBy { it.id.value }
+
+            val missing = input.trackIds.filter { it !in byId }
+            require(missing.isEmpty()) {
+                "Unknown track id(s): ${missing.joinToString(", ")}. Known: ${byId.keys.joinToString(", ")}"
+            }
+
+            val front = input.trackIds.map { byId.getValue(it) }
+            val frontIdSet = input.trackIds.map { TrackId(it) }.toSet()
+            val tail = tracks.filterNot { it.id in frontIdSet } // preserves existing relative order
+            val reordered = front + tail
+            newOrderOut = reordered.map { it.id.value }
+            project.copy(timeline = project.timeline.copy(tracks = reordered))
+        }
+
+        val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
+        return ToolResult(
+            title = "reorder tracks (${input.trackIds.size} pinned)",
+            outputForLlm = "Track order is now: ${newOrderOut.joinToString(", ")}. " +
+                "Timeline snapshot: ${snapshotId.value}",
+            data = Output(
+                projectId = pid.value,
+                action = "reorder",
+                newOrder = newOrderOut,
+                snapshotId = snapshotId.value,
+            ),
+        )
+    }
+
+    private fun generateCopyId(sourceId: String, existing: Set<String>): String {
+        var n = 1
+        while (true) {
+            val candidate = "$sourceId-copy-$n"
+            if (candidate !in existing) return candidate
+            n++
+        }
+    }
+
+    private fun cloneClip(original: Clip): Clip {
+        val newId = ClipId(Uuid.random().toString())
+        return when (original) {
+            is Clip.Video -> original.copy(id = newId)
+            is Clip.Audio -> original.copy(id = newId)
+            is Clip.Text -> original.copy(id = newId)
+        }
+    }
+
+    private fun rebuildTrackWithNewId(source: Track, newId: TrackId, clips: List<Clip>): Track = when (source) {
+        is Track.Video -> Track.Video(id = newId, clips = clips)
+        is Track.Audio -> Track.Audio(id = newId, clips = clips)
+        is Track.Subtitle -> Track.Subtitle(id = newId, clips = clips)
+        is Track.Effect -> Track.Effect(id = newId, clips = clips)
     }
 
     private fun trackKind(track: Track): String = when (track) {

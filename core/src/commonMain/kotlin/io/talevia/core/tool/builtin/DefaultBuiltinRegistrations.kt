@@ -64,7 +64,6 @@ import io.talevia.core.tool.builtin.video.ClearTimelineTool
 import io.talevia.core.tool.builtin.video.ClipActionTool
 import io.talevia.core.tool.builtin.video.ClipSetActionTool
 import io.talevia.core.tool.builtin.video.ConsolidateMediaIntoBundleTool
-import io.talevia.core.tool.builtin.video.DuplicateTrackTool
 import io.talevia.core.tool.builtin.video.EditTextClipTool
 import io.talevia.core.tool.builtin.video.ExportDryRunTool
 import io.talevia.core.tool.builtin.video.ExportTool
@@ -72,7 +71,6 @@ import io.talevia.core.tool.builtin.video.ExtractFrameTool
 import io.talevia.core.tool.builtin.video.FilterActionTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.RelinkAssetTool
-import io.talevia.core.tool.builtin.video.ReorderTracksTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
 import io.talevia.core.tool.builtin.video.TrackActionTool
 import io.talevia.core.tool.builtin.video.TransitionActionTool
@@ -194,8 +192,6 @@ fun ToolRegistry.registerClipAndTrackTools(
     register(EditTextClipTool(projects))
     register(TransitionActionTool(projects))
     register(TrackActionTool(projects))
-    register(DuplicateTrackTool(projects))
-    register(ReorderTracksTool(projects))
     register(RevertTimelineTool(sessions, projects))
     register(ClearTimelineTool(projects))
 }

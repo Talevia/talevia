@@ -30,11 +30,17 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
+/**
+ * Cycle 151 absorbed the standalone `DuplicateTrackTool` into
+ * [TrackActionTool] as `action="duplicate"`; these tests pin the same
+ * semantics on the dispatcher (rename of class, same fixture, same
+ * assertions) so a future fold doesn't silently lose the contract.
+ */
 class DuplicateTrackToolTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: DuplicateTrackTool,
+        val tool: TrackActionTool,
         val ctx: ToolContext,
         val emittedParts: MutableList<Part>,
     )
@@ -51,13 +57,14 @@ class DuplicateTrackToolTest {
             emitPart = { emitted += it },
             messages = emptyList(),
         )
-        return Rig(store, DuplicateTrackTool(store), ctx, emitted)
+        return Rig(store, TrackActionTool(store), ctx, emitted)
     }
 
     private fun single(sourceTrackId: String, newTrackId: String? = null) =
-        DuplicateTrackTool.Input(
+        TrackActionTool.Input(
             projectId = "p",
-            items = listOf(DuplicateTrackTool.Item(sourceTrackId, newTrackId)),
+            action = "duplicate",
+            items = listOf(TrackActionTool.DuplicateItem(sourceTrackId, newTrackId)),
         )
 
     @Test fun duplicatesVideoTrackWithThreeClipsAndFreshIds() = runTest {
@@ -82,10 +89,11 @@ class DuplicateTrackToolTest {
         val rig = newRig(project)
 
         val out = rig.tool.execute(single("vt"), rig.ctx).data
-        val only = out.results.single()
+        val only = out.duplicateResults.single()
         assertEquals("vt", only.sourceTrackId)
         assertEquals("vt-copy-1", only.newTrackId)
         assertEquals(3, only.clipCount)
+        assertEquals("duplicate", out.action)
 
         val saved = rig.store.get(ProjectId("p"))!!
         assertEquals(2, saved.timeline.tracks.size)
@@ -188,7 +196,7 @@ class DuplicateTrackToolTest {
         val rig = newRig(project)
 
         val out = rig.tool.execute(single("et"), rig.ctx).data
-        assertEquals(0, out.results.single().clipCount)
+        assertEquals(0, out.duplicateResults.single().clipCount)
         val saved = rig.store.get(ProjectId("p"))!!
         val copy = saved.timeline.tracks.firstOrNull { it.id.value == "et-copy-1" }
         assertTrue(copy is Track.Effect, "expected Track.Effect copy, got ${copy?.let { it::class.simpleName }}")
@@ -211,7 +219,7 @@ class DuplicateTrackToolTest {
         val rig = newRig(project)
 
         val out = rig.tool.execute(single("main", newTrackId = "variantA"), rig.ctx).data
-        assertEquals("variantA", out.results.single().newTrackId)
+        assertEquals("variantA", out.duplicateResults.single().newTrackId)
         val saved = rig.store.get(ProjectId("p"))!!
         assertTrue(saved.timeline.tracks.any { it.id.value == "variantA" })
     }
@@ -229,11 +237,12 @@ class DuplicateTrackToolTest {
         val rig = newRig(project)
 
         rig.tool.execute(
-            DuplicateTrackTool.Input(
+            TrackActionTool.Input(
                 projectId = "p",
+                action = "duplicate",
                 items = listOf(
-                    DuplicateTrackTool.Item("vt"),
-                    DuplicateTrackTool.Item("at"),
+                    TrackActionTool.DuplicateItem("vt"),
+                    TrackActionTool.DuplicateItem("at"),
                 ),
             ),
             rig.ctx,
@@ -257,11 +266,12 @@ class DuplicateTrackToolTest {
         val before = rig.store.get(ProjectId("p"))!!
         assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                DuplicateTrackTool.Input(
+                TrackActionTool.Input(
                     projectId = "p",
+                    action = "duplicate",
                     items = listOf(
-                        DuplicateTrackTool.Item("vt"),
-                        DuplicateTrackTool.Item("ghost"),
+                        TrackActionTool.DuplicateItem("vt"),
+                        TrackActionTool.DuplicateItem("ghost"),
                     ),
                 ),
                 rig.ctx,
@@ -329,6 +339,6 @@ class DuplicateTrackToolTest {
         val rig = newRig(project)
 
         val out = rig.tool.execute(single("vt"), rig.ctx).data
-        assertEquals("vt-copy-3", out.results.single().newTrackId)
+        assertEquals("vt-copy-3", out.duplicateResults.single().newTrackId)
     }
 }

@@ -161,12 +161,11 @@ final class AppContainer {
         registry.register(tool: AddSubtitlesTool(store: self.projects))
         registry.register(tool: EditTextClipTool(store: self.projects))
         registry.register(tool: TransitionActionTool(store: self.projects))
-        // `AddTrackTool` / `RemoveTrackTool` folded into
-        // `track_action(action="add"/"remove")` — the consolidated
-        // `TrackActionTool` covers both verbs (and reorder).
+        // `AddTrackTool` / `RemoveTrackTool` (folded earlier) and
+        // `DuplicateTrackTool` / `ReorderTracksTool` (cycle 151) all live
+        // inside `TrackActionTool` now — `track_action(action="add"|
+        // "remove"|"duplicate"|"reorder")`.
         registry.register(tool: TrackActionTool(store: self.projects))
-        registry.register(tool: DuplicateTrackTool(store: self.projects))
-        registry.register(tool: ReorderTracksTool(store: self.projects))
         registry.register(tool: RevertTimelineTool(sessions: self.sessions, projects: self.projects))
         registry.register(tool: ClearTimelineTool(store: self.projects))
         // `create_from_template` is now `project_action(action="create_from_template")`;
