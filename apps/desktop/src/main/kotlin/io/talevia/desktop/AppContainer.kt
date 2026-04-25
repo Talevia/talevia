@@ -313,6 +313,9 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
             compactionThreshold = compactionThreshold,
             titler = SessionTitler(provider = provider, store = sessions),
             fallbackProviders = providers.all().filter { it.id != provider.id },
+            routingPolicy = io.talevia.core.agent.resolveProviderRoutingPolicy(
+                System.getenv("TALEVIA_PROVIDER_ROUTING"),
+            ),
         )
     }
 

@@ -364,6 +364,9 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
             fallbackProviders = providers.all().filter { it.id != provider.id },
             projects = projects,
             metrics = metrics,
+            routingPolicy = io.talevia.core.agent.resolveProviderRoutingPolicy(
+                System.getenv("TALEVIA_PROVIDER_ROUTING"),
+            ),
         )
     }
 
