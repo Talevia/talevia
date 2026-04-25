@@ -7,8 +7,10 @@ import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
+import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import kotlinx.datetime.Clock
 import okio.Path.Companion.toPath
 
 /**
@@ -26,8 +28,10 @@ import okio.Path.Companion.toPath
  */
 internal suspend fun executeCreateProject(
     projects: ProjectStore,
+    sessions: SessionStore?,
+    clock: Clock,
     input: ProjectActionTool.Input,
-    @Suppress("UNUSED_PARAMETER") ctx: ToolContext,
+    ctx: ToolContext,
 ): ToolResult<ProjectActionTool.Output> {
     val title = input.title?.takeIf { it.isNotBlank() }
         ?: error("action=create requires non-blank `title`")
@@ -45,7 +49,7 @@ internal suspend fun executeCreateProject(
         )
         created.id
     } else {
-        val rawId = input.projectId?.takeIf { it.isNotBlank() } ?: slugifyProjectId(title)
+        val rawId = resolveDefaultHomeProjectId(input.projectId, title)
         val candidate = ProjectId(rawId)
         require(projects.get(candidate) == null) {
             "project ${candidate.value} already exists; use list_projects to find an unused id or operate on the existing one"
@@ -54,6 +58,8 @@ internal suspend fun executeCreateProject(
         projects.upsert(title, project)
         candidate
     }
+
+    autoBindSessionToProject(sessions, clock, ctx, pid)
 
     val data = ProjectActionTool.Output(
         projectId = pid.value,
@@ -66,10 +72,11 @@ internal suspend fun executeCreateProject(
         ),
     )
     val pathNote = input.path?.let { " at $it" }.orEmpty()
+    val bindNote = if (sessions != null) " Session ${ctx.sessionId.value} now bound to it." else ""
     return ToolResult(
         title = "create project $title",
         outputForLlm = "Created project ${pid.value} (\"$title\")$pathNote at " +
-            "${resolution.width}x${resolution.height}@${frameRate.numerator}fps. " +
+            "${resolution.width}x${resolution.height}@${frameRate.numerator}fps.$bindNote " +
             "Pass projectId=${pid.value} to subsequent tool calls.",
         data = data,
     )

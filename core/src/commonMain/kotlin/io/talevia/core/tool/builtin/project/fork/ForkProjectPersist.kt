@@ -4,7 +4,7 @@ import io.talevia.core.ProjectId
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.tool.builtin.project.ForkProjectTool
-import io.talevia.core.tool.builtin.project.slugifyProjectId
+import io.talevia.core.tool.builtin.project.resolveDefaultHomeProjectId
 import okio.Path.Companion.toPath
 
 /**
@@ -56,8 +56,7 @@ internal suspend fun persistFork(
         projects.mutate(created.id) { forkBody }
         pid = created.id
     } else {
-        val rawId = input.newProjectId?.takeIf { it.isNotBlank() }
-            ?: slugifyProjectId(input.newTitle)
+        val rawId = resolveDefaultHomeProjectId(input.newProjectId, input.newTitle)
         val candidate = ProjectId(rawId)
         require(projects.get(candidate) == null) {
             "project ${candidate.value} already exists; pick a different newProjectId or call list_projects to find an unused id"

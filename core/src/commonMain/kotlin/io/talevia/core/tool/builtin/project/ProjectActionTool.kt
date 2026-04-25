@@ -2,9 +2,11 @@ package io.talevia.core.tool.builtin.project
 
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionSpec
+import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import kotlinx.datetime.Clock
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
@@ -71,6 +73,17 @@ import kotlinx.serialization.serializer
  */
 class ProjectActionTool(
     private val projects: ProjectStore,
+    /**
+     * Optional session store. When provided, `action="create"` /
+     * `"create_from_template"` automatically rebind the dispatching session
+     * to the freshly-created project (see [autoBindSessionToProject] for
+     * why this bypasses `switch_project`). Null keeps the tool usable in
+     * test rigs that don't subscribe — the project is still created but
+     * the session keeps its previous binding (or remains unbound).
+     * Production composition roots all pass the app's session store.
+     */
+    private val sessions: SessionStore? = null,
+    private val clock: Clock = Clock.System,
 ) : Tool<ProjectActionTool.Input, ProjectActionTool.Output> {
 
     @Serializable data class Input(
@@ -264,8 +277,8 @@ class ProjectActionTool(
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         return when (input.action) {
-            "create" -> executeCreateProject(projects, input, ctx)
-            "create_from_template" -> executeCreateFromTemplate(projects, input, ctx)
+            "create" -> executeCreateProject(projects, sessions, clock, input, ctx)
+            "create_from_template" -> executeCreateFromTemplate(projects, sessions, clock, input, ctx)
             "open" -> executeOpenProject(projects, input, ctx)
             "delete" -> executeDeleteProject(projects, input, ctx)
             "rename" -> executeRenameProject(projects, input, ctx)

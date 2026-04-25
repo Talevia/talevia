@@ -8,6 +8,7 @@ import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.source.Source
+import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.project.template.IntentClassifier
@@ -16,6 +17,7 @@ import io.talevia.core.tool.builtin.project.template.seedMusicMvTemplate
 import io.talevia.core.tool.builtin.project.template.seedNarrativeTemplate
 import io.talevia.core.tool.builtin.project.template.seedTutorialTemplate
 import io.talevia.core.tool.builtin.project.template.seedVlogTemplate
+import kotlinx.datetime.Clock
 import okio.Path.Companion.toPath
 
 /**
@@ -43,8 +45,10 @@ import okio.Path.Companion.toPath
  */
 internal suspend fun executeCreateFromTemplate(
     projects: ProjectStore,
+    sessions: SessionStore?,
+    clock: Clock,
     input: ProjectActionTool.Input,
-    @Suppress("UNUSED_PARAMETER") ctx: ToolContext,
+    ctx: ToolContext,
 ): ToolResult<ProjectActionTool.Output> {
     val title = input.title
     require(!title.isNullOrBlank()) { "title must not be blank for action='create_from_template'" }
@@ -74,7 +78,7 @@ internal suspend fun executeCreateFromTemplate(
         projects.mutate(created.id) { it.copy(source = source) }
         created.id
     } else {
-        val rawId = input.projectId?.takeIf { it.isNotBlank() } ?: slugifyProjectId(title)
+        val rawId = resolveDefaultHomeProjectId(input.projectId, title)
         val candidate = ProjectId(rawId)
         require(projects.get(candidate) == null) {
             "project ${candidate.value} already exists; use project_query(select=projects-equivalent " +
@@ -90,6 +94,8 @@ internal suspend fun executeCreateFromTemplate(
         candidate
     }
 
+    autoBindSessionToProject(sessions, clock, ctx, pid)
+
     val result = ProjectActionTool.CreateFromTemplateResult(
         title = title,
         template = resolved.template,
@@ -102,11 +108,12 @@ internal suspend fun executeCreateFromTemplate(
     )
     val inferenceNote = if (resolved.inferred) " (auto-inferred: ${resolved.reason})" else ""
     val pathNote = input.path?.let { " at $it" }.orEmpty()
+    val bindNote = if (sessions != null) " Session ${ctx.sessionId.value} now bound to it." else ""
     return ToolResult(
         title = "create project $title from ${resolved.template}",
         outputForLlm = "Created project ${pid.value} (\"$title\")$pathNote at " +
             "${resolution.width}x${resolution.height}@${frameRate.numerator}fps " +
-            "from ${resolved.template} template$inferenceNote. Seeded ${seededIds.size} source node(s): " +
+            "from ${resolved.template} template$inferenceNote.$bindNote Seeded ${seededIds.size} source node(s): " +
             "${seededIds.joinToString(", ")}. Fill in TODO placeholders via update_* tools " +
             "before the first AIGC call.",
         data = ProjectActionTool.Output(

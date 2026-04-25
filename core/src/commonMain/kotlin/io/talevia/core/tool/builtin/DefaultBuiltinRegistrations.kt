@@ -201,10 +201,11 @@ fun ToolRegistry.registerClipAndTrackTools(
 fun ToolRegistry.registerProjectTools(
     projects: ProjectStore,
     engine: VideoEngine,
+    sessions: SessionStore? = null,
 ) {
     register(ExportTool(projects, engine))
     register(ExportDryRunTool(projects))
-    register(ProjectActionTool(projects))
+    register(ProjectActionTool(projects, sessions = sessions))
     register(ListProjectsTool(projects))
     register(ProjectQueryTool(projects))
     register(RegenerateStaleClipsTool(projects, this))

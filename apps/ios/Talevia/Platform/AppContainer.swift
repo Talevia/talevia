@@ -181,7 +181,7 @@ final class AppContainer {
         registry.register(tool: ClearTimelineTool(store: self.projects))
         // `create_from_template` is now `project_action(action="create_from_template")`;
         // `state` / `validation` / `stale_clips` are now `project_query(select=…)`.
-        registry.register(tool: ProjectActionTool(projects: self.projects))
+        registry.register(tool: ProjectActionTool(projects: self.projects, sessions: self.sessions, clock: clock))
         registry.register(tool: ListProjectsTool(projects: self.projects))
         registry.register(tool: ProjectQueryTool(projects: self.projects, clock: clock))
         registry.register(tool: ProjectMaintenanceActionTool(projects: self.projects, engine: self.engine, clock: clock))

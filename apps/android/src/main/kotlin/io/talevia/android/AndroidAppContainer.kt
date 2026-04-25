@@ -143,7 +143,7 @@ class AndroidAppContainer(context: Context) {
         )
         registerMediaTools(engine, projects, bundleBlobWriter, proxyGenerator)
         registerClipAndTrackTools(projects, sessions)
-        registerProjectTools(projects, engine)
+        registerProjectTools(projects, engine, sessions = sessions)
         registerSourceNodeTools(projects)
         // Android deliberately skips registerBuiltinFileTools — phone UI has
         // no fs / shell / web surface. AIGC: all engines null on mobile

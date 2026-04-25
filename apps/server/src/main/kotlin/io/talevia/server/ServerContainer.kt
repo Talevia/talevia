@@ -293,7 +293,7 @@ class ServerContainer(
         )
         registerMediaTools(engine, projects, bundleBlobWriter, FfmpegProxyGenerator())
         registerClipAndTrackTools(projects, sessions)
-        registerProjectTools(projects, engine)
+        registerProjectTools(projects, engine, sessions = sessions)
         registerSourceNodeTools(projects)
         registerBuiltinFileTools(fileSystem, processRunner, httpClient, search)
         registerAigcTools(

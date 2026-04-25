@@ -298,7 +298,7 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         )
         registerMediaTools(engine, projects, bundleBlobWriter, FfmpegProxyGenerator())
         registerClipAndTrackTools(projects, sessions)
-        registerProjectTools(projects, engine)
+        registerProjectTools(projects, engine, sessions = sessions)
         registerSourceNodeTools(projects)
         registerBuiltinFileTools(fileSystem, processRunner, httpClient, search)
         registerAigcTools(imageGen, videoGen, musicGen, upscale, tts, asr, vision, bundleBlobWriter, projects)

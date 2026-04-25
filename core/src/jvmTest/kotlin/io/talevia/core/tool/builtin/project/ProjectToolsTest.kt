@@ -215,7 +215,137 @@ class ProjectToolsTest {
 
     @Test fun slugifierHandlesPunctuationAndCollapses() {
         assertEquals("proj-hello-world", slugifyProjectId("Hello, World!!!"))
-        assertEquals("proj-untitled", slugifyProjectId("***"))
+        // No usable ASCII alphanumerics → null. Caller falls back to a UUID
+        // (see `resolveDefaultHomeProjectId`).
+        assertNull(slugifyProjectId("***"))
         assertEquals("proj-a-b-c", slugifyProjectId("  a---b---c  "))
+    }
+
+    @Test fun slugifierRejectsNonAsciiLetters() {
+        // CJK / accented letters pass `Char.isLetterOrDigit()` but break the
+        // SAFE_ID regex used as a default bundle directory name in
+        // FileProjectStore. The slugifier must drop them as separators rather
+        // than emit a `proj-<cjk>` id that crashes downstream.
+        assertNull(slugifyProjectId("新视频项目"))
+        assertNull(slugifyProjectId("…!?"))
+        // Mixed: ASCII portion survives, non-ASCII portion drops.
+        assertEquals("proj-vlog", slugifyProjectId("vlog 视频"))
+        assertEquals("proj-caf", slugifyProjectId("café"))
+    }
+
+    @Test fun resolveDefaultHomeProjectIdFallsBackToUuidForUnslugableTitle() {
+        // Two CJK-only creates back-to-back must each get a unique id (no
+        // `proj-untitled` collision). The UUID branch matches what
+        // FileProjectStore.createAt mints internally.
+        val first = resolveDefaultHomeProjectId(explicitId = null, title = "新视频项目")
+        val second = resolveDefaultHomeProjectId(explicitId = null, title = "新视频项目")
+        assertTrue(first != second, "expected unique UUIDs, got '$first' and '$second'")
+        // Sanity: should NOT start with `proj-` (UUID branch, not slug branch).
+        assertTrue(!first.startsWith("proj-"))
+    }
+
+    @Test fun createProjectWithCjkTitleSucceedsViaUuidFallback() = runTest {
+        val rig = rig()
+        val tool = ProjectActionTool(rig.store)
+        val out = tool.execute(createInput(title = "新视频项目"), rig.ctx).data
+        // Id is a UUID (no `proj-` prefix), and the project is retrievable.
+        assertTrue(!out.projectId.startsWith("proj-"))
+        assertNotNull(rig.store.get(ProjectId(out.projectId)))
+    }
+
+    @Test fun createProjectAutoBindsSessionWhenSessionStoreProvided() = runTest {
+        // Reproduces the user-reported flow: model calls
+        // `project_action(action="create")` and immediately needs the session
+        // bound to the new project. Pre-fix the model had to call
+        // `switch_project` afterwards, which the mid-run guard rejected
+        // because the agent was still `AwaitingTool` for the create dispatch.
+        val driver = app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver(
+            app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver.IN_MEMORY,
+        )
+        io.talevia.core.db.TaleviaDb.Schema.create(driver)
+        val db = io.talevia.core.db.TaleviaDb(driver)
+        val bus = io.talevia.core.bus.EventBus()
+        val sessions = io.talevia.core.session.SqlDelightSessionStore(db, bus)
+        val past = kotlinx.datetime.Instant.fromEpochMilliseconds(1_600_000_000_000L)
+        sessions.createSession(
+            io.talevia.core.session.Session(
+                id = SessionId("s"),
+                projectId = ProjectId("p-origin"),
+                title = "Untitled",
+                createdAt = past,
+                updatedAt = past,
+                currentProjectId = null,
+            ),
+        )
+        // Wire the ToolContext's publishEvent so we can assert the
+        // `SessionProjectBindingChanged` fanout.
+        val publishedEvents = mutableListOf<io.talevia.core.bus.BusEvent>()
+        val rigStore = ProjectStoreTestKit.create()
+        val ctx = ToolContext(
+            sessionId = SessionId("s"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { PermissionDecision.Once },
+            emitPart = { },
+            messages = emptyList(),
+            publishEvent = { publishedEvents.add(it) },
+        )
+        val tool = ProjectActionTool(rigStore, sessions = sessions)
+
+        val out = tool.execute(createInput(title = "Bound"), ctx).data
+        val pid = ProjectId(out.projectId)
+
+        val refreshed = assertNotNull(sessions.getSession(SessionId("s")))
+        assertEquals(pid, refreshed.currentProjectId)
+        assertTrue(refreshed.updatedAt > past)
+
+        val event = publishedEvents.filterIsInstance<
+            io.talevia.core.bus.BusEvent.SessionProjectBindingChanged,
+        >().single()
+        assertEquals(SessionId("s"), event.sessionId)
+        assertNull(event.previousProjectId)
+        assertEquals(pid, event.newProjectId)
+    }
+
+    @Test fun createProjectIsNoOpAutoBindWhenSessionAlreadyBound() = runTest {
+        val driver = app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver(
+            app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver.IN_MEMORY,
+        )
+        io.talevia.core.db.TaleviaDb.Schema.create(driver)
+        val db = io.talevia.core.db.TaleviaDb(driver)
+        val bus = io.talevia.core.bus.EventBus()
+        val sessions = io.talevia.core.session.SqlDelightSessionStore(db, bus)
+        val past = kotlinx.datetime.Instant.fromEpochMilliseconds(1_600_000_000_000L)
+        sessions.createSession(
+            io.talevia.core.session.Session(
+                id = SessionId("s"),
+                projectId = ProjectId("p-origin"),
+                title = "Untitled",
+                createdAt = past,
+                updatedAt = past,
+                // Already bound to the same id we'll create with — no rebind expected.
+                currentProjectId = ProjectId("proj-foo"),
+            ),
+        )
+        val publishedEvents = mutableListOf<io.talevia.core.bus.BusEvent>()
+        val rigStore = ProjectStoreTestKit.create()
+        val ctx = ToolContext(
+            sessionId = SessionId("s"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { PermissionDecision.Once },
+            emitPart = { },
+            messages = emptyList(),
+            publishEvent = { publishedEvents.add(it) },
+        )
+        ProjectActionTool(rigStore, sessions = sessions).execute(
+            createInput(title = "Foo", projectId = "proj-foo"),
+            ctx,
+        )
+        // No-op rebind → no SessionProjectBindingChanged event.
+        assertTrue(
+            publishedEvents.none { it is io.talevia.core.bus.BusEvent.SessionProjectBindingChanged },
+            "expected no rebind event for same-id create, got: $publishedEvents",
+        )
     }
 }
