@@ -8,11 +8,13 @@ import io.talevia.core.session.ToolState
 import kotlinx.serialization.json.Json
 
 /**
- * Human-readable transcript renderer for [ExportSessionTool] —
- * `format=markdown` path. The JSON envelope is for portability /
- * `import_session` / cross-instance archival; this formatter is for
- * eyeball consumption (sharing a debug session in a bug report,
- * pasting a transcript into a doc, reviewing a session offline).
+ * Human-readable transcript renderer for
+ * `session_action(action="export", format="markdown")` — the
+ * markdown path of the unified export action. The JSON envelope is
+ * for portability / `session_action(action="import")` /
+ * cross-instance archival; this formatter is for eyeball
+ * consumption (sharing a debug session in a bug report, pasting a
+ * transcript into a doc, reviewing a session offline).
  *
  * Shape:
  *

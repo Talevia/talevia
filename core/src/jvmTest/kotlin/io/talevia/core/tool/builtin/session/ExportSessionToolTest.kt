@@ -97,25 +97,25 @@ class ExportSessionToolTest {
             ),
         )
 
-        val out = ExportSessionTool(rig.store).execute(
-            ExportSessionTool.Input(sessionId = "sx"),
+        val out = SessionActionTool(rig.store).execute(
+            SessionActionTool.Input(action = "export", sessionId = "sx"),
             rig.ctx,
         ).data
 
         assertEquals("sx", out.sessionId)
         assertEquals("test-session", out.title)
-        assertEquals("p", out.projectId)
-        assertEquals(ExportSessionTool.FORMAT_VERSION, out.formatVersion)
-        assertEquals(2, out.messageCount)
-        assertEquals(1, out.partCount)
-        assertTrue(out.envelope.isNotBlank())
+        assertEquals("p", out.exportedSessionProjectId)
+        assertEquals(SESSION_EXPORT_FORMAT_VERSION, out.exportedSessionFormatVersion)
+        assertEquals(2, out.exportedSessionMessageCount)
+        assertEquals(1, out.exportedSessionPartCount)
+        assertTrue(out.exportedSessionEnvelope.isNotBlank())
 
         // Round-trip: decode envelope and verify shape.
         val decoded = JsonConfig.default.decodeFromString(
             SessionEnvelope.serializer(),
-            out.envelope,
+            out.exportedSessionEnvelope,
         )
-        assertEquals(ExportSessionTool.FORMAT_VERSION, decoded.formatVersion)
+        assertEquals(SESSION_EXPORT_FORMAT_VERSION, decoded.formatVersion)
         assertEquals(SessionId("sx"), decoded.session.id)
         assertEquals("test-session", decoded.session.title)
         assertEquals(2, decoded.messages.size)
@@ -129,13 +129,13 @@ class ExportSessionToolTest {
     @Test fun emptySessionRoundTripsCleanly() = runTest {
         val rig = rig()
         seedSession(rig.store, "sempty")
-        val out = ExportSessionTool(rig.store).execute(
-            ExportSessionTool.Input(sessionId = "sempty"),
+        val out = SessionActionTool(rig.store).execute(
+            SessionActionTool.Input(action = "export", sessionId = "sempty"),
             rig.ctx,
         ).data
-        assertEquals(0, out.messageCount)
-        assertEquals(0, out.partCount)
-        val decoded = JsonConfig.default.decodeFromString(SessionEnvelope.serializer(), out.envelope)
+        assertEquals(0, out.exportedSessionMessageCount)
+        assertEquals(0, out.exportedSessionPartCount)
+        val decoded = JsonConfig.default.decodeFromString(SessionEnvelope.serializer(), out.exportedSessionEnvelope)
         assertEquals(SessionId("sempty"), decoded.session.id)
         assertTrue(decoded.messages.isEmpty())
         assertTrue(decoded.parts.isEmpty())
@@ -144,8 +144,8 @@ class ExportSessionToolTest {
     @Test fun missingSessionFailsLoudly() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            ExportSessionTool(rig.store).execute(
-                ExportSessionTool.Input(sessionId = "ghost"),
+            SessionActionTool(rig.store).execute(
+                SessionActionTool.Input(action = "export", sessionId = "ghost"),
                 rig.ctx,
             )
         }
@@ -155,8 +155,8 @@ class ExportSessionToolTest {
     @Test fun sessionIdDefaultsFromContext() = runTest {
         val rig = rig(dispatchSessionId = "sctx")
         seedSession(rig.store, "sctx")
-        val out = ExportSessionTool(rig.store).execute(
-            ExportSessionTool.Input(),
+        val out = SessionActionTool(rig.store).execute(
+            SessionActionTool.Input(action = "export"),
             rig.ctx,
         ).data
         assertEquals("sctx", out.sessionId)
@@ -174,18 +174,18 @@ class ExportSessionToolTest {
                 model = ModelRef("anthropic", "claude-opus-4-7"),
             ),
         )
-        val compact = ExportSessionTool(rig.store).execute(
-            ExportSessionTool.Input(sessionId = "scmp", prettyPrint = false),
+        val compact = SessionActionTool(rig.store).execute(
+            SessionActionTool.Input(action = "export", sessionId = "scmp", prettyPrint = false),
             rig.ctx,
         ).data
-        val pretty = ExportSessionTool(rig.store).execute(
-            ExportSessionTool.Input(sessionId = "scmp", prettyPrint = true),
+        val pretty = SessionActionTool(rig.store).execute(
+            SessionActionTool.Input(action = "export", sessionId = "scmp", prettyPrint = true),
             rig.ctx,
         ).data
-        assertTrue(pretty.envelope.length > compact.envelope.length)
+        assertTrue(pretty.exportedSessionEnvelope.length > compact.exportedSessionEnvelope.length)
         // Both round-trip.
-        val compactDecoded = JsonConfig.default.decodeFromString(SessionEnvelope.serializer(), compact.envelope)
-        val prettyDecoded = JsonConfig.default.decodeFromString(SessionEnvelope.serializer(), pretty.envelope)
+        val compactDecoded = JsonConfig.default.decodeFromString(SessionEnvelope.serializer(), compact.exportedSessionEnvelope)
+        val prettyDecoded = JsonConfig.default.decodeFromString(SessionEnvelope.serializer(), pretty.exportedSessionEnvelope)
         assertEquals(compactDecoded.messages.map { it.id }, prettyDecoded.messages.map { it.id })
     }
 
@@ -240,14 +240,14 @@ class ExportSessionToolTest {
             ),
         )
 
-        val out = ExportSessionTool(rig.store).execute(
-            ExportSessionTool.Input(sessionId = "smd", format = "markdown"),
+        val out = SessionActionTool(rig.store).execute(
+            SessionActionTool.Input(action = "export", sessionId = "smd", format = "markdown"),
             rig.ctx,
         ).data
 
-        assertEquals("markdown", out.format)
-        assertEquals("talevia-session-export-md-v1", out.formatVersion)
-        val md = out.envelope
+        assertEquals("markdown", out.exportedSessionFormat)
+        assertEquals("talevia-session-export-md-v1", out.exportedSessionFormatVersion)
+        val md = out.exportedSessionEnvelope
         // Header carries the title + ids verbatim.
         assertTrue(md.startsWith("# Session: Markdown demo"), "header missing title; got: ${md.take(80)}")
         assertTrue("- **id**: `smd`" in md)
@@ -310,10 +310,10 @@ class ExportSessionToolTest {
             ),
         )
 
-        val md = ExportSessionTool(rig.store).execute(
-            ExportSessionTool.Input(sessionId = "stool", format = "md"),
+        val md = SessionActionTool(rig.store).execute(
+            SessionActionTool.Input(action = "export", sessionId = "stool", format = "md"),
             rig.ctx,
-        ).data.envelope
+        ).data.exportedSessionEnvelope
 
         assertTrue("> [!TOOL] `echo`" in md, "tool callout header missing")
         assertTrue("`abc123`" in md, "callId tail missing")
@@ -328,23 +328,23 @@ class ExportSessionToolTest {
         // downstream import_session can still consume it.
         val rig = rig()
         seedSession(rig.store, "sfb")
-        val out = ExportSessionTool(rig.store).execute(
-            ExportSessionTool.Input(sessionId = "sfb", format = "frobnicate"),
+        val out = SessionActionTool(rig.store).execute(
+            SessionActionTool.Input(action = "export", sessionId = "sfb", format = "frobnicate"),
             rig.ctx,
         ).data
-        assertEquals("json", out.format)
+        assertEquals("json", out.exportedSessionFormat)
         // Round-trips as JSON envelope.
-        val decoded = JsonConfig.default.decodeFromString(SessionEnvelope.serializer(), out.envelope)
+        val decoded = JsonConfig.default.decodeFromString(SessionEnvelope.serializer(), out.exportedSessionEnvelope)
         assertEquals(SessionId("sfb"), decoded.session.id)
     }
 
     @Test fun emptySessionMarkdownIsValid() = runTest {
         val rig = rig()
         seedSession(rig.store, "sempty-md", title = "empty")
-        val md = ExportSessionTool(rig.store).execute(
-            ExportSessionTool.Input(sessionId = "sempty-md", format = "markdown"),
+        val md = SessionActionTool(rig.store).execute(
+            SessionActionTool.Input(action = "export", sessionId = "sempty-md", format = "markdown"),
             rig.ctx,
-        ).data.envelope
+        ).data.exportedSessionEnvelope
         assertTrue(md.startsWith("# Session: empty"))
         assertTrue("(empty session — no messages yet)" in md)
     }

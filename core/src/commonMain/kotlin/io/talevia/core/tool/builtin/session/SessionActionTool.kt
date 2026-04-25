@@ -9,6 +9,7 @@ import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.action.executeRemovePermissionRule
 import io.talevia.core.tool.builtin.session.action.executeSessionArchive
 import io.talevia.core.tool.builtin.session.action.executeSessionDelete
+import io.talevia.core.tool.builtin.session.action.executeSessionExport
 import io.talevia.core.tool.builtin.session.action.executeSessionExportBusTrace
 import io.talevia.core.tool.builtin.session.action.executeSessionFork
 import io.talevia.core.tool.builtin.session.action.executeSessionImport
@@ -103,7 +104,7 @@ class SessionActionTool(
          * the dispatch is running.
          */
         val sessionId: String? = null,
-        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, `"set_system_prompt"`, `"export_bus_trace"`, `"set_tool_enabled"`, `"set_spend_cap"`, or `"fork"`. */
+        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, `"set_system_prompt"`, `"export_bus_trace"`, `"set_tool_enabled"`, `"set_spend_cap"`, `"fork"`, or `"export"`. */
         val action: String,
         /**
          * `action="rename"`: required, must be non-blank — the renamed
@@ -133,7 +134,7 @@ class SessionActionTool(
         val pattern: String? = null,
         /**
          * Required for `action=import`. The serialized envelope
-         * produced by `export_session` (format
+         * produced by `session_action(action="export")` (format
          * `talevia-session-export-v1`). The import path verifies
          * `formatVersion`, requires the envelope's target
          * `projectId` to already exist on this machine (import a
@@ -155,11 +156,23 @@ class SessionActionTool(
          */
         val systemPromptOverride: String? = null,
         /**
-         * Used by `action=export_bus_trace`. `"jsonl"` (default) emits
-         * one `BusEventTraceRecorder.Entry` JSON object per line —
+         * Used by `action=export_bus_trace` and `action=export`.
+         *
+         * For `export_bus_trace`: `"jsonl"` (default) emits one
+         * `BusEventTraceRecorder.Entry` JSON object per line —
          * stream-friendly + grep-friendly. `"json"` emits a single
          * JSON array — easier for one-shot tools that decode a whole
-         * file. Ignored on every other action.
+         * file.
+         *
+         * For `export`: `"json"` (default) emits the portable
+         * envelope `talevia-session-export-v1` consumed by
+         * `action="import"`. `"markdown"` (alias `"md"`) emits a
+         * human-readable transcript with tool calls folded into
+         * GitHub-style callouts — meant for bug reports / docs /
+         * offline reading, NOT for re-import. Unknown values fall
+         * back to `"json"`.
+         *
+         * Ignored on every other action.
          */
         val format: String? = null,
         /**
@@ -213,6 +226,13 @@ class SessionActionTool(
          * (the store's `require` surfaces it verbatim).
          */
         val anchorMessageId: String? = null,
+        /**
+         * `action=export` only. Pretty-print the JSON envelope?
+         * Default false (compact wire shape). Markdown format
+         * ignores this flag (its rendering doesn't have a "compact"
+         * variant). Ignored on every other action.
+         */
+        val prettyPrint: Boolean = false,
     )
 
     @Serializable data class Output(
@@ -330,6 +350,43 @@ class SessionActionTool(
          * branch. Zero on every other action.
          */
         val forkCopiedMessageCount: Int = 0,
+        /**
+         * `export` only: serialized session envelope (JSON or
+         * markdown depending on requested format). Empty string on
+         * every other action. Pair with `write_file` to persist.
+         */
+        val exportedSessionEnvelope: String = "",
+        /**
+         * `export` only: format-version tag the export landed in
+         * (`talevia-session-export-v1` for JSON,
+         * `talevia-session-export-md-v1` for markdown). Empty string
+         * on every other action.
+         */
+        val exportedSessionFormatVersion: String = "",
+        /**
+         * `export` only: number of messages the envelope contains.
+         * Zero on every other action.
+         */
+        val exportedSessionMessageCount: Int = 0,
+        /**
+         * `export` only: number of parts the envelope contains
+         * (lossless — includes compacted parts so a round-trip
+         * yields a bit-equal session). Zero on every other action.
+         */
+        val exportedSessionPartCount: Int = 0,
+        /**
+         * `export` only: format string the export landed in
+         * (`"json"` or `"markdown"`), echoed for caller convenience.
+         * Empty string on every other action.
+         */
+        val exportedSessionFormat: String = "",
+        /**
+         * `export` only: project id the exported session is bound to
+         * (re-importing the envelope on another instance requires
+         * the target to have the same project). Empty string on
+         * every other action.
+         */
+        val exportedSessionProjectId: String = "",
     )
 
     override val id: String = "session_action"
@@ -351,25 +408,37 @@ class SessionActionTool(
             "session — creates a new session with parentId pointing at the source, copies " +
             "messages up to optional `anchorMessageId` (omit to copy whole history); use " +
             "for 'try a different approach from here' flows. `newTitle` optional (defaults " +
-            "to '<parent title> (fork)'). sessionId defaults to owning session except on " +
-            "delete and import. Permission: session.write (delete=session.destructive)."
+            "to '<parent title> (fork)'). `export`+optional `format`/`prettyPrint` serializes " +
+            "the session (metadata + every message + every part, including compacted) into " +
+            "a portable JSON envelope (`format=json`, default — pair with action=import for " +
+            "round-trip) or a human-readable markdown transcript (`format=markdown`, alias " +
+            "`md`). sessionId defaults to owning session except on delete and import. " +
+            "Permission: session.write (delete=session.destructive, " +
+            "export/export_bus_trace=session.read)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
 
     /**
      * Base tier `session.write`. [permissionFrom] upgrades to
      * `session.destructive` only when the raw input JSON contains
-     * `"action":"delete"` — any other action (or malformed input) stays
-     * at `session.write`. Malformed-input defaulting to the LOWER tier
-     * is safe here because every action except delete is already a
-     * non-destructive mutation; a malformed input will fail validation
-     * in [execute] before touching the store. The permission layer
-     * just needs to not block the action from reaching that validation.
+     * `"action":"delete"` and downgrades to `session.read` for
+     * `"action":"export"` / `"action":"export_bus_trace"` (both pure
+     * read paths). Any other action (or malformed input) stays at the
+     * base `session.write` tier — defaulting to a tier no LOWER than
+     * the base on parse failure ensures a malformed input cannot bypass
+     * a stricter gate. The downgrade is safe in the other direction:
+     * the actual export handlers fail loud at dispatch if the input
+     * doesn't match the action's contract, so a malformed export
+     * payload never gets to write anything.
      */
     override val permission: PermissionSpec = PermissionSpec(
         permission = "session.write",
         permissionFrom = { inputJson ->
-            if (isDeleteAction(inputJson)) "session.destructive" else "session.write"
+            when {
+                isDeleteAction(inputJson) -> "session.destructive"
+                isExportAction(inputJson) || isExportBusTraceAction(inputJson) -> "session.read"
+                else -> "session.write"
+            }
         },
     )
 
@@ -387,7 +456,7 @@ class SessionActionTool(
                 put("type", "string")
                 put(
                     "description",
-                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, `set_system_prompt`, `export_bus_trace`, `set_tool_enabled`, `set_spend_cap`, or `fork`.",
+                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, `set_system_prompt`, `export_bus_trace`, `set_tool_enabled`, `set_spend_cap`, `fork`, or `export`.",
                 )
                 put(
                     "enum",
@@ -404,6 +473,7 @@ class SessionActionTool(
                             JsonPrimitive("set_tool_enabled"),
                             JsonPrimitive("set_spend_cap"),
                             JsonPrimitive("fork"),
+                            JsonPrimitive("export"),
                         ),
                     ),
                 )
@@ -429,7 +499,7 @@ class SessionActionTool(
                 put(
                     "description",
                     "Required for action=import. The exact envelope string returned by " +
-                        "export_session(format=json) — formatVersion will be checked, target " +
+                        "session_action(action=export, format=json) — formatVersion will be checked, target " +
                         "projectId must already exist on this machine, sessionId collision " +
                         "fails loud.",
                 )
@@ -448,11 +518,20 @@ class SessionActionTool(
                 put("type", "string")
                 put(
                     "description",
-                    "Used by action=export_bus_trace. `\"jsonl\"` (default) or `\"json\"`.",
+                    "Used by action=export_bus_trace (`\"jsonl\"` default | `\"json\"`) and " +
+                        "action=export (`\"json\"` default for the portable envelope | " +
+                        "`\"markdown\"` alias `\"md\"` for a human-readable transcript).",
                 )
                 put(
                     "enum",
-                    JsonArray(listOf(JsonPrimitive("jsonl"), JsonPrimitive("json"))),
+                    JsonArray(
+                        listOf(
+                            JsonPrimitive("jsonl"),
+                            JsonPrimitive("json"),
+                            JsonPrimitive("markdown"),
+                            JsonPrimitive("md"),
+                        ),
+                    ),
                 )
             }
             putJsonObject("limit") {
@@ -505,6 +584,14 @@ class SessionActionTool(
                         "belong to the parent session fails loud.",
                 )
             }
+            putJsonObject("prettyPrint") {
+                put("type", "boolean")
+                put(
+                    "description",
+                    "Used by action=export. Pretty-print the JSON envelope. Default false " +
+                        "(compact wire shape). Markdown format ignores this flag.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("action"))))
         put("additionalProperties", false)
@@ -525,26 +612,46 @@ class SessionActionTool(
             "set_tool_enabled" -> executeSessionSetToolEnabled(sessions, clock, input, ctx)
             "set_spend_cap" -> executeSessionSetSpendCap(sessions, clock, input, ctx)
             "fork" -> executeSessionFork(sessions, input, ctx)
+            "export" -> executeSessionExport(sessions, input, ctx)
             else -> error(
                 "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, " +
                     "remove_permission_rule, import, set_system_prompt, export_bus_trace, " +
-                    "set_tool_enabled, set_spend_cap, fork",
+                    "set_tool_enabled, set_spend_cap, fork, export",
             )
         }
     }
 
     private companion object {
         /**
-         * Regex-check for `"action":"delete"` in the raw input JSON, case-insensitive.
-         * Runs before kotlinx.serialization decode for `permissionFrom`'s tier gate.
-         * Any failed match defaults to the LOWER tier — safe here because a
-         * malformed input can't reach the destructive branch (execute() fails first).
+         * Regex-checks for action discrimination before kotlinx.serialization
+         * decode, used by `permissionFrom`'s tier gate. Any failed match
+         * defaults to the BASE tier (`session.write`) — safe in both
+         * directions:
+         *  - Malformed delete input stays at write (can't bypass to a
+         *    looser tier).
+         *  - Malformed export input stays at write (the pure-read tier
+         *    is a downgrade; defaulting to write is a no-loss).
+         *
+         * Each action's actual handler runs after decode and re-validates
+         * the input shape, so malformed payloads fail loud at dispatch
+         * without ever touching the store.
          */
         private val DELETE_ACTION_REGEX = Regex(
             pattern = """"action"\s*:\s*"delete"""",
             option = RegexOption.IGNORE_CASE,
         )
+        private val EXPORT_ACTION_REGEX = Regex(
+            pattern = """"action"\s*:\s*"export"""",
+            option = RegexOption.IGNORE_CASE,
+        )
+        private val EXPORT_BUS_TRACE_ACTION_REGEX = Regex(
+            pattern = """"action"\s*:\s*"export_bus_trace"""",
+            option = RegexOption.IGNORE_CASE,
+        )
 
         fun isDeleteAction(inputJson: String): Boolean = DELETE_ACTION_REGEX.containsMatchIn(inputJson)
+        fun isExportAction(inputJson: String): Boolean = EXPORT_ACTION_REGEX.containsMatchIn(inputJson)
+        fun isExportBusTraceAction(inputJson: String): Boolean =
+            EXPORT_BUS_TRACE_ACTION_REGEX.containsMatchIn(inputJson)
     }
 }

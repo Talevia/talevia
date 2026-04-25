@@ -5,13 +5,13 @@ import io.talevia.core.ProjectId
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolResult
-import io.talevia.core.tool.builtin.session.ExportSessionTool
+import io.talevia.core.tool.builtin.session.SESSION_EXPORT_FORMAT_VERSION
 import io.talevia.core.tool.builtin.session.SessionActionTool
 import io.talevia.core.tool.builtin.session.SessionEnvelope
 
 /**
  * `session_action(action="import")` handler — symmetric pair of
- * `export_session(format=json)`. Materialises a previously-exported
+ * `session_action(action="export", format="json")`. Materialises a previously-exported
  * envelope into the target [SessionStore]:
  *
  * 1. Validates [projects] is wired (the registering AppContainer
@@ -23,7 +23,7 @@ import io.talevia.core.tool.builtin.session.SessionEnvelope
  * 4. Refuses payloads with a wrong `formatVersion` — silent
  *    tolerance risks corrupting the target session store when
  *    `Message` / `Part` schemas evolve, exactly the contract
- *    `ExportSessionTool.FORMAT_VERSION` signs.
+ *    `SESSION_EXPORT_FORMAT_VERSION` signs.
  * 5. Requires the envelope's target `projectId` to already exist
  *    locally — pair with `import_project_from_json` if the project
  *    isn't there yet (this tool intentionally doesn't create
@@ -50,7 +50,7 @@ internal suspend fun executeSessionImport(
     val rawEnvelope = input.envelope
         ?: error(
             "action=import requires `envelope`. Pass the string returned by " +
-                "export_session(format=json).data.envelope.",
+                "session_action(action=export, format=json).data.exportedSessionEnvelope.",
         )
     require(rawEnvelope.isNotBlank()) { "action=import: envelope must not be blank" }
 
@@ -70,10 +70,10 @@ internal suspend fun executeSessionImport(
         )
     }
 
-    if (envelope.formatVersion != ExportSessionTool.FORMAT_VERSION) {
+    if (envelope.formatVersion != SESSION_EXPORT_FORMAT_VERSION) {
         error(
             "action=import: envelope formatVersion '${envelope.formatVersion}' does not match " +
-                "this tool's '${ExportSessionTool.FORMAT_VERSION}'. The envelope was produced by a " +
+                "this tool's '$SESSION_EXPORT_FORMAT_VERSION'. The envelope was produced by a " +
                 "different schema generation; refusing to import to avoid corrupting the target " +
                 "session store. Re-export from a Talevia of the same schema generation.",
         )

@@ -32,7 +32,7 @@ import kotlin.test.assertTrue
 
 /**
  * End-to-end coverage for `session_action(action=import)` —
- * symmetric with `export_session(format=json)`.
+ * symmetric with `session_action(action="export", format="json")`.
  *
  * Test invariants:
  * - Round-trip: export → import yields a session that the store
@@ -113,7 +113,7 @@ class SessionActionImportTest {
         session: Session,
         messages: List<Message>,
         parts: List<Part>,
-        formatVersion: String = ExportSessionTool.FORMAT_VERSION,
+        formatVersion: String = SESSION_EXPORT_FORMAT_VERSION,
     ): String {
         val env = SessionEnvelope(
             formatVersion = formatVersion,
@@ -138,7 +138,7 @@ class SessionActionImportTest {
         assertEquals("import", result.action)
         assertEquals(session.id.value, result.sessionId)
         assertEquals(session.title, result.title)
-        assertEquals(ExportSessionTool.FORMAT_VERSION, result.importedFormatVersion)
+        assertEquals(SESSION_EXPORT_FORMAT_VERSION, result.importedFormatVersion)
         assertEquals(2, result.importedMessageCount)
         assertEquals(1, result.importedPartCount)
 
