@@ -26,7 +26,7 @@ internal val SESSION_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
                     "cache_stats | " +
                     "context_pressure | run_state_history | tool_spec_budget | run_failure | " +
                     "fallback_history | cancellation_history | permission_history | " +
-                    "permission_rules | preflight_summary | recap | step_history | active_run_summary | bus_trace.",
+                    "permission_rules | preflight_summary | recap | step_history | active_run_summary | bus_trace | text_search.",
             )
         }
         putJsonObject("sessionId") {
@@ -98,6 +98,10 @@ internal val SESSION_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
                     "older than this. Null returns the full ring buffer (capped at 256 entries " +
                     "per session). Rejected for other selects.",
             )
+        }
+        putJsonObject("query") {
+            put("type", "string")
+            put("description", "Required for text_search; case-insensitive substring.")
         }
     }
     put("required", JsonArray(listOf(JsonPrimitive("select"))))

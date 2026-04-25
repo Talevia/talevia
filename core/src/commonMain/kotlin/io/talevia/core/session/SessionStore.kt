@@ -93,6 +93,27 @@ interface SessionStore {
     fun observeSessionParts(sessionId: SessionId): Flow<Part>
 
     /**
+     * Substring search across `Part.Text` content. Backs
+     * `session_query(select=text_search)`. Returns matches newest-first;
+     * scoped to one session when [sessionId] is non-null, or every
+     * session in the store when null. [limit] caps rows after [offset]
+     * skip; both are applied at the SQL layer for cheap pagination on
+     * busy stores.
+     *
+     * Compacted parts are excluded — text whose Part.Compacted has been
+     * dropped is no longer in active context anyway, and including it
+     * would pollute the search with content the agent already lost
+     * track of. [includeCompacted=true] callers can re-issue
+     * `select=parts` for that history.
+     */
+    suspend fun searchTextInParts(
+        query: String,
+        sessionId: SessionId? = null,
+        limit: Int = 50,
+        offset: Int = 0,
+    ): List<Part.Text>
+
+    /**
      * Branch a session: create a new session whose `parentId` points at [parentId],
      * copying messages + parts with fresh IDs so the branch can diverge without
      * touching the parent's history. Returns the new session id.

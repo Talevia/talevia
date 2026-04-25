@@ -41,3 +41,18 @@ DELETE FROM Parts WHERE message_id = ?;
 
 deleteBySession:
 DELETE FROM Parts WHERE session_id = ?;
+
+-- session_text_search backing query — substring match on text-kind parts.
+-- :sessionFilter is either '%' to match every session or the literal
+-- session id (passed wrapped as 'sid'); the LIKE on session_id avoids
+-- having two query variants. data LIKE '%' || :query || '%' walks the
+-- JSON blob; the JSON discriminator + Part.Text payload's `"text":"..."`
+-- field is what hits.
+searchText:
+SELECT * FROM Parts
+ WHERE kind = 'text'
+   AND time_compacted IS NULL
+   AND session_id LIKE :sessionFilter
+   AND data LIKE '%' || :query || '%'
+ ORDER BY time_created DESC, id DESC
+ LIMIT :limitN OFFSET :offsetN;

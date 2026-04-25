@@ -193,6 +193,26 @@ class SqlDelightSessionStore(
         return rows.map { decodePart(it.data_, it.time_compacted) }
     }
 
+    override suspend fun searchTextInParts(
+        query: String,
+        sessionId: SessionId?,
+        limit: Int,
+        offset: Int,
+    ): List<Part.Text> {
+        if (query.isBlank()) return emptyList()
+        // session_id LIKE '%' matches everything; otherwise an exact id.
+        val sessionFilter = sessionId?.value ?: "%"
+        val rows = db.partsQueries
+            .searchText(
+                sessionFilter = sessionFilter,
+                query = query,
+                limitN = limit.toLong(),
+                offsetN = offset.toLong(),
+            )
+            .executeAsList()
+        return rows.mapNotNull { decodePart(it.data_, it.time_compacted) as? Part.Text }
+    }
+
     /**
      * Reconstruct a [Part] from its JSON blob, overlaying the `time_compacted`
      * column. [markPartCompacted] only updates the column (for cheap set-once

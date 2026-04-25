@@ -15,7 +15,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **session-text-search** — 操作者打开旧 session 时只能按 sessionId 列表 + recap 过一遍，没法按内容过滤"我那次问了 X 的 session 是哪个"。当前 fallback：手动 grep `~/.talevia/talevia.db` SQLite。**方向：** `session_query(select=text_search, query, sessionId?, role?)` 走 message body 子串匹配 (在 SqlDelight `messages.data` blob 上 LIKE) 返 (messageId, sessionId, snippet, matchOffset)。Rubric §5.4。Milestone §later.
 - **agent-parallel-tool-dispatch** — assistant turn 包含 N 个 tool_use 时当前逐个串行 dispatch；其中互相不依赖的 (e.g. 两个 `read_part`) 完全可以并行。Long-tail tool 串行严重拖慢 turn。**方向：** ToolDispatcher 接收一批 tool_use → 用 `coroutineScope { ... async { ... } }` 并行；保持 result 顺序匹配 input 顺序写回 message。Rubric §5.7。Milestone §later.
 - **aigc-budget-warning-at-80pct** — `aigc.budget` ASK 只在 `cumulative >= cap` 触发（cycle-101 的 export-fail-fast 同样硬 ≥），用户从 "全无感知" 跳到 "卡死"。中间没有"快超了"的 soft signal。**方向：** AigcBudgetGuard / ExportToolBudgetGuard 在 0.8×cap ≤ cumulative < cap 时发 `BusEvent.SpendCapApproaching`（不 ASK，仅事件 + CLI surface），user 自然减速。Rubric §5.2 / §5.7。Milestone §later.
 - **source-dag-cycle-detection** — `Source.replaceNode` / `addLink` 假设调用方传无环图，没有 guard。一个 node body 里 referenceIds 引用自己（或后代）→ 后续 `descendants(rootId)` 遍历会无限递归 → 栈溢出。**方向：** `Source.validateAcyclic()` helper（DFS + visiting set），调入每个写入路径的入口；返红一条 `ProjectValidationWarning` 而非 throw。Rubric §5.1。Milestone §later.

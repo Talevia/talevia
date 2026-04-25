@@ -33,6 +33,7 @@ import io.talevia.core.tool.builtin.session.query.SessionSpendSummaryRow
 import io.talevia.core.tool.builtin.session.query.SpendSummaryRow
 import io.talevia.core.tool.builtin.session.query.StatusRow
 import io.talevia.core.tool.builtin.session.query.StepHistoryRow
+import io.talevia.core.tool.builtin.session.query.TextSearchMatchRow
 import io.talevia.core.tool.builtin.session.query.ToolCallRow
 import io.talevia.core.tool.builtin.session.query.ToolSpecBudgetRow
 import io.talevia.core.tool.builtin.session.query.runActiveRunSummaryQuery
@@ -59,6 +60,7 @@ import io.talevia.core.tool.builtin.session.query.runSpendQuery
 import io.talevia.core.tool.builtin.session.query.runSpendSummaryQuery
 import io.talevia.core.tool.builtin.session.query.runStatusQuery
 import io.talevia.core.tool.builtin.session.query.runStepHistoryQuery
+import io.talevia.core.tool.builtin.session.query.runTextSearchQuery
 import io.talevia.core.tool.builtin.session.query.runToolCallsQuery
 import io.talevia.core.tool.builtin.session.query.runToolSpecBudgetQuery
 import io.talevia.core.tool.query.QueryDispatcher
@@ -179,6 +181,12 @@ class SessionQueryTool(
          * ring buffer (within its cap). Rejected for other selects.
          */
         val sinceEpochMs: Long? = null,
+        /**
+         * Substring (case-insensitive) for `select=text_search`. Required
+         * for that select; rejected for others. When `sessionId` is null
+         * the search is cross-session, otherwise scoped to that session.
+         */
+        val query: String? = null,
     )
 
     @Serializable data class Output(
@@ -206,34 +214,28 @@ class SessionQueryTool(
             "  • ancestors — parent chain.\n" +
             "  • tool_calls — filter: toolId, includeCompacted.\n" +
             "  • compactions — Part.Compaction aggregate.\n" +
-            "  • status — (state, cause?, neverRan, estimatedTokens, compactionThreshold, " +
-            "percent); state: idle|generating|awaiting_tool|compacting|cancelled|failed.\n" +
+            "  • status — agent run state: idle|generating|awaiting_tool|compacting|cancelled|failed.\n" +
             "  • session_metadata — single-row drill-down.\n" +
             "  • message — single-row + parts summary.\n" +
             "  • spend — single-row AIGC cost.\n" +
             "  • spend_summary — per-provider roll-up.\n" +
-            "  • context_pressure — (currentEstimate, threshold, ratio, marginTokens, " +
-            "overThreshold, messageCount).\n" +
-            "  • tool_spec_budget — registry-wide (toolCount, estimatedTokens, specBytes, " +
-            "topByTokens[5]).\n" +
+            "  • context_pressure — current vs threshold token count.\n" +
+            "  • tool_spec_budget — registry-wide spec token estimate + topByTokens.\n" +
             "  • run_failure — failed-turn post-mortem; optional messageId.\n" +
-            "  • fallback_history — turns with ≥1 fallback hop {messageId, createdAtEpochMs, " +
-            "model, finish, chain}; optional messageId.\n" +
-            "  • cancellation_history — finish=CANCELLED turns {messageId, createdAtEpochMs, " +
-            "model, reason, inFlightToolCallCount, inFlightToolIds}; optional messageId.\n" +
-            "  • permission_history — Asked↔Replied round-trips {requestId, permission, " +
-            "patterns, decision, accepted?, remembered?, askedEpochMs, repliedEpochMs}.\n" +
-            "  • permission_rules — {permission, pattern, action, source}.\n" +
-            "  • preflight_summary — single-row plan-time snapshot collapsing context_pressure + " +
-            "fallback + cancel + retry + pendingPermissionAsks.\n" +
-            "  • recap — single-row session orientation: turnCount, totalTokensIn/Out, " +
-            "totalCostCents, distinctToolsUsed, lastModelId, firstAt/lastAt.\n" +
-            "  • step_history — per-step timeline {model, finishReason, tokens, toolCallCount, " +
-            "elapsedMs}; optional messageId.\n" +
+            "  • fallback_history — turns with ≥1 provider fallback hop; optional messageId.\n" +
+            "  • cancellation_history — finish=CANCELLED turns; optional messageId.\n" +
+            "  • permission_history — Asked↔Replied round-trips.\n" +
+            "  • permission_rules — persisted Always-grant rules.\n" +
+            "  • preflight_summary — plan-time snapshot collapsing context_pressure + " +
+            "fallback + cancel + retry + pendingAsks.\n" +
+            "  • recap — orientation: turnCount, tokens, totalCost, distinctToolsUsed, lastModel.\n" +
+            "  • step_history — per-step timeline; optional messageId.\n" +
             "  • active_run_summary — latest turn stats (state, elapsedMs, tokensIn/Out, " +
             "toolCallCount, compactionsInRun).\n" +
             "  • bus_trace — per-session bus event ring buffer {kind, epochMs, summary}; " +
-            "filters: kind (event class), sinceEpochMs."
+            "filters: kind (event class), sinceEpochMs.\n" +
+            "  • text_search — substring grep over Part.Text content {messageId, partId, " +
+            "snippet, matchOffset}; requires query, optional sessionId for scope."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.read")
@@ -267,6 +269,7 @@ class SessionQueryTool(
         SELECT_PREFLIGHT_SUMMARY -> PreflightSummaryRow.serializer()
         SELECT_RECAP -> SessionRecapRow.serializer()
         SELECT_BUS_TRACE -> BusTraceRow.serializer()
+        SELECT_TEXT_SEARCH -> TextSearchMatchRow.serializer()
         SELECT_STEP_HISTORY -> StepHistoryRow.serializer()
         SELECT_ACTIVE_RUN_SUMMARY -> ActiveRunSummaryRow.serializer()
         else -> error("No row serializer registered for select='$select'")
@@ -311,6 +314,7 @@ class SessionQueryTool(
             SELECT_STEP_HISTORY -> runStepHistoryQuery(sessions, input, limit, offset)
             SELECT_RECAP -> runSessionRecapQuery(sessions, projects, input)
             SELECT_BUS_TRACE -> runBusTraceQuery(busTrace, input, limit, offset)
+            SELECT_TEXT_SEARCH -> runTextSearchQuery(sessions, input, limit, offset)
             SELECT_ACTIVE_RUN_SUMMARY -> runActiveRunSummaryQuery(sessions, agentStates, input)
             else -> error("unreachable — select validated above: '$select'")
         }
@@ -355,6 +359,7 @@ class SessionQueryTool(
         const val SELECT_STEP_HISTORY = "step_history"
         const val SELECT_ACTIVE_RUN_SUMMARY = "active_run_summary"
         const val SELECT_BUS_TRACE = "bus_trace"
+        const val SELECT_TEXT_SEARCH = "text_search"
         internal val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
             SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
@@ -364,7 +369,7 @@ class SessionQueryTool(
             SELECT_RUN_FAILURE, SELECT_FALLBACK_HISTORY, SELECT_CANCELLATION_HISTORY,
             SELECT_PERMISSION_HISTORY, SELECT_PERMISSION_RULES,
             SELECT_PREFLIGHT_SUMMARY, SELECT_RECAP, SELECT_STEP_HISTORY,
-            SELECT_ACTIVE_RUN_SUMMARY, SELECT_BUS_TRACE,
+            SELECT_ACTIVE_RUN_SUMMARY, SELECT_BUS_TRACE, SELECT_TEXT_SEARCH,
         )
 
         private const val DEFAULT_LIMIT = 100
