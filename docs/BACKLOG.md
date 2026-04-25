@@ -13,8 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **session-query-step-history** — assistant turn 内部多 step (text → tool_calls → text 等) 历史虽在 `Part.StepStart`/`Part.StepFinish` 里，但没有 select 把 "每个 step 的 model/finish/tokens/toolCallCount/elapsedMs" 拍平到一个 timeline。debug 只能 grep `~/.talevia/cli.log`。**方向：** `session_query(select=step_history, sessionId)` 按 message 汇总。每行 (messageId, stepIndex, model, finishReason, tokensIn/Out, toolCallCount, elapsedMs)。Rubric §5.4。Milestone §later.
-
 ## P1 — 中优，做完 P0 再排
 
 - **re-evaluate-m2-provider-second-impl** — `m2-provider-second-impl` 跨 5+ repopulate 周期连续 skip-tagged（"需专有 API key + vendor 决策"），符合 §R skip-≥3-cycles 元 bullet 规则。M2 退出仅卡这一条 criterion。**方向：** 用户决定 promote (给定 vendor + key) / demote (M2 改"single provider acceptable") / delete (criterion 不再相关)。Rubric §5.7 / §5.2。Milestone §M2.

@@ -92,13 +92,21 @@ class ToolSpecBudgetGateTest {
      *     to LLM plan-time so the agent doesn't compute "8s × $0.30"
      *     by hand from the priceBasis string. helpText + per-field
      *     descriptions trimmed before bumping. ~0.3% buffer.
-     *   - 23_100 (this cycle, cycle-77): 23_045 measured. +45 tokens
-     *     above prior ceiling; load-bearing addition of
-     *     `project_query(select=source_binding_stats)` per backlog
-     *     `project-query-source-binding-stats`. Per-kind coverage
+     *   - 23_100 (cycle-77): 23_045 measured. +45 tokens above prior
+     *     ceiling; load-bearing addition of
+     *     `project_query(select=source_binding_stats)`. Per-kind coverage
      *     answers "how many character_refs are unused?" in one query
      *     instead of an O(n) walk through `consistency_propagation`.
-     *     helpText already trimmed before bumping. ~0.2% buffer.
+     *     ~0.2% buffer.
+     *   - 23_200 (this cycle, cycle-83): 23_124 measured. +24 tokens
+     *     above prior ceiling; load-bearing additions of
+     *     `session_query(select=preflight_summary)` (cycle-82) +
+     *     `session_query(select=step_history)` (this cycle). preflight
+     *     consolidates 4 query lanes into one row to cut per-plan tool
+     *     calls; step_history exposes per-step (model/finish/tokens/
+     *     toolCallCount/elapsedMs) timeline previously only
+     *     reconstructable from the parts select. helpText for both
+     *     trimmed before bumping. ~0.3% buffer.
      *   - 20_000 (next target, R.6 P0 threshold): requires either
      *     deleting ~10 more tools or moving per-action details to a
      *     `list_tools(select=tool_detail)` sidecar so the live spec
@@ -113,7 +121,7 @@ class ToolSpecBudgetGateTest {
      * the number increased — rationale lives in the commit body since
      * docs/decisions/ was removed (commit ae213b05).
      */
-    private val CEILING_TOKENS: Int = 23_100
+    private val CEILING_TOKENS: Int = 23_200
 
     @Test
     fun registeredToolSpecsFitWithinCeiling() {

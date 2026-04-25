@@ -29,6 +29,7 @@ import io.talevia.core.tool.builtin.session.query.SessionRow
 import io.talevia.core.tool.builtin.session.query.SessionSpendSummaryRow
 import io.talevia.core.tool.builtin.session.query.SpendSummaryRow
 import io.talevia.core.tool.builtin.session.query.StatusRow
+import io.talevia.core.tool.builtin.session.query.StepHistoryRow
 import io.talevia.core.tool.builtin.session.query.ToolCallRow
 import io.talevia.core.tool.builtin.session.query.ToolSpecBudgetRow
 import io.talevia.core.tool.builtin.session.query.runActiveRunSummaryQuery
@@ -51,6 +52,7 @@ import io.talevia.core.tool.builtin.session.query.runSessionsQuery
 import io.talevia.core.tool.builtin.session.query.runSpendQuery
 import io.talevia.core.tool.builtin.session.query.runSpendSummaryQuery
 import io.talevia.core.tool.builtin.session.query.runStatusQuery
+import io.talevia.core.tool.builtin.session.query.runStepHistoryQuery
 import io.talevia.core.tool.builtin.session.query.runToolCallsQuery
 import io.talevia.core.tool.builtin.session.query.runToolSpecBudgetQuery
 import io.talevia.core.tool.query.QueryDispatcher
@@ -221,6 +223,8 @@ class SessionQueryTool(
             "remembered?, askedEpochMs, repliedEpochMs}. requires sessionId. Process-scoped.\n" +
             "  • preflight_summary — single-row plan-time snapshot collapsing context_pressure + " +
             "fallback + cancel + retry + pendingPermissionAsks. requires sessionId.\n" +
+            "  • step_history — per-step timeline {model, finishReason, tokens, toolCallCount, " +
+            "elapsedMs}. sessionId; optional messageId.\n" +
             "  • active_run_summary — running stats for the latest turn (state, elapsedMs, " +
             "tokensIn/Out, toolCallCount, compactionsInRun). requires sessionId.\n" +
             "Common: limit (default 100, clamped 1..1000), offset (default 0). Filter-on-" +
@@ -255,6 +259,7 @@ class SessionQueryTool(
         SELECT_CANCELLATION_HISTORY -> CancellationHistoryRow.serializer()
         SELECT_PERMISSION_HISTORY -> PermissionHistoryRow.serializer()
         SELECT_PREFLIGHT_SUMMARY -> PreflightSummaryRow.serializer()
+        SELECT_STEP_HISTORY -> StepHistoryRow.serializer()
         SELECT_ACTIVE_RUN_SUMMARY -> ActiveRunSummaryRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
@@ -294,6 +299,7 @@ class SessionQueryTool(
                 permissionHistory = permissionHistory,
                 input = input,
             )
+            SELECT_STEP_HISTORY -> runStepHistoryQuery(sessions, input, limit, offset)
             SELECT_ACTIVE_RUN_SUMMARY -> runActiveRunSummaryQuery(sessions, agentStates, input)
             else -> error("unreachable — select validated above: '$select'")
         }
@@ -324,9 +330,13 @@ class SessionQueryTool(
                 select != SELECT_RUN_FAILURE &&
                 select != SELECT_FALLBACK_HISTORY &&
                 select != SELECT_CANCELLATION_HISTORY &&
+                select != SELECT_STEP_HISTORY &&
                 input.messageId != null
             ) {
-                add("messageId (select=message, run_failure, fallback_history, or cancellation_history only)")
+                add(
+                    "messageId (select=message, run_failure, fallback_history, " +
+                        "cancellation_history, or step_history only)",
+                )
             }
             // sessionId is required for everything except sessions (and `message`, which
             // uses messageId for the drill-down); rejected for sessions.
@@ -371,6 +381,7 @@ class SessionQueryTool(
         const val SELECT_CANCELLATION_HISTORY = "cancellation_history"
         const val SELECT_PERMISSION_HISTORY = "permission_history"
         const val SELECT_PREFLIGHT_SUMMARY = "preflight_summary"
+        const val SELECT_STEP_HISTORY = "step_history"
         const val SELECT_ACTIVE_RUN_SUMMARY = "active_run_summary"
         internal val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
@@ -379,7 +390,7 @@ class SessionQueryTool(
             SELECT_CACHE_STATS,
             SELECT_CONTEXT_PRESSURE, SELECT_RUN_STATE_HISTORY, SELECT_TOOL_SPEC_BUDGET,
             SELECT_RUN_FAILURE, SELECT_FALLBACK_HISTORY, SELECT_CANCELLATION_HISTORY,
-            SELECT_PERMISSION_HISTORY, SELECT_PREFLIGHT_SUMMARY,
+            SELECT_PERMISSION_HISTORY, SELECT_PREFLIGHT_SUMMARY, SELECT_STEP_HISTORY,
             SELECT_ACTIVE_RUN_SUMMARY,
         )
 

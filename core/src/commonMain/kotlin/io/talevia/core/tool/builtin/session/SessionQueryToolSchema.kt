@@ -26,7 +26,7 @@ internal val SESSION_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
                     "cache_stats | " +
                     "context_pressure | run_state_history | tool_spec_budget | run_failure | " +
                     "fallback_history | cancellation_history | permission_history | " +
-                    "preflight_summary | active_run_summary.",
+                    "preflight_summary | step_history | active_run_summary.",
             )
         }
         putJsonObject("sessionId") {
