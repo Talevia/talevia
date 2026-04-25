@@ -31,7 +31,7 @@ class AnthropicProviderTest {
 
     @Test
     fun systemPromptIsEncodedAsArrayWithEphemeralCacheControl() {
-        val body = provider().buildRequestBody(
+        val body = buildAnthropicRequestBody(
             LlmRequest(
                 model = ModelRef("anthropic", "claude-opus-4-7"),
                 messages = emptyList(),
@@ -50,7 +50,7 @@ class AnthropicProviderTest {
 
     @Test
     fun emptySystemPromptIsOmitted() {
-        val body = provider().buildRequestBody(
+        val body = buildAnthropicRequestBody(
             LlmRequest(model = ModelRef("anthropic", "claude-opus-4-7"), messages = emptyList()),
         )
         assertNull(body["system"])
@@ -61,7 +61,7 @@ class AnthropicProviderTest {
         val spec = { id: String ->
             ToolSpec(id = id, helpText = "help for $id", inputSchema = buildJsonObject { put("type", "object") })
         }
-        val body = provider().buildRequestBody(
+        val body = buildAnthropicRequestBody(
             LlmRequest(
                 model = ModelRef("anthropic", "claude-opus-4-7"),
                 messages = emptyList(),
@@ -79,7 +79,7 @@ class AnthropicProviderTest {
 
     @Test
     fun noToolsBlockEmittedWhenToolListEmpty() {
-        val body = provider().buildRequestBody(
+        val body = buildAnthropicRequestBody(
             LlmRequest(model = ModelRef("anthropic", "claude-opus-4-7"), messages = emptyList()),
         )
         assertNull(body["tools"])
@@ -99,7 +99,7 @@ class AnthropicProviderTest {
             Part.Reasoning(PartId("p1"), MessageId("a1"), SessionId("s1"), epoch, text = "think think"),
             Part.TimelineSnapshot(PartId("p2"), MessageId("a1"), SessionId("s1"), epoch, timeline = Timeline()),
         )
-        val body = provider().buildRequestBody(
+        val body = buildAnthropicRequestBody(
             LlmRequest(
                 model = ModelRef("anthropic", "claude-opus-4-7"),
                 messages = listOf(MessageWithParts(msg, parts)),
@@ -119,7 +119,7 @@ class AnthropicProviderTest {
 
     @Test
     fun coreRequestFieldsArePresent() {
-        val body = provider().buildRequestBody(
+        val body = buildAnthropicRequestBody(
             LlmRequest(
                 model = ModelRef("anthropic", "claude-opus-4-7"),
                 messages = emptyList(),

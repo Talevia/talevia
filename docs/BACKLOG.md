@@ -18,7 +18,6 @@
 - **m2-provider-second-impl** — M2 criterion 2："provider 多元"。`ImageGenEngine` / `VideoGenEngine` / `MusicGenEngine` / `TtsEngine` 4 个接口每个都只有 1 个 prod impl（grep 印证：OpenAI 图/视/语音 + Replicate 音乐/放大，各 1 家）。**方向：** 任一 engine 长出第二个非 stub 生产 impl（如 `AnthropicImageGenEngine` 若 Claude 上线图像、`ElevenLabsTtsEngine`、`StabilityImageGenEngine`、`LocalMLXTtsEngine`）。需要专有 API key + 产品抉择，待用户决定。Rubric §5.7 / §5.2。Milestone §M2. · skipped 2026-04-24: 需专有 API key + vendor 决策 (跨 4 个 repopulate 周期的老约束).
 ## P2 — 记债 / 观望
 
-- **debt-split-anthropic-provider** — `AnthropicProvider.kt` 384 LOC。request transcoding (Kotlin messages → Anthropic wire format) + SSE parsing + stream event translation 混在一个 class。**方向：** 抽 `AnthropicWireEncoder`（一边）+ `AnthropicSseParser`（另一边）；主 class 只保留 HTTP client 调用 + Flow emit 流控。Rubric §5.6。Milestone §later.
 - **debt-split-prompt-editing-and-external** — `core/agent/prompt/PromptEditingAndExternal.kt` 383 LOC。两个独立 prompt lane 共享一个文件。**方向：** 拆成 `PromptEditingLane.kt` + `PromptExternalLane.kt` —— 两个 const 互相不引用。Rubric §5.6。Milestone §later.
 - **debt-todo-fixme-baseline-32** — R.5.6 scan：32 TODO/FIXME/HACK 出现点在 core/commonMain，和前两次 repopulate 基线一致，无增长（跨 3 周期稳定）。**方向：** 继续观察；下次 repopulate > 32 → 升 P1 + 列新增行号。**触发条件：** 下次 repopulate delta > 0。Rubric §5.6。Milestone §later.
 - **bundle-talevia-json-split** — `talevia.json` 一文件装 timeline + assets + source DAG + lockfile + snapshots。**方向：** 拆 sub-files。**触发条件：** 真实用户报告 diff 噪音或 snapshot ≥ 1 MB。Rubric §3a-3。Milestone §later.
