@@ -56,6 +56,8 @@ internal val PROJECT_QUERY_HELP_TEXT: String =
         "pinned entries still appear for audit but at the tail. No filters beyond limit/offset.\n" +
         "  • timeline_diff — filter: fromSnapshotId, toSnapshotId (≥1 required). Tracks/clips " +
         "added/removed/changed + totalChanges. Same-project only.\n" +
+        "  • source_binding_stats — per-kind coverage: {kind, totalNodes, boundDirectly, " +
+        "boundTransitively, orphans, coverageRatio, orphanNodeIds}. Sorted by kind.\n" +
         "Common: limit (default 100, clamped 1..500), offset (default 0). Filter-on-wrong-select " +
         "fails loud."
 
@@ -76,8 +78,8 @@ internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
                 "What to query: tracks | timeline_clips | assets | transitions | " +
                     "lockfile_entries | clips_for_asset | clips_for_source | " +
                     "clip | lockfile_entry | project_metadata | consistency_propagation | " +
-                    "spend | lockfile_cache_stats | lockfile_orphans | snapshots | timeline_diff " +
-                    "(case-insensitive).",
+                    "spend | lockfile_cache_stats | lockfile_orphans | snapshots | timeline_diff | " +
+                    "source_binding_stats (case-insensitive).",
             )
         }
         putJsonObject("trackKind") {

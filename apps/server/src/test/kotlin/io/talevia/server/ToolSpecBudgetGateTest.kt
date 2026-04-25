@@ -85,15 +85,20 @@ class ToolSpecBudgetGateTest {
      *     turns `dag_summary.rootNodeIds` from a one-off snapshot into a
      *     first-class `nodes` filter; no consolidation path shrinks
      *     this further. ~0.3% buffer.
-     *   - 23_000 (this cycle, cycle-74): 22_935 measured. +235 tokens
-     *     above prior ceiling; load-bearing addition of
+     *   - 23_000 (cycle-74): 22_935 measured. +235 tokens above prior
+     *     ceiling; load-bearing addition of
      *     `provider_query(select=aigc_cost_estimate)` per backlog
      *     `aigc-cost-estimate-tool`. Bridges AigcPricing.estimateCents
      *     to LLM plan-time so the agent doesn't compute "8s × $0.30"
      *     by hand from the priceBasis string. helpText + per-field
-     *     descriptions trimmed before bumping; net additions are
-     *     unavoidable structural cost (3 new params + 1 new select +
-     *     reject rules). ~0.3% buffer.
+     *     descriptions trimmed before bumping. ~0.3% buffer.
+     *   - 23_100 (this cycle, cycle-77): 23_045 measured. +45 tokens
+     *     above prior ceiling; load-bearing addition of
+     *     `project_query(select=source_binding_stats)` per backlog
+     *     `project-query-source-binding-stats`. Per-kind coverage
+     *     answers "how many character_refs are unused?" in one query
+     *     instead of an O(n) walk through `consistency_propagation`.
+     *     helpText already trimmed before bumping. ~0.2% buffer.
      *   - 20_000 (next target, R.6 P0 threshold): requires either
      *     deleting ~10 more tools or moving per-action details to a
      *     `list_tools(select=tool_detail)` sidecar so the live spec
@@ -108,7 +113,7 @@ class ToolSpecBudgetGateTest {
      * the number increased — rationale lives in the commit body since
      * docs/decisions/ was removed (commit ae213b05).
      */
-    private val CEILING_TOKENS: Int = 23_000
+    private val CEILING_TOKENS: Int = 23_100
 
     @Test
     fun registeredToolSpecsFitWithinCeiling() {

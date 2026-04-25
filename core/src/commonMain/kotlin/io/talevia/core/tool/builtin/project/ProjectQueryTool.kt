@@ -18,6 +18,7 @@ import io.talevia.core.tool.builtin.project.query.LockfileEntryRow
 import io.talevia.core.tool.builtin.project.query.LockfileOrphanRow
 import io.talevia.core.tool.builtin.project.query.ProjectMetadataRow
 import io.talevia.core.tool.builtin.project.query.SnapshotRow
+import io.talevia.core.tool.builtin.project.query.SourceBindingStatsRow
 import io.talevia.core.tool.builtin.project.query.SpendSummaryRow
 import io.talevia.core.tool.builtin.project.query.TimelineDiffRow
 import io.talevia.core.tool.builtin.project.query.TrackRow
@@ -34,6 +35,7 @@ import io.talevia.core.tool.builtin.project.query.runLockfileEntryDetailQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileOrphansQuery
 import io.talevia.core.tool.builtin.project.query.runProjectMetadataQuery
 import io.talevia.core.tool.builtin.project.query.runSnapshotsQuery
+import io.talevia.core.tool.builtin.project.query.runSourceBindingStatsQuery
 import io.talevia.core.tool.builtin.project.query.runSpendQuery
 import io.talevia.core.tool.builtin.project.query.runTimelineClipsQuery
 import io.talevia.core.tool.builtin.project.query.runTimelineDiffQuery
@@ -225,6 +227,7 @@ class ProjectQueryTool(
         SELECT_LOCKFILE_ORPHANS -> LockfileOrphanRow.serializer()
         SELECT_SNAPSHOTS -> SnapshotRow.serializer()
         SELECT_TIMELINE_DIFF -> TimelineDiffRow.serializer()
+        SELECT_SOURCE_BINDING_STATS -> SourceBindingStatsRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
 
@@ -256,6 +259,7 @@ class ProjectQueryTool(
             SELECT_LOCKFILE_ORPHANS -> runLockfileOrphansQuery(project, limit, offset)
             SELECT_SNAPSHOTS -> runSnapshotsQuery(project, input, clock)
             SELECT_TIMELINE_DIFF -> runTimelineDiffQuery(project, input)
+            SELECT_SOURCE_BINDING_STATS -> runSourceBindingStatsQuery(project, limit, offset)
             else -> error("unreachable — select validated above: '$select'")
         }
     }
@@ -277,6 +281,7 @@ class ProjectQueryTool(
         const val SELECT_LOCKFILE_ORPHANS = "lockfile_orphans"
         const val SELECT_SNAPSHOTS = "snapshots"
         const val SELECT_TIMELINE_DIFF = "timeline_diff"
+        const val SELECT_SOURCE_BINDING_STATS = "source_binding_stats"
         internal val ALL_SELECTS = setOf(
             SELECT_TRACKS, SELECT_TIMELINE_CLIPS, SELECT_ASSETS,
             SELECT_TRANSITIONS, SELECT_LOCKFILE_ENTRIES,
@@ -284,7 +289,7 @@ class ProjectQueryTool(
             SELECT_CLIP, SELECT_LOCKFILE_ENTRY, SELECT_PROJECT_METADATA,
             SELECT_CONSISTENCY_PROPAGATION, SELECT_SPEND,
             SELECT_LOCKFILE_CACHE_STATS, SELECT_LOCKFILE_ORPHANS,
-            SELECT_SNAPSHOTS, SELECT_TIMELINE_DIFF,
+            SELECT_SNAPSHOTS, SELECT_TIMELINE_DIFF, SELECT_SOURCE_BINDING_STATS,
         )
 
         private const val DEFAULT_LIMIT = 100
