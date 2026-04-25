@@ -51,6 +51,14 @@ internal class RetryLoop(
         val currentProjectId: ProjectId?,
         val spendCapCents: Long?,
         val disabledToolIds: Set<String>,
+        /**
+         * Per-session system prompt override. When non-null, the executor
+         * uses it in place of the Agent's constructor-level default. Re-read
+         * each step alongside the other session-mutable fields so a
+         * `session_action(action=set_system_prompt)` invoked in the previous
+         * turn takes effect on the very next request.
+         */
+        val systemPromptOverride: String?,
     )
 
     /**
@@ -98,6 +106,7 @@ internal class RetryLoop(
                 spendCapCents = snapshot.spendCapCents,
                 disabledToolIds = snapshot.disabledToolIds,
                 retryAttempt = handle.lastRetryAttempt,
+                systemPromptOverride = snapshot.systemPromptOverride,
             )
 
             // Only retry when the turn failed and nothing useful was streamed.

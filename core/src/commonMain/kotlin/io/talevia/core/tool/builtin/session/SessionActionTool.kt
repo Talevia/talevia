@@ -11,6 +11,7 @@ import io.talevia.core.tool.builtin.session.action.executeSessionArchive
 import io.talevia.core.tool.builtin.session.action.executeSessionDelete
 import io.talevia.core.tool.builtin.session.action.executeSessionImport
 import io.talevia.core.tool.builtin.session.action.executeSessionRename
+import io.talevia.core.tool.builtin.session.action.executeSessionSetSystemPrompt
 import io.talevia.core.tool.builtin.session.action.executeSessionUnarchive
 import kotlinx.datetime.Clock
 import kotlinx.serialization.KSerializer
@@ -90,7 +91,7 @@ class SessionActionTool(
          * the dispatch is running.
          */
         val sessionId: String? = null,
-        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, or `"import"`. */
+        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, or `"set_system_prompt"`. */
         val action: String,
         /** Required for `action="rename"`. Must be non-blank. Ignored on other actions. */
         val newTitle: String? = null,
@@ -125,6 +126,16 @@ class SessionActionTool(
          * messages + parts verbatim. Ignored on every other action.
          */
         val envelope: String? = null,
+        /**
+         * Used by `action=set_system_prompt`. Verbatim new value of
+         * `Session.systemPromptOverride`: non-null sets the override
+         * (empty string is a legitimate "run with no system prompt"
+         * override and is NOT conflated with null), null clears it
+         * so subsequent turns fall back to the Agent's default
+         * system prompt. Ignored on every other action — including
+         * actions that don't carry this field at all.
+         */
+        val systemPromptOverride: String? = null,
     )
 
     @Serializable data class Output(
@@ -162,6 +173,19 @@ class SessionActionTool(
         val importedMessageCount: Int = 0,
         /** `import` only: number of parts the envelope landed. Zero otherwise. */
         val importedPartCount: Int = 0,
+        /**
+         * `set_system_prompt` only: previous value of
+         * `Session.systemPromptOverride` as seen before this call (so
+         * the caller can reason about idempotency / undo). Empty string
+         * when the action is not set_system_prompt.
+         */
+        val previousSystemPromptOverride: String? = null,
+        /**
+         * `set_system_prompt` only: the override after this call —
+         * echoes the input. Null when the call cleared the override.
+         * Always-null when the action is not set_system_prompt.
+         */
+        val newSystemPromptOverride: String? = null,
     )
 
     override val id: String = "session_action"
@@ -171,7 +195,9 @@ class SessionActionTool(
             "(`permission`,`pattern`) drops a persisted Always rule, `import`+`envelope` " +
             "materialises a previously-exported session (format `talevia-session-export-v1`; " +
             "envelope's target projectId must already exist; refuses to overwrite an existing " +
-            "session id). sessionId defaults to owning session except on delete and import. " +
+            "session id), `set_system_prompt`+`systemPromptOverride` swaps this session's " +
+            "system prompt without spinning up a second Agent (null=clear, empty string=valid " +
+            "no-prompt override). sessionId defaults to owning session except on delete and import. " +
             "Permission: session.write (delete=session.destructive)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
@@ -207,7 +233,7 @@ class SessionActionTool(
                 put("type", "string")
                 put(
                     "description",
-                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, or `import`.",
+                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, or `set_system_prompt`.",
                 )
                 put(
                     "enum",
@@ -219,6 +245,7 @@ class SessionActionTool(
                             JsonPrimitive("delete"),
                             JsonPrimitive("remove_permission_rule"),
                             JsonPrimitive("import"),
+                            JsonPrimitive("set_system_prompt"),
                         ),
                     ),
                 )
@@ -245,6 +272,16 @@ class SessionActionTool(
                         "fails loud.",
                 )
             }
+            putJsonObject("systemPromptOverride") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Used by action=set_system_prompt. Verbatim new value: " +
+                        "non-null sets the override (empty string = legitimate no-prompt " +
+                        "override, NOT conflated with null), omitting the field clears the " +
+                        "override so subsequent turns fall back to the Agent default.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("action"))))
         put("additionalProperties", false)
@@ -260,8 +297,9 @@ class SessionActionTool(
                 sessions, permissionRulesPersistence, input, ctx,
             )
             "import" -> executeSessionImport(sessions, projects, input)
+            "set_system_prompt" -> executeSessionSetSystemPrompt(sessions, clock, input, ctx)
             else -> error(
-                "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, remove_permission_rule, import",
+                "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, remove_permission_rule, import, set_system_prompt",
             )
         }
     }

@@ -13,11 +13,10 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **re-evaluate-debt-aigc-tool-consolidation** — `debt-aigc-tool-consolidation` 跨 9 cycles 持续 skip-tagged（自 cycle 113 起，原因 §3a-7：`LockfileEntry.toolId` 已 stamped `"generate_image"` 等在 on-disk bundle，删旧工具会让 `ReplayLockfileTool` 对老 entry 失效）。符合 §R skip-≥3-cycles 元 bullet 规则。**方向：** 用户决定 promote (设计 alias-map: `"generate_image" → "aigc_generate" + kind="image"` 写进 ReplayLockfileTool) / demote (接受 4 个独立工具的 LLM context tax) / delete (criterion 不再相关)。Rubric §5.6 / §5.7 / §3a-1 / §3a-7。Milestone §later.
+- **re-evaluate-debt-aigc-tool-consolidation** — `debt-aigc-tool-consolidation` 跨 9 cycles 持续 skip-tagged（自 cycle 113 起，原因 §3a-7：`LockfileEntry.toolId` 已 stamped `"generate_image"` 等在 on-disk bundle，删旧工具会让 `ReplayLockfileTool` 对老 entry 失效）。符合 §R skip-≥3-cycles 元 bullet 规则。**方向：** 用户决定 promote (设计 alias-map: `"generate_image" → "aigc_generate" + kind="image"` 写进 ReplayLockfileTool) / demote (接受 4 个独立工具的 LLM context tax) / delete (criterion 不再相关)。Rubric §5.6 / §5.7 / §3a-1 / §3a-7。Milestone §later. · skipped 2026-04-25: meta bullet awaiting user decision (promote / demote / delete).
 
 ## P1 — 中优，做完 P0 再排
 
-- **agent-system-prompt-per-session** — `Agent` 在 container 时拿到 `systemPrompt: String`，session 没法 override。意味着同一个 Agent 实例上，所有 session 共享一份 prompt —— "把这个 session 切到代码 review mode" 这类需求得另起 Agent。**方向：** `Session.systemPromptOverride: String? = null`（@Serializable default 兼容旧 SQL blob）。Agent loop 在拼 system prompt 时 `session.systemPromptOverride ?: defaultSystemPrompt`。新 tool / slash 可以 set。Rubric §5.4。Milestone §later.
 - **lockfile-diff-by-snapshots** — `regenerate_stale_clips` 完成后，agent 想知道"这次重生产了几条 entry / 哪些 entry 的 inputHash 变了"，目前只能拉两次 `lockfile_entries` 自己 diff。**方向：** `project_query(select=lockfile_diff, fromSnapshotId=…, toSnapshotId=…)`；handler 比两个 snapshot 的 lockfile entries by `inputHash`，分类 added / removed / unchanged。Rubric §5.2 / §5.4。Milestone §later.
 - **cli-forks-slash-cmd** — 用户在 session 之间 `/fork` 和 `/resume` 跳来跳去，没办法看"这个 session 是从哪个 session fork 来的，又被 fork 出过哪几个分支"。`session_query(select=forks)` 已存在。**方向：** `/forks` slash dispatch 该 select，按时间倒序打 fork 树（祖先 → 当前 → 子分支）；指明哪个是当前 session。Rubric §5.4。Milestone §later.
 - **aigc-result-multi-variant** — `generate_image` / `generate_video` 每次产 1 个 asset；OpenAI / Replicate 都支持 `n` 参数返 N 个候选让人挑。当前 agent 拿不到。**方向：** AIGC tools 接收 `n: Int = 1`，返回 List<assetId>；lockfile 每个变体一条 entry，共享 inputHash + 不同 variantIndex。Permission ASK 一次性覆盖 N 次成本。Rubric §5.2。Milestone §later.

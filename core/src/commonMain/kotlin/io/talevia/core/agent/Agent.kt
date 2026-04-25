@@ -331,6 +331,7 @@ class Agent(
                 currentProjectId = sessionSnapshot?.currentProjectId,
                 spendCapCents = sessionSnapshot?.spendCapCents,
                 disabledToolIds = sessionSnapshot?.disabledToolIds ?: emptySet(),
+                systemPromptOverride = sessionSnapshot?.systemPromptOverride,
             )
 
             val (asstMsg, turnResult) = retryLoop.runStepWithRetry(

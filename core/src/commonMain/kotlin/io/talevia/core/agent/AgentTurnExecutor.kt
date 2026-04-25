@@ -110,6 +110,14 @@ internal class AgentTurnExecutor(
          * that preceded it.
          */
         retryAttempt: Int? = null,
+        /**
+         * Per-session system prompt override (`Session.systemPromptOverride`).
+         * Non-null wins over the Agent-level [systemPrompt] default; null
+         * preserves the constructor-level fallback. Empty string is a
+         * legitimate override (= "no system prompt") and is NOT conflated
+         * with null.
+         */
+        systemPromptOverride: String? = null,
     ): TurnResult {
         val projectSnapshot = currentProjectId?.let { projects?.get(it) }
         val projectHasAssets = projectSnapshot?.assets?.isNotEmpty() == true
@@ -131,7 +139,10 @@ internal class AgentTurnExecutor(
                 ),
             ),
             systemPrompt = buildSystemPrompt(
-                base = systemPrompt,
+                // Session.systemPromptOverride wins over the Agent default;
+                // empty string is a legitimate "no prompt" override and is
+                // distinct from null (= no override → fall back to default).
+                base = systemPromptOverride ?: systemPrompt,
                 currentProjectId = currentProjectId,
                 sessionId = input.sessionId,
                 projectIsGreenfield = projectIsGreenfield,

@@ -64,4 +64,23 @@ data class Session(
      * cleanly because kotlinx.serialization honors the default.
      */
     val disabledToolIds: Set<String> = emptySet(),
+    /**
+     * Per-session override of the Agent's default system prompt (VISION
+     * §5.4 control surface). When non-null, [AgentTurnExecutor] feeds this
+     * string into [io.talevia.core.agent.buildSystemPrompt] in place of the
+     * Agent-level default — letting one Agent instance host sessions that
+     * each carry their own persona / mode (e.g. "switch this session to
+     * code-review mode") without the caller having to spin up a second
+     * Agent.
+     *
+     * `null` (default) → fall back to the Agent's constructor-level
+     * `systemPrompt`, preserving pre-feature behaviour. Empty string is a
+     * legitimate override ("run with no system prompt at all"); it is NOT
+     * conflated with null. Legacy sessions persisted before this field
+     * deserialize cleanly because kotlinx.serialization honours the
+     * default — §3a #7 serialization compat.
+     *
+     * Flipped by `session_action(action="set_system_prompt", systemPromptOverride=...)`.
+     */
+    val systemPromptOverride: String? = null,
 )
