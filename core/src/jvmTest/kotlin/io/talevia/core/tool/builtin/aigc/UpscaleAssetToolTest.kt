@@ -12,14 +12,8 @@ import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.FileBundleBlobWriter
-import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.UpscaleEngine
-import io.talevia.core.platform.UpscaleRequest
-import io.talevia.core.platform.UpscaleResult
-import io.talevia.core.platform.UpscaledImage
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.JsonObject
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -35,38 +29,21 @@ class UpscaleAssetToolTest {
         0x0D, 0x0A, 0x1A, 0x0A,
     )
 
-    private class FakeUpscaleEngine(
-        private val bytes: ByteArray,
-        private val baseWidth: Int = 256,
-        private val baseHeight: Int = 256,
-    ) : UpscaleEngine {
-        override val providerId: String = "fake-esrgan"
-        var lastRequest: UpscaleRequest? = null
-            private set
-        var calls: Int = 0
-            private set
-
-        override suspend fun upscale(request: UpscaleRequest): UpscaleResult {
-            calls += 1
-            lastRequest = request
-            return UpscaleResult(
-                image = UpscaledImage(
-                    imageBytes = bytes,
-                    format = request.format,
-                    width = baseWidth * request.scale,
-                    height = baseHeight * request.scale,
-                ),
-                provenance = GenerationProvenance(
-                    providerId = providerId,
-                    modelId = request.modelId,
-                    modelVersion = null,
-                    seed = request.seed,
-                    parameters = JsonObject(emptyMap()),
-                    createdAtEpochMs = 1_700_000_000_000L,
-                ),
-            )
-        }
-    }
+    /**
+     * Local factory alias of the shared [OneShotUpscaleEngine] —
+     * preserves the `providerId = "fake-esrgan"` default. The shared
+     * base lives in `AigcEngineFakes.kt`.
+     */
+    private fun FakeUpscaleEngine(
+        bytes: ByteArray,
+        baseWidth: Int = 256,
+        baseHeight: Int = 256,
+    ): OneShotUpscaleEngine = OneShotUpscaleEngine(
+        bytes = bytes,
+        providerId = "fake-esrgan",
+        baseWidth = baseWidth,
+        baseHeight = baseHeight,
+    )
 
     private fun ctx(): ToolContext = ToolContext(
         sessionId = SessionId("s"),

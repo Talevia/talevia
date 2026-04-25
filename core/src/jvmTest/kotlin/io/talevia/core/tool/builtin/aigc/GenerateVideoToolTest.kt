@@ -15,15 +15,8 @@ import io.talevia.core.domain.source.deepContentHashOf
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.FileBundleBlobWriter
-import io.talevia.core.platform.GeneratedVideo
-import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.VideoGenEngine
-import io.talevia.core.platform.VideoGenRequest
-import io.talevia.core.platform.VideoGenResult
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import okio.Path.Companion.toPath
 import java.io.File
 import kotlin.io.path.createTempDirectory
@@ -37,40 +30,19 @@ class GenerateVideoToolTest {
     /** A handful of bytes standing in for an mp4 body — the tool does not parse it. */
     private val tinyMp4 = byteArrayOf(0, 0, 0, 0x1c, 'f'.code.toByte(), 't'.code.toByte(), 'y'.code.toByte(), 'p'.code.toByte())
 
-    private class FakeVideoGenEngine(
-        private val bytes: ByteArray,
-        private val fixedModelVersion: String? = null,
-    ) : VideoGenEngine {
-        override val providerId: String = "fake-sora"
-        var lastRequest: VideoGenRequest? = null
-            private set
-
-        override suspend fun generate(request: VideoGenRequest): VideoGenResult {
-            lastRequest = request
-            val video = GeneratedVideo(
-                mp4Bytes = bytes,
-                width = request.width,
-                height = request.height,
-                durationSeconds = request.durationSeconds,
-            )
-            val params = buildJsonObject {
-                put("prompt", JsonPrimitive(request.prompt))
-                put("seed", JsonPrimitive(request.seed))
-                put("seconds", JsonPrimitive(request.durationSeconds))
-            }
-            return VideoGenResult(
-                videos = listOf(video),
-                provenance = GenerationProvenance(
-                    providerId = providerId,
-                    modelId = request.modelId,
-                    modelVersion = fixedModelVersion,
-                    seed = request.seed,
-                    parameters = params,
-                    createdAtEpochMs = 1_700_000_000_000L,
-                ),
-            )
-        }
-    }
+    /**
+     * Local alias for the shared [OneShotVideoGenEngine] — preserves the
+     * pre-extract `providerId = "fake-sora"` default this test had inline.
+     * Shared base lives in `AigcEngineFakes.kt`.
+     */
+    private fun fakeVideoEngine(
+        bytes: ByteArray,
+        fixedModelVersion: String? = null,
+    ): OneShotVideoGenEngine = OneShotVideoGenEngine(
+        bytes = bytes,
+        providerId = "fake-sora",
+        fixedModelVersion = fixedModelVersion,
+    )
 
     private fun ctx(): ToolContext = ToolContext(
         sessionId = SessionId("s"),
@@ -85,7 +57,7 @@ class GenerateVideoToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val bundleRoot = "/projects/vid".toPath()
         val pid = store.createAt(path = bundleRoot, title = "vid").id
-        val engine = FakeVideoGenEngine(tinyMp4, fixedModelVersion = "v1")
+        val engine = fakeVideoEngine(tinyMp4, fixedModelVersion = "v1")
         val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
@@ -122,7 +94,7 @@ class GenerateVideoToolTest {
     @Test fun picksSeedClientSideWhenInputOmitsIt() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/seed".toPath(), title = "seed").id
-        val engine = FakeVideoGenEngine(tinyMp4)
+        val engine = fakeVideoEngine(tinyMp4)
         val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
@@ -143,7 +115,7 @@ class GenerateVideoToolTest {
                 CharacterRefBody(name = "Mei", visualDescription = "teal hair, round glasses"),
             )
         }
-        val engine = FakeVideoGenEngine(tinyMp4)
+        val engine = fakeVideoEngine(tinyMp4)
         val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
@@ -167,7 +139,7 @@ class GenerateVideoToolTest {
     @Test fun secondCallWithIdenticalInputsIsLockfileCacheHit() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/cache".toPath(), title = "cache").id
-        val engine = FakeVideoGenEngine(tinyMp4)
+        val engine = fakeVideoEngine(tinyMp4)
         val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val input = GenerateVideoTool.Input(
@@ -204,7 +176,7 @@ class GenerateVideoToolTest {
         }
         val expectedHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
 
-        val engine = FakeVideoGenEngine(tinyMp4)
+        val engine = fakeVideoEngine(tinyMp4)
         val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
         tool.execute(
             GenerateVideoTool.Input(
@@ -253,7 +225,7 @@ class GenerateVideoToolTest {
                 ),
             )
         }
-        val engine = FakeVideoGenEngine(tinyMp4)
+        val engine = fakeVideoEngine(tinyMp4)
         val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(

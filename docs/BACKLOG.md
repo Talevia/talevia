@@ -16,8 +16,6 @@
 - **debt-aigc-tool-consolidation** — `core/tool/builtin/aigc/` 4 个单 verb 工具 (`generate_image` 356 LOC / `generate_video` 367 / `generate_music` 310 / `synthesize_speech` 363) 各带一份 helpText + JSON schema + dispatch boilerplate；LLM 每轮付 4 份 spec token。**方向：** 复刻 `clip_action` / `project_action` 模式，折成 `aigc_generate(kind=image|video|music|speech)` 一个 dispatcher + 4 个 sibling handler 文件；同步删 4 个旧工具。净 tool count -3。Rubric §5.6 / §5.7 / §3a-1。Milestone §later. · skipped 2026-04-25: §3a-7 hit — `LockfileEntry.toolId` already stamped `"generate_image"` 等 in on-disk bundles; removing those tool ids breaks ReplayLockfileTool. Needs alias-map design first.
 ## P1 — 中优，做完 P0 再排
 
-- **debt-aigc-test-fake-extract** — `core/src/jvmTest/.../aigc/`、`tool/builtin/project/` 多处 inline `private class FakeImageEngine / FakeMusicGenEngine / FakeTtsEngine` impls（≥ 6 个独立点）。各副本字段不一致是未来 refactor 的踩点。**方向：** 抽到 `core/src/jvmTest/.../aigc/AigcEngineFakes.kt`（或 `testFixtures` 等价），给最常用的 stub 命名（OneShot / Deterministic / Failing）。Rubric §5.6。Milestone §later.
-
 ## P2 — 记债 / 观望
 
 - **debt-todo-fixme-baseline-32** — R.5.6 scan：32 TODO/FIXME/HACK 出现点在 core/commonMain，跨 8 个 repopulate 周期稳定。**方向：** 继续观察；下次 repopulate > 32 → 升 P1 + 列新增行号。**触发条件：** 下次 repopulate delta > 0。Rubric §5.6。Milestone §later.

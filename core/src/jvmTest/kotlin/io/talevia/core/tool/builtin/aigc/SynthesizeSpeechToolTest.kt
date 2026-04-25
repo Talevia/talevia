@@ -12,15 +12,11 @@ import io.talevia.core.domain.source.consistency.addCharacterRef
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.FileBundleBlobWriter
-import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.SynthesizedAudio
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.TtsRequest
 import io.talevia.core.platform.TtsResult
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -33,36 +29,14 @@ class SynthesizeSpeechToolTest {
     /** Tiny placeholder bytes — engine is fake so no real codec required. */
     private val fakeMp3 = byteArrayOf(0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
 
-    private class FakeTtsEngine(
-        private val bytes: ByteArray,
-    ) : TtsEngine {
-        override val providerId: String = "fake-openai"
-        var lastRequest: TtsRequest? = null
-            private set
-        var callCount: Int = 0
-            private set
-
-        override suspend fun synthesize(request: TtsRequest): TtsResult {
-            lastRequest = request
-            callCount += 1
-            val params = buildJsonObject {
-                put("model", JsonPrimitive(request.modelId))
-                put("voice", JsonPrimitive(request.voice))
-                put("input", JsonPrimitive(request.text))
-            }
-            return TtsResult(
-                audio = SynthesizedAudio(audioBytes = bytes, format = request.format),
-                provenance = GenerationProvenance(
-                    providerId = providerId,
-                    modelId = request.modelId,
-                    modelVersion = null,
-                    seed = 0L,
-                    parameters = params,
-                    createdAtEpochMs = 1_700_000_000_000L,
-                ),
-            )
-        }
-    }
+    /**
+     * Local factory alias of the shared [OneShotTtsEngine] — preserves
+     * the `providerId = "fake-openai"` default. The shared base lives
+     * in `AigcEngineFakes.kt`. Note: shared base exposes `calls`, not
+     * `callCount`; assertions in this file are migrated accordingly.
+     */
+    private fun FakeTtsEngine(bytes: ByteArray): OneShotTtsEngine =
+        OneShotTtsEngine(bytes = bytes, providerId = "fake-openai")
 
     private fun ctx(): ToolContext = ToolContext(
         sessionId = SessionId("s"),
@@ -126,17 +100,17 @@ class SynthesizeSpeechToolTest {
 
         val first = tool.execute(input, ctx())
         assertEquals(false, first.data.cacheHit)
-        assertEquals(1, engine.callCount)
+        assertEquals(1, engine.calls)
 
         val second = tool.execute(input, ctx())
         assertEquals(true, second.data.cacheHit)
         assertEquals(first.data.assetId, second.data.assetId)
-        assertEquals(1, engine.callCount, "cache hit must not call the engine again")
+        assertEquals(1, engine.calls, "cache hit must not call the engine again")
 
         // Change voice → miss + new asset.
         val third = tool.execute(input.copy(voice = "echo"), ctx())
         assertEquals(false, third.data.cacheHit)
-        assertEquals(2, engine.callCount)
+        assertEquals(2, engine.calls)
         assertTrue(third.data.assetId != first.data.assetId)
 
         val lockfile = store.get(pid)!!.lockfile
@@ -156,7 +130,7 @@ class SynthesizeSpeechToolTest {
         tool.execute(base.copy(format = "wav"), ctx())
 
         // 4 distinct hashes → 4 engine calls + 4 lockfile entries.
-        assertEquals(4, engine.callCount)
+        assertEquals(4, engine.calls)
         assertEquals(4, store.get(pid)!!.lockfile.entries.size)
     }
 
@@ -250,7 +224,7 @@ class SynthesizeSpeechToolTest {
                 ctx(),
             )
         }
-        assertEquals(0, engine.callCount, "ambiguous voice binding must fail before hitting the engine")
+        assertEquals(0, engine.calls, "ambiguous voice binding must fail before hitting the engine")
     }
 
     @Test fun voiceBindingChangesTheCacheKey() = runTest {
@@ -313,8 +287,10 @@ class SynthesizeSpeechToolTest {
             SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
             ctx(),
         )
+        // primary is FailingTtsEngine (callCount); secondary is FakeTtsEngine
+        // (= OneShotTtsEngine, calls) after the cycle-121 fake-extract.
         assertEquals(1, primary.callCount, "primary must be attempted")
-        assertEquals(1, secondary.callCount, "secondary must take over after primary throws")
+        assertEquals(1, secondary.calls, "secondary must take over after primary throws")
         assertEquals("fake-openai", result.data.providerId, "lockfile + output record the engine that actually produced audio")
     }
 
@@ -355,7 +331,11 @@ class SynthesizeSpeechToolTest {
             ctx(),
         )
         assertEquals(true, second.data.cacheHit)
-        assertEquals(1, primary.callCount, "cache hit must not re-invoke primary")
+        // primary here is the shared OneShotTtsEngine (alias FakeTtsEngine
+        // returns OneShotTtsEngine after the cycle-121 fake-extract); its
+        // counter is `calls`. secondary is the inline FailingTtsEngine
+        // which still uses `callCount`.
+        assertEquals(1, primary.calls, "cache hit must not re-invoke primary")
         assertEquals(0, secondary.callCount, "cache hit must not even probe the fallback chain")
     }
 

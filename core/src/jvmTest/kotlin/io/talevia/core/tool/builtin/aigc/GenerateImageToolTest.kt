@@ -18,15 +18,8 @@ import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.domain.source.removeNode
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.FileBundleBlobWriter
-import io.talevia.core.platform.GeneratedImage
-import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.ImageGenEngine
-import io.talevia.core.platform.ImageGenRequest
-import io.talevia.core.platform.ImageGenResult
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import okio.Path.Companion.toPath
 import java.io.File
 import kotlin.io.path.createTempDirectory
@@ -51,35 +44,22 @@ class GenerateImageToolTest {
         0x42, 0x60.toByte(), 0x82.toByte(),
     )
 
-    private class FakeImageGenEngine(
-        private val bytes: ByteArray,
-        private val fixedSeed: Long? = null,
-        private val fixedModelVersion: String? = null,
-    ) : ImageGenEngine {
-        override val providerId: String = "fake-openai"
-        var lastRequest: ImageGenRequest? = null
-            private set
-
-        override suspend fun generate(request: ImageGenRequest): ImageGenResult {
-            lastRequest = request
-            val image = GeneratedImage(pngBytes = bytes, width = request.width, height = request.height)
-            val params = buildJsonObject {
-                put("prompt", JsonPrimitive(request.prompt))
-                put("seed", JsonPrimitive(request.seed))
-            }
-            return ImageGenResult(
-                images = listOf(image),
-                provenance = GenerationProvenance(
-                    providerId = providerId,
-                    modelId = request.modelId,
-                    modelVersion = fixedModelVersion,
-                    seed = fixedSeed ?: request.seed,
-                    parameters = params,
-                    createdAtEpochMs = 1_700_000_000_000L,
-                ),
-            )
-        }
-    }
+    /**
+     * Local alias for the shared [OneShotImageGenEngine] — preserves the
+     * pre-extract `providerId = "fake-openai"` default this test had
+     * inline (cycle-121 `debt-aigc-test-fake-extract` extract). The
+     * shared base lives in `AigcEngineFakes.kt`.
+     */
+    private fun fakeImageEngine(
+        bytes: ByteArray,
+        fixedSeed: Long? = null,
+        fixedModelVersion: String? = null,
+    ): OneShotImageGenEngine = OneShotImageGenEngine(
+        bytes = bytes,
+        providerId = "fake-openai",
+        fixedSeed = fixedSeed,
+        fixedModelVersion = fixedModelVersion,
+    )
 
     private fun ctx(): ToolContext = ToolContext(
         sessionId = SessionId("s"),
@@ -94,7 +74,7 @@ class GenerateImageToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val bundleRoot = "/projects/img".toPath()
         val pid = store.createAt(path = bundleRoot, title = "img").id
-        val engine = FakeImageGenEngine(tinyPng, fixedModelVersion = "v1")
+        val engine = fakeImageEngine(tinyPng, fixedModelVersion = "v1")
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
@@ -130,7 +110,7 @@ class GenerateImageToolTest {
     @Test fun picksSeedClientSideWhenInputOmitsIt() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/seed".toPath(), title = "seed").id
-        val engine = FakeImageGenEngine(tinyPng)
+        val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
@@ -145,7 +125,7 @@ class GenerateImageToolTest {
     @Test fun outputDimensionsMatchReturnedImage() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/dim".toPath(), title = "dim").id
-        val engine = FakeImageGenEngine(tinyPng)
+        val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
@@ -166,7 +146,7 @@ class GenerateImageToolTest {
                 CharacterRefBody(name = "Mei", visualDescription = "teal hair, round glasses"),
             )
         }
-        val engine = FakeImageGenEngine(tinyPng)
+        val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
@@ -192,7 +172,7 @@ class GenerateImageToolTest {
     @Test fun secondCallWithIdenticalInputsIsLockfileCacheHit() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/cache".toPath(), title = "cache").id
-        val engine = FakeImageGenEngine(tinyPng, fixedModelVersion = "v1")
+        val engine = fakeImageEngine(tinyPng, fixedModelVersion = "v1")
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
         val input = GenerateImageTool.Input(
             prompt = "a cat on a mat",
@@ -230,7 +210,7 @@ class GenerateImageToolTest {
         }
         val expectedHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
 
-        val engine = FakeImageGenEngine(tinyPng)
+        val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
         tool.execute(
             GenerateImageTool.Input(
@@ -260,7 +240,7 @@ class GenerateImageToolTest {
     @Test fun consistencyBindingWithUnknownIdIsSkippedWithoutThrowing() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/ghost".toPath(), title = "ghost").id
-        val engine = FakeImageGenEngine(tinyPng)
+        val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
@@ -305,7 +285,7 @@ class GenerateImageToolTest {
                 ),
             )
         }
-        val engine = FakeImageGenEngine(tinyPng)
+        val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.execute(
@@ -343,7 +323,7 @@ class GenerateImageToolTest {
                 ),
             )
         }
-        val engine = FakeImageGenEngine(tinyPng)
+        val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
         val input = GenerateImageTool.Input(
             prompt = "portrait",
@@ -375,7 +355,7 @@ class GenerateImageToolTest {
     @Test fun lockfileEntryStampsOriginatingMessageIdFromContext() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/origin".toPath(), title = "origin").id
-        val engine = FakeImageGenEngine(tinyPng)
+        val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
         val ctxWithMsg = ToolContext(
             sessionId = SessionId("s"),

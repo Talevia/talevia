@@ -20,7 +20,6 @@ import io.talevia.core.platform.MusicGenRequest
 import io.talevia.core.platform.MusicGenResult
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import okio.Path.Companion.toPath
 import kotlin.test.Test
@@ -32,37 +31,13 @@ class GenerateMusicToolTest {
 
     private val tinyMp3 = byteArrayOf(0xFF.toByte(), 0xFB.toByte(), 0x90.toByte(), 0x00)
 
-    private class FakeMusicGenEngine(private val bytes: ByteArray) : MusicGenEngine {
-        override val providerId: String = "fake-music"
-        var lastRequest: MusicGenRequest? = null
-            private set
-        var calls: Int = 0
-            private set
-
-        override suspend fun generate(request: MusicGenRequest): MusicGenResult {
-            calls += 1
-            lastRequest = request
-            return MusicGenResult(
-                music = GeneratedMusic(
-                    audioBytes = bytes,
-                    format = request.format,
-                    durationSeconds = request.durationSeconds,
-                ),
-                provenance = GenerationProvenance(
-                    providerId = providerId,
-                    modelId = request.modelId,
-                    modelVersion = null,
-                    seed = request.seed,
-                    parameters = buildJsonObject {
-                        put("prompt", JsonPrimitive(request.prompt))
-                        put("seed", JsonPrimitive(request.seed))
-                        put("dur", JsonPrimitive(request.durationSeconds))
-                    },
-                    createdAtEpochMs = 1_700_000_000_000L,
-                ),
-            )
-        }
-    }
+    /**
+     * Local alias of the shared [OneShotMusicGenEngine] — preserves the
+     * `providerId = "fake-music"` default. The shared base lives in
+     * `AigcEngineFakes.kt`.
+     */
+    private fun FakeMusicGenEngine(bytes: ByteArray): OneShotMusicGenEngine =
+        OneShotMusicGenEngine(bytes = bytes, providerId = "fake-music")
 
     private fun ctx(): ToolContext = ToolContext(
         sessionId = SessionId("s"),
