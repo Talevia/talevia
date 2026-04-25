@@ -1,7 +1,6 @@
 package io.talevia.core.session
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
-import app.cash.turbine.test
 import io.talevia.core.AssetId
 import io.talevia.core.CallId
 import io.talevia.core.MessageId
@@ -10,6 +9,7 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
+import io.talevia.core.bus.publishAndAwait
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.MediaMetadata
@@ -22,8 +22,6 @@ import io.talevia.core.permission.AllowAllPermissionService
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.builtin.video.ClipActionTool
 import io.talevia.core.tool.builtin.video.FilterActionTool
-import kotlinx.coroutines.async
-import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import kotlin.test.Test
@@ -135,13 +133,11 @@ class SessionRevertTest {
         // reply to turn 1 (a1) — keeps its timeline snapshot so the revert
         // exercises the timeline-restore branch.
         lateinit var result: SessionRevert.Result
-        bus.events.filterIsInstance<BusEvent.SessionReverted>().test(timeout = 5.seconds) {
-            val run = async { revert.revertToMessage(sessionId, a1, projectId) }
-            val evt = awaitItem()
-            result = run.await()
+        bus.publishAndAwait<BusEvent.SessionReverted>(
+            trigger = { result = revert.revertToMessage(sessionId, a1, projectId) },
+        ) { evt ->
             assertEquals(a1, evt.anchorMessageId)
             assertEquals(sessionId, evt.sessionId)
-            cancelAndIgnoreRemainingEvents()
         }
 
         assertEquals(2, result.deletedMessages)

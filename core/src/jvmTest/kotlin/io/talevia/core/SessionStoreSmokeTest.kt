@@ -1,16 +1,15 @@
 package io.talevia.core
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
-import app.cash.turbine.test
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
+import io.talevia.core.bus.publishAndAwait
 import io.talevia.core.db.TaleviaDb
 import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part
 import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
-import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import kotlin.test.Test
@@ -60,22 +59,17 @@ class SessionStoreSmokeTest {
             text = "hello timeline",
         )
 
-        // Subscribe before any writes so we catch the event.
-        bus.subscribe<BusEvent.PartUpdated>().test(timeout = 5.seconds) {
-            val writes = async {
+        bus.publishAndAwait<BusEvent.PartUpdated>(
+            trigger = {
                 store.createSession(session)
                 store.appendMessage(message)
                 store.upsertPart(part)
-            }
-
-            val event = awaitItem()
+            },
+        ) { event ->
             assertEquals(sessionId, event.sessionId)
             assertEquals(partId, event.partId)
             val streamed = event.part as Part.Text
             assertEquals("hello timeline", streamed.text)
-
-            writes.await()
-            cancelAndIgnoreRemainingEvents()
         }
 
         val hydrated = store.listMessagesWithParts(sessionId)

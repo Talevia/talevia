@@ -1,14 +1,13 @@
 package io.talevia.core.session
 
 import app.cash.sqldelight.driver.jdbc.sqlite.JdbcSqliteDriver
-import app.cash.turbine.test
 import io.talevia.core.MessageId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
+import io.talevia.core.bus.publishAndAwait
 import io.talevia.core.db.TaleviaDb
-import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -75,30 +74,26 @@ class SessionFullCapTest {
         assertEquals(cap, store.listMessages(sid).size)
 
         // Subscribe BEFORE the over-cap append so the SessionFull event
-        // lands in the flow (subscribe-before-publish — see
-        // PAIN_POINTS 2026-04-25 ios-swift-validation-gap for the
-        // historical recipe). Using Turbine's `test {}` block so we
-        // don't have to manage the scope manually.
-        bus.events.filterIsInstance<BusEvent.SessionFull>().test {
-            val ex = assertFailsWith<IllegalStateException> {
-                store.appendMessage(userMessage(cap, sid))
-            }
-            assertTrue(
-                ex.message!!.contains("hit the appendMessage cap") &&
-                    ex.message!!.contains("cap=$cap") &&
-                    ex.message!!.contains("messageCount=$cap"),
-                "exception text should name the cap + count; got: ${ex.message}",
-            )
-            // The rejected message must NOT have been written.
-            assertEquals(cap, store.listMessages(sid).size)
-
-            // The SessionFull event should be the next emission on the
-            // filtered flow.
-            val event = awaitItem()
+        // lands in the flow — see `BusEventTestKit.publishAndAwait` for
+        // the subscribe-before-publish recipe (cycle 160).
+        bus.publishAndAwait<BusEvent.SessionFull>(
+            trigger = {
+                val ex = assertFailsWith<IllegalStateException> {
+                    store.appendMessage(userMessage(cap, sid))
+                }
+                assertTrue(
+                    ex.message!!.contains("hit the appendMessage cap") &&
+                        ex.message!!.contains("cap=$cap") &&
+                        ex.message!!.contains("messageCount=$cap"),
+                    "exception text should name the cap + count; got: ${ex.message}",
+                )
+                // The rejected message must NOT have been written.
+                assertEquals(cap, store.listMessages(sid).size)
+            },
+        ) { event ->
             assertEquals(sid, event.sessionId)
             assertEquals(cap, event.messageCount)
             assertEquals(cap, event.cap)
-            cancelAndIgnoreRemainingEvents()
         }
     }
 

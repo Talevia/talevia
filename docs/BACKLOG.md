@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **debt-test-bus-event-subscribe-race** — Cycle 155 (`SessionFullCapTest`) had to use Turbine's `test {}` block to handle subscribe-before-publish races (`bus.events.filterIsInstance<X>().test { ... }`). Cycle 148 PAIN_POINTS recorded the same shape (`SessionActionExportBusTraceTest` flaky-from-cache); cycle 155's fix was inline / per-test. The pattern recurs because EventBus's MutableSharedFlow + Dispatchers.Default fanout requires the subscriber to be registered before any publish lands. Several other jvmTest suites that publish + assert on bus events are likely susceptible. **方向：** extract a `BusEventTestKit.publishAndAwait<T>(bus, predicate, action)` (or similar) helper in `core/src/jvmTest/kotlin/.../bus/` that wraps the Turbine pattern; migrate the existing bus-event tests to use it. Asymmetric write-many tax: every new bus event test pays subscribe-before-publish learning cost, vs. one-time helper cost. Rubric §5.6 / §3a #9。Milestone §later.
 - **re-evaluate-debt-aigc-tool-consolidation** — `debt-aigc-tool-consolidation` 跨 9+ repopulate cycles 持续 skip-tagged（自 cycle 113 起，原因 §3a-7：`LockfileEntry.toolId` 已 stamped `"generate_image"` 等在 on-disk bundle，删旧工具会让 `ReplayLockfileTool` 对老 entry 失效）。**方向：** 用户决定 promote (设计 alias-map: `"generate_image" → "aigc_generate" + kind="image"` 写进 ReplayLockfileTool) / demote (接受 4 个独立工具的 LLM context tax) / delete (criterion 不再相关)。Rubric §5.6 / §5.7 / §3a #1 / §3a #7。Milestone §later. · skipped 2026-04-25: meta bullet awaiting user decision (promote / demote / delete).
 
 ## P1 — 中优，做完 P0 再排
