@@ -17,7 +17,6 @@
 
 - **re-evaluate-m2-provider-second-impl** — `m2-provider-second-impl` 跨 5+ repopulate 周期连续 skip-tagged（"需专有 API key + vendor 决策"），符合 §R skip-≥3-cycles 元 bullet 规则。M2 退出仅卡这一条 criterion。**方向：** 用户决定 promote (给定 vendor + key) / demote (M2 改"single provider acceptable") / delete (criterion 不再相关)。Rubric §5.7 / §5.2。Milestone §M2. · skipped 2026-04-24: meta bullet awaiting user decision (no agent action possible)
 - **debt-split-bus-event-kt** — `BusEvent.kt` 385 LOC, sealed interface 27 子类。Past 阻塞: 464 `BusEvent.X` call sites。**方向：** kotlin nested-vs-top-level 限制下，把每个子类做独立顶层 data class，`BusEvent` 留 marker interface。Rubric §5.6。Milestone §later. · 历史阻塞 — 见 `git log --grep skip-close.*bus-event.kt`. · skipped 2026-04-24: trigger not met (file still 385 LOC, well under 500-LOC threshold; past skip-close at 1765a11f documents the trade-off — touching ~496 call sites for an observational preempt is the wrong cost / risk ratio while the file isn't growing).
-- **benchmark-export-tool-end-to-end** — `ExportTool` 是用户感知最慢的入口（per-clip render + transitions + subtitles + LUT），但 7 bench 里只测组件，没有"小项目 export 整流程"端到端 wall-time guard。**方向：** `ExportEndToEndBenchmark` —— 5-clip 1080p 项目，full export 一次 + 一次缓存命中再跑，soft budget。Rubric §5.7。Milestone §later.
 
 ## P2 — 记债 / 观望
 
