@@ -99,15 +99,18 @@ import io.talevia.core.tool.builtin.web.WebSearchTool
  * wants. Each takes the concrete dependencies it actually needs — no
  * god-object container ref. Composition roots call whichever subset
  * applies and overlay platform-specific or provider-gated tools on
- * top (e.g. Server registers `ProviderQueryTool` + `CompactSessionTool`
- * in a second pass because those depend on `ProviderRegistry`, which
- * itself is built from the same container).
+ * top (e.g. Server registers `ProviderQueryTool` and re-registers
+ * `SessionActionTool` with `providers=` wired in for the
+ * `action="compact"` path in a second pass because both depend on
+ * `ProviderRegistry`, which itself is built from the same container).
  *
- * Two tools (`ProviderQueryTool`, `CompactSessionTool`) are
- * intentionally NOT in here — they depend on `ProviderRegistry`,
- * which is built from the same container in a second pass. Keeping
- * them in the container's `init {}` block keeps this file's deps
- * acyclic.
+ * `ProviderQueryTool` is intentionally NOT in here — it depends on
+ * `ProviderRegistry`, which is built from the same container in a
+ * second pass. `SessionActionTool` is registered first-pass without
+ * a `ProviderRegistry`; AppContainers re-register it with full deps
+ * (including `providers=`) in the second pass to enable the
+ * `action="compact"` path. `ToolRegistry.register` is overwrite-by-id
+ * so the second registration replaces the first.
  */
 
 /**

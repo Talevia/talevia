@@ -329,7 +329,21 @@ class ServerContainer(
                 ),
             ),
         )
-        tools.register(io.talevia.core.tool.builtin.session.CompactSessionTool(providers, sessions, bus))
+        // Re-register SessionActionTool with `providers` wired in so
+        // action="compact" dispatches against the live ProviderRegistry.
+        // The first-pass `registerSessionAndMetaTools` registration
+        // can't pass providers (the registry is built from this same
+        // container in the second pass). `ToolRegistry.register` is
+        // overwrite-by-id so this replaces the first-pass registration.
+        tools.register(
+            io.talevia.core.tool.builtin.session.SessionActionTool(
+                sessions = sessions,
+                projects = projects,
+                busTrace = busTrace,
+                bus = bus,
+                providers = providers,
+            ),
+        )
 
         // Eager-warm every configured LLM provider so the first AIGC dispatch
         // doesn't pay TLS + auth + model-handshake latency. Best-effort;

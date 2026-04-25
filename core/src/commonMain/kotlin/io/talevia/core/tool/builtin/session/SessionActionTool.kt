@@ -8,6 +8,7 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.action.executeRemovePermissionRule
 import io.talevia.core.tool.builtin.session.action.executeSessionArchive
+import io.talevia.core.tool.builtin.session.action.executeSessionCompact
 import io.talevia.core.tool.builtin.session.action.executeSessionDelete
 import io.talevia.core.tool.builtin.session.action.executeSessionExport
 import io.talevia.core.tool.builtin.session.action.executeSessionExportBusTrace
@@ -97,12 +98,27 @@ class SessionActionTool(
     private val busTrace: io.talevia.core.bus.BusEventTraceRecorder? = null,
     /**
      * Bus used by `action=revert` to publish
-     * `BusEvent.SessionReverted` so UIs refresh atomically. Default
-     * `null` keeps existing test rigs source-compatible; revert
-     * fails loud when missing, mirroring the other "missing dep"
-     * patterns above.
+     * `BusEvent.SessionReverted` so UIs refresh atomically, and by
+     * `action=compact` to feed the Compactor's progress events.
+     * Default `null` keeps existing test rigs source-compatible;
+     * revert / compact fail loud when missing, mirroring the other
+     * "missing dep" patterns above.
      */
     private val bus: io.talevia.core.bus.EventBus? = null,
+    /**
+     * Provider registry used by `action=compact` to look up the
+     * session's bound model and run the compactor's summary
+     * round-trip. Default `null` because `ProviderRegistry` is
+     * built FROM the same registry this tool registers into — the
+     * first-pass `registerSessionAndMetaTools` registration must
+     * stay null-providers, and each `AppContainer` re-registers
+     * `SessionActionTool` in the second pass with the now-built
+     * providers (per the existing
+     * `DefaultBuiltinRegistrations` chicken-and-egg comment).
+     * Compact fails loud at dispatch time when null, so test rigs
+     * that don't exercise compaction stay source-compatible.
+     */
+    private val providers: io.talevia.core.provider.ProviderRegistry? = null,
 ) : Tool<SessionActionTool.Input, SessionActionTool.Output> {
 
     @Serializable data class Input(
@@ -113,7 +129,7 @@ class SessionActionTool(
          * the dispatch is running.
          */
         val sessionId: String? = null,
-        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, `"set_system_prompt"`, `"export_bus_trace"`, `"set_tool_enabled"`, `"set_spend_cap"`, `"fork"`, `"export"`, or `"revert"`. */
+        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, `"set_system_prompt"`, `"export_bus_trace"`, `"set_tool_enabled"`, `"set_spend_cap"`, `"fork"`, `"export"`, `"revert"`, or `"compact"`. */
         val action: String,
         /**
          * `action="rename"`: required, must be non-blank — the renamed
@@ -258,6 +274,18 @@ class SessionActionTool(
          * silent fallback).
          */
         val projectId: String? = null,
+        /**
+         * `action=compact` only. Optional compaction strategy:
+         * `"summarize_and_prune"` (default; alias `"default"`,
+         * `"summarise_and_prune"`) prunes oldest tool outputs and
+         * writes an LLM-generated summary part. `"prune_only"`
+         * (alias `"prune"`, `"no_summary"`) prunes only — no
+         * provider call, no summary part written; right pick when
+         * the session is mostly tool calls + outputs with very
+         * little prose between them. Unknown values fall back to
+         * the default — typos can't silently skip the summary call.
+         */
+        val strategy: String? = null,
     )
 
     @Serializable data class Output(
@@ -435,6 +463,43 @@ class SessionActionTool(
          * snapshot restore. Zero on every other action.
          */
         val revertRestoredTrackCount: Int = 0,
+        /**
+         * `compact` only: `true` when the run actually compacted
+         * (either summarise+prune or prune-only path). `false` on
+         * skip / no-op. Always-false on every other action.
+         */
+        val compacted: Boolean = false,
+        /**
+         * `compact` only: count of parts whose `time_compacted`
+         * stamp was written in this run. Zero on every other action
+         * or on a skip.
+         */
+        val compactPrunedPartCount: Int = 0,
+        /**
+         * `compact` only: id of the new `Part.Compaction` attached
+         * to the latest assistant message (summarise path only).
+         * Null on prune-only / skip / non-compact actions.
+         */
+        val compactPartId: String? = null,
+        /**
+         * `compact` only: first 200 chars of the LLM-generated
+         * summary (summarise path only). Null on prune-only / skip /
+         * non-compact actions. Use `read_part` for the full text.
+         */
+        val compactSummaryPreview: String? = null,
+        /**
+         * `compact` only: human-readable reason populated when the
+         * run was a no-op (no assistant messages, missing provider,
+         * compactor decided nothing to do). Null when compaction
+         * actually ran or on every other action.
+         */
+        val compactSkipReason: String? = null,
+        /**
+         * `compact` only: echoed strategy that ran —
+         * `"summarize_and_prune"` or `"prune_only"`. Empty string
+         * on every other action.
+         */
+        val compactStrategy: String = "",
     )
 
     override val id: String = "session_action"
@@ -464,7 +529,11 @@ class SessionActionTool(
             "deletes every message strictly after the anchor and rolls the project timeline " +
             "back to the most recent `Part.TimelineSnapshot` at-or-before the anchor (no " +
             "un-revert; pair with project_snapshot_action(action=save) for project-level " +
-            "safety nets). sessionId defaults to owning session except on delete and import. " +
+            "safety nets). `compact`+optional `strategy` proactively triggers two-phase " +
+            "context compaction (the same Compactor the Agent runs automatically at the " +
+            "120k-token threshold); `strategy=prune_only` skips the LLM summary call (cheaper; " +
+            "right for tool-heavy sessions); default `summarize_and_prune` keeps current " +
+            "behaviour. sessionId defaults to owning session except on delete and import. " +
             "Permission: session.write (delete=session.destructive, " +
             "export/export_bus_trace=session.read)."
     override val inputSerializer: KSerializer<Input> = serializer()
@@ -508,7 +577,7 @@ class SessionActionTool(
                 put("type", "string")
                 put(
                     "description",
-                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, `set_system_prompt`, `export_bus_trace`, `set_tool_enabled`, `set_spend_cap`, `fork`, `export`, or `revert`.",
+                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, `set_system_prompt`, `export_bus_trace`, `set_tool_enabled`, `set_spend_cap`, `fork`, `export`, `revert`, or `compact`.",
                 )
                 put(
                     "enum",
@@ -527,6 +596,7 @@ class SessionActionTool(
                             JsonPrimitive("fork"),
                             JsonPrimitive("export"),
                             JsonPrimitive("revert"),
+                            JsonPrimitive("compact"),
                         ),
                     ),
                 )
@@ -655,6 +725,16 @@ class SessionActionTool(
                         "responsibility (no implicit derive).",
                 )
             }
+            putJsonObject("strategy") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Used by action=compact. summarize_and_prune (default) prunes oldest " +
+                        "tool outputs and writes an LLM-generated summary part. prune_only " +
+                        "(alias prune, no_summary) prunes only — no provider call, no " +
+                        "summary part written. Unknown values fall back to the default.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("action"))))
         put("additionalProperties", false)
@@ -677,10 +757,11 @@ class SessionActionTool(
             "fork" -> executeSessionFork(sessions, input, ctx)
             "export" -> executeSessionExport(sessions, input, ctx)
             "revert" -> executeSessionRevert(sessions, projects, bus, input)
+            "compact" -> executeSessionCompact(sessions, providers, bus, input, ctx)
             else -> error(
                 "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, " +
                     "remove_permission_rule, import, set_system_prompt, export_bus_trace, " +
-                    "set_tool_enabled, set_spend_cap, fork, export, revert",
+                    "set_tool_enabled, set_spend_cap, fork, export, revert, compact",
             )
         }
     }

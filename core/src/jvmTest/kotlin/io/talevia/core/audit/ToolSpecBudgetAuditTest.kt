@@ -65,8 +65,10 @@ import kotlin.test.assertTrue
  *    6 tools. CompareAigcCandidatesTool + ReplayLockfileTool *would*
  *    register unconditionally but those two live under the AIGC
  *    register group.
- *  - `ProviderQueryTool` + `CompactSessionTool` — registered in a
- *    second-pass in each container because they need `ProviderRegistry`.
+ *  - `ProviderQueryTool` and the second-pass re-registration of
+ *    `SessionActionTool` (with `providers=` wired in for
+ *    `action="compact"`) — both deferred to each container's second
+ *    pass because they need `ProviderRegistry`.
  *
  * The measured number therefore **undercounts** production by roughly
  * the skipped groups (~15 tools, ~2-3k tokens last observed). When

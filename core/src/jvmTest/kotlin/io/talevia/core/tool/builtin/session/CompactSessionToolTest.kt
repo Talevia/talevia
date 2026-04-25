@@ -28,10 +28,17 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
+/**
+ * `session_action(action="compact", strategy?)` regression coverage.
+ *
+ * Cycle 147 absorbed the standalone `compact_session` tool into
+ * [SessionActionTool]; these tests pin the same semantics on the
+ * dispatcher so a future fold doesn't silently lose the contract.
+ */
 class CompactSessionToolTest {
 
     private data class Rig(
-        val tool: CompactSessionTool,
+        val tool: SessionActionTool,
         val store: SqlDelightSessionStore,
         val bus: EventBus,
         val ctx: ToolContext,
@@ -44,7 +51,11 @@ class CompactSessionToolTest {
         val store = SqlDelightSessionStore(TaleviaDb(driver), bus)
         val provider = FakeProvider(turns)
         val registry = ProviderRegistry.Builder().add(provider).build()
-        val tool = CompactSessionTool(registry, store, bus)
+        val tool = SessionActionTool(
+            sessions = store,
+            bus = bus,
+            providers = registry,
+        )
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),
@@ -125,14 +136,15 @@ class CompactSessionToolTest {
         seedLongSession(rig.store)
 
         val out = rig.tool.execute(
-            CompactSessionTool.Input(sessionId = "s-1"),
+            SessionActionTool.Input(sessionId = "s-1", action = "compact"),
             rig.ctx,
         ).data
 
-        assertTrue(out.compacted, "expected compacted=true, got skipReason=${out.skipReason}")
-        assertNotNull(out.compactionPartId)
-        assertTrue((out.prunedPartCount ?: 0) >= 1, "prunedPartCount should be non-zero")
-        assertTrue(out.summaryPreview!!.contains("Goal"), out.summaryPreview)
+        assertTrue(out.compacted, "expected compacted=true, got skipReason=${out.compactSkipReason}")
+        assertNotNull(out.compactPartId)
+        assertTrue(out.compactPrunedPartCount >= 1, "compactPrunedPartCount should be non-zero")
+        assertTrue(out.compactSummaryPreview!!.contains("Goal"), out.compactSummaryPreview)
+        assertEquals("summarize_and_prune", out.compactStrategy)
 
         // Compaction part landed on the store.
         val parts = rig.store.listSessionParts(SessionId("s-1"))
@@ -153,19 +165,22 @@ class CompactSessionToolTest {
         )
 
         val out = rig.tool.execute(
-            CompactSessionTool.Input(sessionId = "s-empty"),
+            SessionActionTool.Input(sessionId = "s-empty", action = "compact"),
             rig.ctx,
         ).data
 
         assertFalse(out.compacted)
-        assertTrue(out.skipReason!!.contains("no assistant messages"), out.skipReason)
+        assertTrue(
+            out.compactSkipReason!!.contains("no assistant messages"),
+            out.compactSkipReason,
+        )
     }
 
     @Test fun missingSessionFailsLoud() = runTest {
         val rig = rig(emptyList())
         val ex = kotlin.test.assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                CompactSessionTool.Input(sessionId = "ghost"),
+                SessionActionTool.Input(sessionId = "ghost", action = "compact"),
                 rig.ctx,
             )
         }
@@ -190,12 +205,43 @@ class CompactSessionToolTest {
         )
 
         val out = rig.tool.execute(
-            CompactSessionTool.Input(sessionId = "s-1"),
+            SessionActionTool.Input(sessionId = "s-1", action = "compact"),
             rig.ctx,
         ).data
 
         assertFalse(out.compacted)
-        assertTrue(out.skipReason!!.contains("unregistered-provider"), out.skipReason)
+        assertTrue(
+            out.compactSkipReason!!.contains("unregistered-provider"),
+            out.compactSkipReason,
+        )
+    }
+
+    @Test fun missingProvidersFailsLoud() = runTest {
+        val driver = JdbcSqliteDriver(JdbcSqliteDriver.IN_MEMORY)
+        TaleviaDb.Schema.create(driver)
+        val bus = EventBus()
+        val store = SqlDelightSessionStore(TaleviaDb(driver), bus)
+        // No providers wired — first-pass-only registration shape.
+        val tool = SessionActionTool(sessions = store, bus = bus)
+        val ctx = ToolContext(
+            sessionId = SessionId("s"),
+            messageId = MessageId("m"),
+            callId = CallId("c"),
+            askPermission = { PermissionDecision.Once },
+            emitPart = { },
+            messages = emptyList(),
+        )
+
+        val ex = kotlin.test.assertFailsWith<IllegalStateException> {
+            tool.execute(
+                SessionActionTool.Input(sessionId = "s-x", action = "compact"),
+                ctx,
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("ProviderRegistry"),
+            ex.message,
+        )
     }
 
     private fun tokenUsage(): TokenUsage = TokenUsage(input = 10, output = 10)
