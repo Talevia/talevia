@@ -9,6 +9,7 @@ import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.action.executeRemovePermissionRule
 import io.talevia.core.tool.builtin.session.action.executeSessionArchive
 import io.talevia.core.tool.builtin.session.action.executeSessionDelete
+import io.talevia.core.tool.builtin.session.action.executeSessionExportBusTrace
 import io.talevia.core.tool.builtin.session.action.executeSessionImport
 import io.talevia.core.tool.builtin.session.action.executeSessionRename
 import io.talevia.core.tool.builtin.session.action.executeSessionSetSystemPrompt
@@ -81,6 +82,14 @@ class SessionActionTool(
      * loud at dispatch time when the field is missing.
      */
     private val projects: io.talevia.core.domain.ProjectStore? = null,
+    /**
+     * In-memory ring-buffer recorder used by `action=export_bus_trace`
+     * to flush a session's recent `BusEvent` history as JSONL / JSON.
+     * Default `null` keeps existing test rigs source-compatible;
+     * the export action fails loud when the field is unset, mirroring
+     * the `import` / `remove_permission_rule` "missing dep" pattern.
+     */
+    private val busTrace: io.talevia.core.bus.BusEventTraceRecorder? = null,
 ) : Tool<SessionActionTool.Input, SessionActionTool.Output> {
 
     @Serializable data class Input(
@@ -91,7 +100,7 @@ class SessionActionTool(
          * the dispatch is running.
          */
         val sessionId: String? = null,
-        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, or `"set_system_prompt"`. */
+        /** `"archive"`, `"unarchive"`, `"rename"`, `"delete"`, `"remove_permission_rule"`, `"import"`, `"set_system_prompt"`, or `"export_bus_trace"`. */
         val action: String,
         /** Required for `action="rename"`. Must be non-blank. Ignored on other actions. */
         val newTitle: String? = null,
@@ -136,6 +145,21 @@ class SessionActionTool(
          * actions that don't carry this field at all.
          */
         val systemPromptOverride: String? = null,
+        /**
+         * Used by `action=export_bus_trace`. `"jsonl"` (default) emits
+         * one `BusEventTraceRecorder.Entry` JSON object per line —
+         * stream-friendly + grep-friendly. `"json"` emits a single
+         * JSON array — easier for one-shot tools that decode a whole
+         * file. Ignored on every other action.
+         */
+        val format: String? = null,
+        /**
+         * Used by `action=export_bus_trace`. Cap on number of most-
+         * recent entries to include. Null = no cap (full ring buffer
+         * up to `BusEventTraceRecorder.DEFAULT_CAPACITY_PER_SESSION`).
+         * Ignored on every other action.
+         */
+        val limit: Int? = null,
     )
 
     @Serializable data class Output(
@@ -186,6 +210,24 @@ class SessionActionTool(
          * Always-null when the action is not set_system_prompt.
          */
         val newSystemPromptOverride: String? = null,
+        /**
+         * `export_bus_trace` only: rendered JSONL or JSON body
+         * containing the captured `BusEventTraceRecorder.Entry` rows
+         * for the target session. Empty string when the action is
+         * not export_bus_trace.
+         */
+        val exportedBusTrace: String = "",
+        /**
+         * `export_bus_trace` only: number of trace entries the
+         * exported body contains (post-limit). Zero otherwise.
+         */
+        val exportedTraceEntryCount: Int = 0,
+        /**
+         * `export_bus_trace` only: format string the export landed in
+         * (`"jsonl"` or `"json"`), echoed for caller convenience.
+         * Empty string otherwise.
+         */
+        val exportedTraceFormat: String = "",
     )
 
     override val id: String = "session_action"
@@ -197,7 +239,9 @@ class SessionActionTool(
             "envelope's target projectId must already exist; refuses to overwrite an existing " +
             "session id), `set_system_prompt`+`systemPromptOverride` swaps this session's " +
             "system prompt without spinning up a second Agent (null=clear, empty string=valid " +
-            "no-prompt override). sessionId defaults to owning session except on delete and import. " +
+            "no-prompt override), `export_bus_trace`+optional `format`/`limit` flushes the " +
+            "session's `BusEventTraceRecorder` ring buffer to JSONL (default) or JSON for " +
+            "offline triage. sessionId defaults to owning session except on delete and import. " +
             "Permission: session.write (delete=session.destructive)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
@@ -233,7 +277,7 @@ class SessionActionTool(
                 put("type", "string")
                 put(
                     "description",
-                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, or `set_system_prompt`.",
+                    "`archive`, `unarchive`, `rename`, `delete`, `remove_permission_rule`, `import`, `set_system_prompt`, or `export_bus_trace`.",
                 )
                 put(
                     "enum",
@@ -246,6 +290,7 @@ class SessionActionTool(
                             JsonPrimitive("remove_permission_rule"),
                             JsonPrimitive("import"),
                             JsonPrimitive("set_system_prompt"),
+                            JsonPrimitive("export_bus_trace"),
                         ),
                     ),
                 )
@@ -282,6 +327,25 @@ class SessionActionTool(
                         "override so subsequent turns fall back to the Agent default.",
                 )
             }
+            putJsonObject("format") {
+                put("type", "string")
+                put(
+                    "description",
+                    "Used by action=export_bus_trace. `\"jsonl\"` (default) or `\"json\"`.",
+                )
+                put(
+                    "enum",
+                    JsonArray(listOf(JsonPrimitive("jsonl"), JsonPrimitive("json"))),
+                )
+            }
+            putJsonObject("limit") {
+                put("type", "integer")
+                put(
+                    "description",
+                    "Used by action=export_bus_trace. Cap on most-recent entries to include " +
+                        "(default = full ring buffer). Must be ≥ 1 if set.",
+                )
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("action"))))
         put("additionalProperties", false)
@@ -298,8 +362,9 @@ class SessionActionTool(
             )
             "import" -> executeSessionImport(sessions, projects, input)
             "set_system_prompt" -> executeSessionSetSystemPrompt(sessions, clock, input, ctx)
+            "export_bus_trace" -> executeSessionExportBusTrace(busTrace, input, ctx)
             else -> error(
-                "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, remove_permission_rule, import, set_system_prompt",
+                "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, remove_permission_rule, import, set_system_prompt, export_bus_trace",
             )
         }
     }

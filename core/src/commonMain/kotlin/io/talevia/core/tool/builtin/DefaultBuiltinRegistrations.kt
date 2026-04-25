@@ -165,6 +165,7 @@ fun ToolRegistry.registerSessionAndMetaTools(
             sessions = sessions,
             permissionRulesPersistence = permissionRulesPersistence,
             projects = projects,
+            busTrace = busTrace,
         ),
     )
     register(ReadPartTool(sessions))
