@@ -93,6 +93,7 @@ internal fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
     is BusEvent.ProjectValidationWarning -> "project.validation.warning"
     is BusEvent.AigcCostRecorded -> "aigc.cost.recorded"
+    is BusEvent.SpendCapApproaching -> "spend.cap.approaching"
     is BusEvent.AigcCacheProbe -> "aigc.cache.probe"
     is BusEvent.AssetsMissing -> "project.assets.missing"
     is BusEvent.ProviderWarmup -> "provider.warmup"
@@ -171,6 +172,10 @@ data class BusEventDto(
     val providerId: String? = null,
     /** Set for `provider.warmup` — wall-clock epochMs the phase fired at. */
     val epochMs: Long? = null,
+    /** Set for `spend.cap.approaching` — the configured per-session cap. */
+    val spendCapCents: Long? = null,
+    /** Set for `spend.cap.approaching` — `"aigc"` (mid-session) | `"export"` (export-time). */
+    val spendCapScope: String? = null,
 ) {
     companion object {
         fun from(e: BusEvent): BusEventDto = when (e) {
@@ -259,6 +264,14 @@ data class BusEventDto(
                 toolId = e.toolId,
                 assetId = e.assetId,
                 costCents = e.costCents,
+            )
+            is BusEvent.SpendCapApproaching -> BusEventDto(
+                "spend.cap.approaching",
+                e.sessionId.value,
+                toolId = e.toolId,
+                costCents = e.currentCents,
+                spendCapCents = e.capCents,
+                spendCapScope = e.scope,
             )
             is BusEvent.AigcCacheProbe -> BusEventDto(
                 "aigc.cache.probe",

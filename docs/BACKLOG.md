@@ -15,7 +15,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **aigc-budget-warning-at-80pct** — `aigc.budget` ASK 只在 `cumulative >= cap` 触发（cycle-101 的 export-fail-fast 同样硬 ≥），用户从 "全无感知" 跳到 "卡死"。中间没有"快超了"的 soft signal。**方向：** AigcBudgetGuard / ExportToolBudgetGuard 在 0.8×cap ≤ cumulative < cap 时发 `BusEvent.SpendCapApproaching`（不 ASK，仅事件 + CLI surface），user 自然减速。Rubric §5.2 / §5.7。Milestone §later.
 - **source-dag-cycle-detection** — `Source.replaceNode` / `addLink` 假设调用方传无环图，没有 guard。一个 node body 里 referenceIds 引用自己（或后代）→ 后续 `descendants(rootId)` 遍历会无限递归 → 栈溢出。**方向：** `Source.validateAcyclic()` helper（DFS + visiting set），调入每个写入路径的入口；返红一条 `ProjectValidationWarning` 而非 throw。Rubric §5.1。Milestone §later.
 - **provider-warmup-eager-prefetch** — 首个 AIGC 调用承担 cold-start latency (TLS + auth + model handshake)；`ProviderWarmup` 事件能观察但没人在 container init 时主动 fire。Session 首条 generate_image 比后续慢得多。**方向：** 各 container 在 `init {}` 里挑 default provider 的 `/models` 探针（廉价 GET）异步 kick 一次；warmup 历史照常进 ProviderWarmupStats。Rubric §5.7。Milestone §later.
 - **bus-trace-cli-slash** — cycle-100 加了 `session_query(select=bus_trace)`；CLI 用户每次手敲 query 麻烦。**方向：** `/trace [kind=]` slash 命令打印当前 session 最近 N=20 行；继承 `/permissions` 风格。`SlashCompletion` 给 kind 候选（`PartDelta` / `MessageUpdated` / …）。Rubric §5.4 / cli。Milestone §later.

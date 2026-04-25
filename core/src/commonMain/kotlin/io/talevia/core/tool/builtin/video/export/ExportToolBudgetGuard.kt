@@ -1,5 +1,6 @@
 package io.talevia.core.tool.builtin.video.export
 
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.domain.Project
 import io.talevia.core.permission.PermissionRequest
 import io.talevia.core.tool.ToolContext
@@ -42,7 +43,22 @@ internal suspend fun enforceTimelineSpendCap(project: Project, ctx: ToolContext)
     val cap = ctx.spendCapCents ?: return
     val (perClip, totalCost) = buildPerClipCostAttribution(project)
     if (totalCost == 0L) return
-    if (totalCost < cap) return
+    if (totalCost < cap) {
+        // Soft warning at 80% — see BusEvent.SpendCapApproaching kdoc.
+        if (totalCost >= cap * 4L / 5L) {
+            ctx.publishEvent(
+                BusEvent.SpendCapApproaching(
+                    sessionId = ctx.sessionId,
+                    capCents = cap,
+                    currentCents = totalCost,
+                    ratio = totalCost.toDouble() / cap.toDouble(),
+                    scope = "export",
+                    toolId = "export",
+                ),
+            )
+        }
+        return
+    }
 
     val pricedClipCount = perClip.values.count { it != null }
     val decision = ctx.askPermission(

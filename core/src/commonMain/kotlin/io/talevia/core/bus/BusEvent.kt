@@ -289,6 +289,33 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     /**
+     * Soft warning emitted when cumulative AIGC spend reaches
+     * `0.8 * spendCapCents` but is still strictly below the cap. Fires
+     * before the hard `aigc.budget` ASK so users get a "you're at 80%"
+     * signal between "no awareness" and "hard stop".
+     *
+     * [scope] is `aigc` for in-session AIGC dispatch (AigcBudgetGuard)
+     * vs `export` for export-time timeline-cost gating
+     * (ExportToolBudgetGuard) — the two surfaces share the cap but
+     * have different "current" measures, so the scope tag lets
+     * subscribers tell them apart without parsing toolId.
+     *
+     * Subscribers MAY rate-limit display (CLI debounces to one banner
+     * per session per ~30s). The guard fires every qualifying call;
+     * keeping the dedupe state in the guard would couple guard to
+     * subscriber lifecycle which violates the bus's
+     * "publishers don't know subscribers" invariant.
+     */
+    data class SpendCapApproaching(
+        override val sessionId: SessionId,
+        val capCents: Long,
+        val currentCents: Long,
+        val ratio: Double,
+        val scope: String,
+        val toolId: String,
+    ) : SessionEvent
+
+    /**
      * Cache-lookup outcome from `AigcPipeline.findCached`. Emitted once per
      * attempted AIGC tool invocation **before** the provider call (so a hit
      * short-circuits without emitting `AigcCostRecorded`, and a miss pairs

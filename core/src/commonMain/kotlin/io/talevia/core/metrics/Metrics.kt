@@ -186,6 +186,7 @@ class EventBusMetricsSink(
         is BusEvent.ProjectValidationWarning -> "project.validation.warning"
         is BusEvent.AssetsMissing -> "project.assets.missing"
         is BusEvent.AigcCostRecorded -> "aigc.cost.recorded"
+        is BusEvent.SpendCapApproaching -> "spend.cap.approaching.${event.scope}"
         is BusEvent.AigcCacheProbe ->
             if (event.hit) "aigc.cache.hits.total" else "aigc.cache.misses.total"
         // Per-phase counters so a Prometheus scrape can alert when

@@ -1,6 +1,7 @@
 package io.talevia.core.tool.builtin.aigc
 
 import io.talevia.core.ProjectId
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.permission.PermissionRequest
 import io.talevia.core.tool.ToolContext
@@ -38,6 +39,10 @@ import io.talevia.core.tool.ToolContext
  */
 internal object AigcBudgetGuard {
 
+    /** 0.8x cap, expressed as integer fraction so we don't bring `Double` into the comparison. */
+    private const val WARNING_THRESHOLD_NUM = 4L
+    private const val WARNING_THRESHOLD_DEN = 5L
+
     /**
      * @param toolId Passed through to the permission request metadata so
      *   the UI can show *which* AIGC tool tripped the gate.
@@ -60,7 +65,23 @@ internal object AigcBudgetGuard {
             .asSequence()
             .filter { it.sessionId == ctx.sessionId.value }
             .sumOf { it.costCents ?: 0L }
-        if (spentCents < cap) return
+        if (spentCents < cap) {
+            // Soft warning at 80% — see BusEvent.SpendCapApproaching kdoc.
+            // Fires every qualifying call; subscribers debounce.
+            if (spentCents >= cap * WARNING_THRESHOLD_NUM / WARNING_THRESHOLD_DEN) {
+                ctx.publishEvent(
+                    BusEvent.SpendCapApproaching(
+                        sessionId = ctx.sessionId,
+                        capCents = cap,
+                        currentCents = spentCents,
+                        ratio = spentCents.toDouble() / cap.toDouble(),
+                        scope = "aigc",
+                        toolId = toolId,
+                    ),
+                )
+            }
+            return
+        }
 
         val decision = ctx.askPermission(
             PermissionRequest(
