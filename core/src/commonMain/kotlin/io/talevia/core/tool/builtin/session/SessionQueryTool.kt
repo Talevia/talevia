@@ -21,6 +21,7 @@ import io.talevia.core.tool.builtin.session.query.MessageDetailRow
 import io.talevia.core.tool.builtin.session.query.MessageRow
 import io.talevia.core.tool.builtin.session.query.PartRow
 import io.talevia.core.tool.builtin.session.query.PermissionHistoryRow
+import io.talevia.core.tool.builtin.session.query.PermissionRuleRow
 import io.talevia.core.tool.builtin.session.query.PreflightSummaryRow
 import io.talevia.core.tool.builtin.session.query.RunFailureRow
 import io.talevia.core.tool.builtin.session.query.RunStateTransitionRow
@@ -44,6 +45,7 @@ import io.talevia.core.tool.builtin.session.query.runMessageDetailQuery
 import io.talevia.core.tool.builtin.session.query.runMessagesQuery
 import io.talevia.core.tool.builtin.session.query.runPartsQuery
 import io.talevia.core.tool.builtin.session.query.runPermissionHistoryQuery
+import io.talevia.core.tool.builtin.session.query.runPermissionRulesQuery
 import io.talevia.core.tool.builtin.session.query.runPreflightSummaryQuery
 import io.talevia.core.tool.builtin.session.query.runRunFailureQuery
 import io.talevia.core.tool.builtin.session.query.runRunStateHistoryQuery
@@ -195,8 +197,8 @@ class SessionQueryTool(
             "requires sessionId.\n" +
             "  • session_metadata — single-row drill-down. requires sessionId.\n" +
             "  • message — single-row + parts summary. requires messageId.\n" +
-            "  • spend — single-row AIGC cost. requires sessionId.\n" +
-            "  • spend_summary — per-provider roll-up. requires sessionId.\n" +
+            "  • spend — single-row AIGC cost.\n" +
+            "  • spend_summary — per-provider roll-up.\n" +
             "  • context_pressure — (currentEstimate, threshold, ratio, marginTokens, " +
             "overThreshold, messageCount). requires sessionId.\n" +
             "  • tool_spec_budget — registry-wide (toolCount, estimatedTokens, specBytes, " +
@@ -210,14 +212,14 @@ class SessionQueryTool(
             "  • permission_history — Asked↔Replied round-trips {requestId, permission, " +
             "patterns, decision, accepted?, remembered?, askedEpochMs, repliedEpochMs}. " +
             "requires sessionId.\n" +
+            "  • permission_rules — {permission, pattern, action, source}. requires sessionId.\n" +
             "  • preflight_summary — single-row plan-time snapshot collapsing context_pressure + " +
             "fallback + cancel + retry + pendingPermissionAsks. requires sessionId.\n" +
             "  • step_history — per-step timeline {model, finishReason, tokens, toolCallCount, " +
             "elapsedMs}. sessionId; optional messageId.\n" +
-            "  • active_run_summary — running stats for the latest turn (state, elapsedMs, " +
-            "tokensIn/Out, toolCallCount, compactionsInRun). requires sessionId.\n" +
-            "Common: limit (default 100, clamped 1..1000), offset (default 0). Filter-on-" +
-            "wrong-select fails loud."
+            "  • active_run_summary — latest turn stats (state, elapsedMs, tokensIn/Out, " +
+            "toolCallCount, compactionsInRun). requires sessionId.\n" +
+            "Common: limit (1..1000, default 100), offset. Filter-on-wrong-select fails loud."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.read")
@@ -247,6 +249,7 @@ class SessionQueryTool(
         SELECT_FALLBACK_HISTORY -> FallbackHistoryRow.serializer()
         SELECT_CANCELLATION_HISTORY -> CancellationHistoryRow.serializer()
         SELECT_PERMISSION_HISTORY -> PermissionHistoryRow.serializer()
+        SELECT_PERMISSION_RULES -> PermissionRuleRow.serializer()
         SELECT_PREFLIGHT_SUMMARY -> PreflightSummaryRow.serializer()
         SELECT_STEP_HISTORY -> StepHistoryRow.serializer()
         SELECT_ACTIVE_RUN_SUMMARY -> ActiveRunSummaryRow.serializer()
@@ -281,6 +284,7 @@ class SessionQueryTool(
             SELECT_FALLBACK_HISTORY -> runFallbackHistoryQuery(sessions, fallbackTracker, input, limit, offset)
             SELECT_CANCELLATION_HISTORY -> runCancellationHistoryQuery(sessions, input, limit, offset)
             SELECT_PERMISSION_HISTORY -> runPermissionHistoryQuery(permissionHistory, input, limit, offset)
+            SELECT_PERMISSION_RULES -> runPermissionRulesQuery(sessions, input, limit, offset)
             SELECT_PREFLIGHT_SUMMARY -> runPreflightSummaryQuery(
                 sessions = sessions,
                 agentStates = agentStates,
@@ -369,6 +373,7 @@ class SessionQueryTool(
         const val SELECT_FALLBACK_HISTORY = "fallback_history"
         const val SELECT_CANCELLATION_HISTORY = "cancellation_history"
         const val SELECT_PERMISSION_HISTORY = "permission_history"
+        const val SELECT_PERMISSION_RULES = "permission_rules"
         const val SELECT_PREFLIGHT_SUMMARY = "preflight_summary"
         const val SELECT_STEP_HISTORY = "step_history"
         const val SELECT_ACTIVE_RUN_SUMMARY = "active_run_summary"
@@ -379,7 +384,8 @@ class SessionQueryTool(
             SELECT_CACHE_STATS,
             SELECT_CONTEXT_PRESSURE, SELECT_RUN_STATE_HISTORY, SELECT_TOOL_SPEC_BUDGET,
             SELECT_RUN_FAILURE, SELECT_FALLBACK_HISTORY, SELECT_CANCELLATION_HISTORY,
-            SELECT_PERMISSION_HISTORY, SELECT_PREFLIGHT_SUMMARY, SELECT_STEP_HISTORY,
+            SELECT_PERMISSION_HISTORY, SELECT_PERMISSION_RULES,
+            SELECT_PREFLIGHT_SUMMARY, SELECT_STEP_HISTORY,
             SELECT_ACTIVE_RUN_SUMMARY,
         )
 
