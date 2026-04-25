@@ -16,6 +16,7 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.video.export.PerClipStats
 import io.talevia.core.tool.builtin.video.export.buildPerClipCostAttribution
+import io.talevia.core.tool.builtin.video.export.enforceTimelineSpendCap
 import io.talevia.core.tool.builtin.video.export.fingerprintOf
 import io.talevia.core.tool.builtin.video.export.mimeTypeFor
 import io.talevia.core.tool.builtin.video.export.provenanceOf
@@ -182,6 +183,17 @@ class ExportTool(
         val width = input.width ?: timeline.resolution.width
         val height = input.height ?: timeline.resolution.height
         val fps = input.frameRate ?: timeline.frameRate.numerator / timeline.frameRate.denominator
+
+        // Spend-cap fail-fast (VISION §5.2 / §5.7). The timeline's AIGC content
+        // already has a cost — sum of `perClipCostCents` for clips whose asset
+        // has a priced lockfile entry. If that exceeds the session's
+        // `spendCapCents`, ASK before kicking off the render so the user
+        // can bail early instead of waiting for ffmpeg / Media3 / AVFoundation
+        // to finish encoding content they don't actually want shipped.
+        // Granted decisions ⇒ render proceeds; rejected ⇒ error before any
+        // engine call. Same `aigc.budget` permission name AIGC tools use, so
+        // an existing "Always allow" rule covers both surfaces.
+        enforceTimelineSpendCap(project, ctx)
 
         // Provenance manifest (VISION §5.3). Pure function of (projectId,
         // timeline, lockfile) — no timestamps / random ids — so two identical
