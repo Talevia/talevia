@@ -74,6 +74,7 @@ internal class SlashCommandDispatcher(
                 renderer.println("${Styles.ok("✓")} new session ${Styles.accent(fresh.value.take(8))}")
             }
             "sessions" -> renderer.println(sessionsTable(projectId, currentSession))
+            "projects" -> renderer.println(projectsTable())
             "resume" -> {
                 if (args.isBlank()) {
                     renderer.println(Styles.meta("usage: /resume <id-prefix>"))
@@ -550,6 +551,26 @@ internal class SlashCommandDispatcher(
         }
         return "in=${tokens.input} · out=${tokens.output} · reasoning=${tokens.reasoning} · " +
             "cache r/w=${tokens.cacheRead}/${tokens.cacheWrite} · usd=${"%.5f".format(usd)}"
+    }
+
+    /**
+     * `/projects` lists every project the recents registry knows about,
+     * sorted updated-desc — same ordering `ListProjectsTool`'s default
+     * delivers to the agent. Per-project path comes from
+     * `ProjectStore.pathOf` (machine-local; not a field on
+     * `ProjectSummary`).
+     */
+    private suspend fun projectsTable(): String {
+        val summaries = container.projects.listSummaries()
+        // Pre-fetch paths so the formatter's lookup callback can stay
+        // non-suspending — Kotlin doesn't propagate suspend through
+        // higher-order calls without `crossinline`/explicit suspend
+        // function types, and a synchronous lookup is the right shape
+        // for the renderer's pure-function contract.
+        val paths: Map<String, String?> = summaries.associate { s ->
+            s.id to container.projects.pathOf(io.talevia.core.ProjectId(s.id))?.toString()
+        }
+        return formatProjectsTable(summaries) { id -> paths[id] }
     }
 
     /**

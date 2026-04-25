@@ -32,6 +32,11 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         category = SlashCategory.SESSION,
     ),
     SlashCommandSpec(
+        "/projects",
+        "list every project in the recents registry (most-recently-updated first)",
+        category = SlashCategory.SESSION,
+    ),
+    SlashCommandSpec(
         "/resume",
         "switch to the session whose id starts with <prefix>",
         argHint = "<prefix>",

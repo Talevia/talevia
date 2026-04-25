@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **cli-projects-slash-cmd** — `/sessions` 列出当前 project 的会话；但 CLI 没法列"系统里有哪些 project"。`list_projects` 工具能给 agent 用，但 operator 直接想看的时候没 slash。**方向：** `/projects` slash dispatch `ListProjectsTool` (或直接读 `RecentsRegistry`)，按 `updatedAt` 倒序打 id + title + path。Rubric §5.4。Milestone §later.
 - **re-evaluate-debt-aigc-tool-consolidation** — `debt-aigc-tool-consolidation` 跨 9 cycles 持续 skip-tagged（自 cycle 113 起，原因 §3a-7：`LockfileEntry.toolId` 已 stamped `"generate_image"` 等在 on-disk bundle，删旧工具会让 `ReplayLockfileTool` 对老 entry 失效）。符合 §R skip-≥3-cycles 元 bullet 规则。**方向：** 用户决定 promote (设计 alias-map: `"generate_image" → "aigc_generate" + kind="image"` 写进 ReplayLockfileTool) / demote (接受 4 个独立工具的 LLM context tax) / delete (criterion 不再相关)。Rubric §5.6 / §5.7 / §3a-1 / §3a-7。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排
