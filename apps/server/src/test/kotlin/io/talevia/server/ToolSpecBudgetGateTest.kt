@@ -79,14 +79,21 @@ class ToolSpecBudgetGateTest {
      *     Cost-compare is a new LLM-facing select that answers
      *     "cheapest model for this request?" — high-value surface no
      *     consolidation path shrinks further. ~0.4% buffer.
-     *   - 22_700 (this cycle, cycle-51): 22_623 measured. +23 tokens
-     *     above prior ceiling; load-bearing addition of
-     *     `source_query(select=nodes)` new `hasParent` filter per
-     *     `docs/decisions/2026-04-23-source-query-roots-filter.md`.
-     *     hasParent is the DAG-position filter that turns
-     *     `dag_summary.rootNodeIds` from a one-off snapshot into a
+     *   - 22_700 (cycle-51): 22_623 measured. +23 tokens above prior
+     *     ceiling; load-bearing addition of `source_query(select=nodes)`
+     *     `hasParent` filter. hasParent is the DAG-position filter that
+     *     turns `dag_summary.rootNodeIds` from a one-off snapshot into a
      *     first-class `nodes` filter; no consolidation path shrinks
      *     this further. ~0.3% buffer.
+     *   - 23_000 (this cycle, cycle-74): 22_935 measured. +235 tokens
+     *     above prior ceiling; load-bearing addition of
+     *     `provider_query(select=aigc_cost_estimate)` per backlog
+     *     `aigc-cost-estimate-tool`. Bridges AigcPricing.estimateCents
+     *     to LLM plan-time so the agent doesn't compute "8s × $0.30"
+     *     by hand from the priceBasis string. helpText + per-field
+     *     descriptions trimmed before bumping; net additions are
+     *     unavoidable structural cost (3 new params + 1 new select +
+     *     reject rules). ~0.3% buffer.
      *   - 20_000 (next target, R.6 P0 threshold): requires either
      *     deleting ~10 more tools or moving per-action details to a
      *     `list_tools(select=tool_detail)` sidecar so the live spec
@@ -96,11 +103,12 @@ class ToolSpecBudgetGateTest {
      * Tightening is the only legal direction. A regression that would
      * push the budget over ceiling is a backlog bullet for the next
      * cycle, NOT a bumped ceiling. If the growth is truly load-bearing
-     * (new high-value tool with no consolidation path), add a matching
-     * decision file in `docs/decisions/` alongside the ceiling bump
-     * explaining why this number increased.
+     * (new high-value tool with no consolidation path), bump
+     * CEILING_TOKENS in this test and explain in the commit body why
+     * the number increased — rationale lives in the commit body since
+     * docs/decisions/ was removed (commit ae213b05).
      */
-    private val CEILING_TOKENS: Int = 22_700
+    private val CEILING_TOKENS: Int = 23_000
 
     @Test
     fun registeredToolSpecsFitWithinCeiling() {

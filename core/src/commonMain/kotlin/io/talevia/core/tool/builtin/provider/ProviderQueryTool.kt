@@ -7,11 +7,13 @@ import io.talevia.core.provider.ProviderRegistry
 import io.talevia.core.provider.ProviderWarmupStats
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.provider.query.AigcCostEstimateRow
 import io.talevia.core.tool.builtin.provider.query.CostCompareRow
 import io.talevia.core.tool.builtin.provider.query.CostHistoryRow
 import io.talevia.core.tool.builtin.provider.query.ModelRow
 import io.talevia.core.tool.builtin.provider.query.ProviderRow
 import io.talevia.core.tool.builtin.provider.query.WarmupStatsRow
+import io.talevia.core.tool.builtin.provider.query.runAigcCostEstimateQuery
 import io.talevia.core.tool.builtin.provider.query.runCostCompareQuery
 import io.talevia.core.tool.builtin.provider.query.runCostHistoryQuery
 import io.talevia.core.tool.builtin.provider.query.runModelsQuery
@@ -90,6 +92,25 @@ class ProviderQueryTool(
          * selects. Null/omitted = no lower bound.
          */
         val sinceEpochMs: Long? = null,
+        /**
+         * [SELECT_AIGC_COST_ESTIMATE] only — registered tool id (e.g.
+         * `generate_image`, `synthesize_speech`). Rejected for other
+         * selects.
+         */
+        val toolId: String? = null,
+        /**
+         * [SELECT_AIGC_COST_ESTIMATE] only — provider-scoped model id (e.g.
+         * `gpt-image-1`, `sora`, `tts-1`). Rejected for other selects.
+         */
+        val modelId: String? = null,
+        /**
+         * [SELECT_AIGC_COST_ESTIMATE] only — the same `baseInputs` JSON the
+         * agent intends to pass to the actual AIGC tool (e.g.
+         * `{"width": 1024, "height": 1024}` for image, `{"text": "..."}`
+         * for TTS, `{"durationSeconds": 8}` for video). Rejected for
+         * other selects.
+         */
+        val inputs: JsonObject? = null,
     )
 
     @Serializable data class Output(
@@ -129,7 +150,11 @@ class ProviderQueryTool(
             "Rows: {toolId, providerId, modelId, costCents, projectId, sessionId, " +
             "originatingMessageId, assetId, createdAtEpochMs}. Sourced from each project's " +
             "lockfile.entries; entries without costCents are filtered out. Filters: limit " +
-            "(default 50, max 500), sinceEpochMs. Sorted by createdAtEpochMs desc."
+            "(default 50, max 500), sinceEpochMs. Sorted by createdAtEpochMs desc.\n" +
+            "  • aigc_cost_estimate — plan-time cost estimate for one AIGC dispatch. Requires " +
+            "(toolId, providerId, modelId, inputs); inputs match the tool's baseInputs (width/" +
+            "height, text, durationSeconds…). Row: {…, cents, priceBasis, pricedInputs}. cents=" +
+            "null = no rule matched (≠ free). Use before dispatch; cost_history for post-hoc."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("provider.read")
@@ -142,7 +167,7 @@ class ProviderQueryTool(
                 put(
                     "description",
                     "What to query: providers | models | cost_compare | warmup_stats | " +
-                        "cost_history (case-insensitive).",
+                        "cost_history | aigc_cost_estimate (case-insensitive).",
                 )
                 put(
                     "enum",
@@ -152,6 +177,7 @@ class ProviderQueryTool(
                         add(JsonPrimitive(SELECT_COST_COMPARE))
                         add(JsonPrimitive(SELECT_WARMUP_STATS))
                         add(JsonPrimitive(SELECT_COST_HISTORY))
+                        add(JsonPrimitive(SELECT_AIGC_COST_ESTIMATE))
                     },
                 )
             }
@@ -183,6 +209,19 @@ class ProviderQueryTool(
                     "cost_history only. Drop entries older than this epoch-ms. Null = no lower bound.",
                 )
             }
+            putJsonObject("toolId") {
+                put("type", "string")
+                put("description", "aigc_cost_estimate only. Tool id (e.g. generate_image).")
+            }
+            putJsonObject("modelId") {
+                put("type", "string")
+                put("description", "aigc_cost_estimate only. Model id (e.g. gpt-image-1, sora).")
+            }
+            putJsonObject("inputs") {
+                put("type", "object")
+                put("additionalProperties", true)
+                put("description", "aigc_cost_estimate only. baseInputs JSON for the tool.")
+            }
         }
         put("required", JsonArray(listOf(JsonPrimitive("select"))))
         put("additionalProperties", false)
@@ -196,6 +235,7 @@ class ProviderQueryTool(
         SELECT_COST_COMPARE -> CostCompareRow.serializer()
         SELECT_WARMUP_STATS -> WarmupStatsRow.serializer()
         SELECT_COST_HISTORY -> CostHistoryRow.serializer()
+        SELECT_AIGC_COST_ESTIMATE -> AigcCostEstimateRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
 
@@ -215,6 +255,12 @@ class ProviderQueryTool(
                 store = projects,
                 limit = (input.limit ?: 50).coerceIn(1, 500),
                 sinceEpochMs = input.sinceEpochMs,
+            )
+            SELECT_AIGC_COST_ESTIMATE -> runAigcCostEstimateQuery(
+                toolId = input.toolId!!,
+                providerId = input.providerId!!,
+                modelId = input.modelId!!,
+                inputs = input.inputs ?: JsonObject(emptyMap()),
             )
             else -> error("unreachable — select validated above: '$select'")
         }
@@ -274,6 +320,29 @@ class ProviderQueryTool(
                     "limit / sinceEpochMs (cost_history only).",
             )
         }
+        if (select != SELECT_AIGC_COST_ESTIMATE &&
+            (input.toolId != null || input.modelId != null || input.inputs != null)
+        ) {
+            error(
+                "The following filter fields do not apply to select='$select': " +
+                    "toolId / modelId / inputs (aigc_cost_estimate only).",
+            )
+        }
+        if (select == SELECT_AIGC_COST_ESTIMATE) {
+            val missing = buildList {
+                if (input.toolId.isNullOrBlank()) add("toolId")
+                if (input.providerId.isNullOrBlank()) add("providerId")
+                if (input.modelId.isNullOrBlank()) add("modelId")
+            }
+            if (missing.isNotEmpty()) {
+                error(
+                    "select='$select' requires ${missing.joinToString(" + ")} " +
+                        "(plus optional `inputs` JSON for shape-dependent rules like image " +
+                        "width/height or video durationSeconds). Without these the pricing " +
+                        "table can't pick a row.",
+                )
+            }
+        }
         if (select == SELECT_COST_COMPARE) {
             if (input.providerId != null) {
                 error(
@@ -296,9 +365,10 @@ class ProviderQueryTool(
         const val SELECT_COST_COMPARE = "cost_compare"
         const val SELECT_WARMUP_STATS = "warmup_stats"
         const val SELECT_COST_HISTORY = "cost_history"
+        const val SELECT_AIGC_COST_ESTIMATE = "aigc_cost_estimate"
         internal val ALL_SELECTS = setOf(
             SELECT_PROVIDERS, SELECT_MODELS, SELECT_COST_COMPARE, SELECT_WARMUP_STATS,
-            SELECT_COST_HISTORY,
+            SELECT_COST_HISTORY, SELECT_AIGC_COST_ESTIMATE,
         )
     }
 }
