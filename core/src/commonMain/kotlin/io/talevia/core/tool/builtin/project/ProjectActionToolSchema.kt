@@ -21,13 +21,15 @@ internal val PROJECT_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
             put("type", "string")
             put(
                 "description",
-                "`create`, `open`, `delete`, `rename`, `set_output_profile`, or `remove_asset`.",
+                "`create`, `create_from_template`, `open`, `delete`, `rename`, " +
+                    "`set_output_profile`, or `remove_asset`.",
             )
             put(
                 "enum",
                 JsonArray(
                     listOf(
                         JsonPrimitive("create"),
+                        JsonPrimitive("create_from_template"),
                         JsonPrimitive("open"),
                         JsonPrimitive("delete"),
                         JsonPrimitive("rename"),
@@ -47,26 +49,35 @@ internal val PROJECT_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
         }
         putJsonObject("title") {
             put("type", "string")
-            put("description", "create: human-readable initial title. rename: new title. Must not be blank.")
+            put(
+                "description",
+                "create / create_from_template: human-readable initial title. rename: new title. " +
+                    "Must not be blank.",
+            )
         }
         putJsonObject("path") {
             put("type", "string")
             put(
                 "description",
-                "create + open: filesystem path. create: optional bundle location (must not " +
-                    "already contain talevia.json); omit for the store's default home. open: " +
-                    "absolute path to an existing bundle directory containing talevia.json.",
+                "create / create_from_template / open: filesystem path. create / " +
+                    "create_from_template: optional bundle location (must not already contain " +
+                    "talevia.json); omit for the store's default home. open: absolute path to an " +
+                    "existing bundle directory containing talevia.json.",
             )
         }
         putJsonObject("resolutionPreset") {
             put("type", "string")
-            put("description", "create only. 720p, 1080p (default), or 4k.")
+            put(
+                "description",
+                "create / create_from_template only. 720p, 1080p (default), or 4k.",
+            )
         }
         putJsonObject("fps") {
             put("type", "integer")
             put(
                 "description",
-                "create: 24, 30 (default), or 60. set_output_profile: any positive integer fps.",
+                "create / create_from_template: 24, 30 (default), or 60. " +
+                    "set_output_profile: any positive integer fps.",
             )
         }
         putJsonObject("deleteFiles") {
@@ -122,6 +133,37 @@ internal val PROJECT_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
         putJsonObject("container") {
             put("type", "string")
             put("description", "set_output_profile only. e.g. mp4, mov, mkv, webm.")
+        }
+        putJsonObject("template") {
+            put("type", "string")
+            put(
+                "description",
+                "create_from_template only. Genre template id: narrative, vlog, ad, musicmv, " +
+                    "tutorial, or auto. auto requires `intent` and classifies the genre from " +
+                    "keywords (no LLM round-trip).",
+            )
+            put(
+                "enum",
+                JsonArray(
+                    listOf(
+                        JsonPrimitive("narrative"),
+                        JsonPrimitive("vlog"),
+                        JsonPrimitive("ad"),
+                        JsonPrimitive("musicmv"),
+                        JsonPrimitive("tutorial"),
+                        JsonPrimitive("auto"),
+                    ),
+                ),
+            )
+        }
+        putJsonObject("intent") {
+            put("type", "string")
+            put(
+                "description",
+                "create_from_template only. One-sentence user intent. Required when " +
+                    "template='auto'; ignored otherwise. Used to classify the genre via " +
+                    "on-device keyword match (no LLM round-trip).",
+            )
         }
     }
     put("required", JsonArray(listOf(JsonPrimitive("action"))))

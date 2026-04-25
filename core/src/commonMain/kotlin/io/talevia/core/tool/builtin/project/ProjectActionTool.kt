@@ -75,8 +75,9 @@ class ProjectActionTool(
 
     @Serializable data class Input(
         /**
-         * One of `"create"`, `"open"`, `"delete"`, `"rename"`,
-         * `"set_output_profile"`, `"remove_asset"`. Case-sensitive.
+         * One of `"create"`, `"create_from_template"`, `"open"`,
+         * `"delete"`, `"rename"`, `"set_output_profile"`,
+         * `"remove_asset"`. Case-sensitive.
          */
         val action: String,
         /**
@@ -118,6 +119,20 @@ class ProjectActionTool(
         val audioBitrate: Long? = null,
         /** set_output_profile only. e.g. mp4 / mov / mkv / webm. */
         val container: String? = null,
+        /**
+         * `create_from_template` only — required. Genre template id:
+         * `"narrative"` | `"vlog"` | `"ad"` | `"musicmv"` | `"tutorial"` |
+         * `"auto"`. `"auto"` requires [intent] and drives keyword-based
+         * classification on-device.
+         */
+        val template: String? = null,
+        /**
+         * `create_from_template` only — required when
+         * `template = "auto"`, ignored otherwise. One-sentence user
+         * intent the on-device keyword classifier reads to pick a
+         * genre. No LLM round-trip.
+         */
+        val intent: String? = null,
     )
 
     @Serializable data class CreateResult(
@@ -166,11 +181,30 @@ class ProjectActionTool(
         val dependentClips: List<String>,
     )
 
+    @Serializable data class CreateFromTemplateResult(
+        val title: String,
+        /** Echo of the template actually seeded (resolved from `auto` when applicable). */
+        val template: String,
+        val resolutionWidth: Int,
+        val resolutionHeight: Int,
+        val fps: Int,
+        val seededNodeIds: List<String>,
+        /**
+         * `true` when the caller passed `template = "auto"` and the
+         * keyword classifier picked the resolved template.
+         */
+        val inferredFromIntent: Boolean = false,
+        /** Brief explanation of which keywords drove classification. */
+        val inferredReason: String? = null,
+    )
+
     @Serializable data class Output(
         val projectId: String,
         val action: String,
         /** Populated when `action="create"`. */
         val createResult: CreateResult? = null,
+        /** Populated when `action="create_from_template"`. */
+        val createFromTemplateResult: CreateFromTemplateResult? = null,
         /** Populated when `action="open"`. */
         val openResult: OpenResult? = null,
         /** Populated when `action="delete"`. */
@@ -185,9 +219,15 @@ class ProjectActionTool(
 
     override val id: String = "project_action"
     override val helpText: String =
-        "Six-way project lifecycle verb dispatching on `action`: " +
+        "Seven-way project lifecycle verb dispatching on `action`: " +
             "`create` + title (resolutionPreset?, fps?, projectId?, path?) bootstraps a project " +
             "(permission `project.write`). " +
+            "`create_from_template` + title + template (narrative|vlog|ad|musicmv|tutorial|auto) " +
+            "(intent? required when template=auto, projectId?, path?, resolutionPreset?, fps?) " +
+            "creates a project pre-populated with a genre source-DAG skeleton. Each genre's " +
+            "seed body uses TODO placeholders so the agent / user can tell what still needs " +
+            "filling in. template=auto + intent classifies via on-device keyword match (no LLM " +
+            "round-trip). VISION §5.4 novice path. " +
             "`open` + path registers an existing bundle (permission `project.read`). " +
             "`delete` + projectId (deleteFiles?) drops the project; deleteFiles=true also wipes " +
             "the on-disk bundle (permission `project.destructive`). " +
@@ -225,13 +265,15 @@ class ProjectActionTool(
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
         return when (input.action) {
             "create" -> executeCreateProject(projects, input, ctx)
+            "create_from_template" -> executeCreateFromTemplate(projects, input, ctx)
             "open" -> executeOpenProject(projects, input, ctx)
             "delete" -> executeDeleteProject(projects, input, ctx)
             "rename" -> executeRenameProject(projects, input, ctx)
             "set_output_profile" -> executeSetOutputProfile(projects, input, ctx)
             "remove_asset" -> executeRemoveAsset(projects, input, ctx)
             else -> error(
-                "unknown action '${input.action}'; accepted: create, open, delete, rename, set_output_profile, remove_asset",
+                "unknown action '${input.action}'; accepted: create, create_from_template, " +
+                    "open, delete, rename, set_output_profile, remove_asset",
             )
         }
     }

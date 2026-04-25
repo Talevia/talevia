@@ -37,7 +37,6 @@ import io.talevia.core.tool.builtin.meta.EstimateTokensTool
 import io.talevia.core.tool.builtin.meta.ListToolsTool
 import io.talevia.core.tool.builtin.ml.DescribeAssetTool
 import io.talevia.core.tool.builtin.ml.TranscribeAssetTool
-import io.talevia.core.tool.builtin.project.CreateProjectFromTemplateTool
 import io.talevia.core.tool.builtin.project.DiffProjectsTool
 import io.talevia.core.tool.builtin.project.ExportProjectTool
 import io.talevia.core.tool.builtin.project.ForkProjectTool
@@ -222,7 +221,6 @@ fun ToolRegistry.registerProjectTools(
     register(ExportTool(projects, engine))
     register(ExportDryRunTool(projects))
     register(ProjectActionTool(projects))
-    register(CreateProjectFromTemplateTool(projects))
     register(ListProjectsTool(projects))
     register(ProjectQueryTool(projects))
     register(RegenerateStaleClipsTool(projects, this))

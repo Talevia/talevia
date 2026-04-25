@@ -39,9 +39,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun narrativeSeedsSixNodesAndWiresDag() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val out = tool.execute(
-            CreateProjectFromTemplateTool.Input(
+            ProjectActionTool.Input(
+                action = "create_from_template",
                 title = "My Short",
                 template = "narrative",
                 projectId = "narr-1",
@@ -50,8 +51,8 @@ class CreateProjectFromTemplateToolTest {
         ).data
 
         assertEquals("narr-1", out.projectId)
-        assertEquals("narrative", out.template)
-        assertEquals(6, out.seededNodeIds.size)
+        assertEquals("narrative", out.createFromTemplateResult!!.template)
+        assertEquals(6, out.createFromTemplateResult!!.seededNodeIds.size)
 
         val project = store.get(ProjectId("narr-1"))!!
         val kinds = project.source.nodes.associate { it.id.value to it.kind }
@@ -72,9 +73,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun vlogSeedsFourNodes() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val out = tool.execute(
-            CreateProjectFromTemplateTool.Input(
+            ProjectActionTool.Input(
+                action = "create_from_template",
                 title = "Graduation",
                 template = "vlog",
                 projectId = "vlog-1",
@@ -83,8 +85,8 @@ class CreateProjectFromTemplateToolTest {
         ).data
 
         assertEquals("vlog-1", out.projectId)
-        assertEquals("vlog", out.template)
-        assertEquals(4, out.seededNodeIds.size)
+        assertEquals("vlog", out.createFromTemplateResult!!.template)
+        assertEquals(4, out.createFromTemplateResult!!.seededNodeIds.size)
 
         val project = store.get(ProjectId("vlog-1"))!!
         val kinds = project.source.nodes.associate { it.id.value to it.kind }
@@ -96,10 +98,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun unknownTemplateFailsLoud() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(
-                CreateProjectFromTemplateTool.Input(title = "T", template = "mv"),
+                ProjectActionTool.Input(action = "create_from_template", title = "T", template = "mv"),
                 ctx(),
             )
         }
@@ -108,14 +110,14 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun duplicateProjectIdFailsLoud() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         tool.execute(
-            CreateProjectFromTemplateTool.Input(title = "a", template = "narrative", projectId = "p-dup"),
+            ProjectActionTool.Input(action = "create_from_template", title = "a", template = "narrative", projectId = "p-dup"),
             ctx(),
         )
         val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(
-                CreateProjectFromTemplateTool.Input(title = "b", template = "vlog", projectId = "p-dup"),
+                ProjectActionTool.Input(action = "create_from_template", title = "b", template = "vlog", projectId = "p-dup"),
                 ctx(),
             )
         }
@@ -124,9 +126,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun resolutionAndFpsParsed() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val out = tool.execute(
-            CreateProjectFromTemplateTool.Input(
+            ProjectActionTool.Input(
+                action = "create_from_template",
                 title = "t",
                 template = "vlog",
                 projectId = "p-4k",
@@ -135,16 +138,16 @@ class CreateProjectFromTemplateToolTest {
             ),
             ctx(),
         ).data
-        assertEquals(3840, out.resolutionWidth)
-        assertEquals(2160, out.resolutionHeight)
-        assertEquals(24, out.fps)
+        assertEquals(3840, out.createFromTemplateResult!!.resolutionWidth)
+        assertEquals(2160, out.createFromTemplateResult!!.resolutionHeight)
+        assertEquals(24, out.createFromTemplateResult!!.fps)
     }
 
     @Test fun autoSlugFromTitleWhenProjectIdOmitted() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val out = tool.execute(
-            CreateProjectFromTemplateTool.Input(title = "My Graduation Vlog", template = "vlog"),
+            ProjectActionTool.Input(action = "create_from_template", title = "My Graduation Vlog", template = "vlog"),
             ctx(),
         ).data
         // Slug must be derived from the title (lower-case, hyphenated) and must be non-blank.
@@ -155,9 +158,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun adSeedsFourNodesAndWiresParents() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val out = tool.execute(
-            CreateProjectFromTemplateTool.Input(
+            ProjectActionTool.Input(
+                action = "create_from_template",
                 title = "Spring Sale",
                 template = "ad",
                 projectId = "ad-1",
@@ -165,8 +169,8 @@ class CreateProjectFromTemplateToolTest {
             ctx(),
         ).data
 
-        assertEquals("ad", out.template)
-        assertEquals(4, out.seededNodeIds.size)
+        assertEquals("ad", out.createFromTemplateResult!!.template)
+        assertEquals(4, out.createFromTemplateResult!!.seededNodeIds.size)
 
         val project = store.get(ProjectId("ad-1"))!!
         val kinds = project.source.nodes.associate { it.id.value to it.kind }
@@ -184,9 +188,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun musicMvSeedsFourNodesAndSkipsTrack() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val out = tool.execute(
-            CreateProjectFromTemplateTool.Input(
+            ProjectActionTool.Input(
+                action = "create_from_template",
                 title = "Neon Dreams",
                 template = "musicmv",
                 projectId = "mv-1",
@@ -194,8 +199,8 @@ class CreateProjectFromTemplateToolTest {
             ctx(),
         ).data
 
-        assertEquals("musicmv", out.template)
-        assertEquals(4, out.seededNodeIds.size)
+        assertEquals("musicmv", out.createFromTemplateResult!!.template)
+        assertEquals(4, out.createFromTemplateResult!!.seededNodeIds.size)
 
         val project = store.get(ProjectId("mv-1"))!!
         val kinds = project.source.nodes.map { it.kind }.toSet()
@@ -215,9 +220,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun tutorialSeedsFourNodes() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val out = tool.execute(
-            CreateProjectFromTemplateTool.Input(
+            ProjectActionTool.Input(
+                action = "create_from_template",
                 title = "Setup Guide",
                 template = "tutorial",
                 projectId = "tut-1",
@@ -225,8 +231,8 @@ class CreateProjectFromTemplateToolTest {
             ctx(),
         ).data
 
-        assertEquals("tutorial", out.template)
-        assertEquals(4, out.seededNodeIds.size)
+        assertEquals("tutorial", out.createFromTemplateResult!!.template)
+        assertEquals(4, out.createFromTemplateResult!!.seededNodeIds.size)
 
         val project = store.get(ProjectId("tut-1"))!!
         val kinds = project.source.nodes.associate { it.id.value to it.kind }
@@ -244,10 +250,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun titlePreservedInProjectRecord() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val title = "Cinematic Short Film"
         tool.execute(
-            CreateProjectFromTemplateTool.Input(title = title, template = "narrative", projectId = "p-title"),
+            ProjectActionTool.Input(action = "create_from_template", title = title, template = "narrative", projectId = "p-title"),
             ctx(),
         )
         val summaries = store.listSummaries()
@@ -260,9 +266,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun autoTemplateClassifiesNarrativeFromStoryKeywords() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val out = tool.execute(
-            CreateProjectFromTemplateTool.Input(
+            ProjectActionTool.Input(
+                action = "create_from_template",
                 title = "Short Story",
                 template = "auto",
                 projectId = "auto-narr",
@@ -271,11 +278,11 @@ class CreateProjectFromTemplateToolTest {
             ctx(),
         ).data
 
-        assertEquals("narrative", out.template)
-        assertTrue(out.inferredFromIntent)
-        assertNotNull(out.inferredReason)
+        assertEquals("narrative", out.createFromTemplateResult!!.template)
+        assertTrue(out.createFromTemplateResult!!.inferredFromIntent)
+        assertNotNull(out.createFromTemplateResult!!.inferredReason)
         // At least one of the narrative keywords (short film / scene / character-driven / drama) hits.
-        assertTrue(out.inferredReason!!.contains("narrative"), out.inferredReason)
+        assertTrue(out.createFromTemplateResult!!.inferredReason!!.contains("narrative"), out.createFromTemplateResult!!.inferredReason)
         // Actually seeded a narrative skeleton.
         val project = store.get(ProjectId("auto-narr"))!!
         assertEquals(6, project.source.nodes.size)
@@ -283,9 +290,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun autoTemplateClassifiesMusicMvFromMusicKeyword() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val out = tool.execute(
-            CreateProjectFromTemplateTool.Input(
+            ProjectActionTool.Input(
+                action = "create_from_template",
                 title = "Debut MV",
                 template = "auto",
                 projectId = "auto-mv",
@@ -293,15 +301,16 @@ class CreateProjectFromTemplateToolTest {
             ),
             ctx(),
         ).data
-        assertEquals("musicmv", out.template)
-        assertTrue(out.inferredFromIntent)
+        assertEquals("musicmv", out.createFromTemplateResult!!.template)
+        assertTrue(out.createFromTemplateResult!!.inferredFromIntent)
     }
 
     @Test fun autoTemplateClassifiesTutorial() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val out = tool.execute(
-            CreateProjectFromTemplateTool.Input(
+            ProjectActionTool.Input(
+                action = "create_from_template",
                 title = "Sourdough 101",
                 template = "auto",
                 projectId = "auto-tut",
@@ -309,15 +318,16 @@ class CreateProjectFromTemplateToolTest {
             ),
             ctx(),
         ).data
-        assertEquals("tutorial", out.template)
-        assertTrue(out.inferredFromIntent)
+        assertEquals("tutorial", out.createFromTemplateResult!!.template)
+        assertTrue(out.createFromTemplateResult!!.inferredFromIntent)
     }
 
     @Test fun autoTemplateFallsBackToNarrativeOnEmptySignal() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val out = tool.execute(
-            CreateProjectFromTemplateTool.Input(
+            ProjectActionTool.Input(
+                action = "create_from_template",
                 title = "Mystery Project",
                 template = "auto",
                 projectId = "auto-fallback",
@@ -326,17 +336,18 @@ class CreateProjectFromTemplateToolTest {
             ),
             ctx(),
         ).data
-        assertEquals("narrative", out.template)
-        assertTrue(out.inferredFromIntent)
-        assertTrue(out.inferredReason!!.contains("default", ignoreCase = true), out.inferredReason)
+        assertEquals("narrative", out.createFromTemplateResult!!.template)
+        assertTrue(out.createFromTemplateResult!!.inferredFromIntent)
+        assertTrue(out.createFromTemplateResult!!.inferredReason!!.contains("default", ignoreCase = true), out.createFromTemplateResult!!.inferredReason)
     }
 
     @Test fun autoTemplateRejectsBlankIntent() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(
-                CreateProjectFromTemplateTool.Input(
+                ProjectActionTool.Input(
+                    action = "create_from_template",
                     title = "No Intent",
                     template = "auto",
                     projectId = "auto-blank",
@@ -350,10 +361,11 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun autoTemplateRejectsMissingIntent() = runTest {
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(
-                CreateProjectFromTemplateTool.Input(
+                ProjectActionTool.Input(
+                    action = "create_from_template",
                     title = "Missing Intent",
                     template = "auto",
                     projectId = "auto-missing",
@@ -368,9 +380,10 @@ class CreateProjectFromTemplateToolTest {
         // Intent with strong vlog signal, but explicit template = "ad" still wins
         // — regression guard against auto-mode leaking into explicit calls.
         val store = newStore()
-        val tool = CreateProjectFromTemplateTool(store)
+        val tool = ProjectActionTool(store)
         val out = tool.execute(
-            CreateProjectFromTemplateTool.Input(
+            ProjectActionTool.Input(
+                action = "create_from_template",
                 title = "Explicit Ad",
                 template = "ad",
                 projectId = "p-explicit",
@@ -378,8 +391,8 @@ class CreateProjectFromTemplateToolTest {
             ),
             ctx(),
         ).data
-        assertEquals("ad", out.template)
-        assertEquals(false, out.inferredFromIntent)
-        assertEquals(null, out.inferredReason)
+        assertEquals("ad", out.createFromTemplateResult!!.template)
+        assertEquals(false, out.createFromTemplateResult!!.inferredFromIntent)
+        assertEquals(null, out.createFromTemplateResult!!.inferredReason)
     }
 }
