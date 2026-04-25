@@ -114,6 +114,7 @@ internal class SlashCommandDispatcher(
             "metrics" -> renderer.println(metricsSummary())
             "permissions" -> renderer.println(permissionsSummary(currentSession))
             "tools" -> renderer.println(toolsTable(args))
+            "spendcap" -> renderer.println(handleSpendCap(currentSession, args))
             "trace" -> renderer.println(traceSummary(currentSession, args))
             "summary" -> renderer.println(summarySlashSummary(currentSession))
             "todos" -> renderer.println(todosSummary(currentSession))
@@ -709,6 +710,99 @@ internal class SlashCommandDispatcher(
         // Filter applies in the formatter so the empty / mistype path
         // can render an actionable hint pointing at the unfiltered set.
         return formatToolsTable(out.data.tools, prefix = args.trim().takeIf { it.isNotBlank() })
+    }
+
+    /**
+     * `/spendcap [<usd>|clear]` — operator surface for `Session.spendCapCents`
+     * (added cycle 124). Three modes selected by args:
+     *
+     *  - blank → show: pulls current cap + cumulative spend via
+     *    `SetSessionSpendCapTool` (no-op semantics: omit capCents) and
+     *    `session_query(select=spend)`.
+     *  - `clear` → call `set_session_spend_cap` with `capCents=null`.
+     *  - numeric (USD, possibly with leading `$` and `.cc`) → convert
+     *    to cents (round-half-up via `Math.round`), call setter.
+     *
+     * USD parsing is permissive: strips leading `$`, accepts integer
+     * dollars or 2-decimal cents. Anything else falls through to a
+     * usage hint rather than a SQL-blob mutation.
+     */
+    private suspend fun handleSpendCap(sessionId: SessionId, rawArgs: String): String {
+        val args = rawArgs.trim()
+        val tool = io.talevia.core.tool.builtin.session.SetSessionSpendCapTool(container.sessions)
+        val ctx = io.talevia.core.tool.ToolContext(
+            sessionId = sessionId,
+            messageId = io.talevia.core.MessageId("slash-spendcap"),
+            callId = io.talevia.core.CallId("slash-spendcap"),
+            askPermission = { io.talevia.core.permission.PermissionDecision.Once },
+            emitPart = { },
+            messages = emptyList(),
+        )
+
+        if (args.isEmpty()) {
+            // Show current cap + cumulative spend.
+            val session = container.sessions.getSession(sessionId)
+                ?: return Styles.meta("/spendcap: session ${sessionId.value.take(8)} not found")
+            val spent = currentSessionSpentCents(sessionId)
+            return formatSpendCapStatus(session.spendCapCents, spent)
+        }
+
+        val newCapCents: Long? = when {
+            args.equals("clear", ignoreCase = true) ||
+                args.equals("none", ignoreCase = true) ||
+                args.equals("null", ignoreCase = true) -> null
+            else -> parseUsdToCents(args)
+                ?: return Styles.meta(
+                    "/spendcap: cannot parse `$args` as USD. " +
+                        "Try `/spendcap 5` (= \$5 = 500¢), `/spendcap 0.50` (= 50¢), or `/spendcap clear`.",
+                )
+        }
+
+        val out = runCatching {
+            tool.execute(
+                io.talevia.core.tool.builtin.session.SetSessionSpendCapTool.Input(
+                    sessionId = sessionId.value,
+                    capCents = newCapCents,
+                ),
+                ctx,
+            )
+        }.getOrElse { e ->
+            return Styles.meta("/spendcap: ${e.message ?: e::class.simpleName}")
+        }
+        return formatSpendCapMutation(out.data.previousCapCents, out.data.capCents)
+    }
+
+    /**
+     * Sum of `LockfileEntry.costCents` for entries whose `sessionId`
+     * matches — same accounting `AigcBudgetGuard.enforce` consults
+     * pre-flight. Returns 0 when no project is bound (matches the
+     * guard's silent pass-through).
+     */
+    private suspend fun currentSessionSpentCents(sessionId: SessionId): Long {
+        val session = container.sessions.getSession(sessionId) ?: return 0L
+        val pid = session.currentProjectId ?: return 0L
+        val project = container.projects.get(pid) ?: return 0L
+        return project.lockfile.entries
+            .asSequence()
+            .filter { it.sessionId == sessionId.value }
+            .sumOf { it.costCents ?: 0L }
+    }
+
+    /**
+     * Parse a USD expression into cents. Accepts: `5`, `$5`, `5.00`,
+     * `$5.50`, `0.05`. Rejects negative values + multi-decimal.
+     * Returns null on parse failure so the caller can render a usage
+     * hint rather than mutating with garbage.
+     */
+    private fun parseUsdToCents(raw: String): Long? {
+        val cleaned = raw.removePrefix("$").trim()
+        if (cleaned.isEmpty() || cleaned.startsWith("-")) return null
+        val asDouble = cleaned.toDoubleOrNull() ?: return null
+        if (asDouble < 0) return null
+        // Round half-up at the cent boundary — Math.round does
+        // half-up for non-negative values, which is what we want.
+        val cents = Math.round(asDouble * 100.0)
+        return cents
     }
 
     private companion object {

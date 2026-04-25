@@ -86,6 +86,12 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         category = SlashCategory.MODEL,
     ),
     SlashCommandSpec(
+        "/spendcap",
+        "show / set / clear the per-session AIGC spend cap (USD)",
+        argHint = "[<usd>|clear]",
+        category = SlashCategory.MODEL,
+    ),
+    SlashCommandSpec(
         "/metrics",
         "dump in-process counters + wall-time histograms (ops visibility)",
         category = SlashCategory.MODEL,
