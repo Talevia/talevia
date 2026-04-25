@@ -1,17 +1,14 @@
 package io.talevia.core.tool.builtin.video
 
-import io.talevia.core.AssetId
-import io.talevia.core.SourceNodeId
-import io.talevia.core.domain.Clip
-import io.talevia.core.domain.Filter
 import io.talevia.core.domain.ProjectStore
-import io.talevia.core.domain.Track
-import io.talevia.core.domain.source.consistency.asStyleBible
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
+import io.talevia.core.tool.builtin.video.filter.FILTER_ACTION_VERBS
+import io.talevia.core.tool.builtin.video.filter.FILTER_ACTION_VERBS_BY_ID
+import io.talevia.core.tool.builtin.video.filter.FilterActionDispatchContext
 import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonArray
@@ -253,250 +250,12 @@ class FilterActionTool(
     }
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        val verb = FILTER_ACTION_VERBS_BY_ID[input.action]
+            ?: error(
+                "unknown action '${input.action}'; accepted: " +
+                    FILTER_ACTION_VERBS.joinToString { it.id },
+            )
         val pid = ctx.resolveProjectId(input.projectId)
-        return when (input.action) {
-            "apply" -> executeApply(pid, input, ctx)
-            "remove" -> executeRemove(pid, input, ctx)
-            "apply_lut" -> executeApplyLut(pid, input, ctx)
-            else -> error(
-                "unknown action '${input.action}'; accepted: apply, remove, apply_lut",
-            )
-        }
-    }
-
-    private suspend fun executeApply(
-        pid: io.talevia.core.ProjectId,
-        input: Input,
-        ctx: ToolContext,
-    ): ToolResult<Output> {
-        require(input.filterName.isNotBlank()) {
-            "filterName is required when action=apply"
-        }
-        val selectorCount = listOf(
-            input.clipIds.isNotEmpty(),
-            !input.trackId.isNullOrBlank(),
-            input.allVideoClips,
-        ).count { it }
-        require(selectorCount == 1) {
-            "exactly one of clipIds / trackId / allVideoClips must be provided (got $selectorCount)"
-        }
-
-        val appliedClipIds = mutableListOf<String>()
-        val skipped = mutableListOf<Skipped>()
-
-        val updated = store.mutate(pid) { project ->
-            val requestedIds = input.clipIds.toSet()
-            if (requestedIds.isNotEmpty()) {
-                val allClipsByKind = project.timeline.tracks.flatMap { track ->
-                    track.clips.map { it.id.value to (it is Clip.Video) }
-                }.toMap()
-                for (id in requestedIds) {
-                    when (allClipsByKind[id]) {
-                        null -> skipped += Skipped(id, "clip not found")
-                        false -> skipped += Skipped(id, "clip is not a video clip (apply_filter skips text/audio)")
-                        true -> Unit
-                    }
-                }
-            }
-
-            val newTracks = project.timeline.tracks.map { track ->
-                val shouldVisit = when {
-                    input.clipIds.isNotEmpty() -> true
-                    !input.trackId.isNullOrBlank() -> track.id.value == input.trackId
-                    input.allVideoClips -> track is Track.Video
-                    else -> false
-                }
-                if (!shouldVisit) return@map track
-                val newClips = track.clips.map { c ->
-                    val matches = when {
-                        input.clipIds.isNotEmpty() -> c.id.value in requestedIds
-                        !input.trackId.isNullOrBlank() -> true
-                        input.allVideoClips -> true
-                        else -> false
-                    }
-                    if (!matches || c !is Clip.Video) {
-                        c
-                    } else {
-                        appliedClipIds += c.id.value
-                        c.copy(filters = c.filters + Filter(input.filterName, input.params))
-                    }
-                }
-                when (track) {
-                    is Track.Video -> track.copy(clips = newClips)
-                    is Track.Audio -> track.copy(clips = newClips)
-                    is Track.Subtitle -> track.copy(clips = newClips)
-                    is Track.Effect -> track.copy(clips = newClips)
-                }
-            }
-            project.copy(timeline = project.timeline.copy(tracks = newTracks))
-        }
-
-        if (appliedClipIds.isEmpty() && skipped.isEmpty()) {
-            return ToolResult(
-                title = "apply ${input.filterName} (no match)",
-                outputForLlm = "No video clips matched the selector — nothing to apply.",
-                data = Output(
-                    projectId = pid.value,
-                    action = "apply",
-                    filterName = input.filterName,
-                    snapshotId = "",
-                ),
-            )
-        }
-
-        val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
-        val summary = buildString {
-            append("Applied ${input.filterName} to ${appliedClipIds.size} clip(s)")
-            if (skipped.isNotEmpty()) append("; skipped ${skipped.size}")
-            append(". Timeline snapshot: ${snapshotId.value}")
-        }
-        return ToolResult(
-            title = "apply ${input.filterName} × ${appliedClipIds.size}",
-            outputForLlm = summary,
-            data = Output(
-                projectId = pid.value,
-                action = "apply",
-                filterName = input.filterName,
-                snapshotId = snapshotId.value,
-                appliedClipIds = appliedClipIds,
-                skipped = skipped,
-            ),
-        )
-    }
-
-    private suspend fun executeRemove(
-        pid: io.talevia.core.ProjectId,
-        input: Input,
-        ctx: ToolContext,
-    ): ToolResult<Output> {
-        require(input.clipIds.isNotEmpty()) { "clipIds must not be empty" }
-        require(input.filterName.isNotBlank()) { "filterName must not be blank" }
-        val results = mutableListOf<RemoveItemResult>()
-
-        val updated = store.mutate(pid) { project ->
-            var tracks = project.timeline.tracks
-            input.clipIds.forEachIndexed { idx, clipId ->
-                val hit = tracks.firstNotNullOfOrNull { track ->
-                    track.clips.firstOrNull { it.id.value == clipId }?.let { track to it }
-                } ?: error("clipIds[$idx] ($clipId) not found in project ${pid.value}")
-                val (track, clip) = hit
-                val video = clip as? Clip.Video ?: error(
-                    "clipIds[$idx] ($clipId): remove_filter only supports video clips " +
-                        "(got ${clip::class.simpleName}).",
-                )
-                val kept = video.filters.filter { it.name != input.filterName }
-                val removed = video.filters.size - kept.size
-                val updatedClip = video.copy(filters = kept)
-                val newTrack = replaceClipOnTrack(track, video, updatedClip)
-                tracks = tracks.map { if (it.id == newTrack.id) newTrack else it }
-                results += RemoveItemResult(
-                    clipId = clipId,
-                    removedCount = removed,
-                    remainingFilterCount = kept.size,
-                )
-            }
-            project.copy(timeline = project.timeline.copy(tracks = tracks))
-        }
-
-        val total = results.sumOf { it.removedCount }
-        val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
-        return ToolResult(
-            title = "remove ${input.filterName} × ${results.size}",
-            outputForLlm = "Removed $total filter(s) named '${input.filterName}' across ${results.size} " +
-                "clip(s). Timeline snapshot: ${snapshotId.value}",
-            data = Output(
-                projectId = pid.value,
-                action = "remove",
-                filterName = input.filterName,
-                snapshotId = snapshotId.value,
-                removed = results,
-                totalRemoved = total,
-            ),
-        )
-    }
-
-    private suspend fun executeApplyLut(
-        pid: io.talevia.core.ProjectId,
-        input: Input,
-        ctx: ToolContext,
-    ): ToolResult<Output> {
-        require(input.clipIds.isNotEmpty()) { "clipIds must not be empty when action=apply_lut" }
-        val lutArg = input.lutAssetId?.takeIf { it.isNotBlank() }
-        val styleArg = input.styleBibleId?.takeIf { it.isNotBlank() }
-        require((lutArg == null) xor (styleArg == null)) {
-            "exactly one of lutAssetId or styleBibleId must be provided"
-        }
-
-        var resolvedLutId: AssetId? = null
-        val results = mutableListOf<LutItemResult>()
-
-        val updated = store.mutate(pid) { project ->
-            val lutId: AssetId = if (lutArg != null) {
-                AssetId(lutArg)
-            } else {
-                val sid = SourceNodeId(styleArg!!)
-                val node = project.source.byId[sid]
-                    ?: error("style_bible node '${sid.value}' not found in project ${pid.value}")
-                val style = node.asStyleBible()
-                    ?: error("node '${sid.value}' exists but is not a style_bible (kind=${node.kind})")
-                style.lutReference
-                    ?: error(
-                        "style_bible '${sid.value}' has no lutReference; set one by updating the node's body " +
-                            "(source_query(select=node_detail) → set body.lutReference → update_source_node_body) first",
-                    )
-            }
-            if (project.assets.none { it.id == lutId }) {
-                error("LUT asset '${lutId.value}' not found in the project's asset catalog")
-            }
-            resolvedLutId = lutId
-
-            var tracks = project.timeline.tracks
-            input.clipIds.forEachIndexed { idx, clipId ->
-                val hit = tracks.firstNotNullOfOrNull { t ->
-                    t.clips.firstOrNull { it.id.value == clipId }?.let { t to it }
-                } ?: error("clipIds[$idx] ($clipId) not found in project ${pid.value}")
-                val (track, clip) = hit
-                if (clip !is Clip.Video) {
-                    error(
-                        "clipIds[$idx] ($clipId): apply_lut only supports video clips; " +
-                            "clip is ${clip::class.simpleName}",
-                    )
-                }
-                val newFilters = clip.filters + Filter(name = "lut", assetId = lutId)
-                val newBinding = if (styleArg != null) clip.sourceBinding + SourceNodeId(styleArg) else clip.sourceBinding
-                val replaced = clip.copy(filters = newFilters, sourceBinding = newBinding)
-                val newTrack = replaceClipOnTrack(track, clip, replaced)
-                tracks = tracks.map { if (it.id == newTrack.id) newTrack else it }
-                results += LutItemResult(clipId = clipId, filterCount = newFilters.size)
-            }
-            project.copy(timeline = project.timeline.copy(tracks = tracks))
-        }
-
-        val snapshotId = emitTimelineSnapshot(ctx, updated.timeline)
-        val sourceNote = if (styleArg != null) " (from style_bible '$styleArg')" else ""
-        return ToolResult(
-            title = "apply LUT × ${results.size}",
-            outputForLlm = "Applied LUT '${resolvedLutId!!.value}'$sourceNote to ${results.size} clip(s). " +
-                "Snapshot: ${snapshotId.value}",
-            data = Output(
-                projectId = pid.value,
-                action = "apply_lut",
-                filterName = "lut",
-                snapshotId = snapshotId.value,
-                lutAssetId = resolvedLutId!!.value,
-                lutResults = results,
-                lutStyleBibleId = styleArg,
-            ),
-        )
-    }
-
-    private fun replaceClipOnTrack(track: Track, removed: Clip, replacement: Clip): Track {
-        val clips = track.clips.map { if (it.id == removed.id) replacement else it }
-        return when (track) {
-            is Track.Video -> track.copy(clips = clips)
-            is Track.Audio -> track.copy(clips = clips)
-            is Track.Subtitle -> track.copy(clips = clips)
-            is Track.Effect -> track.copy(clips = clips)
-        }
+        return verb.run(input, ctx, FilterActionDispatchContext(store, pid))
     }
 }
