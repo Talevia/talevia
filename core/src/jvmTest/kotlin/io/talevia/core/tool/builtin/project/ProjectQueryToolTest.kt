@@ -314,6 +314,23 @@ class ProjectQueryToolTest {
         assertEquals(2, rows.single { it.assetId == "v-used" }.inUseByClips)
     }
 
+    @Test fun assetsOutputForLlmListsAssetIds() = runTest {
+        // Regression: prior to this assertion the textual summary said only
+        // "N matching assets, returning M" — no IDs. The LLM only sees
+        // outputForLlm (structured `rows` is invisible), so without IDs in
+        // the text the agent has to hallucinate when chaining clip_action /
+        // filter_action.
+        val (store, pid) = fixture()
+        val result = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(projectId = pid.value, select = "assets"),
+            ctx(),
+        )
+        val text = result.outputForLlm
+        listOf("v-used", "v-unused", "a-used", "img").forEach { id ->
+            assertTrue(id in text, "outputForLlm must list assetId '$id'; got: $text")
+        }
+    }
+
     // ── validation / error paths ──────────────────────────────────────
 
     @Test fun unknownSelectThrows() = runTest {

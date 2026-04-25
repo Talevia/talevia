@@ -21,10 +21,10 @@ import io.talevia.core.platform.RenderProgress
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.video.AddSubtitlesTool
-import io.talevia.core.tool.builtin.video.AddTransitionTool
 import io.talevia.core.tool.builtin.video.ClipActionTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
+import io.talevia.core.tool.builtin.video.TransitionActionTool
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.add
@@ -110,6 +110,10 @@ class FfmpegEndToEndTest {
             buildJsonObject {
                 put("path", inputA.absolutePath)
                 put("projectId", projectId.value)
+                // Force reference-mode: auto would try to copy bytes via the
+                // SYSTEM-fs bundle blob writer, but ProjectStoreTestKit hosts
+                // the bundle on a FakeFileSystem so the copy can't land.
+                put("copy_into_bundle", false)
             },
             ctx,
         )
@@ -117,6 +121,7 @@ class FfmpegEndToEndTest {
             buildJsonObject {
                 put("path", inputB.absolutePath)
                 put("projectId", projectId.value)
+                put("copy_into_bundle", false)
             },
             ctx,
         )
@@ -197,6 +202,10 @@ class FfmpegEndToEndTest {
             buildJsonObject {
                 put("path", inputA.absolutePath)
                 put("projectId", projectId.value)
+                // Force reference-mode: auto would try to copy bytes via the
+                // SYSTEM-fs bundle blob writer, but ProjectStoreTestKit hosts
+                // the bundle on a FakeFileSystem so the copy can't land.
+                put("copy_into_bundle", false)
             },
             ctx,
         )
@@ -271,7 +280,7 @@ class FfmpegEndToEndTest {
         val registry = ToolRegistry().apply {
             register(ImportMediaTool(engine, projects))
             register(ClipActionTool(projects))
-            register(AddTransitionTool(projects))
+            register(TransitionActionTool(projects))
             register(ExportTool(projects, engine))
         }
 
@@ -288,6 +297,10 @@ class FfmpegEndToEndTest {
             buildJsonObject {
                 put("path", inputA.absolutePath)
                 put("projectId", projectId.value)
+                // Force reference-mode: auto would try to copy bytes via the
+                // SYSTEM-fs bundle blob writer, but ProjectStoreTestKit hosts
+                // the bundle on a FakeFileSystem so the copy can't land.
+                put("copy_into_bundle", false)
             },
             ctx,
         )
@@ -295,6 +308,7 @@ class FfmpegEndToEndTest {
             buildJsonObject {
                 put("path", inputB.absolutePath)
                 put("projectId", projectId.value)
+                put("copy_into_bundle", false)
             },
             ctx,
         )
@@ -316,9 +330,10 @@ class FfmpegEndToEndTest {
         val clipIdA = addResults[0].clipId
         val clipIdB = addResults[1].clipId
 
-        registry["add_transitions"]!!.dispatch(
+        registry["transition_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
+                put("action", "add")
                 putJsonArray("items") {
                     addJsonObject {
                         put("fromClipId", clipIdA)
@@ -460,6 +475,10 @@ class FfmpegEndToEndTest {
             buildJsonObject {
                 put("path", inputA.absolutePath)
                 put("projectId", projectId.value)
+                // Force reference-mode: auto would try to copy bytes via the
+                // SYSTEM-fs bundle blob writer, but ProjectStoreTestKit hosts
+                // the bundle on a FakeFileSystem so the copy can't land.
+                put("copy_into_bundle", false)
             },
             ctx,
         )

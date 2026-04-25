@@ -156,6 +156,8 @@ class ExportDeterminismTest {
             buildJsonObject {
                 put("path", input.absolutePath)
                 put("projectId", projectId.value)
+                // Reference-mode: see FfmpegEndToEndTest comment.
+                put("copy_into_bundle", false)
             },
             ctx,
         )

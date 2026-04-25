@@ -106,10 +106,23 @@ internal fun runAssetsQuery(
         }
         sortBy?.let { add("sort=$it") }
     }.joinToString(", ")
+    // Inline assetIds in the LLM-visible text so the agent can pass them to
+    // clip_action / filter_action without a follow-up query — without this the
+    // structured `rows` payload is invisible to the model and it has to
+    // hallucinate ids. Capped to bound prompt growth on huge catalogs.
+    val idList = buildString {
+        if (page.isNotEmpty()) {
+            append(" assetIds: ")
+            page.take(MAX_INLINED_IDS).joinTo(this, ", ") { it.assetId }
+            if (page.size > MAX_INLINED_IDS) {
+                append(" (+${page.size - MAX_INLINED_IDS} more — page through with offset/limit)")
+            }
+        }
+    }
     return ToolResult(
         title = "project_query assets ($kindFilter)",
         outputForLlm = "Project ${project.id.value}: ${filtered.size} matching assets, " +
-            "returning ${page.size} (offset $offset, $scopeBits).",
+            "returning ${page.size} (offset $offset, $scopeBits).$idList",
         data = ProjectQueryTool.Output(
             projectId = project.id.value,
             select = ProjectQueryTool.SELECT_ASSETS,
@@ -119,6 +132,13 @@ internal fun runAssetsQuery(
         ),
     )
 }
+
+/**
+ * Cap on inline assetIds in the textual summary. 30 keeps a small vlog
+ * project's IDs visible at a glance while bounding token cost on a 1000-clip
+ * archive. Overflow points the agent at offset/limit pagination.
+ */
+private const val MAX_INLINED_IDS: Int = 30
 
 private fun classifyAsset(asset: MediaAsset): String {
     val hasV = asset.metadata.videoCodec != null

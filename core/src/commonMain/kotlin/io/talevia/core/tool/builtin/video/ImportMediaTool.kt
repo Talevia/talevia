@@ -308,6 +308,21 @@ class ImportMediaTool(
                         "${pathsToImport.size} paths in project ${pid.value}; project now has " +
                         "${out.projectAssetCount} asset(s).",
                 )
+                // Inline assetIds (paired with filename) so the agent can call
+                // clip_action(action='add') without a follow-up query — without
+                // this the agent only sees the count and is forced to either
+                // hallucinate an id or chain another tool call. Cap at a
+                // reasonable count to bound prompt growth on huge batches; the
+                // rest are still in `data.imported` for client-side use.
+                if (imported.isNotEmpty()) {
+                    append(" Imported (filename → assetId): ")
+                    imported.take(MAX_INLINED_IDS).forEach { a ->
+                        append("${a.path.substringAfterLast('/')} → ${a.assetId}; ")
+                    }
+                    if (imported.size > MAX_INLINED_IDS) {
+                        append("and ${imported.size - MAX_INLINED_IDS} more (call project_query(select=assets) for the full list).")
+                    }
+                }
                 if (failedReports.isNotEmpty()) {
                     append(" Failures: ")
                     failedReports.take(3).forEach { f ->
@@ -331,5 +346,13 @@ class ImportMediaTool(
     companion object {
         /** Auto-copy threshold — 50 MiB. Matches the bullet spec. */
         const val DEFAULT_AUTO_IN_BUNDLE_THRESHOLD_BYTES: Long = 50L * 1024L * 1024L
+
+        /**
+         * Maximum filename → assetId pairs inlined in the batch-import summary.
+         * Keeps the LLM-visible text bounded on a 100-file rsync while still
+         * giving the agent enough context for the typical vlog-sized batch
+         * (5–20 clips). Overflow points the agent at `project_query`.
+         */
+        private const val MAX_INLINED_IDS: Int = 25
     }
 }

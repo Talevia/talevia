@@ -113,6 +113,32 @@ class ImportMediaBatchTest {
         assertEquals(out.imported.first().assetId, out.assetId)
     }
 
+    @Test fun batchOutputForLlmListsImportedAssetIds() = runTest {
+        // Regression: prior to this assertion the batch summary was just
+        // "N ok / M failed" with no IDs, so the agent had to either
+        // hallucinate assetIds for the follow-up clip_action(action="add") or
+        // chain an extra project_query. The LLM only sees outputForLlm —
+        // structured `data.imported` is invisible — so the IDs must live in
+        // the textual summary.
+        val (_, tool) = rig()
+        val paths = (0 until 3).map { tempPath(".good") }
+        val result = tool.execute(
+            ImportMediaTool.Input(paths = paths, projectId = "p", copy_into_bundle = false),
+            ctx(),
+        )
+        val text = result.outputForLlm
+        result.data.imported.forEach { imp ->
+            assertTrue(
+                imp.assetId in text,
+                "outputForLlm must list assetId ${imp.assetId}; got: $text",
+            )
+        }
+        assertTrue(
+            "filename → assetId" in text,
+            "summary must label the path → id mapping; got: $text",
+        )
+    }
+
     @Test fun batchCapturesPerPathFailuresWithoutAbortingTheRun() = runTest {
         val (projects, tool) = rig()
         val good1 = tempPath(".good")
