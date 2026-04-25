@@ -491,8 +491,8 @@ class UpdateSourceNodeBodyToolTest {
             )
         }
         assertTrue(
-            ex.message!!.contains("requires either"),
-            "error must explain both options: ${ex.message}",
+            ex.message!!.contains("requires one of"),
+            "error must explain the modes: ${ex.message}",
         )
     }
 
@@ -603,6 +603,177 @@ class UpdateSourceNodeBodyToolTest {
         val body = node.body as kotlinx.serialization.json.JsonObject
         assertEquals("wide", body["framing"]!!.toString().trim('"'))
         assertEquals(1, body.size, "extra keys must not leak in when body is already nested")
+    }
+
+    // -----------------------------------------------------------------
+    // Per-field merge from history (mergeFromRevisionIndex / mergeFieldPaths)
+    // -----------------------------------------------------------------
+
+    /** Build a node body with hair / outfit / prompt — covers the
+     *  "restore one field, keep the rest" character_ref scenario from the
+     *  backlog bullet. */
+    private fun characterBody(hair: String, outfit: String, prompt: String) = buildJsonObject {
+        put("hair", JsonPrimitive(hair))
+        put("outfit", JsonPrimitive(outfit))
+        put("prompt", JsonPrimitive(prompt))
+    }
+
+    @Test fun mergeRestoresNamedFieldFromHistoryKeepingOthersCurrent() = runTest {
+        val rig = rig()
+        seedShot(rig.store, rig.pid, "char-1", body = characterBody("red", "robe-v1", "p1"))
+        // v2: change all three; v3 (current): change all three again. After
+        // v3 lands, history has [v2-overwritten, v1-overwritten] — index 0
+        // is v2, index 1 is v1.
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value, nodeId = "char-1",
+                body = characterBody("brown", "robe-v2", "p2"),
+            ),
+            rig.ctx,
+        )
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value, nodeId = "char-1",
+                body = characterBody("blonde", "robe-v3", "p3"),
+            ),
+            rig.ctx,
+        )
+        // Merge hair from index 1 (= v1's body — hair="red") over current
+        // body. outfit / prompt keep their current values.
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value, nodeId = "char-1",
+                mergeFromRevisionIndex = 1,
+                mergeFieldPaths = listOf("hair"),
+            ),
+            rig.ctx,
+        )
+        val body = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("char-1")]!!.body
+            as kotlinx.serialization.json.JsonObject
+        assertEquals("\"red\"", body["hair"].toString())
+        assertEquals("\"robe-v3\"", body["outfit"].toString())
+        assertEquals("\"p3\"", body["prompt"].toString())
+    }
+
+    @Test fun mergeAcceptsMultipleFieldPaths() = runTest {
+        val rig = rig()
+        seedShot(rig.store, rig.pid, "char-1", body = characterBody("red", "robe-v1", "p1"))
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value, nodeId = "char-1",
+                body = characterBody("blonde", "robe-v2", "p2"),
+            ),
+            rig.ctx,
+        )
+        // Merge both hair AND outfit from index 0 (= v1). prompt stays current ("p2").
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value, nodeId = "char-1",
+                mergeFromRevisionIndex = 0,
+                mergeFieldPaths = listOf("hair", "outfit"),
+            ),
+            rig.ctx,
+        )
+        val body = rig.store.get(rig.pid)!!.source.byId[SourceNodeId("char-1")]!!.body
+            as kotlinx.serialization.json.JsonObject
+        assertEquals("\"red\"", body["hair"].toString())
+        assertEquals("\"robe-v1\"", body["outfit"].toString())
+        assertEquals("\"p2\"", body["prompt"].toString())
+    }
+
+    @Test fun mergeRejectsFieldNotInHistoricalRevision() = runTest {
+        val rig = rig()
+        seedShot(rig.store, rig.pid, "char-1", body = buildJsonObject { put("hair", JsonPrimitive("red")) })
+        // History entry will only have `hair`; merging `outfit` must fail.
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value, nodeId = "char-1",
+                body = buildJsonObject {
+                    put("hair", JsonPrimitive("blonde"))
+                    put("outfit", JsonPrimitive("robe"))
+                },
+            ),
+            rig.ctx,
+        )
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                UpdateSourceNodeBodyTool.Input(
+                    projectId = rig.pid.value, nodeId = "char-1",
+                    mergeFromRevisionIndex = 0,
+                    mergeFieldPaths = listOf("outfit"),
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("not present in historical revision"),
+            "error must explain the missing key: ${ex.message}",
+        )
+    }
+
+    @Test fun mergeRequiresNonEmptyFieldPaths() = runTest {
+        val rig = rig()
+        seedShot(rig.store, rig.pid, "char-1")
+        rig.tool.execute(
+            UpdateSourceNodeBodyTool.Input(
+                projectId = rig.pid.value, nodeId = "char-1",
+                body = buildJsonObject { put("framing", JsonPrimitive("wide")) },
+            ),
+            rig.ctx,
+        )
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                UpdateSourceNodeBodyTool.Input(
+                    projectId = rig.pid.value, nodeId = "char-1",
+                    mergeFromRevisionIndex = 0,
+                    mergeFieldPaths = emptyList(),
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("non-empty"),
+            "error must require non-empty list: ${ex.message}",
+        )
+    }
+
+    @Test fun mergeFieldPathsWithoutMergeIndexFailsLoud() = runTest {
+        val rig = rig()
+        seedShot(rig.store, rig.pid, "char-1")
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                UpdateSourceNodeBodyTool.Input(
+                    projectId = rig.pid.value, nodeId = "char-1",
+                    body = buildJsonObject { put("a", JsonPrimitive("b")) },
+                    mergeFieldPaths = listOf("a"),
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("mergeFieldPaths"),
+            "error must call out the orphaned param: ${ex.message}",
+        )
+    }
+
+    @Test fun threeWayMutualExclusionRejectsBodyPlusMerge() = runTest {
+        val rig = rig()
+        seedShot(rig.store, rig.pid, "char-1")
+        val ex = assertFailsWith<IllegalStateException> {
+            rig.tool.execute(
+                UpdateSourceNodeBodyTool.Input(
+                    projectId = rig.pid.value, nodeId = "char-1",
+                    body = buildJsonObject { put("a", JsonPrimitive("b")) },
+                    mergeFromRevisionIndex = 0,
+                    mergeFieldPaths = listOf("a"),
+                ),
+                rig.ctx,
+            )
+        }
+        assertTrue(
+            ex.message!!.contains("exactly one"),
+            "error must name the exactly-one-of contract: ${ex.message}",
+        )
     }
 }
 

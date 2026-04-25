@@ -13,8 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **source-node-diff-restore-composite-tool** — P0 restore tool（按整 revision 回滚）已落 `revision_index` 路径。但 user "把 character_ref 的 hair 字段还原成 3 版本前，prompt 字段保持当前" 的 per-field 合并需求当前仍要走读 history → 手编 body → update_source_node_body 的 3-step 链路。**方向：** `merge_source_node_body_from_history(nodeId, revisionIndex, fieldPaths)` 一次完成；history 已经是 JSONL append-only，per-field 抽取走 `JsonObject.merge` patch。Rubric §5.5。Milestone §later.
-
 ## P1 — 中优，做完 P0 再排
 
 - **m2-provider-second-impl** — M2 criterion 2："provider 多元"。`ImageGenEngine` / `VideoGenEngine` / `MusicGenEngine` / `TtsEngine` 4 个接口每个都只有 1 个 prod impl（grep 印证：OpenAI 图/视/语音 + Replicate 音乐/放大，各 1 家）。**方向：** 任一 engine 长出第二个非 stub 生产 impl（如 `AnthropicImageGenEngine` 若 Claude 上线图像、`ElevenLabsTtsEngine`、`StabilityImageGenEngine`、`LocalMLXTtsEngine`）。需要专有 API key + 产品抉择，待用户决定。Rubric §5.7 / §5.2。Milestone §M2. · skipped 2026-04-24: 需专有 API key + vendor 决策 (跨 5 个 repopulate 周期的老约束).

@@ -80,7 +80,8 @@ class UpdateSourceNodeBodyTool(
          * Full replacement. Every field the caller wants to keep must appear here.
          * Nullable so callers who want to restore a past revision (see
          * [restoreFromRevisionIndex]) don't have to pass a dummy body. Exactly
-         * one of [body] / [restoreFromRevisionIndex] must be set.
+         * one of [body] / [restoreFromRevisionIndex] / [mergeFromRevisionIndex]
+         * must be set.
          */
         val body: JsonObject? = null,
         /**
@@ -91,9 +92,32 @@ class UpdateSourceNodeBodyTool(
          * post-mutate hook, so the audit log keeps a forward arrow of time
          * (no rewriting the past). Out-of-range and empty-history cases fail
          * loud with a hint directing to `source_query(select=history)`.
-         * Mutually exclusive with [body].
+         * Mutually exclusive with [body] and [mergeFromRevisionIndex].
          */
         val restoreFromRevisionIndex: Int? = null,
+        /**
+         * Per-field merge from a historical revision. When set, [mergeFieldPaths]
+         * names the top-level body keys whose values are copied from the
+         * historical body at this index over the current body — every other
+         * key keeps its current value. Lets the agent answer "restore the
+         * `hair` field to what it was 3 versions ago, leave `prompt`
+         * untouched" in one tool call instead of describe → handcraft body →
+         * update. Mutually exclusive with [body] and
+         * [restoreFromRevisionIndex]; requires non-empty [mergeFieldPaths]
+         * with every named key present in the historical revision (a missing
+         * key fails loud — the agent must spell out an explicit body if it
+         * intends to drop a field).
+         */
+        val mergeFromRevisionIndex: Int? = null,
+        /**
+         * Top-level body keys to take from [mergeFromRevisionIndex]'s historical
+         * body. Required when [mergeFromRevisionIndex] is set; rejected
+         * otherwise. Keys are exact, top-level only — nested-path support is
+         * intentionally out of scope (agents can call merge twice, or hand-
+         * craft a full body via [body], if they need surgical sub-tree
+         * edits).
+         */
+        val mergeFieldPaths: List<String>? = null,
     )
 
     /**
@@ -124,7 +148,10 @@ class UpdateSourceNodeBodyTool(
             // synthesized body in that case — that's how the rescue fires a
             // false positive. Only synthesize when at least one non-reserved
             // top-level key exists (the "flattened body" shape).
-            val reserved = setOf("projectId", "nodeId", "body", "restoreFromRevisionIndex")
+            val reserved = setOf(
+                "projectId", "nodeId", "body",
+                "restoreFromRevisionIndex", "mergeFromRevisionIndex", "mergeFieldPaths",
+            )
             val flatKeys = obj.keys - reserved
             if (flatKeys.isEmpty()) return element
             val body = buildJsonObject {
@@ -136,6 +163,8 @@ class UpdateSourceNodeBodyTool(
                 obj["projectId"]?.let { put("projectId", it) }
                 obj["nodeId"]?.let { put("nodeId", it) }
                 obj["restoreFromRevisionIndex"]?.let { put("restoreFromRevisionIndex", it) }
+                obj["mergeFromRevisionIndex"]?.let { put("mergeFromRevisionIndex", it) }
+                obj["mergeFieldPaths"]?.let { put("mergeFieldPaths", it) }
                 put("body", body)
             }
         }
@@ -166,10 +195,14 @@ class UpdateSourceNodeBodyTool(
             "Kind-agnostic. Does NOT touch kind (rebuild if kind must change), parents (use " +
             "set_source_node_parents), or id (use source_node_action(action=\"rename\")). " +
             "Bumps contentHash " +
-            "→ bound clips go stale; run find_stale_clips after. Workflow: describe_source_" +
-            "node first to read current body, mutate client-side (keep every field you want — " +
-            "this is not a patch), pass complete object as `body`. Empty body is rejected. " +
-            "Rollback: restoreFromRevisionIndex=N (0=newest) restores from history."
+            "→ bound clips go stale; run find_stale_clips after. Three input modes (exactly one): " +
+            "(1) `body` — full replacement object; describe_source_node first to read current " +
+            "body, mutate client-side (keep every field you want — this is not a patch), pass " +
+            "complete object. Empty body rejected. (2) `restoreFromRevisionIndex=N` (0=newest) " +
+            "rolls back to a whole historical revision. (3) `mergeFromRevisionIndex=N` + " +
+            "`mergeFieldPaths=[…]` per-field merges named top-level keys from a historical " +
+            "revision over the current body — \"restore hair to 3 revs ago, keep prompt\" in one " +
+            "call. Every named key must exist in the historical revision; missing keys fail loud."
     override val inputSerializer: KSerializer<Input> = InputCompatSerializer
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.write")
@@ -210,8 +243,28 @@ class UpdateSourceNodeBodyTool(
                 put("minimum", 0)
                 put(
                     "description",
-                    "Restore body from history (0=newest). Mutually exclusive with body.",
+                    "Restore whole body from history (0=newest). Mutually exclusive with " +
+                        "body and mergeFromRevisionIndex.",
                 )
+            }
+            putJsonObject("mergeFromRevisionIndex") {
+                put("type", "integer")
+                put("minimum", 0)
+                put(
+                    "description",
+                    "Per-field merge from history (0=newest). Pair with mergeFieldPaths to " +
+                        "name the top-level keys to copy from the historical body over the " +
+                        "current body. Mutually exclusive with body and restoreFromRevisionIndex.",
+                )
+            }
+            putJsonObject("mergeFieldPaths") {
+                put("type", "array")
+                put(
+                    "description",
+                    "Top-level body keys to take from mergeFromRevisionIndex's historical " +
+                        "body. Required when mergeFromRevisionIndex is set; rejected otherwise.",
+                )
+                putJsonObject("items") { put("type", "string") }
             }
         }
         put(
@@ -227,71 +280,114 @@ class UpdateSourceNodeBodyTool(
         val pid = ProjectId(input.projectId)
         val nodeId = SourceNodeId(input.nodeId)
 
-        // Exactly-one-of validation: either supply a body, or supply a
-        // revision index to restore. Both means "which one wins?" — fail
-        // loud. Neither is an obviously-broken call — same.
+        // Exactly-one-of validation across three modes — body /
+        // restoreFromRevisionIndex / mergeFromRevisionIndex. Two-or-more
+        // means "which one wins?" — fail loud. Zero is an obviously-
+        // broken call — same.
         val hasBody = input.body != null
         val hasRestore = input.restoreFromRevisionIndex != null
-        if (hasBody && hasRestore) {
+        val hasMerge = input.mergeFromRevisionIndex != null
+        val modeCount = listOf(hasBody, hasRestore, hasMerge).count { it }
+        if (modeCount > 1) {
             error(
-                "update_source_node_body takes exactly one of `body` / " +
-                    "`restoreFromRevisionIndex` (got both). Drop one; restore picks the body " +
-                    "from history, body passes an explicit new state.",
+                "update_source_node_body takes exactly one of `body` / `restoreFromRevisionIndex` " +
+                    "/ `mergeFromRevisionIndex` (got $modeCount). Drop the extras; " +
+                    "body passes an explicit new state, restore replaces the whole body from " +
+                    "history, merge copies named fields from history over the current body.",
             )
         }
-        if (!hasBody && !hasRestore) {
+        if (modeCount == 0) {
             error(
-                "update_source_node_body requires either `body` (full replacement) or " +
-                    "`restoreFromRevisionIndex` (past revision index, 0=newest historical). " +
+                "update_source_node_body requires one of `body` (full replacement) / " +
+                    "`restoreFromRevisionIndex` (whole-body rollback, 0=newest) / " +
+                    "`mergeFromRevisionIndex` + `mergeFieldPaths` (per-field merge from history). " +
                     "Call source_query(select=history, root=${nodeId.value}) to discover " +
                     "available indices.",
             )
         }
+        if (hasMerge) {
+            val paths = input.mergeFieldPaths
+            if (paths.isNullOrEmpty()) {
+                error(
+                    "mergeFromRevisionIndex requires non-empty `mergeFieldPaths`. " +
+                        "Pass the list of top-level body keys to copy from the historical " +
+                        "revision; an empty merge is a no-op.",
+                )
+            }
+        }
+        if (input.mergeFieldPaths != null && !hasMerge) {
+            error(
+                "`mergeFieldPaths` requires `mergeFromRevisionIndex` to be set. Drop one or " +
+                    "both — `mergeFieldPaths` only applies in merge mode.",
+            )
+        }
 
-        // Resolve the effective new body. For restore: fetch history,
-        // bounds-check the index, return the historical body. For direct
-        // body: pass through unchanged.
-        val effectiveNewBody: JsonElement = if (hasRestore) {
-            val idx = input.restoreFromRevisionIndex!!
+        // Resolve the effective new body for restore / direct-body modes.
+        // Merge mode defers body resolution to inside mutateSource because
+        // it needs both the historical body (fetched here) and the current
+        // body (read inside the mutate). For uniformity, we pre-fetch the
+        // historical body for merge mode here too and let the mutate block
+        // splice it in — keeps the IO out of the source mutex.
+        val effectiveNewBody: JsonElement?
+        val mergeHistoricalBody: JsonObject?
+        if (hasRestore || hasMerge) {
+            val idx = (input.restoreFromRevisionIndex ?: input.mergeFromRevisionIndex)!!
+            val modeLabel = if (hasRestore) "restoreFromRevisionIndex" else "mergeFromRevisionIndex"
             if (idx < 0) {
                 error(
-                    "restoreFromRevisionIndex must be non-negative (got $idx). " +
+                    "$modeLabel must be non-negative (got $idx). " +
                         "0 = newest historical revision; larger N goes further back.",
                 )
             }
-            // Fetch a window large enough to cover the requested index. The
-            // store caps at 100 internally; we pass idx+1 so a legitimate
-            // index==0 doesn't round-trip the full 20-default window.
             val window = projects.listSourceNodeHistory(pid, nodeId, limit = idx + 1)
             if (window.isEmpty()) {
                 error(
                     "Source node ${nodeId.value} has no body-history entries — nothing to " +
-                        "restore. Either this node was never updated, or the bundle was " +
-                        "created before body-history tracking landed. Call source_query" +
-                        "(select=history, root=${nodeId.value}) to confirm.",
+                        "${if (hasRestore) "restore" else "merge from"}. Either this node was " +
+                        "never updated, or the bundle was created before body-history tracking " +
+                        "landed. Call source_query(select=history, root=${nodeId.value}) to confirm.",
                 )
             }
             if (idx >= window.size) {
-                // window.size reflects the capped fetch; re-fetch a wider
-                // window to report the true ceiling accurately, but only
-                // when the initial fetch maxed out (else window.size IS
-                // the truth).
                 val trueWindow = if (window.size >= idx + 1) window else
                     projects.listSourceNodeHistory(pid, nodeId, limit = 100)
                 error(
-                    "restoreFromRevisionIndex=$idx is out of range for node ${nodeId.value} " +
+                    "$modeLabel=$idx is out of range for node ${nodeId.value} " +
                         "(only ${trueWindow.size} historical revision(s) available; valid " +
                         "indices 0..${trueWindow.size - 1}). Call source_query(select=history, " +
                         "root=${nodeId.value}) to see all revisions.",
                 )
             }
-            window[idx].body
+            val historical = window[idx].body
+            if (hasRestore) {
+                effectiveNewBody = historical
+                mergeHistoricalBody = null
+            } else {
+                val historicalObj = historical as? JsonObject
+                    ?: error(
+                        "history entry $idx is not a JSON object (got ${historical::class.simpleName}); " +
+                            "cannot per-field merge from a non-object revision.",
+                    )
+                val missing = input.mergeFieldPaths!!.filter { it !in historicalObj.keys }
+                if (missing.isNotEmpty()) {
+                    error(
+                        "mergeFieldPaths contains keys not present in historical revision $idx: " +
+                            "${missing.joinToString(", ")}. The historical body has " +
+                            "${historicalObj.keys.joinToString(", ")}. If you intend to drop " +
+                            "these fields, pass an explicit `body` instead.",
+                    )
+                }
+                effectiveNewBody = null
+                mergeHistoricalBody = historicalObj
+            }
         } else {
-            input.body!!
+            effectiveNewBody = input.body!!
+            mergeHistoricalBody = null
         }
 
         var previousHash = ""
         var previousBody: JsonElement = JsonObject(emptyMap())
+        var resolvedNewBody: JsonObject = JsonObject(emptyMap())
         var newHash = ""
         var kindSeen = ""
         var boundClipCount = 0
@@ -305,19 +401,32 @@ class UpdateSourceNodeBodyTool(
             previousHash = existing.contentHash
             previousBody = existing.body
             kindSeen = existing.kind
-            source.replaceNode(nodeId) { node ->
-                // Only JsonObject bodies fit SourceNode.body's runtime contract
-                // (the type is JsonElement but every kind-handler expects an
-                // object today). A restored BodyRevision may technically be
-                // any JsonElement; guard-cast here so a malformed restore
-                // fails loud instead of silently corrupting downstream.
-                val bodyAsObject = effectiveNewBody as? JsonObject
+            // Compute the JsonObject body that will land on the node:
+            //  - body / restore mode → effectiveNewBody is set (already an
+            //    element; cast-guard against corrupt history).
+            //  - merge mode → splice historical fields named in
+            //    mergeFieldPaths over the current existing.body.
+            val bodyAsObject: JsonObject = if (mergeHistoricalBody != null) {
+                val current = (existing.body as? JsonObject)
                     ?: error(
-                        "restored body is not a JSON object (got ${effectiveNewBody::class.simpleName}). " +
+                        "current body of ${nodeId.value} is not a JSON object " +
+                            "(got ${existing.body::class.simpleName}); cannot per-field " +
+                            "merge over a non-object body.",
+                    )
+                val paths = input.mergeFieldPaths!!
+                buildJsonObject {
+                    current.forEach { (k, v) -> put(k, v) }
+                    paths.forEach { key -> put(key, mergeHistoricalBody[key]!!) }
+                }
+            } else {
+                effectiveNewBody as? JsonObject
+                    ?: error(
+                        "restored body is not a JSON object (got ${effectiveNewBody!!::class.simpleName}). " +
                             "History entry is corrupt or was written by an older schema.",
                     )
-                node.copy(body = bodyAsObject)
             }
+            resolvedNewBody = bodyAsObject
+            source.replaceNode(nodeId) { node -> node.copy(body = bodyAsObject) }
         }
 
         // Append the pre-edit body to the per-node history log AFTER the
@@ -326,12 +435,12 @@ class UpdateSourceNodeBodyTool(
         // FileProjectStore.appendSourceNodeHistory) because history is an
         // audit log, not canonical state.
         //
-        // Restore calls still append: the pre-restore current body is the
-        // new "most-recent overwritten" revision, so audit log keeps a
-        // forward arrow of time. Compare vs. `effectiveNewBody` (not
-        // `input.body`, which is null on restore) to catch no-op restores
-        // where the current body equals the restored revision.
-        if (previousBody != effectiveNewBody) {
+        // Restore + merge calls still append: the pre-edit current body is
+        // the new "most-recent overwritten" revision, so audit log keeps a
+        // forward arrow of time. Compare vs. the actual resolved new body
+        // (not input.body — null on restore/merge) to catch no-op edits
+        // where the current body equals the post-edit body.
+        if (previousBody != (resolvedNewBody as JsonElement)) {
             projects.appendSourceNodeHistory(
                 pid,
                 nodeId,
