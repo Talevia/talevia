@@ -31,9 +31,13 @@ import kotlinx.serialization.json.JsonObject
 
 /**
  * `select=lockfile_entry` — single-row drill-down replacing the
- * deleted `describe_lockfile_entry` tool. Looks up by `inputHash`;
- * returns full provenance, source-binding snapshot / drift state,
- * baseInputs, clip references on the current timeline.
+ * deleted `describe_lockfile_entry` tool. Looks up by **either**
+ * `inputHash` (forward lookup, the canonical cache key) **or**
+ * `assetId` (reverse lookup, "which generation produced this asset?"
+ * via [io.talevia.core.domain.lockfile.Lockfile.byAssetId]). Exactly
+ * one of the two must be supplied — both-set or neither-set fails
+ * loud. Returns full provenance, source-binding snapshot / drift
+ * state, baseInputs, clip references on the current timeline.
  */
 @Serializable data class LockfileEntryDetailRow(
     val inputHash: String,
@@ -68,16 +72,35 @@ internal fun runLockfileEntryDetailQuery(
     project: Project,
     input: ProjectQueryTool.Input,
 ): ToolResult<ProjectQueryTool.Output> {
-    val inputHash = input.inputHash
-        ?: error(
-            "select='${ProjectQueryTool.SELECT_LOCKFILE_ENTRY}' requires inputHash. Call " +
+    val rawHash = input.inputHash
+    val rawAssetId = input.assetId
+    if (rawHash != null && rawAssetId != null) {
+        error(
+            "select='${ProjectQueryTool.SELECT_LOCKFILE_ENTRY}' takes exactly one of " +
+                "`inputHash` (forward lookup) / `assetId` (reverse lookup); both were " +
+                "supplied. Drop the one you don't need.",
+        )
+    }
+    val entry = when {
+        rawHash != null -> project.lockfile.findByInputHash(rawHash)
+            ?: error(
+                "Lockfile entry with inputHash '$rawHash' not found in project ${project.id.value}. " +
+                    "Call project_query(select=lockfile_entries) to see valid hashes.",
+            )
+        rawAssetId != null -> project.lockfile.byAssetId[io.talevia.core.AssetId(rawAssetId)]
+            ?: error(
+                "No lockfile entry produced asset '$rawAssetId' in project ${project.id.value}. " +
+                    "Either the asset was imported (not generated) or pre-dates lockfile recording. " +
+                    "Call project_query(select=lockfile_entries) to enumerate AIGC-produced assets.",
+            )
+        else -> error(
+            "select='${ProjectQueryTool.SELECT_LOCKFILE_ENTRY}' requires one of `inputHash` " +
+                "(forward lookup, the canonical cache key) or `assetId` (reverse lookup, " +
+                "\"which generation produced this asset?\"). Call " +
                 "project_query(select=lockfile_entries) to discover valid hashes.",
         )
-    val entry = project.lockfile.findByInputHash(inputHash)
-        ?: error(
-            "Lockfile entry with inputHash '$inputHash' not found in project ${project.id.value}. " +
-                "Call project_query(select=lockfile_entries) to see valid hashes.",
-        )
+    }
+    val inputHash = entry.inputHash
 
     val currentHashesById = project.source.nodes.associate { it.id.value to it.contentHash }
     val driftedNodes = entry.sourceContentHashes.mapNotNull { (nodeId, snapshot) ->

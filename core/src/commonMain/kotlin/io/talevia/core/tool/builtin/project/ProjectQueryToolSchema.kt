@@ -39,7 +39,7 @@ internal val PROJECT_QUERY_HELP_TEXT: String =
         "  • clips_for_source — required: sourceNodeId. Transitive closure.\n" +
         "  • consistency_propagation — required: sourceNodeId.\n" +
         "  • clip — required: clipId. Drill-down.\n" +
-        "  • lockfile_entry — required: inputHash. Drill-down.\n" +
+        "  • lockfile_entry — required: exactly one of inputHash (forward) | assetId (reverse). Drill-down.\n" +
         "  • project_metadata — single-row aggregate.\n" +
         "  • snapshots — filter: maxAgeDays.\n" +
         "  • spend — single-row AIGC cost aggregate.\n" +
@@ -137,7 +137,12 @@ internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
         }
         putJsonObject("assetId") {
             put("type", "string")
-            put("description", "Required for clips_for_asset.")
+            put(
+                "description",
+                "Required for clips_for_asset. Also accepted by lockfile_entry as the " +
+                    "reverse-lookup key (\"which generation produced this asset?\"); pair with " +
+                    "select=lockfile_entry, mutually exclusive with inputHash there.",
+            )
         }
         putJsonObject("sourceNodeId") {
             put("type", "string")
@@ -153,7 +158,11 @@ internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
         }
         putJsonObject("inputHash") {
             put("type", "string")
-            put("description", "Required for lockfile_entry drill-down.")
+            put(
+                "description",
+                "Forward lookup for lockfile_entry drill-down. Pair with select=lockfile_entry; " +
+                    "mutually exclusive with assetId.",
+            )
         }
         putJsonObject("sortBy") {
             put("type", "string")

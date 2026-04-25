@@ -54,8 +54,15 @@ internal fun rejectIncompatibleProjectQueryFilters(
         if (select != ProjectQueryTool.SELECT_LOCKFILE_ENTRIES && input.toolId != null) {
             add("toolId (select=lockfile_entries only)")
         }
-        if (select != ProjectQueryTool.SELECT_CLIPS_FOR_ASSET && input.assetId != null) {
-            add("assetId (select=clips_for_asset only)")
+        // assetId is valid for clips_for_asset (lookup clips bound to an asset)
+        // AND lockfile_entry (reverse-lookup the entry that produced an asset
+        // via Lockfile.byAssetId — see runLockfileEntryDetailQuery). Reject
+        // elsewhere.
+        if (select != ProjectQueryTool.SELECT_CLIPS_FOR_ASSET &&
+            select != ProjectQueryTool.SELECT_LOCKFILE_ENTRY &&
+            input.assetId != null
+        ) {
+            add("assetId (select=clips_for_asset or lockfile_entry only)")
         }
         if (select != ProjectQueryTool.SELECT_CLIPS_FOR_SOURCE &&
             select != ProjectQueryTool.SELECT_CONSISTENCY_PROPAGATION &&

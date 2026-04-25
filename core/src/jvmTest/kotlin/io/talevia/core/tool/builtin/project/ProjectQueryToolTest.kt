@@ -1001,7 +1001,7 @@ class ProjectQueryToolTest {
         assertTrue(ex.message!!.contains("not found"), ex.message)
     }
 
-    @Test fun lockfileEntryDrillDownRequiresInputHash() = runTest {
+    @Test fun lockfileEntryDrillDownRequiresInputHashOrAssetId() = runTest {
         val (store, pid) = lockfileFixture()
         val ex = assertFailsWith<IllegalStateException> {
             ProjectQueryTool(store).execute(
@@ -1009,7 +1009,71 @@ class ProjectQueryToolTest {
                 ctx(),
             )
         }
-        assertTrue(ex.message!!.contains("requires inputHash"), ex.message)
+        assertTrue(ex.message!!.contains("inputHash"), ex.message)
+        assertTrue(ex.message!!.contains("assetId"), ex.message)
+    }
+
+    @Test fun lockfileEntryReverseLookupByAssetIdReturnsSameRowAsForwardLookup() = runTest {
+        // Reverse lookup ("which generation produced this asset?") via
+        // assetId must hit the same entry forward-lookup-by-inputHash
+        // does. Two queries → same row contents — pin the round-trip
+        // so a future refactor that drops Lockfile.byAssetId silently
+        // doesn't pass.
+        val (store, pid) = lockfileFixture()
+        val byHash = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(
+                projectId = pid.value,
+                select = "lockfile_entry",
+                inputHash = "h-pinned",
+            ),
+            ctx(),
+        ).data.rows.decodeRowsAs(LockfileEntryDetailRow.serializer()).single()
+
+        val byAsset = ProjectQueryTool(store).execute(
+            ProjectQueryTool.Input(
+                projectId = pid.value,
+                select = "lockfile_entry",
+                assetId = "a-pinned",
+            ),
+            ctx(),
+        ).data.rows.decodeRowsAs(LockfileEntryDetailRow.serializer()).single()
+
+        assertEquals(byHash, byAsset, "reverse-lookup row must match forward-lookup row")
+    }
+
+    @Test fun lockfileEntryReverseLookupRejectsBothKeys() = runTest {
+        // Ambiguous: both inputHash and assetId set. The dispatcher must
+        // fail loud rather than silently picking one — agents that
+        // typo'd one of them shouldn't get a "right answer for the
+        // wrong key" surprise.
+        val (store, pid) = lockfileFixture()
+        val ex = assertFailsWith<IllegalStateException> {
+            ProjectQueryTool(store).execute(
+                ProjectQueryTool.Input(
+                    projectId = pid.value,
+                    select = "lockfile_entry",
+                    inputHash = "h-pinned",
+                    assetId = "a-pinned",
+                ),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("exactly one"), ex.message)
+    }
+
+    @Test fun lockfileEntryReverseLookupUnknownAssetFailsLoud() = runTest {
+        val (store, pid) = lockfileFixture()
+        val ex = assertFailsWith<IllegalStateException> {
+            ProjectQueryTool(store).execute(
+                ProjectQueryTool.Input(
+                    projectId = pid.value,
+                    select = "lockfile_entry",
+                    assetId = "a-never-generated",
+                ),
+                ctx(),
+            )
+        }
+        assertTrue(ex.message!!.contains("a-never-generated"), ex.message)
     }
 
     @Test fun projectMetadataReturnsSummaryAndBreakdowns() = runTest {
