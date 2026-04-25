@@ -25,17 +25,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
-import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.Json
-import kotlin.concurrent.Volatile
 import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
@@ -179,27 +174,7 @@ class Agent(
         log = log,
     )
 
-    /**
-     * Per-session handle tracking an in-flight [run] so [cancel] can reach into
-     * the running coroutine and finalise the current assistant message with
-     * [FinishReason.CANCELLED] rather than letting it hang at `finish = null`.
-     */
-    private class RunHandle(val job: Job) : RetryLoop.Handle {
-        @Volatile override var currentAssistantId: MessageId? = null
-
-        /**
-         * Most recent retry attempt number scheduled during this run, or null
-         * until the first retry fires. Read by [Agent.run]'s terminal
-         * [BusEvent.AgentRunStateChanged] emits so subscribers can correlate
-         * the terminal state with the preceding retry. Set by [runLoop] after
-         * publishing [BusEvent.AgentRetryScheduled]; monotonically
-         * non-decreasing across steps and provider fallbacks within one run.
-         */
-        @Volatile override var lastRetryAttempt: Int? = null
-    }
-
-    private val inflightMutex = Mutex()
-    private val inflight = mutableMapOf<SessionId, RunHandle>()
+    private val inflight = AgentInflightRegistry()
 
     /**
      * Routes [BusEvent.SessionCancelRequested] → [cancel] so any publisher
@@ -222,15 +197,11 @@ class Agent(
      * found and cancelled; false if no run was in flight. Safe to call from
      * any coroutine.
      */
-    suspend fun cancel(sessionId: SessionId): Boolean {
-        val handle = inflightMutex.withLock { inflight[sessionId] } ?: return false
-        handle.job.cancel(CancellationException("Agent.cancel($sessionId)"))
-        return true
-    }
+    suspend fun cancel(sessionId: SessionId): Boolean =
+        inflight.cancel(sessionId, "Agent.cancel($sessionId)")
 
     /** True while [run] for [sessionId] is executing. */
-    suspend fun isRunning(sessionId: SessionId): Boolean =
-        inflightMutex.withLock { sessionId in inflight }
+    suspend fun isRunning(sessionId: SessionId): Boolean = inflight.isRunning(sessionId)
 
     /**
      * Release background resources owned by this Agent. Idempotent and safe
@@ -257,13 +228,7 @@ class Agent(
     suspend fun run(input: RunInput): Message.Assistant {
         val thisJob = currentCoroutineContext()[Job]
             ?: error("Agent.run must be called from a coroutine with a Job")
-        val handle = RunHandle(thisJob)
-        inflightMutex.withLock {
-            check(input.sessionId !in inflight) {
-                "Session ${input.sessionId} already has an in-flight Agent.run; cancel it first"
-            }
-            inflight[input.sessionId] = handle
-        }
+        val handle = inflight.register(input.sessionId, AgentRunHandle(thisJob))
 
         val runStart = clock.now()
         log.info(
@@ -290,36 +255,20 @@ class Agent(
             )
             return result
         } catch (e: CancellationException) {
-            withContext(NonCancellable) {
-                finalizeCancelled(store, handle.currentAssistantId, e.message)
-                bus.publish(BusEvent.SessionCancelled(input.sessionId))
-                bus.publish(
-                    BusEvent.AgentRunStateChanged(
-                        input.sessionId,
-                        AgentRunState.Cancelled,
-                        retryAttempt = handle.lastRetryAttempt,
-                    ),
-                )
-            }
+            finalizeCancelledRun(store, bus, input.sessionId, handle, e)
             log.info("run.cancelled", "session" to input.sessionId.value, "reason" to e.message)
             throw e
         } catch (t: Throwable) {
-            bus.publish(
-                BusEvent.AgentRunStateChanged(
-                    input.sessionId,
-                    AgentRunState.Failed(t.message ?: t::class.simpleName ?: "unknown"),
-                    retryAttempt = handle.lastRetryAttempt,
-                ),
-            )
+            finalizeFailedRun(bus, input.sessionId, handle, t)
             throw t
         } finally {
             metrics?.observe("agent.run.ms", (clock.now() - runStart).inWholeMilliseconds)
-            inflightMutex.withLock { inflight.remove(input.sessionId) }
+            inflight.unregister(input.sessionId)
         }
     }
 
     @OptIn(ExperimentalUuidApi::class)
-    private suspend fun runLoop(input: RunInput, handle: RunHandle): Message.Assistant {
+    private suspend fun runLoop(input: RunInput, handle: AgentRunHandle): Message.Assistant {
         val now = clock.now()
 
         // First-turn check has to read the store BEFORE we append this turn's user
