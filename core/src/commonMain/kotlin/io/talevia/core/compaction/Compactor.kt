@@ -96,14 +96,24 @@ class Compactor(
     private val inflightSessions = mutableSetOf<SessionId>()
 
     /**
-     * @return [Result.Compacted] with the new compaction summary, or [Result.Skipped]
-     * when there's nothing to drop or another pass for the same session is already
-     * in flight.
+     * @param strategy controls whether to follow up the prune pass with an
+     * LLM-generated summary. Defaults to [CompactionStrategy.SUMMARIZE_AND_PRUNE]
+     * so existing callers keep historical behaviour;
+     * [CompactionStrategy.PRUNE_ONLY] short-circuits before the provider
+     * call and returns [Result.Pruned] (no summary, no `Part.Compaction`
+     * written).
+     *
+     * @return [Result.Compacted] when summarisation produced a summary,
+     * [Result.Pruned] when [strategy] is [CompactionStrategy.PRUNE_ONLY]
+     * and at least one part was dropped, or [Result.Skipped] when there's
+     * nothing to drop / another pass for the same session is already in
+     * flight / the provider returned no summary.
      */
     suspend fun process(
         sessionId: SessionId,
         history: List<MessageWithParts>,
         model: ModelRef,
+        strategy: CompactionStrategy = CompactionStrategy.SUMMARIZE_AND_PRUNE,
     ): Result {
         val acquired = inflightMutex.withLock {
             if (sessionId in inflightSessions) {
@@ -127,6 +137,24 @@ class Compactor(
             }
             if (prunedIds.isEmpty() && survivors.tokens() < budget.pruneKeepTokens) {
                 return Result.Skipped("nothing to compact")
+            }
+
+            // PRUNE_ONLY short-circuits before the provider call. Skipping
+            // pure-zero-prune passes here too — there's no value in
+            // publishing SessionCompacted(prunedCount=0) since the prune
+            // step did nothing visible.
+            if (strategy == CompactionStrategy.PRUNE_ONLY) {
+                if (prunedIds.isEmpty()) {
+                    return Result.Skipped("nothing to prune (prune-only strategy)")
+                }
+                bus.publish(
+                    BusEvent.SessionCompacted(
+                        sessionId = sessionId,
+                        prunedCount = prunedIds.size,
+                        summaryLength = 0,
+                    ),
+                )
+                return Result.Pruned(prunedIds.size)
             }
 
             val summary = summarise(provider, survivors, model)
@@ -248,6 +276,17 @@ class Compactor(
 
     sealed class Result {
         data class Compacted(val prunedCount: Int, val summary: String, val partId: PartId) : Result()
+
+        /**
+         * Output of [CompactionStrategy.PRUNE_ONLY] success path — at least
+         * one [Part.Tool] was marked compacted, no summary was generated,
+         * no [Part.Compaction] was written. Distinct from [Compacted] so
+         * callers can branch on whether a summary part exists; CLI / UI
+         * surfaces should say "pruned N tool outputs" instead of pretending
+         * a summary is available.
+         */
+        data class Pruned(val prunedCount: Int) : Result()
+
         data class Skipped(val reason: String) : Result()
     }
 

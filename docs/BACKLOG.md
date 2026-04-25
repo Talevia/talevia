@@ -15,8 +15,6 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **compaction-strategy-prune-only** — `Compactor` 当前默认 summarize-old (LLM call + token cost)。某些 session（仅 tool-heavy，prose 极少）summarize 没意义；只 prune 最老的 `Part.Tool` results 就够了。**方向：** `CompactionStrategy.PruneToolsOnly` 选项，从 oldest 开始按 `estimatedTokens` 删 `Part.Tool` 直到回到阈值；不调 LLM。`set_compaction_strategy` 或 session metadata 切换。Rubric §5.6 / §5.7。Milestone §later.
-
 ## P2 — 记债 / 观望
 
 - **debt-todo-fixme-baseline-32** — R.5.6 scan：32 TODO/FIXME/HACK 出现点在 core/commonMain，跨 7 个 repopulate 周期稳定。**方向：** 继续观察；下次 repopulate > 32 → 升 P1 + 列新增行号。**触发条件：** 下次 repopulate delta > 0。Rubric §5.6。Milestone §later.
