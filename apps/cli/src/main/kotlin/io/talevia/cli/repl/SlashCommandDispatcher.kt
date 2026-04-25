@@ -113,6 +113,7 @@ internal class SlashCommandDispatcher(
             "spend" -> renderer.println(spendSummary(currentSession))
             "metrics" -> renderer.println(metricsSummary())
             "permissions" -> renderer.println(permissionsSummary(currentSession))
+            "tools" -> renderer.println(toolsTable(args))
             "trace" -> renderer.println(traceSummary(currentSession, args))
             "summary" -> renderer.println(summarySlashSummary(currentSession))
             "todos" -> renderer.println(todosSummary(currentSession))
@@ -673,6 +674,41 @@ internal class SlashCommandDispatcher(
             archived = active.archived,
         )
         return formatForksTree(current, ancestors, children)
+    }
+
+    /**
+     * `/tools` lists LLM tools wired into this CLI runtime — operator-
+     * facing complement to `/help` (which lists slash commands, not
+     * LLM tools). Calls `ListToolsTool` to get the catalog with
+     * helpText + permission + optional cost hint, then renders via
+     * the pure formatter.
+     *
+     * The optional `args` is treated as an id prefix filter ("show
+     * every `generate_*`"). Whitespace-only args render as no
+     * filter — matches the bullet's "id filter" intent without
+     * requiring the operator to remember an empty-string convention.
+     */
+    private suspend fun toolsTable(args: String): String {
+        val tool = io.talevia.core.tool.builtin.meta.ListToolsTool(
+            registry = container.tools,
+            metrics = container.metrics,
+        )
+        val ctx = io.talevia.core.tool.ToolContext(
+            sessionId = io.talevia.core.SessionId("slash-tools"),
+            messageId = io.talevia.core.MessageId("slash-tools"),
+            callId = io.talevia.core.CallId("slash-tools"),
+            askPermission = { io.talevia.core.permission.PermissionDecision.Once },
+            emitPart = { },
+            messages = emptyList(),
+        )
+        val out = runCatching {
+            tool.execute(io.talevia.core.tool.builtin.meta.ListToolsTool.Input(prefix = null), ctx)
+        }.getOrElse { e ->
+            return Styles.meta("/tools: ${e.message ?: e::class.simpleName}")
+        }
+        // Filter applies in the formatter so the empty / mistype path
+        // can render an actionable hint pointing at the unfiltered set.
+        return formatToolsTable(out.data.tools, prefix = args.trim().takeIf { it.isNotBlank() })
     }
 
     private companion object {

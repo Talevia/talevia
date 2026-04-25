@@ -96,6 +96,12 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         category = SlashCategory.MODEL,
     ),
     SlashCommandSpec(
+        "/tools",
+        "list LLM tools registered in this runtime (optional id-prefix filter)",
+        argHint = "[<prefix>]",
+        category = SlashCategory.MODEL,
+    ),
+    SlashCommandSpec(
         "/trace",
         "recent bus events (last 20) for this session; optional event-class filter",
         argHint = "[<kind>]",
