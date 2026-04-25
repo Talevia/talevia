@@ -17,6 +17,7 @@ final class AppContainer {
     let bus: EventBus
     let agentStates: AgentRunStateTracker
     let warmupStats: ProviderWarmupStats
+    let permissionHistory: PermissionHistoryRecorder
     let sessions: SqlDelightSessionStore
     /// File-bundle [ProjectStore]. Bundles default to
     /// `<Documents>/projects/...`; the per-machine recents catalog lives at
@@ -70,6 +71,7 @@ final class AppContainer {
         self.bus = EventBus(extraBufferCapacity: 0)
         self.agentStates = AgentRunStateTrackerCompanion.shared.withSupervisor(bus: self.bus)
         self.warmupStats = ProviderWarmupStatsCompanion.shared.withSupervisor(bus: self.bus)
+        self.permissionHistory = PermissionHistoryRecorderCompanion.shared.withSupervisor(bus: self.bus)
         let clock = ClockSystem.shared
         let json = JsonConfig.shared.default
         self.sessions = SqlDelightSessionStore(db: self.db, bus: self.bus, clock: clock, json: json)
@@ -107,7 +109,7 @@ final class AppContainer {
         registry.register(tool: ExecutePlanTool(registry: registry, sessions: self.sessions, clock: clock))
         registry.register(tool: CompareAigcCandidatesTool(registry: registry))
         registry.register(tool: ReplayLockfileTool(registry: registry, projects: self.projects))
-        registry.register(tool: SessionQueryTool(sessions: self.sessions, agentStates: self.agentStates, projects: self.projects, toolRegistry: registry))
+        registry.register(tool: SessionQueryTool(sessions: self.sessions, agentStates: self.agentStates, projects: self.projects, toolRegistry: registry, permissionHistory: self.permissionHistory))
         registry.register(tool: ExportSessionTool(sessions: self.sessions))
         registry.register(tool: EstimateSessionTokensTool(sessions: self.sessions))
         registry.register(tool: ForkSessionTool(sessions: self.sessions))

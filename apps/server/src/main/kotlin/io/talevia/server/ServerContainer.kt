@@ -131,6 +131,11 @@ class ServerContainer(
         bus,
         CoroutineScope(SupervisorJob() + Dispatchers.Default),
     )
+    val permissionHistory: io.talevia.core.permission.PermissionHistoryRecorder =
+        io.talevia.core.permission.PermissionHistoryRecorder(
+            bus,
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        )
     val sessions: SessionStore = SqlDelightSessionStore(db, bus)
 
     /**
@@ -271,7 +276,7 @@ class ServerContainer(
         ?.let { TavilySearchEngine(httpClient, it) }
 
     val tools: ToolRegistry = ToolRegistry().apply {
-        registerSessionAndMetaTools(sessions, agentStates, projects, bus, fallbackStates)
+        registerSessionAndMetaTools(sessions, agentStates, projects, bus, fallbackStates, permissionHistory)
         registerMediaTools(engine, projects, bundleBlobWriter, FfmpegProxyGenerator())
         registerClipAndTrackTools(projects, sessions)
         registerProjectTools(projects, engine)

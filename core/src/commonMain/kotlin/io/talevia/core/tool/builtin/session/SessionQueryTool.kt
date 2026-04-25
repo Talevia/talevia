@@ -20,6 +20,7 @@ import io.talevia.core.tool.builtin.session.query.ForkRow
 import io.talevia.core.tool.builtin.session.query.MessageDetailRow
 import io.talevia.core.tool.builtin.session.query.MessageRow
 import io.talevia.core.tool.builtin.session.query.PartRow
+import io.talevia.core.tool.builtin.session.query.PermissionHistoryRow
 import io.talevia.core.tool.builtin.session.query.RunFailureRow
 import io.talevia.core.tool.builtin.session.query.RunStateTransitionRow
 import io.talevia.core.tool.builtin.session.query.SessionMetadataRow
@@ -40,6 +41,7 @@ import io.talevia.core.tool.builtin.session.query.runForksQuery
 import io.talevia.core.tool.builtin.session.query.runMessageDetailQuery
 import io.talevia.core.tool.builtin.session.query.runMessagesQuery
 import io.talevia.core.tool.builtin.session.query.runPartsQuery
+import io.talevia.core.tool.builtin.session.query.runPermissionHistoryQuery
 import io.talevia.core.tool.builtin.session.query.runRunFailureQuery
 import io.talevia.core.tool.builtin.session.query.runRunStateHistoryQuery
 import io.talevia.core.tool.builtin.session.query.runSessionMetadataQuery
@@ -115,6 +117,14 @@ class SessionQueryTool(
      * to the empty list (no regression from pre-cycle-57 callers).
      */
     private val fallbackTracker: AgentProviderFallbackTracker? = null,
+    /**
+     * Optional permission-history recorder. Required for
+     * `select=permission_history`; null in test rigs that don't have
+     * permission UX. When null, the select reports zero rows with a
+     * descriptive note rather than failing — same convention as the
+     * other optional aggregator wires.
+     */
+    private val permissionHistory: io.talevia.core.permission.PermissionHistoryRecorder? = null,
 ) : QueryDispatcher<SessionQueryTool.Input, SessionQueryTool.Output>() {
 
     @Serializable data class Input(
@@ -204,6 +214,9 @@ class SessionQueryTool(
             "Rows: {messageId, createdAtEpochMs, model, reason, inFlightToolCallCount, inFlightToolIds}. " +
             "Complements run_failure (error turns) + fallback_history (successful-with-recovery) " +
             "with the third post-mortem axis. requires sessionId; optional messageId narrows.\n" +
+            "  • permission_history — every Asked↔Replied round-trip this process. Rows: " +
+            "{requestId, permission, patterns, decision (once|always|reject|pending), accepted?, " +
+            "remembered?, askedEpochMs, repliedEpochMs}. requires sessionId. Process-scoped.\n" +
             "  • active_run_summary — running stats for the latest turn (state, elapsedMs, " +
             "tokensIn/Out, toolCallCount, compactionsInRun). requires sessionId.\n" +
             "Common: limit (default 100, clamped 1..1000), offset (default 0). Filter-on-" +
@@ -236,6 +249,7 @@ class SessionQueryTool(
         SELECT_RUN_FAILURE -> RunFailureRow.serializer()
         SELECT_FALLBACK_HISTORY -> FallbackHistoryRow.serializer()
         SELECT_CANCELLATION_HISTORY -> CancellationHistoryRow.serializer()
+        SELECT_PERMISSION_HISTORY -> PermissionHistoryRow.serializer()
         SELECT_ACTIVE_RUN_SUMMARY -> ActiveRunSummaryRow.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
@@ -267,6 +281,7 @@ class SessionQueryTool(
             SELECT_RUN_FAILURE -> runRunFailureQuery(sessions, agentStates, fallbackTracker, input)
             SELECT_FALLBACK_HISTORY -> runFallbackHistoryQuery(sessions, fallbackTracker, input, limit, offset)
             SELECT_CANCELLATION_HISTORY -> runCancellationHistoryQuery(sessions, input, limit, offset)
+            SELECT_PERMISSION_HISTORY -> runPermissionHistoryQuery(permissionHistory, input, limit, offset)
             SELECT_ACTIVE_RUN_SUMMARY -> runActiveRunSummaryQuery(sessions, agentStates, input)
             else -> error("unreachable — select validated above: '$select'")
         }
@@ -342,6 +357,7 @@ class SessionQueryTool(
         const val SELECT_RUN_FAILURE = "run_failure"
         const val SELECT_FALLBACK_HISTORY = "fallback_history"
         const val SELECT_CANCELLATION_HISTORY = "cancellation_history"
+        const val SELECT_PERMISSION_HISTORY = "permission_history"
         const val SELECT_ACTIVE_RUN_SUMMARY = "active_run_summary"
         internal val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
@@ -350,6 +366,7 @@ class SessionQueryTool(
             SELECT_CACHE_STATS,
             SELECT_CONTEXT_PRESSURE, SELECT_RUN_STATE_HISTORY, SELECT_TOOL_SPEC_BUDGET,
             SELECT_RUN_FAILURE, SELECT_FALLBACK_HISTORY, SELECT_CANCELLATION_HISTORY,
+            SELECT_PERMISSION_HISTORY,
             SELECT_ACTIVE_RUN_SUMMARY,
         )
 

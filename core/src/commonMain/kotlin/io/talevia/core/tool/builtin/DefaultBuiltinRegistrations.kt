@@ -140,6 +140,7 @@ fun ToolRegistry.registerSessionAndMetaTools(
     projects: ProjectStore,
     bus: EventBus,
     fallbackTracker: io.talevia.core.agent.AgentProviderFallbackTracker? = null,
+    permissionHistory: io.talevia.core.permission.PermissionHistoryRecorder? = null,
 ) {
     register(ListToolsTool(this))
     register(EstimateTokensTool())
@@ -153,6 +154,7 @@ fun ToolRegistry.registerSessionAndMetaTools(
             projects,
             toolRegistry = this,
             fallbackTracker = fallbackTracker,
+            permissionHistory = permissionHistory,
         ),
     )
     register(ExportSessionTool(sessions))
