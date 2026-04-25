@@ -135,6 +135,11 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
             store = sessions,
         )
+    val busTrace: io.talevia.core.bus.BusEventTraceRecorder =
+        io.talevia.core.bus.BusEventTraceRecorder(
+            bus,
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        )
 
     /**
      * File-bundle [ProjectStore]. `TALEVIA_PROJECTS_HOME` is the default
@@ -287,7 +292,10 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
         ?.let { TavilySearchEngine(httpClient, it) }
 
     val tools: ToolRegistry = ToolRegistry().apply {
-        registerSessionAndMetaTools(sessions, agentStates, projects, bus, fallbackStates, permissionHistory, permissionRulesPersistence)
+        registerSessionAndMetaTools(
+            sessions, agentStates, projects, bus, fallbackStates, permissionHistory,
+            permissionRulesPersistence, busTrace = busTrace,
+        )
         registerMediaTools(engine, projects, bundleBlobWriter, FfmpegProxyGenerator())
         registerClipAndTrackTools(projects, sessions)
         registerProjectTools(projects, engine)

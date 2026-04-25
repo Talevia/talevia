@@ -2,6 +2,7 @@ package io.talevia.core.tool.builtin.session
 
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_ACTIVE_RUN_SUMMARY
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_ANCESTORS
+import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_BUS_TRACE
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_CACHE_STATS
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_CANCELLATION_HISTORY
 import io.talevia.core.tool.builtin.session.SessionQueryTool.Companion.SELECT_COMPACTIONS
@@ -73,6 +74,7 @@ internal val SESSION_QUERY_ACCEPTED_FIELDS: Map<String, Set<String>> = mapOf(
     SELECT_RECAP to setOf("sessionId"),
     SELECT_STEP_HISTORY to setOf("sessionId", "messageId"),
     SELECT_ACTIVE_RUN_SUMMARY to setOf("sessionId"),
+    SELECT_BUS_TRACE to setOf("sessionId", "kind", "sinceEpochMs"),
 )
 
 /**

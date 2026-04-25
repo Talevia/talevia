@@ -143,6 +143,7 @@ fun ToolRegistry.registerSessionAndMetaTools(
     permissionHistory: io.talevia.core.permission.PermissionHistoryRecorder? = null,
     permissionRulesPersistence: io.talevia.core.permission.PermissionRulesPersistence =
         io.talevia.core.permission.PermissionRulesPersistence.Noop,
+    busTrace: io.talevia.core.bus.BusEventTraceRecorder? = null,
 ) {
     register(ListToolsTool(this))
     register(EstimateTokensTool())
@@ -157,6 +158,7 @@ fun ToolRegistry.registerSessionAndMetaTools(
             toolRegistry = this,
             fallbackTracker = fallbackTracker,
             permissionHistory = permissionHistory,
+            busTrace = busTrace,
         ),
     )
     register(ExportSessionTool(sessions))

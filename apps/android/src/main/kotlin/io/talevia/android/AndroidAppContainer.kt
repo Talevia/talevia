@@ -75,6 +75,11 @@ class AndroidAppContainer(context: Context) {
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
             store = sessions,
         )
+    val busTrace: io.talevia.core.bus.BusEventTraceRecorder =
+        io.talevia.core.bus.BusEventTraceRecorder(
+            bus,
+            CoroutineScope(SupervisorJob() + Dispatchers.Default),
+        )
 
     /**
      * File-bundle [ProjectStore]. Bundles default to `<filesDir>/projects/...`
@@ -132,7 +137,10 @@ class AndroidAppContainer(context: Context) {
     val httpClient: HttpClient = HttpClient(CIO)
 
     val tools: ToolRegistry = ToolRegistry().apply {
-        registerSessionAndMetaTools(sessions, agentStates, projects, bus, fallbackStates, permissionHistory)
+        registerSessionAndMetaTools(
+            sessions, agentStates, projects, bus, fallbackStates, permissionHistory,
+            busTrace = busTrace,
+        )
         registerMediaTools(engine, projects, bundleBlobWriter, proxyGenerator)
         registerClipAndTrackTools(projects, sessions)
         registerProjectTools(projects, engine)

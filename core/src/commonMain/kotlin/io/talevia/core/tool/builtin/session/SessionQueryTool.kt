@@ -11,6 +11,7 @@ import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.ToolResult
 import io.talevia.core.tool.builtin.session.query.ActiveRunSummaryRow
 import io.talevia.core.tool.builtin.session.query.AncestorRow
+import io.talevia.core.tool.builtin.session.query.BusTraceRow
 import io.talevia.core.tool.builtin.session.query.CacheStatsRow
 import io.talevia.core.tool.builtin.session.query.CancellationHistoryRow
 import io.talevia.core.tool.builtin.session.query.CompactionRow
@@ -36,6 +37,7 @@ import io.talevia.core.tool.builtin.session.query.ToolCallRow
 import io.talevia.core.tool.builtin.session.query.ToolSpecBudgetRow
 import io.talevia.core.tool.builtin.session.query.runActiveRunSummaryQuery
 import io.talevia.core.tool.builtin.session.query.runAncestorsQuery
+import io.talevia.core.tool.builtin.session.query.runBusTraceQuery
 import io.talevia.core.tool.builtin.session.query.runCacheStatsQuery
 import io.talevia.core.tool.builtin.session.query.runCancellationHistoryQuery
 import io.talevia.core.tool.builtin.session.query.runCompactionsQuery
@@ -133,6 +135,14 @@ class SessionQueryTool(
      * other optional aggregator wires.
      */
     private val permissionHistory: io.talevia.core.permission.PermissionHistoryRecorder? = null,
+    /**
+     * Optional bus event trace recorder. Required for
+     * `select=bus_trace`; null in test rigs that don't wire it. When
+     * null the select reports zero rows with a descriptive note rather
+     * than failing — same convention as the other optional aggregator
+     * wires.
+     */
+    private val busTrace: io.talevia.core.bus.BusEventTraceRecorder? = null,
 ) : QueryDispatcher<SessionQueryTool.Input, SessionQueryTool.Output>() {
 
     @Serializable data class Input(
@@ -221,7 +231,9 @@ class SessionQueryTool(
             "  • step_history — per-step timeline {model, finishReason, tokens, toolCallCount, " +
             "elapsedMs}; optional messageId.\n" +
             "  • active_run_summary — latest turn stats (state, elapsedMs, tokensIn/Out, " +
-            "toolCallCount, compactionsInRun)."
+            "toolCallCount, compactionsInRun).\n" +
+            "  • bus_trace — per-session bus event ring buffer {kind, epochMs, summary}; " +
+            "filters: kind (event class), sinceEpochMs."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.read")
@@ -254,6 +266,7 @@ class SessionQueryTool(
         SELECT_PERMISSION_RULES -> PermissionRuleRow.serializer()
         SELECT_PREFLIGHT_SUMMARY -> PreflightSummaryRow.serializer()
         SELECT_RECAP -> SessionRecapRow.serializer()
+        SELECT_BUS_TRACE -> BusTraceRow.serializer()
         SELECT_STEP_HISTORY -> StepHistoryRow.serializer()
         SELECT_ACTIVE_RUN_SUMMARY -> ActiveRunSummaryRow.serializer()
         else -> error("No row serializer registered for select='$select'")
@@ -297,6 +310,7 @@ class SessionQueryTool(
             )
             SELECT_STEP_HISTORY -> runStepHistoryQuery(sessions, input, limit, offset)
             SELECT_RECAP -> runSessionRecapQuery(sessions, projects, input)
+            SELECT_BUS_TRACE -> runBusTraceQuery(busTrace, input, limit, offset)
             SELECT_ACTIVE_RUN_SUMMARY -> runActiveRunSummaryQuery(sessions, agentStates, input)
             else -> error("unreachable — select validated above: '$select'")
         }
@@ -340,6 +354,7 @@ class SessionQueryTool(
         const val SELECT_RECAP = "recap"
         const val SELECT_STEP_HISTORY = "step_history"
         const val SELECT_ACTIVE_RUN_SUMMARY = "active_run_summary"
+        const val SELECT_BUS_TRACE = "bus_trace"
         internal val ALL_SELECTS = setOf(
             SELECT_SESSIONS, SELECT_MESSAGES, SELECT_PARTS,
             SELECT_FORKS, SELECT_ANCESTORS, SELECT_TOOL_CALLS, SELECT_COMPACTIONS, SELECT_STATUS,
@@ -349,7 +364,7 @@ class SessionQueryTool(
             SELECT_RUN_FAILURE, SELECT_FALLBACK_HISTORY, SELECT_CANCELLATION_HISTORY,
             SELECT_PERMISSION_HISTORY, SELECT_PERMISSION_RULES,
             SELECT_PREFLIGHT_SUMMARY, SELECT_RECAP, SELECT_STEP_HISTORY,
-            SELECT_ACTIVE_RUN_SUMMARY,
+            SELECT_ACTIVE_RUN_SUMMARY, SELECT_BUS_TRACE,
         )
 
         private const val DEFAULT_LIMIT = 100
