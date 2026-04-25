@@ -392,6 +392,8 @@ class ServerContainer(
      * reloads and tests.
      */
     fun close() {
+        agentsByProvider.values.forEach { runCatching { it.close() } }
+        agentsByProvider.clear()
         runCatching { httpClient.close() }
         runCatching { driver.close() }
     }

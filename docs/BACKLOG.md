@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **agent-bg-task-cancel-on-shutdown** — `Agent.backgroundScope` 持 titler / cancel-watcher / metrics sink；containers 长生命周期（server）不漏，但短命测试 rig 创建 Agent 不显式 dispose 时 scope 残留。`backgroundScope` 默认是 `CoroutineScope(SupervisorJob() + Dispatchers.Default)` —— 没有 close 路径意味着 Agent GC 后任务仍在 background。**方向：** 提 `Agent.dispose()` /  `AutoCloseable` —— 取消 backgroundScope、metricsSink job、cancelWatcher job。Containers 在 shutdown 调用。Rubric §5.6 / §5.4。Milestone §later.
 - **source-node-diff-restore-composite-tool** — P0 restore tool（按整 revision 回滚）已落 `revision_index` 路径。但 user "把 character_ref 的 hair 字段还原成 3 版本前，prompt 字段保持当前" 的 per-field 合并需求当前仍要走读 history → 手编 body → update_source_node_body 的 3-step 链路。**方向：** `merge_source_node_body_from_history(nodeId, revisionIndex, fieldPaths)` 一次完成；history 已经是 JSONL append-only，per-field 抽取走 `JsonObject.merge` patch。Rubric §5.5。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排

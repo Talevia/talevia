@@ -27,6 +27,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -143,7 +144,7 @@ class Agent(
      * cacheable and test-friendly.
      */
     private val routingPolicy: ProviderRoutingPolicy = ProviderRoutingPolicy.Default,
-) {
+) : AutoCloseable {
 
     private val log = Loggers.get("agent")
 
@@ -230,6 +231,27 @@ class Agent(
     /** True while [run] for [sessionId] is executing. */
     suspend fun isRunning(sessionId: SessionId): Boolean =
         inflightMutex.withLock { sessionId in inflight }
+
+    /**
+     * Release background resources owned by this Agent. Idempotent and safe
+     * to call from any thread.
+     *
+     * Cancels the [backgroundScope] — kills the bus-driven cancel-watcher
+     * subscription, any in-flight session-titler launches, and any future
+     * fire-and-forget work the Agent had outstanding. In-flight [run] calls
+     * are NOT cancelled by `close` (use [cancel] for that); they execute on
+     * the caller's coroutine context, so cancelling them is the caller's
+     * responsibility.
+     *
+     * Composition roots (CLI / Desktop / Server / Android / iOS containers)
+     * call this in their shutdown path so a process exit doesn't leave a
+     * SupervisorJob worth of background coroutines orphaned. Tests that
+     * spin up a throwaway Agent should also call it (or wrap the Agent in
+     * `use { … }`) to avoid leaking subscriptions across runs.
+     */
+    override fun close() {
+        backgroundScope.cancel(CancellationException("Agent.close()"))
+    }
 
     @OptIn(ExperimentalUuidApi::class)
     suspend fun run(input: RunInput): Message.Assistant {
