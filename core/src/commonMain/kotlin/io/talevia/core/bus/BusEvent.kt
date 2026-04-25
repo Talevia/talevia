@@ -10,11 +10,9 @@ import io.talevia.core.session.Message
 import io.talevia.core.session.Part
 
 /**
- * Events the Core publishes to UI / persistence subscribers.
- *
- * Event taxonomy mirrors OpenCode (`packages/opencode/src/bus/index.ts:19-41` and
- * `session/message-v2.ts:488-496`) — UI consumes deltas for streaming updates and
- * full part snapshots once a part finalises.
+ * Events the Core publishes to UI / persistence subscribers. Taxonomy mirrors
+ * OpenCode (`packages/opencode/src/bus/index.ts:19-41` +
+ * `session/message-v2.ts:488-496`).
  */
 sealed interface BusEvent {
 
@@ -27,18 +25,11 @@ sealed interface BusEvent {
     data class SessionDeleted(override val sessionId: SessionId) : SessionEvent
 
     /**
-     * Published by [io.talevia.core.session.SessionStore.appendMessage] when
-     * the post-append message count would exceed the configured per-store
-     * `maxMessages` ceiling — the bound that backstops the
-     * `Compactor`-trigger-threshold gate when compaction can't keep up
-     * (rapid-fire tool outputs, model that throws on too-large context
-     * the compactor can't reduce enough). The event fires alongside a
-     * thrown `IllegalStateException` from `appendMessage` so UIs can
-     * surface "this session is full, fork or revert" without polling.
-     *
-     * `messageCount` is the count BEFORE the rejected append — i.e. the
-     * current size; `cap` is the configured ceiling that triggered the
-     * rejection. `cap == messageCount` is the typical trip.
+     * `SqlDelightSessionStore.appendMessage` rejected because count would
+     * exceed `maxMessages` cap. Backstops the `Compactor`-trigger gate when
+     * compaction can't keep up. Fired alongside the rejection's
+     * `IllegalStateException` so UIs can surface "fork or revert" without
+     * polling. `messageCount` is pre-rejection; usually `== cap`.
      */
     data class SessionFull(
         override val sessionId: SessionId,
@@ -52,24 +43,17 @@ sealed interface BusEvent {
         val message: Message,
     ) : SessionEvent
 
-    /**
-     * A message (and all of its parts) was deleted from the session — currently
-     * fired by `SessionRevert.revertToMessage` after truncating later turns.
-     * UI consumers should drop any cached state keyed on [messageId] (rendered
-     * markdown, in-flight tool spinners, etc.) so the on-screen view matches
-     * persistence.
-     */
+    /** Fired by `SessionRevert.revertToMessage` after truncating later turns. */
     data class MessageDeleted(
         override val sessionId: SessionId,
         val messageId: MessageId,
     ) : SessionEvent
 
     /**
-     * A [io.talevia.core.session.SessionRevert] pass committed: messages after
-     * [anchorMessageId] have been removed and, if [appliedSnapshotPartId] is
-     * non-null, the project's timeline was rolled back to that snapshot.
-     * Emitted once per revert, after the individual [MessageDeleted] events —
-     * UI can treat it as a signal to refresh the whole turn list.
+     * `SessionRevert` pass committed: messages after `anchorMessageId` removed,
+     * project timeline rolled back to `appliedSnapshotPartId` if non-null.
+     * Fires once per revert AFTER the per-message `MessageDeleted` events —
+     * UI can use it as the refresh-the-whole-turn-list signal.
      */
     data class SessionReverted(
         override val sessionId: SessionId,
@@ -109,55 +93,38 @@ sealed interface BusEvent {
         val remembered: Boolean,
     ) : SessionEvent
 
-    /** An in-flight Agent.run for this session was cancelled via [io.talevia.core.agent.Agent.cancel]. */
+    /** In-flight `Agent.run` for this session was cancelled via `Agent.cancel`. */
     data class SessionCancelled(override val sessionId: SessionId) : SessionEvent
 
     /**
-     * Request that the Agent cancel an in-flight run for [sessionId]. Any
-     * subscriber (CLI signal handler, HTTP endpoint, IDE abort button) can
-     * publish this without holding an [io.talevia.core.agent.Agent] reference;
-     * the Agent subscribes on construction and calls `Agent.cancel(sessionId)`
-     * on receipt. Publishing against an idle session is a no-op. The observable
-     * effects are the follow-up [SessionCancelled] event and the assistant
-     * message's `FinishReason.CANCELLED` — subscribers watching for completion
-     * should key off those, not this request event.
+     * Request that the Agent cancel an in-flight run. Any subscriber (CLI signal
+     * handler, HTTP endpoint, IDE abort button) can publish without holding an
+     * `Agent` reference; the Agent subscribes on construction. No-op against
+     * idle sessions. Observable effects come via `SessionCancelled` +
+     * `FinishReason.CANCELLED`, not this request event.
      */
     data class SessionCancelRequested(override val sessionId: SessionId) : SessionEvent
 
     /**
-     * The Agent caught a transient provider error and scheduled a retry.
-     * [attempt] is 1-based — the upcoming attempt number — and [waitMs] is
-     * the backoff the Agent is about to sleep before re-streaming.
-     * UI can use this to show "Retrying in 4s…" rather than leaving the turn
-     * looking stuck.
+     * Agent caught a transient provider error and scheduled a retry. UI
+     * surfaces "Retrying in {waitMs}ms…" instead of frozen turn. `attempt`
+     * is 1-based (the upcoming attempt). `providerId` defaulted null for
+     * pre-cycle-91 emitters that didn't thread the provider chain.
      */
     data class AgentRetryScheduled(
         override val sessionId: SessionId,
         val attempt: Int,
         val waitMs: Long,
         val reason: String,
-        /**
-         * Provider id the retry is targeting on this attempt. Carried so
-         * subscribers (rate-limit history aggregator, ops dashboards)
-         * don't have to scrape the [reason] string. Default null
-         * preserves serialised compatibility with pre-cycle-91 emitters
-         * (any test rig publishing this event without
-         * RetryLoop's threaded provider chain).
-         */
         val providerId: String? = null,
     ) : SessionEvent
 
     /**
-     * Primary provider exhausted its retry budget with no streamed content;
-     * the Agent is falling through to the next provider in the configured
-     * chain ([Agent.fallbackProviders]). Pair with [AgentRetryScheduled]:
-     * retry covers same-provider transient failures, fallback covers
-     * cross-provider ones. Emitted once per chain advance.
-     *
-     * Mid-stream failures (content already delivered to the user) do NOT
-     * trigger fallback — the partial output is preserved and the turn is
-     * marked ERROR so the user sees what came through rather than two
-     * different providers' truncated outputs stitched together.
+     * Primary provider exhausted retry budget with no streamed content; Agent
+     * advances to next provider in `Agent.fallbackProviders`. Pair with
+     * `AgentRetryScheduled` (same-provider transient) vs this (cross-provider).
+     * Mid-stream failures do NOT trigger fallback — partial output preserved,
+     * turn marked ERROR.
      */
     data class AgentProviderFallback(
         override val sessionId: SessionId,
@@ -167,10 +134,9 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     /**
-     * Background agent runs (e.g. the server's fire-and-forget `agent.run` launch)
-     * historically swallowed failures, leaving clients stuck on a 202 with no signal
-     * that the run died. Publish this event instead so SSE subscribers see the
-     * failure and the client can recover.
+     * Background agent runs (server's fire-and-forget `agent.run`) historically
+     * swallowed failures, leaving SSE clients stuck on a 202. Publish this
+     * instead so subscribers see the failure and the client can recover.
      */
     data class AgentRunFailed(
         override val sessionId: SessionId,
@@ -179,22 +145,12 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     /**
-     * The Agent auto-triggered context compaction at the start of a turn because
-     * the estimated token footprint of the surviving history crossed the
-     * configured threshold. Emitted exactly once per auto-compaction pass,
-     * **before** the Compactor re-reads the session. UI consumers can show
-     * "compacting…" instead of letting the next turn look stuck while the
-     * summarisation call is in flight.
-     *
-     * Manual compaction calls (e.g. an explicit `/compact` from the operator)
-     * do **not** emit this event — it's specifically the overflow-auto-trigger
-     * signal. Pair with [AgentRetryScheduled]: together they cover the two
-     * visible pauses a long session can exhibit before a turn's streaming
-     * resumes.
-     *
-     * @property historyTokensBefore TokenEstimator.forHistory result that
-     *   crossed the threshold and caused the trigger.
-     * @property thresholdTokens The threshold the estimate exceeded.
+     * Agent auto-triggered context compaction at turn start because estimated
+     * history tokens crossed the per-model threshold. Fires exactly once per
+     * auto-pass, BEFORE Compactor re-reads. Manual `/compact` does NOT emit
+     * this — it's specifically the overflow-auto-trigger. Pair with
+     * `AgentRetryScheduled` for the two visible "stuck" pauses long sessions
+     * exhibit.
      */
     data class SessionCompactionAuto(
         override val sessionId: SessionId,
@@ -203,31 +159,12 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     /**
-     * A compaction pass **finished** and produced a summary part: [prunedCount]
-     * older tool outputs were marked compacted and a new `Part.Compaction` of
-     * [summaryLength] characters was attached to the latest assistant message.
-     * Emitted exactly once per successful `Compactor.process()` return-of-
-     * [Compactor.Result.Compacted], immediately after the compaction part is
-     * persisted.
-     *
-     * Pairs with [SessionCompactionAuto] (which fires *before* the pass starts,
-     * reporting the overflow that triggered it): auto-trigger → Compactor
-     * runs → [SessionCompacted] closes the pair. Manual `/compact` runs that
-     * also hit the `Compactor` emit this event too — it's the post-pass
-     * result signal, not the trigger signal.
-     *
-     * CLI / Desktop UIs subscribe to render a "compacted N tool outputs,
-     * summary NNN chars" notice in the transcript so the user sees what
-     * happened to the lost context. If [prunedCount] is 0 but a summary was
-     * still written, it means the pre-window envelope already fit but the
-     * summary path was exercised anyway — the notice should still fire
-     * (the summary replaces nothing but records session state).
-     *
-     * @property prunedCount Number of [Part.Tool] parts moved to compacted
-     *   state in this pass.
-     * @property summaryLength Character count of the summary body written
-     *   into the [Part.Compaction]. Characters, not tokens, so UIs can
-     *   render a human count without depending on a tokenizer.
+     * Compaction pass FINISHED + summary part written. Fires once per
+     * `Compactor.process()` returning `Compactor.Result.Compacted`. Pairs with
+     * `SessionCompactionAuto` (which fires BEFORE the pass). Manual `/compact`
+     * also emits this — it's the post-pass result, not the trigger. UI renders
+     * "compacted N tool outputs, summary M chars" notice. `summaryLength` is
+     * char count not tokens (no tokenizer dep needed).
      */
     data class SessionCompacted(
         override val sessionId: SessionId,
@@ -236,28 +173,18 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     /**
-     * Explicit `Agent.run` state transition. See [AgentRunState] for the state
-     * diagram and invariants. Emitted on every transition (including
-     * `Idle → Generating` at run entry and the terminal transition to
-     * `Idle / Cancelled / Failed`), so UI subscribers can render a live
-     * status bar without polling.
+     * `Agent.run` state transition (see `AgentRunState`). Emits on every edge
+     * including run-entry (`Idle → Generating`) and terminal
+     * (`→ Idle / Cancelled / Failed`). Coarse "what phase?" signal — finer
+     * signals (`PartUpdated`, `SessionCompactionAuto`, `AgentRetryScheduled`)
+     * still fire independently.
      *
-     * The finer-grained signals — `PartUpdated` for streaming text deltas,
-     * `SessionCompactionAuto` for the token crossing that drove a
-     * `Generating → Compacting` edge, `AgentRetryScheduled` for transient-
-     * error retries — still fire independently. This event is the
-     * "what high-level phase is the agent in?" coarse signal.
-     *
-     * @property retryAttempt Null until the Agent has scheduled at least one
-     *   retry during this run; thereafter echoes the most recent
-     *   [AgentRetryScheduled.attempt] and persists through every subsequent
-     *   state transition for the rest of the run. Pairs each follow-up
-     *   `Generating / AwaitingTool / Idle / Failed` transition with the retry
-     *   that preceded it, so subscribers can answer "did retry #N succeed?"
-     *   by watching the terminal transition's `retryAttempt` — no wall-clock
-     *   log-joining required. The counter monotonically increases; provider
-     *   fallbacks do NOT reset it (the companion [AgentProviderFallback] event
-     *   carries per-provider boundary info for subscribers that care).
+     * `retryAttempt`: null until the first retry; thereafter echoes the most
+     * recent `AgentRetryScheduled.attempt` and persists across subsequent
+     * transitions for the rest of the run. Pairs each follow-up transition with
+     * the retry that preceded it — subscribers can answer "did retry #N
+     * succeed?" by watching the terminal transition. Monotonically increasing;
+     * provider fallbacks do NOT reset (`AgentProviderFallback` carries that).
      */
     data class AgentRunStateChanged(
         override val sessionId: SessionId,
@@ -266,21 +193,10 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     /**
-     * The session's `currentProjectId` binding changed — fired exclusively
-     * by `switch_project` after it persists the new binding. [previousProjectId]
-     * is null when the session was previously unbound (first-time bind);
-     * [newProjectId] is always set because unbinding is not an operation
-     * exposed on the session lane (to unbind, the user creates a new session).
-     *
-     * UI / metrics subscribers can consume this to refresh the "current
-     * project" indicator without polling `describe_session`, and to log
-     * per-session project switches for observability.
-     *
-     * A no-op same-id rebind does NOT fire this event — see [SwitchProjectTool]
-     * where the same-id branch returns early before `updateSession`. Fork does
-     * not fire this event either: a freshly forked session inherits its
-     * parent's binding through [SessionCreated] (the binding is the session's
-     * initial state, not a change).
+     * Session's `currentProjectId` changed — fired by `switch_project` after
+     * persisting. `previousProjectId` null = first-time bind. Same-id rebind
+     * does NOT fire (early-return in tool). Fork does not fire either —
+     * inheritance comes through `SessionCreated`.
      */
     data class SessionProjectBindingChanged(
         override val sessionId: SessionId,
@@ -289,17 +205,11 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     /**
-     * An AIGC dispatch (image / TTS / music / video / upscale) completed and a
-     * lockfile entry was recorded. Carries a best-effort cost estimate in
-     * integer USD cents; [costCents] is `null` when
-     * [io.talevia.core.cost.AigcPricing] has no rule for the provider + model
-     * combination. Subscribers (metrics sink, UI spend indicator) aggregate
-     * non-null values and surface "unknown cost" as a separate signal rather
-     * than silently summing zero.
-     *
-     * Fired exclusively on cache **misses** (new generations). Cache hits
-     * re-serve the already-billed asset and do not emit this event — the cost
-     * was accounted for on the original generation.
+     * AIGC dispatch completed; lockfile entry recorded. `costCents` is best-
+     * effort integer USD cents per `AigcPricing`; null = no rule for
+     * provider+model. Subscribers (metrics, UI spend) sum non-null and surface
+     * "unknown" separately. Fires only on cache MISS — hits re-serve already-
+     * billed assets.
      */
     data class AigcCostRecorded(
         override val sessionId: SessionId,
@@ -310,22 +220,15 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     /**
-     * Soft warning emitted when cumulative AIGC spend reaches
-     * `0.8 * spendCapCents` but is still strictly below the cap. Fires
-     * before the hard `aigc.budget` ASK so users get a "you're at 80%"
-     * signal between "no awareness" and "hard stop".
+     * Soft warning when cumulative AIGC spend hits 0.8 × `spendCapCents` but
+     * still strictly below cap. Fires before the hard `aigc.budget` ASK so
+     * users get an "at 80 %" signal between "no awareness" and "hard stop".
      *
-     * [scope] is `aigc` for in-session AIGC dispatch (AigcBudgetGuard)
-     * vs `export` for export-time timeline-cost gating
-     * (ExportToolBudgetGuard) — the two surfaces share the cap but
-     * have different "current" measures, so the scope tag lets
-     * subscribers tell them apart without parsing toolId.
-     *
-     * Subscribers MAY rate-limit display (CLI debounces to one banner
-     * per session per ~30s). The guard fires every qualifying call;
-     * keeping the dedupe state in the guard would couple guard to
-     * subscriber lifecycle which violates the bus's
-     * "publishers don't know subscribers" invariant.
+     * `scope` = `aigc` (in-session AigcBudgetGuard) or `export`
+     * (ExportToolBudgetGuard) — same cap, different "current" measures.
+     * Subscribers MAY rate-limit display (CLI debounces ~30s); the guard fires
+     * every qualifying call (dedupe in the guard would couple guard to
+     * subscriber lifecycle, breaking "publishers don't know subscribers").
      */
     data class SpendCapApproaching(
         override val sessionId: SessionId,
@@ -337,17 +240,10 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     /**
-     * Cache-lookup outcome from `AigcPipeline.findCached`. Emitted once per
-     * attempted AIGC tool invocation **before** the provider call (so a hit
-     * short-circuits without emitting `AigcCostRecorded`, and a miss pairs
-     * later with `AigcCostRecorded` only on success). Subscribers (metrics
-     * sink, debug UI) use the stream to answer "did my seed lock actually
-     * cache-hit?" without re-walking the lockfile.
-     *
-     * Not a [SessionEvent] — the probe is project-scoped (findCached reads
-     * a single project's lockfile) but doesn't care about session. Per-tool
-     * counters are kept separate in [io.talevia.core.metrics.EventBusMetricsSink]
-     * so dashboards can break down by tool.
+     * Cache-lookup outcome from `AigcPipeline.findCached`. Fires once per AIGC
+     * tool invocation BEFORE the provider call; hit short-circuits without
+     * `AigcCostRecorded`, miss pairs later with one on success. Not a
+     * `SessionEvent` — probe is project-scoped, doesn't care about session.
      */
     data class AigcCacheProbe(
         val toolId: String,
@@ -355,20 +251,12 @@ sealed interface BusEvent {
     ) : BusEvent
 
     /**
-     * A project load detected structural issues in its source DAG
-     * (dangling parent refs, parent cycles). Non-throwing warning — the
-     * project is still returned to the caller, but subscribers (UI,
-     * metrics sink, audit log) can surface the issue so it doesn't rot
-     * unnoticed. Emitted by `FileProjectStore.get` right after the
-     * blob decode on every read; issues are computed via a lightweight
-     * sublsubset of `project_query(select=validation)`'s DAG check (no full
-     * clip/asset/audio validation, see that tool for exhaustive linting).
-     *
-     * Not a [SessionEvent] — validation runs at project load time,
-     * independent of any active session. Each issue in [issues] is a
-     * human-readable message that already includes the offending node id,
-     * matching `Issue.message` shape from `project_query(select=validation)` so UI
-     * consumers can render either source uniformly.
+     * Project load detected DAG issues (dangling parent refs, cycles).
+     * Non-throwing — project still returned. `FileProjectStore.get` emits on
+     * every read; issues come from a lightweight subset of
+     * `project_query(select=validation)`. Each `issues` entry is human-readable
+     * + includes the offending node id (matches the validation tool's `Issue`
+     * shape so UIs render uniformly).
      */
     data class ProjectValidationWarning(
         val projectId: ProjectId,
@@ -376,26 +264,16 @@ sealed interface BusEvent {
     ) : BusEvent
 
     /**
-     * Emitted by [io.talevia.core.domain.FileProjectStore.openAt] and
-     * [io.talevia.core.domain.FileProjectStore.get] when one or more assets
-     * on the project reference a `MediaSource.File` absolute path that does
-     * not exist on the current machine — the canonical cross-machine
-     * bundle-open failure mode. UI surfaces this as a "relink your source
-     * footage" panel; CLI can block / warn before `export`. Only fires
-     * when at least one asset is missing (empty payload would be noise).
-     *
-     * Consumers wire `relink_asset(assetId, newPath)` to flip the asset's
-     * source to the new location — and the tool cascades to every other
-     * asset sharing the same original path, so the user only relinks once
-     * per source file.
-     *
-     * Not fired for `BundleFile` / `Http` / `Platform` sources — those
-     * either travel with the bundle (bundle-corrupt is a different
-     * failure) or aren't path-based in the first place.
+     * Cross-machine bundle-open failure: ≥ 1 asset references a
+     * `MediaSource.File` absolute path that doesn't exist on this machine.
+     * UI shows "relink your source footage" panel; CLI can block / warn before
+     * `export`. Only fires when at least one asset is missing.
+     * `relink_asset(assetId, newPath)` cascades to every other asset sharing
+     * the same original path so the user only relinks once per source file.
+     * Not fired for `BundleFile` / `Http` / `Platform` sources.
      */
     data class AssetsMissing(
         val projectId: ProjectId,
-        /** Each entry: (assetId, absolute path the asset referenced on alice's machine). */
         val missing: List<MissingAsset>,
     ) : BusEvent
 
@@ -405,31 +283,22 @@ sealed interface BusEvent {
     )
 
     /**
-     * AIGC provider is warming up — the connection setup, model load and
-     * seed-pinning handshake that precede the first useful byte of output.
-     * Published in `Starting → Ready` pairs bracketing the first HTTP round
-     * trip of a long-running provider call; later calls in the same dispatch
-     * do not re-emit (warmup is a cold-start signal, not a per-poll signal).
+     * AIGC provider warmup signal — the connection / model load / seed-pinning
+     * handshake that precedes the first useful byte. Published in
+     * `Starting → Ready` pairs around the first HTTP round trip; later calls in
+     * the same dispatch don't re-emit (cold-start signal, not per-poll).
      *
-     * Motivation (M2 exit summary §3.1 follow-up #4): the session-cold first
-     * image used to sit silent for ~2-20s with no UI indication — users saw
-     * the assistant go quiet and assumed a hang. Every other visible pause
-     * (retry, compaction, clip render) has a bus event driving a one-line
-     * notice; warmup was the last unvoiced one. CLI / Desktop subscribers
-     * render `Starting` as `warming up <providerId>…` and suppress `Ready`
-     * (redundant once streaming resumes).
+     * Why: M2 exit summary §3.1 follow-up #4 — first image used to sit silent
+     * for 2-20s with no UI signal. Every other visible pause has a bus event;
+     * warmup was the last unvoiced one. CLI / Desktop render `Starting` as
+     * `warming up <providerId>…` and suppress `Ready` (redundant once
+     * streaming resumes).
      *
-     * Phase is a 2-state enum (not a sealed class with payloads) because
-     * neither edge carries additional data — epochMs + providerId + sessionId
-     * are sufficient for the "time to first useful byte" metric that falls
-     * out of subtracting paired `Starting`/`Ready` events.
-     *
-     * Not every AIGC engine publishes this — OpenAI's synchronous
-     * `/v1/images/generations` has no separate warmup/streaming split, so
-     * it stays silent. Replicate's async poll shape (create prediction →
-     * poll until terminal) is where the visible lag lives, so the
-     * Replicate-backed engines (`ReplicateMusicGenEngine`,
-     * `ReplicateUpscaleEngine`) are the emitters today.
+     * Phase is a 2-state enum (not a sealed payload) — neither edge carries
+     * extra data; epochMs + providerId + sessionId are sufficient for the
+     * "time to first useful byte" metric. Replicate-backed engines emit;
+     * OpenAI's synchronous `/v1/images/generations` doesn't (no warmup/streaming
+     * split).
      */
     data class ProviderWarmup(
         override val sessionId: SessionId,
@@ -441,41 +310,24 @@ sealed interface BusEvent {
     }
 
     /**
-     * Bookend (and, once engines support it, mid-flight) progress signal for
-     * AIGC dispatches. Fires from [io.talevia.core.tool.builtin.aigc.AigcPipeline.withProgress]
-     * at start ([Phase.Started] / `ratio=0`) and at the terminal edge
-     * ([Phase.Completed] / `ratio=1` on success, [Phase.Failed] /
-     * `ratio=0` on error) — same lifecycle as the existing
-     * [io.talevia.core.session.Part.RenderProgress] audit trail, but on
-     * the bus instead of the session-history part stream.
+     * AIGC dispatch progress signal. Fires from `AigcPipeline.withProgress` at
+     * `Phase.Started` (ratio=0), terminal `Phase.Completed` (ratio=1) or
+     * `Phase.Failed` (ratio=0). Same lifecycle as `Part.RenderProgress` but on
+     * the bus instead of session-history.
      *
-     * Why duplicate the progress signal across Part + BusEvent:
+     * Why duplicate progress across Part + BusEvent: `Part.RenderProgress` is
+     * session-history persistent (every tick lands in `messages_parts.data` so
+     * revert / replay / cross-machine re-runs see it; CLI Renderer paints from
+     * those parts). `AigcJobProgress` is ephemeral with no session-store write
+     * — subscribers that don't want every tick polluting Part history (metrics,
+     * desktop in-flight panel, server SSE, ops dashboards) listen here instead.
+     * CLI does NOT subscribe (the existing Part path drives its progress
+     * line; double-subscribing would render twice).
      *
-     * - `Part.RenderProgress` is **session-history persistent** — every
-     *   tick lands in `messages_parts.data` so `session_action(action="revert")` /
-     *   `replay_lockfile` / cross-machine re-runs see the same audit
-     *   trail. The CLI Renderer already paints a one-liner from those
-     *   parts (see `EventRouter` → `renderer.renderProgress`).
-     * - `BusEvent.AigcJobProgress` is **ephemeral**, with no session-
-     *   store write. Subscribers that don't want every progress tick to
-     *   pollute Part history (metrics counters, desktop in-flight UI
-     *   panel, server SSE stream, future operator dashboards) can listen
-     *   here directly without filtering `PartUpdated` for
-     *   `Part.RenderProgress` after the fact.
-     *
-     * CLI does **not** subscribe to this event — the existing
-     * `Part.RenderProgress` path already drives its inline progress
-     * line; double-subscribing would render every tick twice. New
-     * subscribers should pick whichever shape matches their persistence
-     * intent.
-     *
-     * `ratio` is `0f..1f` clamped at the publisher; `null` is reserved
-     * for engines that report progress as opaque "still working" pings
-     * without a numeric ratio (none today, future-proof). `etaSec` mirrors
-     * the same null-when-unknown convention. `providerId` is non-null
-     * when the dispatching engine knows it (Replicate / OpenAI), else
-     * empty — the bookend doesn't always have a provider attribution
-     * (cache hits short-circuit before the engine call).
+     * `ratio` 0..1 clamped at publisher; null reserved for opaque "still
+     * working" pings (none today). `etaSec` same null-when-unknown convention.
+     * `providerId` non-null when engine knows it (cache hits short-circuit
+     * before engine call).
      */
     data class AigcJobProgress(
         override val sessionId: SessionId,
