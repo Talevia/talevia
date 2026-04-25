@@ -71,14 +71,19 @@ final class AppContainer {
         self.driver = factory.createPersistentDriver(name: "talevia.db")
         self.db = TaleviaDbCompanion.shared.invoke(driver: self.driver)
         self.bus = EventBus(extraBufferCapacity: 0)
-        self.agentStates = AgentRunStateTrackerCompanion.shared.withSupervisor(bus: self.bus)
-        self.warmupStats = ProviderWarmupStatsCompanion.shared.withSupervisor(bus: self.bus)
-        self.rateLimitHistory = RateLimitHistoryRecorderCompanion.shared.withSupervisor(bus: self.bus)
+        // SKIE bridges class Companions as nested types — `XCompanion` (top-
+        // level) stopped resolving in cycle ~145; access via `X.companion`
+        // accessor instead. Interface Companions (TaleviaDbCompanion above)
+        // stay top-level because Swift doesn't allow nested types on
+        // protocols.
+        self.agentStates = AgentRunStateTracker.companion.withSupervisor(bus: self.bus)
+        self.warmupStats = ProviderWarmupStats.companion.withSupervisor(bus: self.bus)
+        self.rateLimitHistory = RateLimitHistoryRecorder.companion.withSupervisor(bus: self.bus)
         let clock = ClockSystem.shared
         let json = JsonConfig.shared.default
         self.sessions = SqlDelightSessionStore(db: self.db, bus: self.bus, clock: clock, json: json)
-        self.permissionHistory = PermissionHistoryRecorderCompanion.shared.withSupervisor(bus: self.bus, store: self.sessions)
-        self.busTrace = BusEventTraceRecorderCompanion.shared.withSupervisor(bus: self.bus)
+        self.permissionHistory = PermissionHistoryRecorder.companion.withSupervisor(bus: self.bus, store: self.sessions)
+        self.busTrace = BusEventTraceRecorder.companion.withSupervisor(bus: self.bus)
 
         // File-bundle ProjectStore rooted at <Documents>/projects/, recents
         // at <Documents>/recents.json. Bypasses the SqlDelight ProjectStore
@@ -86,13 +91,16 @@ final class AppContainer {
         let docsDir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
         let projectsHome = docsDir.appendingPathComponent("projects").path
         let recentsPath = docsDir.appendingPathComponent("recents.json").path
-        self.recentsRegistry = newRecentsRegistry(path: recentsPath)
-        self.projects = newFileProjectStore(
+        // Top-level Kotlin factory functions in `IosBridges.kt` are bridged
+        // as `IosBridgesKt.doNew*` (SKIE prefixes `new` with `do` because
+        // Swift's `new` is a reserved keyword in some grammar contexts).
+        self.recentsRegistry = IosBridgesKt.doNewRecentsRegistry(path: recentsPath)
+        self.projects = IosBridgesKt.doNewFileProjectStore(
             registry: self.recentsRegistry,
             projectsHome: projectsHome,
             bus: self.bus
         )
-        self.bundleBlobWriter = newFileBundleBlobWriter(projects: self.projects)
+        self.bundleBlobWriter = IosBridgesKt.doNewFileBundleBlobWriter(projects: self.projects)
 
         // The engine takes a resolver for source-clip path resolution, but
         // ExportTool now passes a per-render BundleMediaPathResolver via
@@ -105,36 +113,47 @@ final class AppContainer {
         )
         self.permissions = DefaultPermissionService(bus: self.bus)
 
+        // SKIE doesn't translate Kotlin `= default` parameters into Swift
+        // initializer defaults — every Kotlin ctor param shows up as
+        // required in Swift, so each register call below must pass an
+        // explicit value (typically `nil` for `T?` defaults, or the
+        // matching companion-singleton for non-null defaults).
+        let permissionRulesNoop = PermissionRulesPersistenceCompanion.shared.Noop
+        let systemFs = OkioFileSystem.companion.SYSTEM
         let registry = ToolRegistry()
-        registry.register(tool: ListToolsTool(registry: registry))
+        registry.register(tool: ListToolsTool(registry: registry, metrics: nil))
         registry.register(tool: EstimateTokensTool())
         registry.register(tool: TodoWriteTool(clock: clock))
         registry.register(tool: DraftPlanTool(clock: clock))
         registry.register(tool: ExecutePlanTool(registry: registry, sessions: self.sessions, clock: clock))
         registry.register(tool: CompareAigcCandidatesTool(registry: registry))
         registry.register(tool: ReplayLockfileTool(registry: registry, projects: self.projects))
-        registry.register(tool: SessionQueryTool(sessions: self.sessions, agentStates: self.agentStates, projects: self.projects, toolRegistry: registry, permissionHistory: self.permissionHistory, busTrace: self.busTrace))
+        registry.register(tool: SessionQueryTool(sessions: self.sessions, agentStates: self.agentStates, projects: self.projects, toolRegistry: registry, fallbackTracker: nil, permissionHistory: self.permissionHistory, busTrace: self.busTrace))
         // First-pass registration without `providers` — the ProviderRegistry
         // is built FROM this same container in the second pass, so
         // `action="compact"` is wired below at the second-pass re-register.
         // `bus` is required for `action="revert"` (publishes
         // BusEvent.SessionReverted); compact's bus needs land in the
         // second pass too.
-        registry.register(tool: SessionActionTool(sessions: self.sessions, clock: clock, projects: self.projects, busTrace: self.busTrace, bus: self.bus))
-        registry.register(tool: SwitchProjectTool(sessions: self.sessions, projects: self.projects, clock: clock, bus: self.bus))
+        registry.register(tool: SessionActionTool(sessions: self.sessions, clock: clock, permissionRulesPersistence: permissionRulesNoop, projects: self.projects, busTrace: self.busTrace, bus: self.bus, providers: nil))
+        registry.register(tool: SwitchProjectTool(sessions: self.sessions, projects: self.projects, clock: clock, bus: self.bus, agentStates: self.agentStates))
         registry.register(tool: ReadPartTool(sessions: self.sessions))
         registry.register(tool: ImportMediaTool(
             engine: self.engine,
             projects: self.projects,
-            proxyGenerator: self.proxyGenerator
+            clock: clock,
+            proxyGenerator: self.proxyGenerator,
+            fs: systemFs,
+            bundleBlobWriter: self.bundleBlobWriter,
+            autoInBundleThresholdBytes: 50 * 1024 * 1024
         ))
         registry.register(tool: ExtractFrameTool(engine: self.engine, projects: self.projects, bundleBlobWriter: self.bundleBlobWriter))
-        registry.register(tool: ConsolidateMediaIntoBundleTool(projects: self.projects))
-        registry.register(tool: RelinkAssetTool(projects: self.projects))
+        registry.register(tool: ConsolidateMediaIntoBundleTool(projects: self.projects, fs: systemFs, clock: clock, bundleBlobWriter: self.bundleBlobWriter))
+        registry.register(tool: RelinkAssetTool(projects: self.projects, clock: clock))
         registry.register(tool: ClipActionTool(store: self.projects))
-        registry.register(tool: ReplaceClipTool(store: self.projects))
+        // `ReplaceClipTool` / `FadeAudioClipTool` folded into
+        // `clip_action(action="replace_asset")` / `clip_action(action="fade_audio")`.
         registry.register(tool: ClipSetActionTool(store: self.projects))
-        registry.register(tool: FadeAudioClipTool(store: self.projects))
         registry.register(tool: ExportTool(store: self.projects, engine: self.engine, clock: clock))
         registry.register(tool: ExportDryRunTool(store: self.projects))
         registry.register(tool: FilterActionTool(store: self.projects))
@@ -142,9 +161,11 @@ final class AppContainer {
         registry.register(tool: AddSubtitlesTool(store: self.projects))
         registry.register(tool: EditTextClipTool(store: self.projects))
         registry.register(tool: TransitionActionTool(store: self.projects))
-        registry.register(tool: AddTrackTool(store: self.projects))
+        // `AddTrackTool` / `RemoveTrackTool` folded into
+        // `track_action(action="add"/"remove")` — the consolidated
+        // `TrackActionTool` covers both verbs (and reorder).
+        registry.register(tool: TrackActionTool(store: self.projects))
         registry.register(tool: DuplicateTrackTool(store: self.projects))
-        registry.register(tool: RemoveTrackTool(store: self.projects))
         registry.register(tool: ReorderTracksTool(store: self.projects))
         registry.register(tool: RevertTimelineTool(sessions: self.sessions, projects: self.projects))
         registry.register(tool: ClearTimelineTool(store: self.projects))
@@ -152,7 +173,7 @@ final class AppContainer {
         // `state` / `validation` / `stale_clips` are now `project_query(select=…)`.
         registry.register(tool: ProjectActionTool(projects: self.projects))
         registry.register(tool: ListProjectsTool(projects: self.projects))
-        registry.register(tool: ProjectQueryTool(projects: self.projects))
+        registry.register(tool: ProjectQueryTool(projects: self.projects, clock: clock))
         registry.register(tool: ProjectMaintenanceActionTool(projects: self.projects, engine: self.engine, clock: clock))
         registry.register(tool: ProjectPinActionTool(projects: self.projects))
         registry.register(tool: ProjectSnapshotActionTool(projects: self.projects, clock: clock))
@@ -165,7 +186,7 @@ final class AppContainer {
         registry.register(tool: SourceQueryTool(projects: self.projects))
         registry.register(tool: DiffSourceNodesTool(projects: self.projects))
         registry.register(tool: ExportSourceNodeTool(projects: self.projects))
-        registry.register(tool: SourceNodeActionTool(projects: self.projects))
+        registry.register(tool: SourceNodeActionTool(projects: self.projects, clock: clock))
         self.tools = registry
 
         self.httpClient = createIosHttpClient()
@@ -196,6 +217,7 @@ final class AppContainer {
         registry.register(tool: SessionActionTool(
             sessions: self.sessions,
             clock: clock,
+            permissionRulesPersistence: permissionRulesNoop,
             projects: self.projects,
             busTrace: self.busTrace,
             bus: self.bus,

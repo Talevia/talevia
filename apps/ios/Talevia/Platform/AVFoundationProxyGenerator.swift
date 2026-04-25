@@ -76,7 +76,10 @@ final class AVFoundationProxyGenerator: NSObject, ProxyGenerator {
         }
         let midSeconds = metaSeconds / 2.0
 
-        let assetId = asset.id.value
+        // `MediaAsset.id` is `AssetId` (a Kotlin `@JvmInline value class`) —
+        // SKIE erases value classes to `id` (Swift `Any`) on the iOS bridge,
+        // so `.value` no longer resolves. Use the IosBridges raw-extractor.
+        let assetId = IosBridgesKt.assetIdRaw(id: asset.id)
         let outDir = proxyDir.appendingPathComponent(assetId, isDirectory: true)
         let thumbURL = outDir.appendingPathComponent("thumb.jpg")
 

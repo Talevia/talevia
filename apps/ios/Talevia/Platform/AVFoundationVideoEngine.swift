@@ -597,12 +597,17 @@ final class AVFoundationVideoEngine: NSObject, VideoEngine {
     ) {
         // `MediaSource` is a sealed Kotlin class; only `.File` is resolvable to
         // an AVURLAsset on iOS without platform-side download (HTTP) or
-        // PHAsset resolution (Platform). Match the Android engine's surface —
-        // non-file sources fail with a clear error instead of silently trying.
+        // PHAsset resolution (Platform). `.BundleFile` requires a per-render
+        // `MediaPathResolver` to translate the bundle-relative path; the
+        // probe / thumbnail callsites don't carry one (they receive a raw
+        // `MediaSource`), so reject loud — same shape as Http / Platform.
         let path: String
         switch onEnum(of: source) {
         case .file(let file):
             path = file.path
+        case .bundleFile:
+            completionHandler(nil, avfError("BundleFile MediaSource needs per-render MediaPathResolver — probe/thumbnail callsites don't carry one"))
+            return
         case .http:
             completionHandler(nil, avfError("Http MediaSource not supported (download first)"))
             return
@@ -674,7 +679,8 @@ final class AVFoundationVideoEngine: NSObject, VideoEngine {
                     audioCodec: nil,
                     sampleRate: sampleRate,
                     channels: channels,
-                    bitrate: nil
+                    bitrate: nil,
+                    comment: nil
                 )
                 completionHandler(metadata, nil)
             } catch {
@@ -697,6 +703,9 @@ final class AVFoundationVideoEngine: NSObject, VideoEngine {
         switch onEnum(of: source) {
         case .file(let file):
             path = file.path
+        case .bundleFile:
+            completionHandler(nil, avfError("BundleFile MediaSource needs per-render MediaPathResolver — probe/thumbnail callsites don't carry one"))
+            return
         case .http:
             completionHandler(nil, avfError("Http MediaSource not supported (download first)"))
             return

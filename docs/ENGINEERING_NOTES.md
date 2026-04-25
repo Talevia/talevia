@@ -303,6 +303,67 @@ edge cases while the heuristic helps the common path.
 
 ## Build / lint / packaging
 
+### SKIE bridging quirks for the iOS `apps/ios` Swift consumer
+`2026-04-25 — debt-ios-swift-catchup-deep-drift`
+
+A few SKIE-specific patterns that catch out Swift code consuming the
+TaleviaCore framework. Useful when a fold / refactor in
+`core/commonMain` breaks `apps/ios/Talevia/Platform/AppContainer.swift`
+or any other Swift file:
+
+- **Companions for classes vs interfaces**. SKIE bridges a `class
+  Foo { companion object { ... } }` as `Foo.Companion` (nested) AND
+  `Foo.companion` (static accessor). Both work from Swift:
+  `Foo.companion.bar(...)` is the cleanest spelling. But for
+  `interface Foo { companion object { ... } }`, Swift won't allow a
+  nested type on a protocol, so SKIE keeps it top-level:
+  `FooCompanion.shared.bar(...)`. Old code using the top-level
+  `XCompanion.shared.bar(...)` pattern for class companions silently
+  stopped resolving when SKIE switched (cycles ~145+); migrate to
+  `X.companion.bar(...)`.
+
+- **Top-level Kotlin functions get a `do` prefix when their name
+  starts with `new`**. `fun newRecentsRegistry(path: String)` in
+  `core/iosMain/IosBridges.kt` becomes
+  `IosBridgesKt.doNewRecentsRegistry(path:)` in Swift, because
+  Swift's `new` token has reserved-word friction. Same for
+  `newFileProjectStore` → `doNewFileProjectStore`,
+  `newFileBundleBlobWriter` → `doNewFileBundleBlobWriter`.
+
+- **Kotlin `@JvmInline value class` erases to `id` (Swift `Any`) on
+  the iOS bridge**. `AssetId(value="x")` in Kotlin becomes a raw
+  ObjC `id` from Swift's perspective — `.value` access doesn't
+  resolve, and the type name `AssetId` isn't even in scope. Use the
+  IosBridges accessors: `IosBridgesKt.assetId(value: "x")` to
+  construct, `IosBridgesKt.assetIdRaw(id: x)` to extract the
+  underlying String. Same for `SessionId`, `ClipId`, `MessageId`,
+  `PartId`, `ProjectId`, `CallId`, `SourceNodeId` — every value
+  class has matching `<id>(value:)` / `<id>Raw(id:)` helpers in
+  `IosBridges.kt`.
+
+- **Kotlin default arguments don't translate to Swift defaults**.
+  `class Foo(private val x: X, private val y: Y = Default)` in
+  Kotlin becomes a Swift initializer where BOTH `x` and `y` are
+  required arguments. The Swift compiler error is "missing argument
+  for parameter 'y' in call". Either pass `nil` explicitly when the
+  Kotlin default is `null`, or look up the matching companion-
+  singleton (`OkioFileSystem.companion.SYSTEM`,
+  `PermissionRulesPersistenceCompanion.shared.Noop`) for non-null
+  defaults.
+
+- **Validate Swift compilation, not just framework link**.
+  `:core:compileKotlinIosSimulatorArm64` only type-checks Kotlin —
+  the Swift app at `apps/ios/Talevia/**/*.swift` is a separate
+  xcodebuild target and can have arbitrary Swift errors that survive
+  the gradle pipeline. Run `cd apps/ios && xcodegen generate &&
+  xcodebuild build -project Talevia.xcodeproj -scheme Talevia
+  -destination 'platform=iOS Simulator,name=iPhone 16e'
+  CODE_SIGNING_ALLOWED=NO` after any Kotlin API change that's
+  visible in the framework header (new ctor params, new sealed
+  variants, new protocol members, value-class signatures). Cycles
+  136–149 accumulated 35+ silent Swift errors before the gap was
+  caught.
+
 ### ktlint `no-blank-line-before-rbrace` fires after mass-delete of a trailing block
 `2026-04-23 — debt-split-fork-project-tool`
 

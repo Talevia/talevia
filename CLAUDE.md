@@ -27,8 +27,9 @@ JDK 21 must be reachable. `brew install openjdk@21`, then either `sudo ln -sfn /
 | Server tests | `./gradlew :apps:server:test` |
 | Android debug APK | `./gradlew :apps:android:assembleDebug` (requires Android SDK at `~/Library/Android/sdk` via `local.properties`) |
 | iOS app | `cd apps/ios && xcodegen generate && open Talevia.xcodeproj` (⌘R). Pre-build phase runs gradle automatically. |
+| iOS Swift compile (headless) | `cd apps/ios && xcodegen generate && xcodebuild build -project Talevia.xcodeproj -scheme Talevia -destination 'platform=iOS Simulator,name=iPhone 16e' CODE_SIGNING_ALLOWED=NO` (use `xcrun simctl list devicetypes` to find a valid `name=` if iPhone 16e is gone). Catches Swift drift the framework-only `compileKotlinIosSimulatorArm64` misses; runs the gradle link as a build-phase script so it covers both. |
 | Lint (all modules) | `./gradlew ktlintCheck` (auto-fix: `ktlintFormat`). Rule profile in `.editorconfig`: hygiene-only (unused imports, final newline, import order). |
-| Every target + every test | `./gradlew :core:jvmTest :platform-impls:video-ffmpeg-jvm:test :apps:server:test :apps:desktop:assemble :core:compileKotlinIosSimulatorArm64 :apps:android:assembleDebug` |
+| Every target + every test | `./gradlew :core:jvmTest :platform-impls:video-ffmpeg-jvm:test :apps:server:test :apps:desktop:assemble :core:compileKotlinIosSimulatorArm64 :apps:android:assembleDebug` followed by the iOS Swift compile row above (xcodebuild). The gradle invocation alone validates only the KMP iOS framework — Swift consumer drift (`apps/ios/Talevia/**/*.swift`) is invisible without the xcodebuild step (cycles 136–149 accumulated 35+ silent Swift errors before the gap was caught). |
 
 FFmpeg + ffprobe must be on PATH for `platform-impls/video-ffmpeg-jvm` tests (`brew install ffmpeg`).
 
