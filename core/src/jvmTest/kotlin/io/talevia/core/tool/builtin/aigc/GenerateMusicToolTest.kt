@@ -13,14 +13,8 @@ import io.talevia.core.domain.source.consistency.addStyleBible
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.FileBundleBlobWriter
-import io.talevia.core.platform.GeneratedMusic
-import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.MusicGenEngine
-import io.talevia.core.platform.MusicGenRequest
-import io.talevia.core.platform.MusicGenResult
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
-import kotlinx.serialization.json.buildJsonObject
 import okio.Path.Companion.toPath
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -134,45 +128,12 @@ class GenerateMusicToolTest {
         assertEquals(listOf("cool-jazz"), result.data.appliedConsistencyBindingIds)
     }
 
-    /**
-     * A MusicGenEngine that fires warmup phases during `generate(..., onWarmup)` —
-     * models the async-poll Replicate shape so the tool's plumbing (engine
-     * callback → ctx.publishEvent → BusEvent.ProviderWarmup) is exercisable
-     * without standing up HTTP mocks.
-     */
-    private class WarmingFakeEngine(private val bytes: ByteArray) : MusicGenEngine {
-        override val providerId: String = "warming-fake"
-        override suspend fun generate(request: MusicGenRequest): MusicGenResult =
-            generate(request) { }
-
-        override suspend fun generate(
-            request: MusicGenRequest,
-            onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
-        ): MusicGenResult {
-            onWarmup(BusEvent.ProviderWarmup.Phase.Starting)
-            onWarmup(BusEvent.ProviderWarmup.Phase.Ready)
-            return MusicGenResult(
-                music = GeneratedMusic(
-                    audioBytes = bytes,
-                    format = request.format,
-                    durationSeconds = request.durationSeconds,
-                ),
-                provenance = GenerationProvenance(
-                    providerId = providerId,
-                    modelId = request.modelId,
-                    modelVersion = null,
-                    seed = request.seed,
-                    parameters = buildJsonObject { },
-                    createdAtEpochMs = 1_700_000_000_000L,
-                ),
-            )
-        }
-    }
-
     @Test fun publishesProviderWarmupEventsViaToolContext() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/warmup".toPath(), title = "warmup").id
-        val engine = WarmingFakeEngine(tinyMp3)
+        // Shared `WarmingMusicGenEngine` (cycle 127 fake-extract phase 2)
+        // pinned to the legacy providerId the assertion below checks.
+        val engine = WarmingMusicGenEngine(tinyMp3, providerId = "warming-fake")
         val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
 
         val published = mutableListOf<BusEvent>()

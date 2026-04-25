@@ -17,8 +17,7 @@
 
 ## P1 — 中优，做完 P0 再排
 
-- **aigc-result-multi-variant** — `generate_image` / `generate_video` 每次产 1 个 asset；OpenAI / Replicate 都支持 `n` 参数返 N 个候选让人挑。当前 agent 拿不到。**方向：** AIGC tools 接收 `n: Int = 1`，返回 List<assetId>；lockfile 每个变体一条 entry，共享 inputHash + 不同 variantIndex。Permission ASK 一次性覆盖 N 次成本。Rubric §5.2。Milestone §later.
-- **debt-aigc-test-fake-extract-phase-2** — cycle 121 落地了 5 个 `OneShot*Engine` 共享 fakes 并迁移了 5 个最简单 call site；剩 9 个 inline fake 仍未抽（`CountingImageEngine` × 3 callers、`WarmingFakeEngine`、`FailingTtsEngine`、e2e 的 `FullFieldsImageEngine` / `OneShotImageEngine` 等）。**方向：** 加 `CountingImageGenEngine`（call-count-keyed bytes）+ `WarmingMusicGenEngine`（onWarmup callback）+ `FailingTtsEngine` 到 `AigcEngineFakes.kt`，然后扫所有还没迁的 inline。**触发条件：** 出现第 10 个 inline fake（说明 phase 1 没收住），或下次有人改 `*Engine` interface 因为 fake 不一致踩坑。Rubric §5.6。Milestone §later.
+- **aigc-result-multi-variant** — `generate_image` / `generate_video` 每次产 1 个 asset；OpenAI / Replicate 都支持 `n` 参数返 N 个候选让人挑。当前 agent 拿不到。**方向：** AIGC tools 接收 `n: Int = 1`，返回 List<assetId>；lockfile 每个变体一条 entry，共享 inputHash + 不同 variantIndex。Permission ASK 一次性覆盖 N 次成本。Rubric §5.2。Milestone §later. · skipped 2026-04-25: §3a #4 + design ambiguity — bullet's "shared inputHash" semantic conflicts with seed-in-hash invariant (variants need different seeds → different hashes), AND video providers (Sora 2 / Veo) don't natively support n so per-variant calls have separate-billing UX implications the user should approve before shipping.
 
 ## P2 — 记债 / 观望
 

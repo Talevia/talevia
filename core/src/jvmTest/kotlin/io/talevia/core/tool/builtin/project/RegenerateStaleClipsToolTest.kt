@@ -24,13 +24,10 @@ import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.domain.source.replaceNode
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.BundleBlobWriter
-import io.talevia.core.platform.GeneratedImage
 import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.ImageGenEngine
-import io.talevia.core.platform.ImageGenRequest
-import io.talevia.core.platform.ImageGenResult
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
+import io.talevia.core.tool.builtin.aigc.CountingImageGenEngine
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
@@ -48,33 +45,15 @@ class RegenerateStaleClipsToolTest {
     private val tinyPng = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte())
 
     /**
-     * Image-gen fake that produces distinct bytes per call so each regeneration
-     * yields a *different* asset (and therefore a different lockfile entry) even
-     * though storage.import would otherwise deduplicate identical sources.
+     * Distinct bytes per regenerate call (4-byte marker = call counter) so
+     * each generation yields a different asset / lockfile entry. Migrated
+     * to the shared [CountingImageGenEngine] in cycle 127
+     * (`debt-aigc-test-fake-extract-phase-2`).
      */
-    private class CountingImageEngine : ImageGenEngine {
-        override val providerId: String = "fake"
-        var calls: Int = 0
-            private set
-
-        override suspend fun generate(request: ImageGenRequest): ImageGenResult {
-            calls += 1
-            val marker = calls.toByte()
-            // Distinct bytes per call so MediaStorage treats them as separate assets.
-            val bytes = ByteArray(4) { marker }
-            return ImageGenResult(
-                images = listOf(GeneratedImage(pngBytes = bytes, width = request.width, height = request.height)),
-                provenance = GenerationProvenance(
-                    providerId = providerId,
-                    modelId = request.modelId,
-                    modelVersion = null,
-                    seed = request.seed,
-                    parameters = JsonObject(emptyMap()),
-                    createdAtEpochMs = 1_700_000_000_000L + calls,
-                ),
-            )
-        }
-    }
+    private fun countingImageEngine(): CountingImageGenEngine = CountingImageGenEngine(
+        providerId = "fake",
+        bytesForCall = { call -> ByteArray(4) { call.toByte() } },
+    )
 
     private class FakeBlobWriter(private val rootDir: File) : BundleBlobWriter {
         override suspend fun writeBlob(
@@ -101,7 +80,7 @@ class RegenerateStaleClipsToolTest {
     @Test fun regeneratesEachStaleClipAndSwapsAssetIdOnTimeline() = runTest {
         val tmpDir = createTempDirectory("regen-test").toFile()
         val store = ProjectStoreTestKit.create()
-        val engine = CountingImageEngine()
+        val engine = countingImageEngine()
         val writer = FakeBlobWriter(tmpDir)
         val pid = ProjectId("p-regen")
         val clipId = ClipId("c-1")
@@ -212,7 +191,7 @@ class RegenerateStaleClipsToolTest {
     @Test fun clipIdsFilterRegeneratesOnlyListedClips() = runTest {
         val tmpDir = createTempDirectory("regen-filter").toFile()
         val store = ProjectStoreTestKit.create()
-        val engine = CountingImageEngine()
+        val engine = countingImageEngine()
         val writer = FakeBlobWriter(tmpDir)
         val pid = ProjectId("p-filter")
 
@@ -320,7 +299,7 @@ class RegenerateStaleClipsToolTest {
     @Test fun skipsLegacyEntriesWithoutBaseInputs() = runTest {
         val tmpDir = createTempDirectory("regen-legacy").toFile()
         val store = ProjectStoreTestKit.create()
-        val engine = CountingImageEngine()
+        val engine = countingImageEngine()
         val writer = FakeBlobWriter(tmpDir)
         val pid = ProjectId("p-legacy")
         val clipId = ClipId("c-1")
@@ -413,7 +392,7 @@ class RegenerateStaleClipsToolTest {
     @Test fun skipsPinnedEntriesWithoutDispatching() = runTest {
         val tmpDir = createTempDirectory("regen-pinned").toFile()
         val store = ProjectStoreTestKit.create()
-        val engine = CountingImageEngine()
+        val engine = countingImageEngine()
         val writer = FakeBlobWriter(tmpDir)
         val pid = ProjectId("p-pinned")
         val clipId = ClipId("c-hero")

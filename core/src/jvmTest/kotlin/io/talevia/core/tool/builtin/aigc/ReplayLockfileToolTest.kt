@@ -15,17 +15,14 @@ import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.BundleBlobWriter
-import io.talevia.core.platform.GeneratedImage
 import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.platform.ImageGenEngine
-import io.talevia.core.platform.ImageGenRequest
-import io.talevia.core.platform.ImageGenResult
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import java.io.File
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -49,37 +46,19 @@ class ReplayLockfileToolTest {
         0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
     )
 
-    /** Fake image-gen engine that bumps a counter per call so each generation lands a distinct asset. */
-    private class CountingImageEngine : ImageGenEngine {
-        override val providerId: String = "fake-img"
-        var calls: Int = 0
-            private set
-
-        override suspend fun generate(request: ImageGenRequest): ImageGenResult {
-            calls++
-            val image = GeneratedImage(
-                pngBytes = byteArrayOf(
-                    0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, calls.toByte(),
-                ),
-                width = request.width,
-                height = request.height,
-            )
-            return ImageGenResult(
-                images = listOf(image),
-                provenance = GenerationProvenance(
-                    providerId = providerId,
-                    modelId = request.modelId,
-                    modelVersion = "v1",
-                    seed = request.seed,
-                    parameters = buildJsonObject {
-                        put("prompt", JsonPrimitive(request.prompt))
-                        put("call", JsonPrimitive(calls))
-                    },
-                    createdAtEpochMs = 1_700_000_000_000L + calls,
-                ),
-            )
-        }
-    }
+    /**
+     * Each call returns the PNG-magic prefix followed by the call counter
+     * byte — distinct bytes per invocation, mirroring the original inline
+     * fake's contract. Migrated to the shared [CountingImageGenEngine] in
+     * cycle 127 (`debt-aigc-test-fake-extract-phase-2`).
+     */
+    private fun countingImageEngine(): CountingImageGenEngine = CountingImageGenEngine(
+        providerId = "fake-img",
+        bytesForCall = { call ->
+            byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, call.toByte())
+        },
+        fixedModelVersion = "v1",
+    )
 
     private class FakeBlobWriter(private val rootDir: File) : BundleBlobWriter {
         override suspend fun writeBlob(
@@ -109,7 +88,7 @@ class ReplayLockfileToolTest {
 
     @Test fun replaySkipsCacheAndAppendsNewLockfileEntry() = runTest {
         val tmp = createTempDirectory("replay-lockfile-test").toFile()
-        val engine = CountingImageEngine()
+        val engine = countingImageEngine()
 
         val writer = FakeBlobWriter(tmp)
         val store = freshStore()
@@ -299,7 +278,7 @@ class ReplayLockfileToolTest {
         // replay_lockfile in a project-bound session shouldn't have to thread
         // projectId through every Input.
         val tmp = createTempDirectory("replay-lockfile-sessioncontext").toFile()
-        val engine = CountingImageEngine()
+        val engine = countingImageEngine()
 
         val writer = FakeBlobWriter(tmp)
         val store = freshStore()

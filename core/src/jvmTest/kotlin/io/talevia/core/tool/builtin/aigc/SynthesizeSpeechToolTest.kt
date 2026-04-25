@@ -12,9 +12,6 @@ import io.talevia.core.domain.source.consistency.addCharacterRef
 import io.talevia.core.domain.source.mutateSource
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.FileBundleBlobWriter
-import io.talevia.core.platform.TtsEngine
-import io.talevia.core.platform.TtsRequest
-import io.talevia.core.platform.TtsResult
 import io.talevia.core.tool.ToolContext
 import kotlinx.coroutines.test.runTest
 import okio.Path.Companion.toPath
@@ -32,8 +29,7 @@ class SynthesizeSpeechToolTest {
     /**
      * Local factory alias of the shared [OneShotTtsEngine] — preserves
      * the `providerId = "fake-openai"` default. The shared base lives
-     * in `AigcEngineFakes.kt`. Note: shared base exposes `calls`, not
-     * `callCount`; assertions in this file are migrated accordingly.
+     * in `AigcEngineFakes.kt`.
      */
     private fun FakeTtsEngine(bytes: ByteArray): OneShotTtsEngine =
         OneShotTtsEngine(bytes = bytes, providerId = "fake-openai")
@@ -262,20 +258,6 @@ class SynthesizeSpeechToolTest {
         assertEquals(bound.data.assetId, unbound.data.assetId)
     }
 
-    /** Deterministic "throw every time" engine, used to exercise fallback paths. */
-    private class FailingTtsEngine(
-        override val providerId: String,
-        private val message: String = "simulated provider outage",
-    ) : TtsEngine {
-        var callCount: Int = 0
-            private set
-
-        override suspend fun synthesize(request: TtsRequest): TtsResult {
-            callCount += 1
-            error("$providerId: $message")
-        }
-    }
-
     @Test fun fallbackChainUsesSecondEngineWhenFirstThrows() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/fallback".toPath(), title = "fallback").id
@@ -287,9 +269,9 @@ class SynthesizeSpeechToolTest {
             SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
             ctx(),
         )
-        // primary is FailingTtsEngine (callCount); secondary is FakeTtsEngine
-        // (= OneShotTtsEngine, calls) after the cycle-121 fake-extract.
-        assertEquals(1, primary.callCount, "primary must be attempted")
+        // Both fakes now share the `calls` counter (cycle-127 fake-extract
+        // phase 2 unified naming across OneShot* and Failing* fakes).
+        assertEquals(1, primary.calls, "primary must be attempted")
         assertEquals(1, secondary.calls, "secondary must take over after primary throws")
         assertEquals("fake-openai", result.data.providerId, "lockfile + output record the engine that actually produced audio")
     }
@@ -309,8 +291,8 @@ class SynthesizeSpeechToolTest {
         }
         assertTrue(ex.message!!.contains("dead-primary"), "aggregate error names every attempted provider")
         assertTrue(ex.message!!.contains("dead-secondary"), "aggregate error names every attempted provider")
-        assertEquals(1, first.callCount)
-        assertEquals(1, second.callCount)
+        assertEquals(1, first.calls)
+        assertEquals(1, second.calls)
     }
 
     @Test fun fallbackChainShortCircuitsOnCacheHit() = runTest {
@@ -331,12 +313,11 @@ class SynthesizeSpeechToolTest {
             ctx(),
         )
         assertEquals(true, second.data.cacheHit)
-        // primary here is the shared OneShotTtsEngine (alias FakeTtsEngine
-        // returns OneShotTtsEngine after the cycle-121 fake-extract); its
-        // counter is `calls`. secondary is the inline FailingTtsEngine
-        // which still uses `callCount`.
+        // Both fakes (OneShotTtsEngine for primary, FailingTtsEngine for
+        // secondary) share the unified `calls` counter since the cycle-127
+        // fake-extract phase 2.
         assertEquals(1, primary.calls, "cache hit must not re-invoke primary")
-        assertEquals(0, secondary.callCount, "cache hit must not even probe the fallback chain")
+        assertEquals(0, secondary.calls, "cache hit must not even probe the fallback chain")
     }
 
     @Test fun emptyEngineListFailsLoudAtConstruction() {

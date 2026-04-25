@@ -1,5 +1,6 @@
 package io.talevia.core.tool.builtin.aigc
 
+import io.talevia.core.bus.BusEvent
 import io.talevia.core.platform.GeneratedImage
 import io.talevia.core.platform.GeneratedMusic
 import io.talevia.core.platform.GeneratedVideo
@@ -245,6 +246,123 @@ class OneShotUpscaleEngine(
                 createdAtEpochMs = FAKE_PROVENANCE_EPOCH_MS,
             ),
         )
+    }
+}
+
+/**
+ * Image-gen fake that returns distinct bytes on every call, keyed off
+ * a monotonically incrementing call counter. Used by tests that need
+ * each generation to land a *different* lockfile entry / asset
+ * (regenerate-stale-clip flows, replay-bypass-cache flows).
+ *
+ * Default `bytesForCall` returns a 1-byte payload of `N.toByte()` —
+ * enough to make every call's bytes distinct while keeping the fake
+ * trivially constructible. Tests that need a specific magic prefix
+ * (PNG header, 4-byte marker, etc.) override the lambda.
+ *
+ * Provenance includes `call=N` in `parameters` so audit traces from
+ * tests using this fake show clearly which physical engine call
+ * produced which lockfile entry.
+ */
+class CountingImageGenEngine(
+    override val providerId: String = "fake-counting-img",
+    private val bytesForCall: (call: Int) -> ByteArray = { call -> byteArrayOf(call.toByte()) },
+    private val fixedModelVersion: String? = null,
+) : ImageGenEngine {
+    var lastRequest: ImageGenRequest? = null
+        private set
+    var calls: Int = 0
+        private set
+
+    override suspend fun generate(request: ImageGenRequest): ImageGenResult {
+        calls += 1
+        lastRequest = request
+        val image = GeneratedImage(
+            pngBytes = bytesForCall(calls),
+            width = request.width,
+            height = request.height,
+        )
+        return ImageGenResult(
+            images = listOf(image),
+            provenance = GenerationProvenance(
+                providerId = providerId,
+                modelId = request.modelId,
+                modelVersion = fixedModelVersion,
+                seed = request.seed,
+                parameters = buildJsonObject {
+                    put("prompt", JsonPrimitive(request.prompt))
+                    put("call", JsonPrimitive(calls))
+                },
+                // Bumped per-call so two calls within the same fake instance
+                // never collide on createdAtEpochMs — useful for tests that
+                // sort lockfile entries by recency.
+                createdAtEpochMs = FAKE_PROVENANCE_EPOCH_MS + calls,
+            ),
+        )
+    }
+}
+
+/**
+ * Music-gen fake that emits the warmup callback pair (`Starting`
+ * → `Ready`) before returning. Use to exercise tools that thread
+ * provider warmup through `BusEvent.ProviderWarmup` — without this
+ * fake the warmup-event handlers can't be unit-tested without
+ * standing up HTTP mocks.
+ */
+class WarmingMusicGenEngine(
+    private val bytes: ByteArray,
+    override val providerId: String = "warming-fake-music",
+) : MusicGenEngine {
+    var lastRequest: MusicGenRequest? = null
+        private set
+    var calls: Int = 0
+        private set
+
+    override suspend fun generate(request: MusicGenRequest): MusicGenResult =
+        generate(request) { }
+
+    override suspend fun generate(
+        request: MusicGenRequest,
+        onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): MusicGenResult {
+        calls += 1
+        lastRequest = request
+        onWarmup(BusEvent.ProviderWarmup.Phase.Starting)
+        onWarmup(BusEvent.ProviderWarmup.Phase.Ready)
+        return MusicGenResult(
+            music = GeneratedMusic(
+                audioBytes = bytes,
+                format = request.format,
+                durationSeconds = request.durationSeconds,
+            ),
+            provenance = GenerationProvenance(
+                providerId = providerId,
+                modelId = request.modelId,
+                modelVersion = null,
+                seed = request.seed,
+                parameters = buildJsonObject { },
+                createdAtEpochMs = FAKE_PROVENANCE_EPOCH_MS,
+            ),
+        )
+    }
+}
+
+/**
+ * TTS fake that throws on every call — used to exercise tool-level
+ * fallback chains where the primary provider must fail before a
+ * secondary takes over. The `calls` counter still increments so
+ * tests can assert "primary was attempted exactly once".
+ */
+class FailingTtsEngine(
+    override val providerId: String,
+    private val message: String = "simulated provider outage",
+) : TtsEngine {
+    var calls: Int = 0
+        private set
+
+    override suspend fun synthesize(request: TtsRequest): TtsResult {
+        calls += 1
+        error("$providerId: $message")
     }
 }
 
