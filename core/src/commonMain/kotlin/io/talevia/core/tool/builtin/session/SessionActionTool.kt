@@ -499,38 +499,22 @@ class SessionActionTool(
 
     override val id: String = "session_action"
     override val helpText: String =
-        "Session lifecycle: `archive`/`unarchive` (idempotent), `rename`+`newTitle`, " +
-            "`delete`+required `sessionId` (irreversible), `remove_permission_rule`+" +
-            "(`permission`,`pattern`) drops a persisted Always rule, `import`+`envelope` " +
-            "materialises a previously-exported session (format `talevia-session-export-v1`; " +
-            "envelope's target projectId must already exist; refuses to overwrite an existing " +
-            "session id), `set_system_prompt`+`systemPromptOverride` swaps this session's " +
-            "system prompt without spinning up a second Agent (null=clear, empty string=valid " +
-            "no-prompt override), `export_bus_trace`+optional `format`/`limit` flushes the " +
-            "session's `BusEventTraceRecorder` ring buffer to JSONL (default) or JSON for " +
-            "offline triage, `set_tool_enabled`+`toolId`+`enabled` flips a tool in the " +
-            "session's `disabledToolIds` set (disabled tools are filtered from the next " +
-            "turn's tool spec — use to enforce 'stop using <tool>'; no-op when already in " +
-            "the requested state), `set_spend_cap`+`capCents` configures the AIGC spend " +
-            "cap (capCents=null clears, 0 blocks, positive = cents), `fork` branches the " +
-            "session — creates a new session with parentId pointing at the source, copies " +
-            "messages up to optional `anchorMessageId` (omit to copy whole history); use " +
-            "for 'try a different approach from here' flows. `newTitle` optional (defaults " +
-            "to '<parent title> (fork)'). `export`+optional `format`/`prettyPrint` serializes " +
-            "the session (metadata + every message + every part, including compacted) into " +
-            "a portable JSON envelope (`format=json`, default — pair with action=import for " +
-            "round-trip) or a human-readable markdown transcript (`format=markdown`, alias " +
-            "`md`). `revert`+`sessionId`+`anchorMessageId`+`projectId` DESTRUCTIVELY rewinds: " +
-            "deletes every message strictly after the anchor and rolls the project timeline " +
-            "back to the most recent `Part.TimelineSnapshot` at-or-before the anchor (no " +
-            "un-revert; pair with project_snapshot_action(action=save) for project-level " +
-            "safety nets). `compact`+optional `strategy` proactively triggers two-phase " +
-            "context compaction (the same Compactor the Agent runs automatically at the " +
-            "120k-token threshold); `strategy=prune_only` skips the LLM summary call (cheaper; " +
-            "right for tool-heavy sessions); default `summarize_and_prune` keeps current " +
-            "behaviour. sessionId defaults to owning session except on delete and import. " +
-            "Permission: session.write (delete=session.destructive, " +
-            "export/export_bus_trace=session.read)."
+        "Session lifecycle dispatcher (action=…). " +
+            "`archive` / `unarchive` (idempotent). " +
+            "`rename`+`newTitle`. " +
+            "`delete`+required `sessionId` (irreversible). " +
+            "`remove_permission_rule`+(`permission`,`pattern`). " +
+            "`import`+`envelope` (target projectId must exist; sessionId collision fails loud). " +
+            "`set_system_prompt`+`systemPromptOverride` (null=clear, \"\"=valid empty override). " +
+            "`export_bus_trace`+optional `format`(jsonl|json)/`limit`. " +
+            "`set_tool_enabled`+`toolId`+`enabled`. " +
+            "`set_spend_cap`+`capCents` (null=clear, 0=block, positive=cents). " +
+            "`fork`+optional `anchorMessageId`/`newTitle`. " +
+            "`export`+optional `format`(json|markdown)/`prettyPrint`. " +
+            "`revert`+`sessionId`+`anchorMessageId`+`projectId` (DESTRUCTIVE, no un-revert). " +
+            "`compact`+optional `strategy`(summarize_and_prune|prune_only). " +
+            "`sessionId` defaults to owning session except for delete/import. " +
+            "Permission: session.write (delete=session.destructive, export/export_bus_trace=session.read)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
 

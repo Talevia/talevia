@@ -212,44 +212,25 @@ class SessionQueryTool(
 
     override val id: String = "session_query"
     override val helpText: String =
-        "Unified read-only query over sessions + messages + parts + forks. " +
-            "All selects require sessionId except sessions / tool_spec_budget; " +
-            "select=message uses messageId instead. Filter-on-wrong-select fails loud. " +
-            "Common: limit (1..1000, default 100), offset. Picks one `select`:\n" +
-            "  • sessions — filter: projectId, includeArchived.\n" +
-            "  • messages — filter: role (user|assistant).\n" +
-            "  • parts — filter: kind (text|reasoning|tool|media|timeline-snapshot|" +
-            "render-progress|step-start|step-finish|compaction|todos), includeCompacted.\n" +
-            "  • forks — child sessions.\n" +
-            "  • ancestors — parent chain.\n" +
-            "  • tool_calls — filter: toolId, includeCompacted.\n" +
-            "  • compactions — Part.Compaction aggregate.\n" +
-            "  • status — agent run state: idle|generating|awaiting_tool|compacting|cancelled|failed.\n" +
-            "  • session_metadata — single-row drill-down.\n" +
-            "  • message — single-row + parts summary.\n" +
-            "  • spend — single-row AIGC cost.\n" +
-            "  • spend_summary — per-provider roll-up.\n" +
-            "  • context_pressure — current vs threshold token count.\n" +
-            "  • tool_spec_budget — registry-wide spec token estimate + topByTokens.\n" +
-            "  • run_failure — failed-turn post-mortem; optional messageId.\n" +
-            "  • fallback_history — turns with ≥1 provider fallback hop; optional messageId.\n" +
-            "  • cancellation_history — finish=CANCELLED turns; optional messageId.\n" +
-            "  • permission_history — Asked↔Replied round-trips.\n" +
-            "  • permission_rules — persisted Always-grant rules.\n" +
-            "  • preflight_summary — plan-time snapshot collapsing context_pressure + " +
-            "fallback + cancel + retry + pendingAsks.\n" +
-            "  • recap — orientation: turnCount, tokens, totalCost, distinctToolsUsed, lastModel.\n" +
-            "  • step_history — per-step timeline; optional messageId.\n" +
-            "  • active_run_summary — latest turn stats (state, elapsedMs, tokensIn/Out, " +
-            "toolCallCount, compactionsInRun).\n" +
-            "  • bus_trace — per-session bus event ring buffer {kind, epochMs, summary}; " +
-            "filters: kind (event class), sinceEpochMs.\n" +
-            "  • text_search — substring grep over Part.Text content {messageId, partId, " +
-            "snippet, matchOffset}; requires query, optional sessionId for scope.\n" +
-            "  • token_estimate — pre-compaction session-weight probe {messageCount, " +
-            "totalTokens, largestMessageTokens, breakdown?}. Heuristic via TokenEstimator " +
-            "(matches the compactor's trigger). includeBreakdown=true adds per-message rows " +
-            "(most-recent first); default terse."
+        "Read-only query over sessions / messages / parts / forks. " +
+            "Pick one `select`. `sessionId` required for all selects except sessions / tool_spec_budget; " +
+            "message uses messageId instead. Common: limit (1..1000, default 100), offset. " +
+            "Filter-on-wrong-select fails loud. Selects: " +
+            "sessions (projectId / includeArchived); " +
+            "messages (role=user|assistant); " +
+            "parts (kind in text|reasoning|tool|media|timeline-snapshot|render-progress|" +
+            "step-start|step-finish|compaction|todos / includeCompacted); " +
+            "forks; ancestors; tool_calls (toolId); compactions; " +
+            "status (idle|generating|awaiting_tool|compacting|cancelled|failed); " +
+            "session_metadata; message+messageId; spend / spend_summary; context_pressure; " +
+            "tool_spec_budget (registry token estimate + topByTokens); " +
+            "run_failure / fallback_history / cancellation_history (optional messageId); " +
+            "permission_history; permission_rules; " +
+            "preflight_summary (context_pressure + fallback + cancel + retry + pendingAsks roll-up); " +
+            "recap; step_history; active_run_summary; " +
+            "bus_trace (kind / sinceEpochMs filters); " +
+            "text_search+query (substring over Part.Text); " +
+            "token_estimate+optional includeBreakdown (pre-compaction weight)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("session.read")

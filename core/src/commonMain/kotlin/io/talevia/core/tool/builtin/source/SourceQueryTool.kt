@@ -163,36 +163,21 @@ class SourceQueryTool(
 
     override val id: String = "source_query"
     override val helpText: String =
-        "Unified read-only query over a project's Source DAG. Pick one `select`:\n" +
-            "  • nodes — rows: {id, kind, revision, contentHash, parentIds, summary, body?, " +
-            "snippet?, matchOffset?}. filter: kind, kindPrefix, contentSubstring " +
-            "(case-insensitive default), id (exact), hasParent. sortBy: id|kind|revision-desc. " +
-            "includeBody=true for full JSON. Default limit 100 (clamped 1..500).\n" +
-            "  • dag_summary — {nodeCount, nodesByKind, rootNodeIds, leafNodeIds, maxDepth, " +
-            "hotspots, orphanedNodeIds, summaryText}. filter: hotspotLimit (default 5).\n" +
-            "  • dot — whole DAG as Graphviz DOT (unbound-downstream nodes dashed). No filters.\n" +
-            "  • ascii_tree — whole DAG as an indented ASCII tree (box-drawing, orphan / dup " +
-            "markers). Dependency-free; reads straight in a terminal. No filters.\n" +
-            "  • orphans — rows: {id, kind, revision, parentCount, childCount}. Every node no " +
-            "clip binds to (same semantics as dag_summary.orphanedNodeIds). Sorted by id. " +
-            "No filters; dedicated to cleanup workflows.\n" +
-            "  • leaves — rows: {id, kind, revision, parentCount}. Every node with no children " +
-            "(downstream tip of a chain). Sorted by id. No filters; pairs with select=nodes&" +
-            "hasParent=false (roots) for the symmetric DAG-tip view.\n" +
-            "  • node_detail — single-row deep zoom on one node: {nodeId, kind, revision, " +
-            "contentHash, body, parentRefs (with kinds), children, boundClips (with directly " +
-            "flag), summary}. requires id. Use before editing a node to see exactly what it " +
-            "looks like and what depends on it.\n" +
-            "  • descendants — BFS downstream from root; rows carry depthFromRoot (0=root). " +
-            "requires root. Optional depth cap (null/negative=unbounded). Cycle-safe.\n" +
-            "  • ancestors — BFS upstream from root; same shape as descendants.\n" +
-            "  • history — past body snapshots overwritten by update_source_node_body, " +
-            "newest-first. requires root. Default limit 20. Empty set when the node never " +
-            "had its body updated.\n" +
-            "Common: projectId (required unless scope='all_projects'), limit, offset (nodes/" +
-            "descendants/ancestors/history only; history ignores offset). scope='all_projects' " +
-            "(select=nodes only) enumerates every project and tags rows with projectId. Filter-" +
-            "on-wrong-select fails loud."
+        "Read-only query over a project's Source DAG. Pick one `select`. " +
+            "Common: `projectId` (required unless scope='all_projects'); limit, offset " +
+            "(paginated selects only). Filter-on-wrong-select fails loud. Selects: " +
+            "nodes (filter kind/kindPrefix/contentSubstring/id/hasParent; sortBy id|kind|" +
+            "revision-desc; includeBody=true for full JSON; default limit 100, clamped 1..500); " +
+            "dag_summary (filter hotspotLimit, default 5); " +
+            "dot (whole DAG as Graphviz DOT, orphans dashed); " +
+            "ascii_tree (whole DAG as box-drawing tree); " +
+            "orphans (every node no clip binds to); " +
+            "leaves (every node with no children); " +
+            "node_detail+id (deep zoom: body, parentRefs with kinds, children, boundClips); " +
+            "descendants+root (BFS downstream, optional depth cap, cycle-safe); " +
+            "ancestors+root (BFS upstream); " +
+            "history+root (past body snapshots, newest-first, default limit 20). " +
+            "scope='all_projects' (select=nodes only) enumerates every project, tags rows with projectId."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.read")
