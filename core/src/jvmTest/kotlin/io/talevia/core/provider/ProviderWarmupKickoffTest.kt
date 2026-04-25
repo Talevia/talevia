@@ -3,21 +3,25 @@ package io.talevia.core.provider
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.take
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
-import kotlinx.coroutines.yield
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
-import kotlinx.coroutines.launch as kxLaunch
 
 /**
  * Coverage for [kickoffEagerProviderWarmup] — the container-init
@@ -51,11 +55,13 @@ class ProviderWarmupKickoffTest {
             val provider = FakeProvider("anthropic-fake") { emptyList() }
             val registry = ProviderRegistry(byId = mapOf("anthropic-fake" to provider), default = provider)
             val bus = EventBus()
-            val captured = java.util.concurrent.CopyOnWriteArrayList<BusEvent.ProviderWarmup>()
 
-            // Subscribe before kickoff so we don't miss events.
-            val collectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-            val collectJob = collectorScope.collectorLaunch(captured, bus)
+            // Barrier-based: subscribe with `take(2).toList()` so the
+            // collector completes deterministically once 2 events arrive
+            // — no busy-yield against `Dispatchers.Default` queue depth.
+            // Replaces the cycle-115 yield-loop that flaked at 5s on
+            // loaded CI runners (`debt-flaky-provider-warmup-test`).
+            val collected = collectWarmupEvents(bus, expected = 2)
 
             kickoffEagerProviderWarmup(
                 providers = registry,
@@ -63,10 +69,7 @@ class ProviderWarmupKickoffTest {
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
             )
 
-            withTimeout(5.seconds) {
-                while (captured.size < 2) yield()
-            }
-            collectJob.cancel()
+            val captured = withTimeout(5.seconds) { collected.await() }
 
             // Both events fired in order, scoped to the eager session.
             assertEquals(2, captured.size, "expected Starting + Ready")
@@ -83,10 +86,13 @@ class ProviderWarmupKickoffTest {
             val provider = FakeProvider("openai-fake") { error("auth failed") }
             val registry = ProviderRegistry(byId = mapOf("openai-fake" to provider), default = provider)
             val bus = EventBus()
-            val captured = java.util.concurrent.CopyOnWriteArrayList<BusEvent.ProviderWarmup>()
 
-            val collectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-            val collectJob = collectorScope.collectorLaunch(captured, bus)
+            // Barrier 1: take(1) blocks until Starting arrives.
+            val starting = collectWarmupEvents(bus, expected = 1)
+            // Barrier 2: try to collect 2 events with a short window —
+            // expected to time out (no Ready ever arrives). Bounded
+            // negative-evidence wait replaces the yield-10-times probe.
+            val phantomReady = collectWarmupEvents(bus, expected = 2)
 
             kickoffEagerProviderWarmup(
                 providers = registry,
@@ -94,18 +100,20 @@ class ProviderWarmupKickoffTest {
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
             )
 
-            // Wait long enough for the listModels failure to settle.
-            // Starting still fires before listModels; Ready does NOT.
-            withTimeout(5.seconds) {
-                while (captured.firstOrNull()?.phase != BusEvent.ProviderWarmup.Phase.Starting) yield()
-            }
-            // Yield more rounds to give a (non-existent) Ready a chance.
-            repeat(10) { yield() }
-            collectJob.cancel()
+            val firstPair = withTimeout(5.seconds) { starting.await() }
+            // Negative-evidence: 200ms is plenty for a phantom Ready —
+            // Starting fires synchronously inside the launched coroutine,
+            // then listModels throws immediately on the next dispatch.
+            // If Ready was going to fire it would have within 200ms.
+            val excessEvents = withTimeoutOrNull(200.milliseconds) { phantomReady.await() }
+            assertNull(excessEvents, "Ready must not arrive when listModels throws")
+            // Cancel the still-running phantom collector to avoid a
+            // background coroutine that outlives this test.
+            phantomReady.cancel()
 
-            assertEquals(1, captured.size, "only Starting; failure suppresses Ready")
-            assertEquals(BusEvent.ProviderWarmup.Phase.Starting, captured.single().phase)
-            assertEquals("openai-fake", captured.single().providerId)
+            assertEquals(1, firstPair.size, "only Starting; failure suppresses Ready")
+            assertEquals(BusEvent.ProviderWarmup.Phase.Starting, firstPair.single().phase)
+            assertEquals("openai-fake", firstPair.single().providerId)
             // The agent loop's normal retry path covers a real first-call;
             // we only verify the kickoff itself didn't crash.
             assertEquals(1, provider.listModelsCallCount)
@@ -115,10 +123,11 @@ class ProviderWarmupKickoffTest {
     @Test fun emptyRegistryEmitsNothing() = runTest {
         val registry = ProviderRegistry(byId = emptyMap(), default = null)
         val bus = EventBus()
-        val captured = java.util.concurrent.CopyOnWriteArrayList<BusEvent.ProviderWarmup>()
 
-        val collectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val collectJob = collectorScope.collectorLaunch(captured, bus)
+        // Negative-evidence test — expect zero events. take(1).toList()
+        // would never complete on its own, so wrap in withTimeoutOrNull
+        // to get a bounded null on the empty-registry happy path.
+        val collected = collectWarmupEvents(bus, expected = 1)
 
         kickoffEagerProviderWarmup(
             providers = registry,
@@ -126,10 +135,12 @@ class ProviderWarmupKickoffTest {
             scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
         )
 
-        repeat(20) { yield() }
-        collectJob.cancel()
-
-        assertEquals(0, captured.size, "empty registry should fire no events")
+        // 200ms is plenty: kickoff returns synchronously (it just
+        // launches per-provider coroutines), and an empty registry
+        // launches none. If we don't see an event by then, we won't.
+        val phantom = withTimeoutOrNull(200.milliseconds) { collected.await() }
+        collected.cancel()
+        assertNull(phantom, "empty registry should fire no events")
     }
 
     @Test fun twoProvidersWarmInParallelBothEmitReady() = runTest {
@@ -138,10 +149,9 @@ class ProviderWarmupKickoffTest {
             val b = FakeProvider("b") { emptyList() }
             val registry = ProviderRegistry(byId = mapOf("a" to a, "b" to b), default = a)
             val bus = EventBus()
-            val captured = java.util.concurrent.CopyOnWriteArrayList<BusEvent.ProviderWarmup>()
 
-            val collectorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-            val collectJob = collectorScope.collectorLaunch(captured, bus)
+            // 4 events total: each provider emits Starting + Ready.
+            val collected = collectWarmupEvents(bus, expected = 4)
 
             kickoffEagerProviderWarmup(
                 providers = registry,
@@ -149,10 +159,7 @@ class ProviderWarmupKickoffTest {
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
             )
 
-            withTimeout(5.seconds) {
-                while (captured.count { it.phase == BusEvent.ProviderWarmup.Phase.Ready } < 2) yield()
-            }
-            collectJob.cancel()
+            val captured = withTimeout(5.seconds) { collected.await() }
 
             // Both providers got a Starting + Ready pair (4 total events).
             val byProvider = captured.groupBy { it.providerId }
@@ -164,11 +171,26 @@ class ProviderWarmupKickoffTest {
             }
         }
     }
-}
 
-private fun CoroutineScope.collectorLaunch(
-    captured: MutableList<BusEvent.ProviderWarmup>,
-    bus: EventBus,
-): Job = kxLaunch {
-    bus.events.filterIsInstance<BusEvent.ProviderWarmup>().collect { captured += it }
+    /**
+     * Subscribe to the bus on a fresh `Dispatchers.Default` scope and
+     * collect the first [expected] `ProviderWarmup` events into a list.
+     * The returned Deferred completes deterministically once that many
+     * events have been seen (or with the partial list if cancelled).
+     *
+     * Replaces the cycle-115 yield-loop pattern (`while (captured.size
+     * < N) yield()`) which raced against `Dispatchers.Default` queue
+     * depth on loaded CI runners — see `debt-flaky-provider-warmup-test`.
+     * `Flow.take(N).toList()` completes structurally on the Nth emit;
+     * no busy polling, no dispatcher dependency.
+     *
+     * Caller MUST `withTimeout(...)` the await so the test fails loud
+     * if the expected events never arrive.
+     */
+    private fun CoroutineScope.collectWarmupEvents(
+        bus: EventBus,
+        expected: Int,
+    ): Deferred<List<BusEvent.ProviderWarmup>> = async(Dispatchers.Default) {
+        bus.events.filterIsInstance<BusEvent.ProviderWarmup>().take(expected).toList()
+    }
 }
