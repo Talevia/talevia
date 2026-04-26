@@ -45,6 +45,8 @@ internal class SlashCommandDispatcher(
         onSwitchSession: (SessionId) -> Unit,
         currentModel: String,
         onSwitchModel: (String) -> Unit,
+        currentEffort: String? = null,
+        onSwitchEffort: (String?) -> Unit = {},
     ): Outcome {
         val body = raw.removePrefix("/")
         val parts = body.split(Regex("\\s+"), limit = 2)
@@ -99,16 +101,7 @@ internal class SlashCommandDispatcher(
                     }
                 }
             }
-            "model" -> {
-                if (args.isBlank()) {
-                    renderer.println("${Styles.meta("current:")} ${container.providers.default!!.id}/$currentModel")
-                } else {
-                    onSwitchModel(args)
-                    renderer.println(
-                        "${Styles.ok("✓")} model=${container.providers.default!!.id}/$args ${Styles.meta("(takes effect next turn)")}",
-                    )
-                }
-            }
+            "model" -> handleModel(args, currentModel, currentEffort, onSwitchModel, onSwitchEffort)
             "cost" -> renderer.println(costSummary(currentSession))
             "spend" -> renderer.println(spendSummary(currentSession))
             "metrics" -> renderer.println(metricsSummary())
@@ -808,6 +801,112 @@ internal class SlashCommandDispatcher(
         val cents = Math.round(asDouble * 100.0)
         return cents
     }
+
+    /**
+     * `/model` with no args opens an arrow-key menu of every model the active
+     * provider advertises; on a reasoning model (anything `supportsThinking`)
+     * a follow-up menu picks the reasoning effort. The single-arg form
+     * `/model <id>` keeps the old shortcut so muscle memory + tab completion
+     * still work.
+     */
+    private suspend fun handleModel(
+        args: String,
+        currentModel: String,
+        currentEffort: String?,
+        onSwitchModel: (String) -> Unit,
+        onSwitchEffort: (String?) -> Unit,
+    ) {
+        val provider = container.providers.default
+        if (provider == null) {
+            renderer.println(Styles.meta("/model: no provider registered"))
+            return
+        }
+
+        if (args.isNotBlank()) {
+            // Backward-compat shortcut form: /model <id> just sets the id and
+            // leaves reasoning effort untouched.
+            onSwitchModel(args)
+            renderer.println(
+                "${Styles.ok("✓")} model=${provider.id}/$args ${Styles.meta("(takes effect next turn)")}",
+            )
+            return
+        }
+
+        val models = runCatching { provider.listModels() }.getOrElse { e ->
+            renderer.println(Styles.meta("/model: listModels() failed: ${e.message}"))
+            return
+        }
+        if (models.isEmpty()) {
+            renderer.println(Styles.meta("/model: provider ${provider.id} reports no models — type `/model <id>` to set one anyway"))
+            return
+        }
+
+        val initialIndex = models.indexOfFirst { it.id == currentModel }.coerceAtLeast(0)
+        val title = Styles.meta("Pick a model for ${provider.id}  ") +
+            Styles.meta("(↑/↓ navigate · enter pick · esc cancel)")
+        val pickedModel = ArrowMenu.pick(
+            terminal = terminal,
+            title = title,
+            items = models,
+            initialIndex = initialIndex,
+            renderRow = ArrowMenu.RowFormatter { m, _, selected ->
+                val tag = when {
+                    m.id == currentModel -> Styles.meta(" (current)")
+                    else -> ""
+                }
+                val ctx = Styles.meta(" · ctx ${m.contextWindow / 1000}k")
+                val nameCol = "${m.id} — ${m.name}".padEnd(36)
+                if (selected) "  ${Styles.ok("›")} ${Styles.accent(nameCol)}$ctx$tag"
+                else "    $nameCol$ctx$tag"
+            },
+        )
+        if (pickedModel == null) {
+            renderer.println(Styles.meta("/model: cancelled"))
+            return
+        }
+        onSwitchModel(pickedModel.id)
+
+        // Reasoning effort only applies to thinking-capable models. Non-reasoning
+        // models (gpt-4o, etc) skip straight to the confirmation print.
+        if (!pickedModel.supportsThinking) {
+            renderer.println(
+                "${Styles.ok("✓")} model=${provider.id}/${pickedModel.id} ${Styles.meta("(takes effect next turn)")}",
+            )
+            return
+        }
+
+        val effortChoices = listOf(
+            EffortChoice(null, "default", "let the backend pick the per-model default"),
+            EffortChoice("low", "low", "fast responses, lighter reasoning"),
+            EffortChoice("medium", "medium", "balanced — standard everyday tasks"),
+            EffortChoice("high", "high", "deeper reasoning for complex problems"),
+            EffortChoice("xhigh", "xhigh", "extra-deep reasoning, slowest"),
+        )
+        val effortInitial = effortChoices.indexOfFirst { it.value == currentEffort }.coerceAtLeast(0)
+        val effortTitle = Styles.meta("Reasoning effort for ${pickedModel.id}  ") +
+            Styles.meta("(↑/↓ · enter · esc keeps current)")
+        val pickedEffort = ArrowMenu.pick(
+            terminal = terminal,
+            title = effortTitle,
+            items = effortChoices,
+            initialIndex = effortInitial,
+            renderRow = ArrowMenu.RowFormatter { c, _, selected ->
+                val tag = if (c.value == currentEffort) Styles.meta(" (current)") else ""
+                val nameCol = c.label.padEnd(10)
+                val desc = Styles.meta("· ${c.description}")
+                if (selected) "  ${Styles.ok("›")} ${Styles.accent(nameCol)} $desc$tag"
+                else "    $nameCol $desc$tag"
+            },
+        )
+        if (pickedEffort != null) onSwitchEffort(pickedEffort.value)
+        val effortLabel = pickedEffort?.label ?: (currentEffort ?: "default")
+        renderer.println(
+            "${Styles.ok("✓")} model=${provider.id}/${pickedModel.id} · reasoning=$effortLabel " +
+                Styles.meta("(takes effect next turn)"),
+        )
+    }
+
+    private data class EffortChoice(val value: String?, val label: String, val description: String)
 
     /**
      * `/login <provider>` — currently only `openai-codex` is supported. Drives

@@ -80,6 +80,10 @@ class Repl(
         val bootstrapResult = bootstrapSession(container.sessions, projectId, bootstrapMode)
         var sessionId = bootstrapResult.sessionId
         var modelId = defaultModelFor(provider.id)
+        // Reasoning effort sticks per-REPL-session — null means "let backend pick
+        // the per-model default" (some Codex models default to xhigh, others to
+        // medium). User overrides via the second pane of the `/model` menu.
+        var reasoningEffort: String? = null
         println(
             Styles.meta(
                 "project=${projectId.value.take(8)} · session=${sessionId.value.take(8)} " +
@@ -184,6 +188,8 @@ class Repl(
                         onSwitchSession = { sessionId = it },
                         currentModel = modelId,
                         onSwitchModel = { modelId = it },
+                        currentEffort = reasoningEffort,
+                        onSwitchEffort = { reasoningEffort = it },
                     )
                     if (outcome == SlashCommandDispatcher.Outcome.EXIT) break
                     continue
@@ -201,6 +207,9 @@ class Repl(
                                 text = trimmed,
                                 model = ModelRef(provider.id, modelId),
                                 permissionRules = container.permissionRules.toList(),
+                                options = io.talevia.core.provider.ProviderOptions(
+                                    openaiReasoningEffort = reasoningEffort,
+                                ),
                             ),
                         )
                         turnAssistant = assistant

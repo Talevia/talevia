@@ -44,11 +44,13 @@ internal fun buildResponsesApiBody(
     put("prompt_cache_key", sessionId)
     // Every currently-listed Codex backend model is a reasoning model
     // (see codex-rs/models-manager/models.json). Always send a `reasoning`
-    // block — the backend rejects requests on these slugs when it's absent.
-    // Effort comes from ProviderOptions when set, falls back to "medium".
-    // Summary stays "auto" so reasoning_text deltas stream into our SseParser.
+    // block — keeping `summary: auto` makes reasoning_text events stream into
+    // our SseParser. `effort` is only included when the caller explicitly set
+    // it via ProviderOptions; omitting it lets the backend apply the model's
+    // per-slug default (gpt-5.4 → xhigh, others → medium), which is what the
+    // /model menu's "default" choice signals.
     putJsonObject("reasoning") {
-        put("effort", normalizeEffort(request.options.openaiReasoningEffort) ?: "medium")
+        normalizeEffort(request.options.openaiReasoningEffort)?.let { put("effort", it) }
         put("summary", "auto")
     }
 }
@@ -56,7 +58,8 @@ internal fun buildResponsesApiBody(
 /**
  * Coerce [ProviderOptions.openaiReasoningEffort] (free-form string) to one of
  * the values Codex backend accepts: `none / minimal / low / medium / high / xhigh`.
- * Unknown values map to null so the caller can fall back to "medium".
+ * Unknown values map to null so the caller falls through to the backend's
+ * per-model default.
  */
 private fun normalizeEffort(raw: String?): String? {
     val v = raw?.trim()?.lowercase() ?: return null
