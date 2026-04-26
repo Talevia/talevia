@@ -47,6 +47,7 @@ import io.talevia.core.provider.openai.OpenAiWhisperEngine
 import io.talevia.core.provider.replicate.ReplicateMusicGenEngine
 import io.talevia.core.provider.replicate.ReplicateUpscaleEngine
 import io.talevia.core.provider.tavily.TavilySearchEngine
+import io.talevia.core.provider.volcano.SeedanceVideoGenEngine
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.registerAigcTools
@@ -180,9 +181,14 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
     val tts: TtsEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiTtsEngine(httpClient, it) }
 
-    /** Sora-backed text-to-video engine, gated on the same `OPENAI_API_KEY`. */
-    val videoGen: VideoGenEngine? = providerAuth.apiKey("openai")
-        ?.let { OpenAiSoraVideoGenEngine(httpClient, it) }
+    /**
+     * Text-to-video engine. Volcano-Engine Seedance (`ARK_API_KEY`) is
+     * preferred; falls back to OpenAI Sora (`OPENAI_API_KEY`). Two prod
+     * impls satisfy M2 criterion 2 (provider 多元).
+     */
+    val videoGen: VideoGenEngine? =
+        providerAuth.apiKey("volcano")?.let { SeedanceVideoGenEngine(httpClient, it) }
+            ?: providerAuth.apiKey("openai")?.let { OpenAiSoraVideoGenEngine(httpClient, it) }
 
     /** Vision-describe engine for the ML lane, gated on the same `OPENAI_API_KEY`. */
     val vision: VisionEngine? = providerAuth.apiKey("openai")

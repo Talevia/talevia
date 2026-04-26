@@ -73,6 +73,7 @@ class EnvProviderAuth(
             "google" to listOf("GEMINI_API_KEY", "GOOGLE_API_KEY"),
             "replicate" to listOf("REPLICATE_API_TOKEN"),
             "tavily" to listOf("TAVILY_API_KEY"),
+            "volcano" to listOf("ARK_API_KEY"),
         )
     }
 }

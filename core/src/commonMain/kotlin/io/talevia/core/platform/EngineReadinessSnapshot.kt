@@ -38,9 +38,29 @@ fun buildEngineReadinessSnapshot(
             wired = engine != null,
             missingEnvVar = if (engine != null) null else envVar,
         )
+    // video_gen has two prod impls (openai Sora + volcano-seedance). When
+    // wired, label the row with the actual providerId we picked so the
+    // agent can tell whose pricing / capabilities it's about to hit. When
+    // not wired, list both env-var options so a user setting either one
+    // unlocks the slot.
+    val videoGenRow = if (videoGen != null) {
+        EngineReadinessRow(
+            engineKind = "video_gen",
+            providerId = videoGen.providerId,
+            wired = true,
+            missingEnvVar = null,
+        )
+    } else {
+        EngineReadinessRow(
+            engineKind = "video_gen",
+            providerId = "openai|volcano-seedance",
+            wired = false,
+            missingEnvVar = "ARK_API_KEY or OPENAI_API_KEY",
+        )
+    }
     return listOf(
         row("image_gen", "openai", imageGen, "OPENAI_API_KEY"),
-        row("video_gen", "openai", videoGen, "OPENAI_API_KEY"),
+        videoGenRow,
         row("tts", "openai", tts, "OPENAI_API_KEY"),
         row("asr", "openai", asr, "OPENAI_API_KEY"),
         row("vision", "openai", vision, "OPENAI_API_KEY"),

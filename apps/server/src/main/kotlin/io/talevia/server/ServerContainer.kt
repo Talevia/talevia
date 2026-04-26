@@ -50,6 +50,7 @@ import io.talevia.core.provider.openai.OpenAiWhisperEngine
 import io.talevia.core.provider.replicate.ReplicateMusicGenEngine
 import io.talevia.core.provider.replicate.ReplicateUpscaleEngine
 import io.talevia.core.provider.tavily.TavilySearchEngine
+import io.talevia.core.provider.volcano.SeedanceVideoGenEngine
 import io.talevia.core.session.SessionStore
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
@@ -235,12 +236,15 @@ class ServerContainer(
         ?.let { OpenAiTtsEngine(httpClient, it) }
 
     /**
-     * Sora-backed text-to-video engine. Same conditional pattern — present only
-     * when `OPENAI_API_KEY` is set; deployments without it don't expose
-     * `generate_video`.
+     * Text-to-video engine. Two prod impls (M2 criterion 2 — provider 多元):
+     * Volcano-Engine Seedance via `ARK_API_KEY` (preferred), falling back to
+     * OpenAI Sora via `OPENAI_API_KEY`. Deployments with neither key don't
+     * expose `generate_video`. `ARK_SEEDANCE_MODEL` overrides Seedance's
+     * default `doubao-seedance-2-0-260128` model id.
      */
-    val videoGen: VideoGenEngine? = providerAuth.apiKey("openai")
-        ?.let { OpenAiSoraVideoGenEngine(httpClient, it) }
+    val videoGen: VideoGenEngine? =
+        providerAuth.apiKey("volcano")?.let { SeedanceVideoGenEngine(httpClient, it) }
+            ?: providerAuth.apiKey("openai")?.let { OpenAiSoraVideoGenEngine(httpClient, it) }
 
     /**
      * Vision-describe engine for the ML lane. Same conditional pattern; headless

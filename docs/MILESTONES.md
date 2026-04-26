@@ -39,12 +39,15 @@ bullet 打 tag；现有 bullet 不手动 backfill。
   查 lockfile 里能找到对应 entry" 的 round-trip
   （grep: `class LockfileEntry` 在 `core/domain/lockfile/`；e2e test 带
   `project.lockfile.entries` 断言） — cycle 2026-04-24 3fde671a
-- [ ] Provider 多元：`ImageGenEngine` / `VideoGenEngine` / `MusicGenEngine` /
+- [x] Provider 多元：`ImageGenEngine` / `VideoGenEngine` / `MusicGenEngine` /
   `TtsEngine` **至少一个**长出第二个非 stub impl，证明 provider 抽象真的
   是 provider-agnostic 而非 replicate-hardcoded（grep: `class .* :
   ImageGenEngine` 或同类 interface 的 prod 实现在
   `core/src/*Main/` 或 `platform-impls/*/src/main/` 下计数 ≥ 2；
-  `AgentProviderFallbackTracker` 有真实 chain 可填）
+  `AgentProviderFallbackTracker` 有真实 chain 可填） — cycle 2026-04-26
+  **此 commit**（`SeedanceVideoGenEngine` 接 Volcano Engine ARK 作为
+  `VideoGenEngine` 的第二 prod impl，`OpenAiSoraVideoGenEngine` 之外的
+  非 stub fallback；`ARK_API_KEY` 触发，三个 JVM container 均已 wire）
 - [x] Pin 命中率可见：`project_query` 有 select 答 "export 了几次、有多少
   clip 的 asset 从 lockfile cache 命中（无需重跑 AIGC）"
   （grep: 新 select 如 `lockfile_cache_stats` / `pin_hit_rate` 在
@@ -71,20 +74,22 @@ bullet 打 tag；现有 bullet 不手动 backfill。
 
 ### M2 exit summary
 
-M2 关起门来证明了**AIGC 驯服产品化的 5/7 轴已落地**：lockfile 完整性
-(criterion 1, 3fde671a / c30ecbb1) + pin 命中率可见 (criterion 3, 08223ac3)
-+ 成本可见 (criterion 4, 7862ce7d) + fallback 生产回归测试 (criterion 5,
-c3bad022) + seed 复现证明 (criterion 6, e1adea8f)。这五条是 "AIGC 从黑盒
-变 deterministic compiler" 的工程学基石。
+M2 关起门来证明了**AIGC 驯服产品化的 6/6 实质轴 + 1 manual exit 全部
+落地**：lockfile 完整性 (criterion 1, 3fde671a / c30ecbb1) + provider
+多元 (criterion 2, 此 commit — `SeedanceVideoGenEngine` 解锁 ByteDance
+Seedance via Volcano Engine ARK，`VideoGenEngine` 现有 2 个 prod impl) +
+pin 命中率可见 (criterion 3, 08223ac3) + 成本可见 (criterion 4, 7862ce7d)
++ fallback 生产回归测试 (criterion 5, c3bad022) + seed 复现证明
+(criterion 6, e1adea8f)。这六条是 "AIGC 从黑盒变 deterministic compiler"
+的工程学基石。
 
-**criterion 2（provider 多元）依旧 `[ ]`，M2 stalls at 6/7 pending user
-unblock**。ImageGen / VideoGen / MusicGen / TtsEngine 产品路径除 Replicate
-外零非-stub 第二 impl。上手需要 vendor 选型（OpenAI DALL-E / Anthropic 未
-公开 / Stable Diffusion self-hosted / ElevenLabs 等）+ 专有 API key，零提问
-约束禁止自选——等用户把 vendor 决策和 key 拿进来再激活
-(`m2-provider-second-impl` P1 bullet 仍在 queue skip-tagged)。这是 milestone
-机制下的诚实状态：auto-promote 不会触发，M2 永远保留为 "5 done + 1 ticked
-exit + 1 blocked" 的形状直到用户解锁。
+**M2 7/7 全勾 → 触发 §M.3 auto-promote 到 M3**。下一次 `iterate-gap §M`
+cycle 会按照 milestone 机制把本 block 移入 `## Completed — M2 (2026-04-26)`
+段、起草 M3 (§4 小白路径 e2e) 的 criteria 并把 `> Current:` pointer
+从 M2 翻到 M3。本次 user-driven commit 只完成 criterion tick + exit
+summary 更新，不抢先起草 M3 criteria（避免和 iterate-gap 自动起草
+逻辑冲突；§M.5 的 "和触发该 promotion 的 feat commit 同 commit 落盘"
+约束在 user-driven 解 block 场景下让位于职责边界）。
 
 **§3.1 完整愿景里 M2+ 接力的 gap**（超出本 milestone 的工程学跑道，列给
 M3 / M4 / 未来 M）：
@@ -112,7 +117,8 @@ M3 / M4 / 未来 M）：
    bullet 可能要 `lockfile.jsonl` 分文件 + 增量加载。
 
 前四条都指向 M3/M4/M5 的不同赌注；第五条是 §5.7 perf 轴的独立 backlog
-项。M2 至此可以"功能上 ready，产品层等 vendor 选型"。
+项。M2 至此**功能上 + 产品上均 ready** — 第二 video provider 已选型 +
+落地（Seedance / `ARK_API_KEY`）。
 
 ### 亚军 milestones（未正式启动，仅作排序参考）
 

@@ -49,6 +49,7 @@ import io.talevia.core.provider.openai.OpenAiWhisperEngine
 import io.talevia.core.provider.replicate.ReplicateMusicGenEngine
 import io.talevia.core.provider.replicate.ReplicateUpscaleEngine
 import io.talevia.core.provider.tavily.TavilySearchEngine
+import io.talevia.core.provider.volcano.SeedanceVideoGenEngine
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.registerAigcTools
@@ -264,8 +265,11 @@ class CliContainer(env: Map<String, String> = System.getenv()) {
     val tts: TtsEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiTtsEngine(httpClient, it) }
 
-    val videoGen: VideoGenEngine? = providerAuth.apiKey("openai")
-        ?.let { OpenAiSoraVideoGenEngine(httpClient, it) }
+    // Seedance via ARK_API_KEY preferred (M2 criterion 2 — second prod impl);
+    // fallback to OpenAI Sora when only OPENAI_API_KEY is set.
+    val videoGen: VideoGenEngine? =
+        providerAuth.apiKey("volcano")?.let { SeedanceVideoGenEngine(httpClient, it) }
+            ?: providerAuth.apiKey("openai")?.let { OpenAiSoraVideoGenEngine(httpClient, it) }
 
     val vision: VisionEngine? = providerAuth.apiKey("openai")
         ?.let { OpenAiVisionEngine(httpClient, it) }
