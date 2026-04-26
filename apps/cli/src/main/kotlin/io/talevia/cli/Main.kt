@@ -18,9 +18,17 @@ import java.io.File
 import kotlin.system.exitProcess
 
 private class TaleviaCli : CliktCommand(name = "talevia") {
+    /**
+     * Opt back into the prior auto-resume default. Without any flag the CLI
+     * starts a fresh session every launch — that surprised users who came back
+     * the next day expecting a clean slate but instead landed mid-conversation
+     * in a stale context. `--resume` (alias `-r`) brings the old "pick up
+     * where I left off" behaviour back on demand.
+     */
     private val resume by option(
         "--resume",
-        help = "Resume the most recently updated session (alias for the default auto-resume behavior; kept for backward compat).",
+        "-r",
+        help = "Resume the most recently updated session in the project.",
     ).flag()
 
     /**
@@ -34,13 +42,13 @@ private class TaleviaCli : CliktCommand(name = "talevia") {
     ).default("")
 
     /**
-     * Force a brand-new session regardless of project history. The opposite of
-     * the default auto-resume; useful when the user explicitly wants a clean
-     * slate without archiving the previous session.
+     * Force a brand-new session even when a prior `--resume`-able session
+     * exists. Same effect as the no-flag default; kept so scripts that
+     * explicitly opt into "clean slate" stay self-documenting.
      */
     private val forceNew by option(
         "--new",
-        help = "Start a fresh session even if the project has prior non-archived sessions.",
+        help = "Start a fresh session (default; explicit form for clarity in scripts).",
     ).flag()
 
     override fun run() {
@@ -176,11 +184,12 @@ private fun parseSessionOption(rest: List<String>): String {
 /**
  * Collapse the three CLI boot flags into a single [BootstrapMode]. Precedence
  * (strongest first): `--new` > `--session=<prefix>` > `--resume` > default
- * auto-resume. `--resume` is back-compat (the default already auto-resumes),
- * but we still honor it — users who scripted `talevia --resume` see no
- * regression. When someone passes two flags that disagree (e.g. `--new` +
- * `--session=...`) the "stronger" one wins rather than erroring — easier to
- * reason about in shell pipelines than a Clikt-level conflict.
+ * fresh session. The default flipped from auto-resume → fresh because
+ * launching the CLI hours later and silently picking up a stale conversation
+ * surprised users; resuming is now explicit (`--resume` / `-r` /
+ * `--session=<prefix>`). When someone passes two flags that disagree (e.g.
+ * `--new` + `--session=...`) the "stronger" one wins rather than erroring —
+ * easier to reason about in shell pipelines than a Clikt-level conflict.
  */
 internal fun resolveBootstrapMode(
     resume: Boolean,
@@ -189,9 +198,8 @@ internal fun resolveBootstrapMode(
 ): BootstrapMode = when {
     forceNew -> BootstrapMode.ForceNew
     sessionPrefix.isNotBlank() -> BootstrapMode.ByPrefix(sessionPrefix)
-    // `--resume` and "no flag" both map to Auto — by design (see KDoc on
-    // [TaleviaCli.resume]).
-    else -> BootstrapMode.Auto
+    resume -> BootstrapMode.Auto
+    else -> BootstrapMode.ForceNew
 }
 
 /**

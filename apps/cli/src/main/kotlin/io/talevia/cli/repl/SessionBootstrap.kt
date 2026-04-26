@@ -39,7 +39,7 @@ data class BootstrapResult(
     val sessionId: SessionId,
     /**
      * "resumed", "fresh (no prior sessions)", "fresh (prefix not found)",
-     * "fresh (--new)", "resumed by prefix". Surfaced in the startup banner so
+     * "fresh", "resumed by prefix". Surfaced in the startup banner so
      * the user can tell at a glance whether they landed on an existing
      * session or a new one.
      */
@@ -88,7 +88,7 @@ suspend fun bootstrapSession(
     }
 
     return when (mode) {
-        is BootstrapMode.ForceNew -> fresh("fresh (--new)")
+        is BootstrapMode.ForceNew -> fresh("fresh")
         is BootstrapMode.ByPrefix -> {
             val prefix = mode.prefix.trim()
             if (prefix.isBlank()) return fresh("fresh (empty --session prefix)")

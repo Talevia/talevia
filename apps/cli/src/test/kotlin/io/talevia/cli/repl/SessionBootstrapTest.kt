@@ -62,29 +62,41 @@ class SessionBootstrapTest {
     }
 
     @Test fun resumeFlagMapsToAuto() {
-        // --resume is an alias for the default — mapping it to Auto keeps the
-        // single-path behavior regardless of whether the user typed --resume
-        // or nothing.
+        // --resume is the explicit opt-in to the "pick up where I left off"
+        // path — without it (and without --session) the CLI starts fresh.
         assertEquals(
             BootstrapMode.Auto,
             resolveBootstrapMode(resume = true, sessionPrefix = "", forceNew = false),
         )
     }
 
-    @Test fun noFlagsMapsToAuto() {
+    @Test fun noFlagsMapsToForceNew() {
+        // Default flipped from Auto → ForceNew (commit cycle "default fresh
+        // session"): a no-flag launch should drop the user into a clean
+        // session rather than silently resume a possibly-stale chat from
+        // hours/days ago.
         assertEquals(
-            BootstrapMode.Auto,
+            BootstrapMode.ForceNew,
             resolveBootstrapMode(resume = false, sessionPrefix = "", forceNew = false),
         )
     }
 
-    @Test fun blankSessionPrefixFallsThroughToAuto() {
-        // `--session=""` (empty) should not be treated as a pick — just fall
-        // back to Auto. The resolver keeps the explicit-ByPrefix path for
-        // non-blank prefixes only.
+    @Test fun blankSessionPrefixFallsThroughToFresh() {
+        // `--session=""` (empty / whitespace) shouldn't be treated as a pick.
+        // It falls through to whatever the other flags say — here, no other
+        // flag set, so the new fresh-session default applies.
+        assertEquals(
+            BootstrapMode.ForceNew,
+            resolveBootstrapMode(resume = false, sessionPrefix = "   ", forceNew = false),
+        )
+    }
+
+    @Test fun blankSessionPrefixWithResumeFlagStillResumes() {
+        // Same blank-prefix scenario, but with `--resume` set: the resume
+        // flag becomes the deciding signal, mapping to Auto.
         assertEquals(
             BootstrapMode.Auto,
-            resolveBootstrapMode(resume = false, sessionPrefix = "   ", forceNew = false),
+            resolveBootstrapMode(resume = true, sessionPrefix = "   ", forceNew = false),
         )
     }
 
@@ -133,8 +145,8 @@ class SessionBootstrapTest {
         val result = bootstrapSession(sessions, projectId, BootstrapMode.ForceNew)
 
         assertTrue(result.createdFresh)
-        assertEquals("fresh (--new)", result.reason)
-        assertEquals(2, sessions.listSessions(projectId).size, "--new must create a net-new session")
+        assertEquals("fresh", result.reason)
+        assertEquals(2, sessions.listSessions(projectId).size, "ForceNew must create a net-new session")
     }
 
     @Test fun byPrefixPicksUniqueMatch() = runTest {
