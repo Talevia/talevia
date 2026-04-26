@@ -53,7 +53,7 @@ fun buildInteractiveLineReader(
         .option(LineReader.Option.AUTO_FRESH_LINE, true)
         .build()
 
-    wireSlashAutoMenu(reader)
+    wireSlashAutoMenu(reader, terminal)
     return reader
 }
 
@@ -132,21 +132,38 @@ private fun completeSlashName(word: String, candidates: MutableList<Candidate>) 
 
 /**
  * Bind the `/` key so that pressing it on an empty buffer inserts `/` and
- * immediately triggers the completion menu. Pressing `/` anywhere else inserts
- * `/` normally (no menu) so inline paths like `file:///tmp/x` aren't hijacked.
+ * immediately enters interactive menu-select mode (↑/↓/←/→ to navigate,
+ * Enter to accept, Esc to cancel). Pressing `/` anywhere else inserts `/`
+ * normally (no menu) so inline paths like `file:///tmp/x` aren't hijacked.
+ *
+ * Why `menu-select` over `complete-word` (the previous default): the latter
+ * popped the static list but left the user typing more characters to
+ * disambiguate; `menu-select` highlights the current candidate and lets the
+ * user pick by arrow without re-typing. Tab is also rebound so subsequent
+ * mid-line completions land in the same interactive mode.
  *
  * In dumb-terminal fallback (e.g. stdin piped, tests) widgets are inert —
  * the builder still works and the key stays a plain literal insert.
  */
-private fun wireSlashAutoMenu(reader: LineReader) {
+private fun wireSlashAutoMenu(reader: LineReader, terminal: Terminal) {
+    // Dumb terminals (piped stdin, CI, tests) can't render menu-select's
+    // cursor-driven highlight, so fall back to the static list — same as
+    // the pre-arrow-nav behaviour. JLine reports `type = "dumb"` for those.
+    val completionWidget =
+        if (terminal.type == "dumb") LineReader.COMPLETE_WORD else LineReader.MENU_SELECT
     val widgetName = "talevia-slash-auto-menu"
     reader.widgets[widgetName] = Widget {
         val wasAtStart = reader.buffer.length() == 0
         reader.buffer.write('/'.code)
         if (wasAtStart) {
-            reader.callWidget(LineReader.COMPLETE_WORD)
+            reader.callWidget(completionWidget)
         }
         true
     }
-    reader.keyMaps[LineReader.MAIN]?.bind(Reference(widgetName), KeyMap.translate("/"))
+    val mainKeymap = reader.keyMaps[LineReader.MAIN]
+    mainKeymap?.bind(Reference(widgetName), KeyMap.translate("/"))
+    // Tab on a slash command also opens the same completion mode, so
+    // mid-typing completion (`/<prefix><Tab>`) matches the auto-pop entry
+    // path rather than dropping into a different widget.
+    mainKeymap?.bind(Reference(completionWidget), KeyMap.translate("\t"))
 }
