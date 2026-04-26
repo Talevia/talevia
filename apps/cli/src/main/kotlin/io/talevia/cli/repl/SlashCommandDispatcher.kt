@@ -126,6 +126,8 @@ internal class SlashCommandDispatcher(
                 renderer.println(result.message)
                 result.newSessionId?.let { onSwitchSession(it) }
             }
+            "login" -> renderer.println(handleLogin(args))
+            "logout" -> renderer.println(handleLogout(args))
             else -> {
                 val suggestion = suggestSlash("/$name")
                 val hint = suggestion?.let { " · did you mean ${Styles.accent(it.name)}?" } ?: ""
@@ -806,6 +808,58 @@ internal class SlashCommandDispatcher(
         val cents = Math.round(asDouble * 100.0)
         return cents
     }
+
+    /**
+     * `/login <provider>` — currently only `openai-codex` is supported. Drives
+     * the OAuth authorization-code + PKCE flow via [JvmOpenAiCodexAuthenticator],
+     * persists the resulting credentials, and prints next-step hints
+     * (the user still needs `/model openai-codex/<model>` to switch).
+     *
+     * Re-running on an already-signed-in account simply rotates the credential
+     * file; no merge / migration logic.
+     */
+    private suspend fun handleLogin(args: String): String {
+        val target = args.lowercase()
+        if (target.isBlank()) {
+            return Styles.meta("usage: /login <provider> — supported: openai-codex")
+        }
+        if (target != "openai-codex") {
+            return Styles.meta("/login: '$target' is not supported. Try /login openai-codex.")
+        }
+        // The authenticator's onPrompt is invoked from a non-coroutine context
+        // when the browser open fails — push to stderr rather than the suspending
+        // renderer, which would need a separate scope to bridge.
+        val authenticator = io.talevia.core.provider.openai.codex.JvmOpenAiCodexAuthenticator(
+            httpClient = container.httpClient,
+            onPrompt = { url -> System.err.println("Open this URL in your browser: $url") },
+        )
+        renderer.println(Styles.meta("opening browser for ChatGPT sign-in… (waiting for callback on 127.0.0.1:1455)"))
+        return runCatching { authenticator.login() }
+            .map { creds ->
+                container.openAiCodexCredentials.save(creds)
+                "${Styles.ok("✓")} signed in to openai-codex (account ${Styles.accent(maskAccount(creds.accountId))}). " +
+                    Styles.meta("restart the CLI or pick the model with /model openai-codex/gpt-5-codex")
+            }
+            .getOrElse { e ->
+                Styles.meta("/login failed: ${e.message ?: e::class.simpleName}")
+            }
+    }
+
+    private suspend fun handleLogout(args: String): String {
+        val target = args.lowercase()
+        if (target.isBlank()) {
+            return Styles.meta("usage: /logout <provider> — supported: openai-codex")
+        }
+        if (target != "openai-codex") {
+            return Styles.meta("/logout: '$target' is not supported.")
+        }
+        container.openAiCodexCredentials.clear()
+        return "${Styles.ok("✓")} cleared openai-codex credentials. " +
+            Styles.meta("restart the CLI to drop the provider from the registry.")
+    }
+
+    private fun maskAccount(id: String): String =
+        if (id.length <= 6) id else id.take(6) + "…"
 
     private companion object {
         /** Default `/trace` row cap. 20 is small enough for one terminal page, large enough to span a typical turn's events. */

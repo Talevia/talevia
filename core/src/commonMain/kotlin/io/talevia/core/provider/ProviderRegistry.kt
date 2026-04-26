@@ -5,6 +5,9 @@ import io.talevia.core.platform.SecretStore
 import io.talevia.core.provider.anthropic.AnthropicProvider
 import io.talevia.core.provider.gemini.GeminiProvider
 import io.talevia.core.provider.openai.OpenAiProvider
+import io.talevia.core.provider.openai.codex.OpenAiCodexCredentialProviderImpl
+import io.talevia.core.provider.openai.codex.OpenAiCodexCredentialStore
+import io.talevia.core.provider.openai.codex.OpenAiCodexProvider
 import io.talevia.core.session.ModelRef
 
 /**
@@ -101,6 +104,24 @@ class ProviderRegistry(
             }
         }
 
+        /**
+         * Register the `openai-codex` provider when the user has signed in via
+         * the OAuth flow (credentials present in [credentialStore]). Skipped
+         * silently when the user is not signed in.
+         */
+        suspend fun addOpenAiCodex(
+            httpClient: HttpClient,
+            credentialStore: OpenAiCodexCredentialStore,
+        ): Builder = apply {
+            if (credentialStore.load() == null) return@apply
+            add(
+                OpenAiCodexProvider(
+                    httpClient = httpClient,
+                    credentials = OpenAiCodexCredentialProviderImpl(httpClient, credentialStore),
+                ),
+            )
+        }
+
         fun build(): ProviderRegistry {
             val byId = list.associateBy { it.id }
             return ProviderRegistry(byId, default = list.firstOrNull())
@@ -118,5 +139,12 @@ class ProviderRegistry(
         const val GEMINI = "gemini"
         /** Alias some users prefer; falls back to [GEMINI] if both present. */
         const val GOOGLE = "google"
+        /**
+         * The `openai-codex` provider does not store its credentials in
+         * [SecretStore] (they're a structured JSON blob managed by
+         * `OpenAiCodexCredentialStore`); the constant is kept here for callers
+         * that want a stable provider id reference.
+         */
+        const val OPENAI_CODEX = "openai-codex"
     }
 }

@@ -5,10 +5,13 @@ import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpStatusCode
 import io.talevia.core.platform.InMemorySecretStore
+import io.talevia.core.provider.openai.codex.OpenAiCodexCredentialStore
+import io.talevia.core.provider.openai.codex.OpenAiCodexCredentials
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 
 /**
  * Builder composes two credential sources (SecretStore + process env) and must
@@ -73,6 +76,56 @@ class ProviderRegistryBuilderTest {
 
         assertNotNull(registry["openai"])
         assertNotNull(registry["anthropic"])
+    }
+
+    @Test
+    fun openAiCodexNotRegisteredWhenNotSignedIn() = runTest {
+        val store = TestCodexStore(initial = null)
+        val registry = ProviderRegistry.Builder()
+            .addOpenAiCodex(noopClient(), store)
+            .build()
+        assertNull(registry["openai-codex"])
+    }
+
+    @Test
+    fun openAiCodexRegisteredWhenCredsPresent() = runTest {
+        val store = TestCodexStore(
+            initial = OpenAiCodexCredentials(
+                accessToken = "a",
+                refreshToken = "r",
+                idToken = "i",
+                accountId = "acct",
+                lastRefreshEpochMs = 0L,
+            ),
+        )
+        val registry = ProviderRegistry.Builder()
+            .addOpenAiCodex(noopClient(), store)
+            .build()
+        assertNotNull(registry["openai-codex"])
+        assertEquals("openai-codex", registry.default?.id)
+    }
+
+    @Test
+    fun openAiCodexCoexistsWithApiKeyOpenAi() = runTest {
+        val codexStore = TestCodexStore(
+            initial = OpenAiCodexCredentials(
+                accessToken = "a", refreshToken = "r", idToken = "i", accountId = "acct", lastRefreshEpochMs = 0L,
+            ),
+        )
+        val secrets = InMemorySecretStore(mapOf(ProviderRegistry.SecretKeys.OPENAI to "sk-test"))
+        val registry = ProviderRegistry.Builder()
+            .addSecretStore(noopClient(), secrets)
+            .addOpenAiCodex(noopClient(), codexStore)
+            .build()
+        assertNotNull(registry["openai"])
+        assertNotNull(registry["openai-codex"])
+    }
+
+    private class TestCodexStore(initial: OpenAiCodexCredentials?) : OpenAiCodexCredentialStore {
+        private var current: OpenAiCodexCredentials? = initial
+        override suspend fun load() = current
+        override suspend fun save(creds: OpenAiCodexCredentials) { current = creds }
+        override suspend fun clear() { current = null }
     }
 
     // No network calls happen during Builder construction — the provider objects

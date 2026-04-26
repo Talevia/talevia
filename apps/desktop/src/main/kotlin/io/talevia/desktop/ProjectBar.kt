@@ -233,6 +233,41 @@ fun ProjectBar(
                         )
                     },
                 )
+                androidx.compose.material3.HorizontalDivider()
+                // OAuth-based ChatGPT login (provider id "openai-codex"). After
+                // a successful sign-in, the credential file is written under
+                // ~/.talevia/openai-codex-auth.json; the desktop must restart
+                // to register the provider in the registry — no hot-reload
+                // path today.
+                DropdownMenuItem(
+                    text = { Text("Sign in to ChatGPT (Codex)…") },
+                    onClick = {
+                        menuExpanded = false
+                        scope.launch {
+                            runCatching {
+                                val authenticator = io.talevia.core.provider.openai.codex.JvmOpenAiCodexAuthenticator(
+                                    httpClient = container.httpClient,
+                                    onPrompt = { url -> log += "Open in browser: $url" },
+                                )
+                                log += "Opening browser for ChatGPT sign-in…"
+                                val creds = authenticator.login()
+                                container.openAiCodexCredentials.save(creds)
+                                log += "Signed in to openai-codex (account ${creds.accountId.take(6)}…). Restart Talevia to use this provider."
+                            }.onFailure { log += "ChatGPT sign-in failed: ${friendly(it)}" }
+                        }
+                    },
+                )
+                DropdownMenuItem(
+                    text = { Text("Sign out (Codex)") },
+                    onClick = {
+                        menuExpanded = false
+                        scope.launch {
+                            runCatching { container.openAiCodexCredentials.clear() }
+                                .onSuccess { log += "Cleared openai-codex credentials. Restart to drop the provider." }
+                                .onFailure { log += "Sign-out failed: ${friendly(it)}" }
+                        }
+                    },
+                )
             }
         }
     }

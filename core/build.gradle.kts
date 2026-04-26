@@ -59,6 +59,9 @@ kotlin {
         jvmMain.dependencies {
             implementation(libs.sqldelight.driver.sqlite)
             implementation(libs.ktor.client.cio)
+            // OAuth loopback callback server for `openai-codex` provider login
+            implementation(libs.ktor.server.core)
+            implementation(libs.ktor.server.cio)
         }
         iosMain.dependencies {
             implementation(libs.sqldelight.driver.native)

@@ -123,6 +123,18 @@ val SLASH_COMMANDS: List<SlashCommandSpec> = listOf(
         "show the agent's current todo list for this session",
         category = SlashCategory.MODEL,
     ),
+    SlashCommandSpec(
+        "/login",
+        "sign in to a provider via OAuth (currently: openai-codex)",
+        argHint = "<provider>",
+        category = SlashCategory.META,
+    ),
+    SlashCommandSpec(
+        "/logout",
+        "remove stored OAuth credentials for a provider",
+        argHint = "<provider>",
+        category = SlashCategory.META,
+    ),
     SlashCommandSpec("/clear", "clear the screen (keeps the session)", category = SlashCategory.META),
     SlashCommandSpec("/help", "this list", category = SlashCategory.META),
     SlashCommandSpec("/exit", "exit", category = SlashCategory.META),

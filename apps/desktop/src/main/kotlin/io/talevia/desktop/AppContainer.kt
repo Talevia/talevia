@@ -250,10 +250,19 @@ class AppContainer(env: Map<String, String> = System.getenv()) {
      * The secret store read is `suspend`; we block on it once at startup so
      * the rest of the container stays synchronous for Compose.
      */
+    /**
+     * On-disk credential bundle for the OAuth `openai-codex` provider. Lives at
+     * `~/.talevia/openai-codex-auth.json` (POSIX 0600). Populated by the
+     * "Connect ChatGPT" action in the provider settings panel.
+     */
+    val openAiCodexCredentials: io.talevia.core.provider.openai.codex.OpenAiCodexCredentialStore =
+        io.talevia.core.provider.openai.codex.FileOpenAiCodexCredentialStore()
+
     val providers: ProviderRegistry = runBlocking {
         ProviderRegistry.Builder()
             .addSecretStore(httpClient, secrets)
             .addEnv(httpClient, env)
+            .addOpenAiCodex(httpClient, openAiCodexCredentials)
             .build()
     }
 
