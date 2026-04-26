@@ -55,6 +55,7 @@ ktor-server-content-negotiation = { module = "io.ktor:ktor-server-content-negoti
 ktor-server-status-pages = { module = "io.ktor:ktor-server-status-pages", version.ref = "ktor" }
 ktor-server-test-host = { module = "io.ktor:ktor-server-test-host", version.ref = "ktor" }
 logback-classic = { module = "ch.qos.logback:logback-classic", version = "1.5.12" }
+slf4j-nop = { module = "org.slf4j:slf4j-nop", version = "2.0.16" }
 
 kermit = { module = "co.touchlab:kermit", version.ref = "kermit" }
 turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
