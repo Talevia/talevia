@@ -9,6 +9,7 @@ import org.jline.reader.ParsedLine
 import org.jline.reader.Reference
 import org.jline.reader.Widget
 import org.jline.terminal.Terminal
+import org.jline.utils.InfoCmp
 
 /**
  * Mutable holder of completion candidates for the slash-command second
@@ -31,13 +32,13 @@ class SlashArgSources(
 
 /**
  * Build the interactive [LineReader] with slash-command + arg
- * completion. Typing `/<Tab>` or the unambiguous prefix + Tab expands
- * to the matching command; typing `/` on an otherwise-empty line also
- * auto-pops the menu via a custom widget bound to the `/` key so the
- * user doesn't have to know about Tab in the first place. After the
- * command, Tab on the second word completes id-prefix arguments for
- * `/resume <session-id-prefix>` and `/revert` / `/fork
- * <message-id-prefix>` from the [argSources] producer lambdas.
+ * completion. Typing `/` on an empty line auto-pops the candidate list
+ * (unselected), and the list **live-refilters** as the user types extra
+ * characters — Claude-Code-style. Tab / ↑ / ↓ enter menu-complete to
+ * actually pick a candidate. After the command, Tab on the second word
+ * completes id-prefix arguments for `/resume <session-id-prefix>` and
+ * `/revert` / `/fork <message-id-prefix>` from the [argSources] producer
+ * lambdas.
  */
 fun buildInteractiveLineReader(
     terminal: Terminal,
@@ -51,7 +52,23 @@ fun buildInteractiveLineReader(
         .option(LineReader.Option.AUTO_LIST, true)
         .option(LineReader.Option.LIST_PACKED, true)
         .option(LineReader.Option.AUTO_FRESH_LINE, true)
+        // AUTO_MENU_LIST renders the interactive list during menu-complete.
+        // We deliberately do NOT set Option.MENU_COMPLETE — that would make
+        // even the first Tab / `/` keypress pre-select the first candidate,
+        // which felt aggressive ("why is /clear already chosen before I
+        // pressed anything?"). Selection is opt-in: list-choices on `/`
+        // shows the menu unselected, then Tab / ↑ / ↓ enter selection mode.
+        .option(LineReader.Option.AUTO_MENU_LIST, true)
         .build()
+    // JLine's defaults paint the menu with a chunky background fill:
+    //  - LIST_BACKGROUND defaults to `bg:bright-magenta` (the entire menu
+    //    area gets a purplish bar, regardless of which row is selected).
+    //  - LIST_SELECTION defaults to `inverse` (the selected row swaps fg/bg,
+    //    producing yet another solid fill on top of the bg above).
+    // Both are overridden so the menu reads as plain text with only the
+    // selected row's font emphasised — readable on dark + light terminals.
+    reader.setVariable(LineReader.COMPLETION_STYLE_LIST_BACKGROUND, "bg:default")
+    reader.setVariable(LineReader.COMPLETION_STYLE_LIST_SELECTION, "fg:bright-cyan,bold")
 
     wireSlashAutoMenu(reader, terminal)
     return reader
@@ -131,39 +148,149 @@ private fun completeSlashName(word: String, candidates: MutableList<Candidate>) 
 }
 
 /**
- * Bind the `/` key so that pressing it on an empty buffer inserts `/` and
- * immediately enters interactive menu-select mode (↑/↓/←/→ to navigate,
- * Enter to accept, Esc to cancel). Pressing `/` anywhere else inserts `/`
- * normally (no menu) so inline paths like `file:///tmp/x` aren't hijacked.
+ * Wire the slash-command discoverability:
  *
- * Why `menu-select` over `complete-word` (the previous default): the latter
- * popped the static list but left the user typing more characters to
- * disambiguate; `menu-select` highlights the current candidate and lets the
- * user pick by arrow without re-typing. Tab is also rebound so subsequent
- * mid-line completions land in the same interactive mode.
+ * 1. `/` on an empty buffer inserts `/` and shows the candidate list via
+ *    `list-choices` — visible but **unselected**, so users see what's
+ *    available without the menu pre-grabbing their first command.
+ * 2. Every printable keystroke (and backspace) while the buffer is a
+ *    slash-command name re-runs `list-choices`, giving Claude-Code-style
+ *    live filtering as the user types.
+ * 3. Tab enters menu-complete (selects the first candidate, then cycles
+ *    on subsequent presses). With `Option.AUTO_MENU_LIST = true` ↑/↓/←/→
+ *    move the highlight while the menu is active.
+ * 4. ↑ / ↓ also enter menu-complete (forward / reverse), but **only when
+ *    the buffer is a slash-command name**. On a normal prompt they keep
+ *    the default history-navigation behaviour so non-slash flows aren't
+ *    disrupted.
  *
- * In dumb-terminal fallback (e.g. stdin piped, tests) widgets are inert —
- * the builder still works and the key stays a plain literal insert.
+ * Pressing `/` anywhere mid-buffer inserts a literal `/` (no menu) — that
+ * preserves `file:///tmp/x` and similar paths.
+ *
+ * Dumb terminals (piped stdin, CI, tests) get `complete-word` as the
+ * auto-pop widget and skip the live-filter / arrow bindings — the
+ * cursor-driven menu only renders on real terminals.
  */
 private fun wireSlashAutoMenu(reader: LineReader, terminal: Terminal) {
-    // Dumb terminals (piped stdin, CI, tests) can't render menu-select's
-    // cursor-driven highlight, so fall back to the static list — same as
-    // the pre-arrow-nav behaviour. JLine reports `type = "dumb"` for those.
-    val completionWidget =
-        if (terminal.type == "dumb") LineReader.COMPLETE_WORD else LineReader.MENU_SELECT
-    val widgetName = "talevia-slash-auto-menu"
-    reader.widgets[widgetName] = Widget {
+    val mainKeymap = reader.keyMaps[LineReader.MAIN] ?: return
+    val isDumb = terminal.type == "dumb"
+
+    // `/` auto-pop: insert the slash, then list candidates without selecting.
+    val listOnlyWidget = if (isDumb) LineReader.COMPLETE_WORD else LineReader.LIST_CHOICES
+    val slashAutoMenuName = "talevia-slash-auto-menu"
+    reader.widgets[slashAutoMenuName] = Widget {
         val wasAtStart = reader.buffer.length() == 0
         reader.buffer.write('/'.code)
         if (wasAtStart) {
-            reader.callWidget(completionWidget)
+            reader.callWidget(listOnlyWidget)
         }
         true
     }
-    val mainKeymap = reader.keyMaps[LineReader.MAIN]
-    mainKeymap?.bind(Reference(widgetName), KeyMap.translate("/"))
-    // Tab on a slash command also opens the same completion mode, so
-    // mid-typing completion (`/<prefix><Tab>`) matches the auto-pop entry
-    // path rather than dropping into a different widget.
-    mainKeymap?.bind(Reference(completionWidget), KeyMap.translate("\t"))
+    mainKeymap.bind(Reference(slashAutoMenuName), KeyMap.translate("/"))
+
+    if (isDumb) return
+
+    wireLiveFilter(reader, mainKeymap)
+    wireSelectionKeys(reader, mainKeymap, terminal)
+}
+
+/**
+ * Wrap [LineReader.SELF_INSERT] and [LineReader.BACKWARD_DELETE_CHAR] so
+ * that every typed/deleted character refreshes the candidate list when
+ * the buffer is a slash-command name (`/<word>` with no spaces yet).
+ *
+ * The wrappers delegate to the originals first (so the visible buffer
+ * mutation is unchanged) and only call `list-choices` when the buffer
+ * still describes a slash-command name. Once the user types a space or
+ * backspaces past the leading `/`, the wrappers no-op and JLine returns
+ * to ordinary line-editing.
+ */
+private fun wireLiveFilter(reader: LineReader, mainKeymap: KeyMap<org.jline.reader.Binding>) {
+    fun isSlashName(): Boolean {
+        val buf = reader.buffer.toString()
+        return buf.startsWith("/") && !buf.contains(' ')
+    }
+    fun refresh() {
+        runCatching { reader.callWidget(LineReader.LIST_CHOICES) }
+    }
+
+    reader.widgets[LineReader.SELF_INSERT]?.let { original ->
+        val wrapper = "talevia-self-insert-refresh"
+        reader.widgets[wrapper] = Widget {
+            val ok = original.apply()
+            if (isSlashName()) refresh()
+            ok
+        }
+        // Bind every printable ASCII slot to the wrapper. We pass the raw
+        // single-character string to `bind` directly — going through
+        // `KeyMap.translate` blows up on `^`, `\\`, etc. because those are
+        // readline escape-sequence prefixes that expect more characters
+        // (`StringIndexOutOfBoundsException` on translate).
+        for (c in 0x20..0x7E) {
+            // Slash is owned by the auto-pop widget above.
+            if (c == '/'.code) continue
+            mainKeymap.bind(Reference(wrapper), c.toChar().toString())
+        }
+    }
+
+    reader.widgets[LineReader.BACKWARD_DELETE_CHAR]?.let { original ->
+        val wrapper = "talevia-backspace-refresh"
+        reader.widgets[wrapper] = Widget {
+            val ok = original.apply()
+            if (isSlashName()) refresh()
+            ok
+        }
+        // Backspace = ASCII DEL (0x7F) on most terminals, BS (0x08) on a few.
+        mainKeymap.bind(Reference(wrapper), 0x7F.toChar().toString())
+        mainKeymap.bind(Reference(wrapper), 0x08.toChar().toString())
+    }
+}
+
+/**
+ * Bind Tab and ↑/↓ to enter menu-complete mode on slash-command names,
+ * leaving normal lines undisturbed.
+ *
+ * `KeyMap.key(...)` returns null when the terminal doesn't expose the
+ * named capability (rare for `key_up`/`key_down`, but the result is
+ * checked so a missing escape sequence falls back to JLine's defaults
+ * rather than nulling out the binding).
+ */
+private fun wireSelectionKeys(
+    reader: LineReader,
+    mainKeymap: KeyMap<org.jline.reader.Binding>,
+    terminal: Terminal,
+) {
+    fun isSlashName(): Boolean {
+        val buf = reader.buffer.toString()
+        return buf.startsWith("/") && !buf.contains(' ')
+    }
+
+    // Tab: enter menu-complete (interactive selection). `complete-word` is
+    // JLine's default; rebinding to `menu-complete` skips the "first Tab
+    // lists, second Tab cycles" two-step so a single Tab on the already-
+    // displayed list moves straight into selection mode.
+    mainKeymap.bind(Reference(LineReader.MENU_COMPLETE), KeyMap.translate("\t"))
+
+    val arrowUp = "talevia-arrow-up-or-history"
+    reader.widgets[arrowUp] = Widget {
+        val target =
+            if (isSlashName()) LineReader.REVERSE_MENU_COMPLETE
+            else LineReader.UP_LINE_OR_HISTORY
+        reader.callWidget(target)
+        true
+    }
+    val arrowDown = "talevia-arrow-down-or-history"
+    reader.widgets[arrowDown] = Widget {
+        val target =
+            if (isSlashName()) LineReader.MENU_COMPLETE
+            else LineReader.DOWN_LINE_OR_HISTORY
+        reader.callWidget(target)
+        true
+    }
+    KeyMap.key(terminal, InfoCmp.Capability.key_up)?.let {
+        mainKeymap.bind(Reference(arrowUp), it)
+    }
+    KeyMap.key(terminal, InfoCmp.Capability.key_down)?.let {
+        mainKeymap.bind(Reference(arrowDown), it)
+    }
 }
