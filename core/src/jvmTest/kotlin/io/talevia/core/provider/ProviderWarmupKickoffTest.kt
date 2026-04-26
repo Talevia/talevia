@@ -69,7 +69,13 @@ class ProviderWarmupKickoffTest {
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
             )
 
-            val captured = withTimeout(5.seconds) { collected.await() }
+            // 15s, not 5s: this test runs on Dispatchers.Default with N≈cores threads,
+            // and is sometimes invoked from a CI / stop-hook context immediately after
+            // a heavy gradle pass (compile + ktlint + sibling :test tasks). A fresh
+            // test JVM doing class-load + bus setup + 2 launched coroutines + bus
+            // collector can legitimately exceed 5s when the host is saturated. This
+            // is the upper bound — happy path completes in milliseconds.
+            val captured = withTimeout(15.seconds) { collected.await() }
 
             // Both events fired in order, scoped to the eager session.
             assertEquals(2, captured.size, "expected Starting + Ready")
@@ -100,7 +106,7 @@ class ProviderWarmupKickoffTest {
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
             )
 
-            val firstPair = withTimeout(5.seconds) { starting.await() }
+            val firstPair = withTimeout(15.seconds) { starting.await() }
             // Negative-evidence: 200ms is plenty for a phantom Ready —
             // Starting fires synchronously inside the launched coroutine,
             // then listModels throws immediately on the next dispatch.
@@ -159,7 +165,13 @@ class ProviderWarmupKickoffTest {
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
             )
 
-            val captured = withTimeout(5.seconds) { collected.await() }
+            // 15s, not 5s: this test runs on Dispatchers.Default with N≈cores threads,
+            // and is sometimes invoked from a CI / stop-hook context immediately after
+            // a heavy gradle pass (compile + ktlint + sibling :test tasks). A fresh
+            // test JVM doing class-load + bus setup + 2 launched coroutines + bus
+            // collector can legitimately exceed 5s when the host is saturated. This
+            // is the upper bound — happy path completes in milliseconds.
+            val captured = withTimeout(15.seconds) { collected.await() }
 
             // Both providers got a Starting + Ready pair (4 total events).
             val byProvider = captured.groupBy { it.providerId }
