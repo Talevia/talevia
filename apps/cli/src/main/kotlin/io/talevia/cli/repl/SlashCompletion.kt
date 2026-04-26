@@ -213,12 +213,45 @@ private fun wireLiveFilter(reader: LineReader, mainKeymap: KeyMap<org.jline.read
     fun refresh() {
         runCatching { reader.callWidget(LineReader.LIST_CHOICES) }
     }
+    // Track whether the previous keystroke left the buffer in slash-name
+    // mode. When the user backspaces (or types a space) OUT of slash-name
+    // mode, the candidate list rendered by `list-choices` has to be cleared
+    // — JLine doesn't auto-clear the post-prompt area unless its internal
+    // `post` supplier is reset, which `list-choices` itself doesn't do
+    // when invoked with a non-matching buffer. Reflect into the protected
+    // `post` field on `LineReaderImpl`, null it, and call `redisplay`.
+    // Wrapped in runCatching so a future JLine field rename degrades to
+    // "menu lingers" rather than crashing the REPL.
+    val postField = runCatching {
+        var cls: Class<*>? = reader.javaClass
+        while (cls != null) {
+            try {
+                return@runCatching cls.getDeclaredField("post").apply { isAccessible = true }
+            } catch (_: NoSuchFieldException) {
+                cls = cls.superclass
+            }
+        }
+        null
+    }.getOrNull()
+    fun clearMenu() {
+        runCatching { postField?.set(reader, null) }
+        runCatching { reader.callWidget(LineReader.REDISPLAY) }
+    }
+    val wasSlash = java.util.concurrent.atomic.AtomicBoolean(false)
+    fun afterEdit() {
+        val nowSlash = isSlashName()
+        when {
+            nowSlash -> refresh()
+            wasSlash.get() -> clearMenu()
+        }
+        wasSlash.set(nowSlash)
+    }
 
     reader.widgets[LineReader.SELF_INSERT]?.let { original ->
         val wrapper = "talevia-self-insert-refresh"
         reader.widgets[wrapper] = Widget {
             val ok = original.apply()
-            if (isSlashName()) refresh()
+            afterEdit()
             ok
         }
         // Bind every printable ASCII slot to the wrapper. We pass the raw
@@ -237,12 +270,23 @@ private fun wireLiveFilter(reader: LineReader, mainKeymap: KeyMap<org.jline.read
         val wrapper = "talevia-backspace-refresh"
         reader.widgets[wrapper] = Widget {
             val ok = original.apply()
-            if (isSlashName()) refresh()
+            afterEdit()
             ok
         }
         // Backspace = ASCII DEL (0x7F) on most terminals, BS (0x08) on a few.
         mainKeymap.bind(Reference(wrapper), 0x7F.toChar().toString())
         mainKeymap.bind(Reference(wrapper), 0x08.toChar().toString())
+    }
+
+    // The `/` auto-pop widget already calls list-choices on entry, so seed
+    // wasSlash=true after that path runs by intercepting via a second
+    // wrapper. Cleaner: wrap the existing auto-pop widget so it tracks state.
+    reader.widgets["talevia-slash-auto-menu"]?.let { autoPop ->
+        reader.widgets["talevia-slash-auto-menu"] = Widget {
+            val ok = autoPop.apply()
+            wasSlash.set(isSlashName())
+            ok
+        }
     }
 }
 
