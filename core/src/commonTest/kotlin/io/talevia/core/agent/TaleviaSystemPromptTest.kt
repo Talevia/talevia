@@ -109,7 +109,13 @@ class TaleviaSystemPromptTest {
         // Seed / lockfile discipline (VISION §3.1)
         "seed",
         "cacheHit",
-        // Dual user (VISION §4)
+        // Dual user (VISION §4) — base-prompt lane (PROMPT_DUAL_USER)
+        "Two paths, one project",
+        "operation depth",
+        "小白",
+        "专家",
+        // Dual user — AIGC-specific anchors that survived from the original
+        // PromptAigcLane "# Two kinds of users" block.
         "high-level",
         "precise",
         // Bias toward action — prevents the "open a 4-bullet menu of
@@ -149,6 +155,7 @@ class TaleviaSystemPromptTest {
             "# Build-system mental model", // PROMPT_BUILD_SYSTEM opens the body
             "# Consistency bindings",
             "# Seed discipline",
+            "# Two paths, one project", // PROMPT_DUAL_USER between BUILD_SYSTEM and AIGC_LANE
             "# Two kinds of users", // PROMPT_AIGC_LANE starts
             "# AIGC video (text-to-video)",
             "# Project lifecycle", // PROMPT_PROJECT starts
@@ -179,9 +186,9 @@ class TaleviaSystemPromptTest {
         // double-newline. Triple-newline would mean a stray blank line sneaked into
         // one section's body; single-newline would mean the join string drifted.
         val prompt = taleviaSystemPrompt()
-        val buildToConsistency = "invalidation step.\n\n# Two kinds of users"
+        val buildToDualUser = "invalidation step.\n\n# Two paths, one project"
         assertTrue(
-            buildToConsistency in prompt,
+            buildToDualUser in prompt,
             "section-A → section-B boundary must be a single blank line (got: '${
                 prompt.substringAfter("invalidation step.").take(40)
             }')",

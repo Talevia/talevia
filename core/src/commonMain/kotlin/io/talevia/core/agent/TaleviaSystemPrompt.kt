@@ -2,6 +2,7 @@ package io.talevia.core.agent
 
 import io.talevia.core.agent.prompt.PROMPT_AIGC_LANE
 import io.talevia.core.agent.prompt.PROMPT_BUILD_SYSTEM
+import io.talevia.core.agent.prompt.PROMPT_DUAL_USER
 import io.talevia.core.agent.prompt.PROMPT_EDITING_LANE
 import io.talevia.core.agent.prompt.PROMPT_EXTERNAL_LANE
 import io.talevia.core.agent.prompt.PROMPT_PROJECT
@@ -32,6 +33,7 @@ import io.talevia.core.agent.prompt.PROMPT_PROJECT
  */
 internal val TALEVIA_SYSTEM_PROMPT_BASE: String = listOf(
     PROMPT_BUILD_SYSTEM,
+    PROMPT_DUAL_USER,
     PROMPT_AIGC_LANE,
     PROMPT_PROJECT,
     PROMPT_EDITING_LANE,

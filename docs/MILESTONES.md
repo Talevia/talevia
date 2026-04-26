@@ -40,11 +40,13 @@ compiler + agent + UX** 全栈轴的。
   `Project.lockfile.entries.size ≥ 1` + `Project.timeline.tracks` 含有
   ≥ 1 clip 的 Video track（grep: `OneShotDraftE2ETest` test class 存在 +
   上述断言） — cycle 2026-04-26 *本 commit*
-- [ ] System-prompt 引导：default agent system prompt 含 §4 双用户张力的
+- [x] System-prompt 引导：default agent system prompt 含 §4 双用户张力的
   语言锚词，让 LLM 在小白 / 专家模式下自动选择正确的"探索 vs 精修"姿态
   （grep: `core/agent/AgentSystemPrompt.kt` 或等价 source 中含
   `intent` / `skeleton` / `infer.*genre` / `double-user` / `小白` / `专家`
-  之一）
+  之一） — cycle 2026-04-26 *本 commit*（`PROMPT_DUAL_USER` lane 加进
+  `TALEVIA_SYSTEM_PROMPT_BASE`，含 `小白` / `专家` / `operation depth` /
+  `Two paths, one project` 锚词）
 - [ ] 两路径共享 source：jvmTest 验证小白模式产出的 `SourceNodeId` 可被
   `source_node_action(action="update_body")` 直接编辑，下游 clips 走 stale
   标记 → regenerate 的标准链路（grep: `CrossPathSourceSharedTest` 或类似 +

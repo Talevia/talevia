@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **small-user-system-prompt-guidance** — `Agent.systemPrompt`（default agent prompt）当前是通用 agent 风格，不包含 §4 双用户张力的引导（"先 infer genre → propose source skeleton → drive AIGC → deliver"）。LLM 在小白模式下经常不确定该问还是该自主补 source；专家模式下又容易越权决策。**方向：** 在 `core/agent/AgentSystemPrompt.kt` 或等价位置注入一段"双用户张力"提示，并加 jvmTest 断言默认 system prompt 字符串含 "intent" / "skeleton" / "double-user" 之类锚词，防被改没了。Rubric §5.4 / §4。Milestone §later.
 - **debt-runtime-test-fileproject-store-openat** — R.5 #10 critical-path：`FileProjectStore.openAt` 是项目加载入口，决定 schemaVersion 升级 / corrupted bundle / missing lockfile 等错误是 graceful refused 还是黑盒崩。当前只有 happy-path 测试 + 一个 benchmark，缺 (a) 旧 schemaVersion 升级路径、(b) 损坏 `talevia.json` 应 refused with message、(c) 缺 `.gitignore` / `media/` 自动补建语义、(d) 跨机打开同一 bundle 时 `RecentsRegistry` 时序。**方向：** 在 `core/jvmTest/.../FileProjectStoreOpenAtRuntimeTest.kt` 加这 4 类边界用例 + assertFailsWith / assertEquals。Rubric §5.6 / R.5 #10。Milestone §later.
 - **re-evaluate-debt-aigc-tool-consolidation** — `debt-aigc-tool-consolidation` 跨 9+ repopulate cycles 持续 skip-tagged（自 cycle 113 起，原因 §3a-7：`LockfileEntry.toolId` 已 stamped `"generate_image"` 等在 on-disk bundle，删旧工具会让 `ReplayLockfileTool` 对老 entry 失效）。**方向：** 用户决定 promote (设计 alias-map: `"generate_image" → "aigc_generate" + kind="image"` 写进 ReplayLockfileTool) / demote (接受 4 个独立工具的 LLM context tax) / delete (criterion 不再相关)。Rubric §5.6 / §5.7 / §3a #1 / §3a #7。Milestone §later. · skipped 2026-04-25: meta bullet awaiting user decision (promote / demote / delete).
 
