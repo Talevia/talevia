@@ -54,13 +54,16 @@ class OpenAiCodexProvider(
     override val id: String = "openai-codex"
 
     override suspend fun listModels(): List<ModelInfo> = listOf(
-        // Models advertised by the ChatGPT backend Codex stack. The list will
-        // drift as OpenAI ships new ones — `/model` only filters by id, so an
-        // unknown id still works as long as the backend accepts it.
-        ModelInfo("gpt-5-codex", "GPT-5 Codex", contextWindow = 256_000, supportsTools = true, supportsThinking = true, supportsImages = true),
-        ModelInfo("gpt-5", "GPT-5", contextWindow = 256_000, supportsTools = true, supportsThinking = true, supportsImages = true),
-        ModelInfo("gpt-5-mini", "GPT-5 Mini", contextWindow = 200_000, supportsTools = true, supportsThinking = true),
-        ModelInfo("o3", "o3", contextWindow = 200_000, supportsTools = true, supportsThinking = true),
+        // Mirrors the user-visible (`visibility: "list"`) entries in the
+        // canonical Codex backend registry — see
+        // openai/codex codex-rs/models-manager/models.json. The list drifts
+        // as OpenAI ships new tiers; `/model openai-codex/<slug>` only filters
+        // by id, so an unknown but backend-accepted slug still works.
+        ModelInfo("gpt-5.5", "GPT-5.5", contextWindow = 272_000, supportsTools = true, supportsThinking = true, supportsImages = true),
+        ModelInfo("gpt-5.4", "GPT-5.4", contextWindow = 272_000, supportsTools = true, supportsThinking = true, supportsImages = true),
+        ModelInfo("gpt-5.4-mini", "GPT-5.4 Mini", contextWindow = 272_000, supportsTools = true, supportsThinking = true, supportsImages = true),
+        ModelInfo("gpt-5.3-codex", "GPT-5.3 Codex", contextWindow = 272_000, supportsTools = true, supportsThinking = true, supportsImages = true),
+        ModelInfo("gpt-5.2", "GPT-5.2", contextWindow = 272_000, supportsTools = true, supportsThinking = true, supportsImages = true),
     )
 
     override fun stream(request: LlmRequest): Flow<LlmEvent> = channelFlow {

@@ -13,6 +13,7 @@ import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
+import kotlinx.serialization.json.putJsonObject
 
 /**
  * Build the Responses API request body for the ChatGPT Codex backend
@@ -41,6 +42,25 @@ internal fun buildResponsesApiBody(
     put("stream", true)
     putJsonArray("include") { /* keep empty — opt-in fields */ }
     put("prompt_cache_key", sessionId)
+    // Every currently-listed Codex backend model is a reasoning model
+    // (see codex-rs/models-manager/models.json). Always send a `reasoning`
+    // block — the backend rejects requests on these slugs when it's absent.
+    // Effort comes from ProviderOptions when set, falls back to "medium".
+    // Summary stays "auto" so reasoning_text deltas stream into our SseParser.
+    putJsonObject("reasoning") {
+        put("effort", normalizeEffort(request.options.openaiReasoningEffort) ?: "medium")
+        put("summary", "auto")
+    }
+}
+
+/**
+ * Coerce [ProviderOptions.openaiReasoningEffort] (free-form string) to one of
+ * the values Codex backend accepts: `none / minimal / low / medium / high / xhigh`.
+ * Unknown values map to null so the caller can fall back to "medium".
+ */
+private fun normalizeEffort(raw: String?): String? {
+    val v = raw?.trim()?.lowercase() ?: return null
+    return v.takeIf { it in setOf("none", "minimal", "low", "medium", "high", "xhigh") }
 }
 
 private fun buildToolsArray(request: LlmRequest): JsonArray = buildJsonArray {
