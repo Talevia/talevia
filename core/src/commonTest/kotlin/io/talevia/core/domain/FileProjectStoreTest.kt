@@ -362,4 +362,112 @@ class FileProjectStoreTest {
             // Expected — store refused, did not silently fall back.
         }
     }
+
+    // -------------------------------------------------------------------------
+    // openAt runtime edge cases — R.5 #10 critical-path coverage
+    // (`debt-runtime-test-fileproject-store-openat`, cycle 162). Existing
+    // tests above cover happy-path open + missing-file refusal + path-shape
+    // resolution; these four pin schemaVersion compatibility behaviour,
+    // corrupted-envelope refusal shape, and the read-only auto-create
+    // contract that openAt must honour (auto-create lives on createAt /
+    // upsert, not openAt).
+    // -------------------------------------------------------------------------
+
+    @Test fun openAtAcceptsLegacySchemaVersionZero() = runTest {
+        // Bundles that pre-date the [StoredProject.schemaVersion] field
+        // decode with `schemaVersion=0` (the kotlinx-serialization default
+        // when an explicit `schemaVersion=0` is written, or when the field
+        // is absent in legacy JSON and `JsonConfig.default.coerceInputValues`
+        // backfills the constructor default). There's no formal migration
+        // framework today — this test pins the "legacy survives" invariant
+        // so a future schema bump that introduces real migration logic must
+        // explicitly update this assertion to reflect the new behaviour.
+        val (store, fs, _) = setup()
+        val bundle = "/projects/legacy".toPath()
+        fs.createDirectories(bundle)
+        fs.write(bundle.resolve("talevia.json")) {
+            writeUtf8(
+                """{"schemaVersion":0,"title":"legacy","createdAtEpochMs":0,""" +
+                    """"project":{"id":"p-legacy","timeline":{"tracks":[]}}}""",
+            )
+        }
+        val project = store.openAt(bundle)
+        assertEquals(ProjectId("p-legacy"), project.id)
+    }
+
+    @Test fun openAtAcceptsForwardSchemaVersionAsNoOp() = runTest {
+        // A hypothetical future bundle (schemaVersion=99) decodes today
+        // because no version-too-new gate is wired. This is a deliberate
+        // current-state pin: if a future cycle adds a version-refused gate
+        // for forward compat (e.g. "this binary is built against
+        // schemaVersion ≤ 1; refuse 2+ to avoid silently lossy reads"),
+        // this test must flip to assertFailsWith so the regression is
+        // explicit. Until then, "we silently accept" is the documented
+        // contract.
+        val (store, fs, _) = setup()
+        val bundle = "/projects/future".toPath()
+        fs.createDirectories(bundle)
+        fs.write(bundle.resolve("talevia.json")) {
+            writeUtf8(
+                """{"schemaVersion":99,"title":"future","createdAtEpochMs":0,""" +
+                    """"project":{"id":"p-future","timeline":{"tracks":[]}}}""",
+            )
+        }
+        val project = store.openAt(bundle)
+        assertEquals(ProjectId("p-future"), project.id)
+    }
+
+    @Test fun openAtFailsLoudlyOnCorruptedTaleviaJson() = runTest {
+        // Truncated / malformed envelope must fail with an exception, not
+        // crash silently or return an empty project. kotlinx-serialization
+        // surfaces `SerializationException` on bad input; the concrete
+        // subtype is platform-dependent (JVM throws
+        // `MissingFieldException` on absent required fields, JS / Native
+        // can vary), so the assertion targets the general case via
+        // `assertFails` semantics — if a regression makes openAt swallow
+        // the error and return a default Project, the test fails because
+        // no exception is thrown.
+        val (store, fs, _) = setup()
+        val bundle = "/projects/corrupted".toPath()
+        fs.createDirectories(bundle)
+        fs.write(bundle.resolve("talevia.json")) {
+            // Truncate mid-object — unclosed brace, missing required `project` value.
+            writeUtf8("""{"schemaVersion":1,"title":"corrupted","project":""")
+        }
+        var threw = false
+        try {
+            store.openAt(bundle)
+        } catch (_: Throwable) {
+            threw = true
+        }
+        assertTrue(threw, "openAt must fail loudly on corrupted talevia.json, not silently return a default Project")
+    }
+
+    @Test fun openAtDoesNotAutoCreateGitignoreOrMediaDir() = runTest {
+        // `openAt` is a read-only entry point — auto-creation of `.gitignore`
+        // and `media/` is reserved for `createAt` / `upsert` (the
+        // `writeBundleLocked` path). A bundle imported from elsewhere may
+        // legitimately not have these directories; openAt must not modify
+        // the on-disk state behind the user's back. Pins this so a future
+        // "ergonomic" change that auto-fills missing dirs on read trips
+        // the test and forces the change to be explicit.
+        val (store, fs, _) = setup()
+        val bundle = "/projects/bare".toPath()
+        fs.createDirectories(bundle)
+        fs.write(bundle.resolve("talevia.json")) {
+            writeUtf8(
+                """{"schemaVersion":1,"title":"bare","createdAtEpochMs":0,""" +
+                    """"project":{"id":"p-bare","timeline":{"tracks":[]}}}""",
+            )
+        }
+        store.openAt(bundle)
+        assertFalse(
+            fs.exists(bundle.resolve(".gitignore")),
+            "openAt must not auto-create .gitignore (auto-create is reserved for createAt / upsert)",
+        )
+        assertFalse(
+            fs.exists(bundle.resolve("media")),
+            "openAt must not auto-create media/ (auto-create is reserved for createAt / upsert)",
+        )
+    }
 }
