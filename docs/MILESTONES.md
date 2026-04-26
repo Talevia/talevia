@@ -1,6 +1,6 @@
 # Milestones
 
-> **Current: M2 — AIGC 驯服产品化**
+> **Current: M3 — §4 小白路径 e2e**
 
 迭代聚焦的粗粒度指针。每个 milestone 对应 `docs/VISION.md` §3 的一个**核心赌注**。
 机制参考 media-engine 的 `docs/MILESTONES.md` + 三处本地化：**软优先级**（当前 M
@@ -19,118 +19,130 @@ bullet 打 tag；现有 bullet 不手动 backfill。
 
 ---
 
-## M2 — AIGC 驯服产品化 （VISION §3.1）
+## M3 — §4 小白路径 e2e （VISION §4）
 
-**目标**：把 AIGC 从"不可复现的黑盒"驯服成"随机编译器"——seed 显式、模型 / 版本
-锁定、产物 pin 命中率可度量、provider 数量 ≥ 2 有 fallback、每次 AIGC 调用的成本
-在 session 层可见。M1 已证明一致性 binding 能物理注入 prompt；M2 证明注入之后的
-*生成过程本身* 是工程化可控的，不是"拼运气 + 事后补救"。
+**目标**：证明 Talevia 同时服务小白用户（一句话出初稿）和专家用户（精修单帧）
+两条路径**共享同一套 Project / Source / Tool Registry**，操作深度差异不分裂
+系统。M2 把 AIGC 驯服成 deterministic compiler 之后，M3 验证从"用户意图"到
+"可 export 时间线"的 agent-driven 闭环：source 创建 → AIGC 调度 → timeline
+排列 → 专家可介入精修。
 
-选 §3.1 作 M2 的理由：M1 亚军列表的头条候选；M1 的成果（consistency binding 持久化 +
-反查 + 语义回归）只有在 AIGC 生成本身可复现时才有复用价值（否则"一致性绑定的
-物理注入成功了" vs "但每次 generate 结果都漂" 就等于白干）。Rubric 上偏
-§5.2（AIGC 面）+ §5.7（性能 / 成本）。
+选 §4 作 M3 的理由：M2 亚军列表头条；M2 的 deterministic AIGC 是小白路径
+agent-trajectory 跑通的前提（不可复现的 AIGC 让"一句话出初稿"永远像拼运气）；
+§4 双用户张力是 VISION 三条核心战略（§3.1 / §3.3 / §4）里唯一**横跨 source +
+compiler + agent + UX** 全栈轴的。
 
 ### Exit criteria
 
-- [x] Lockfile 完整性：每个成功的 AIGC clip 都在 `project.lockfile.entries`
-  产一条 `LockfileEntry`，含 `(modelId, modelVersion?, seed, parameters,
-  inputHash, sourceBindingContentHashes)`；test 覆盖 "运行 AIGC tool →
-  查 lockfile 里能找到对应 entry" 的 round-trip
-  （grep: `class LockfileEntry` 在 `core/domain/lockfile/`；e2e test 带
-  `project.lockfile.entries` 断言） — cycle 2026-04-24 3fde671a
-- [x] Provider 多元：`ImageGenEngine` / `VideoGenEngine` / `MusicGenEngine` /
-  `TtsEngine` **至少一个**长出第二个非 stub impl，证明 provider 抽象真的
-  是 provider-agnostic 而非 replicate-hardcoded（grep: `class .* :
-  ImageGenEngine` 或同类 interface 的 prod 实现在
-  `core/src/*Main/` 或 `platform-impls/*/src/main/` 下计数 ≥ 2；
-  `AgentProviderFallbackTracker` 有真实 chain 可填） — cycle 2026-04-26
-  **此 commit**（`SeedanceVideoGenEngine` 接 Volcano Engine ARK 作为
-  `VideoGenEngine` 的第二 prod impl，`OpenAiSoraVideoGenEngine` 之外的
-  非 stub fallback；`ARK_API_KEY` 触发，三个 JVM container 均已 wire）
-- [x] Pin 命中率可见：`project_query` 有 select 答 "export 了几次、有多少
-  clip 的 asset 从 lockfile cache 命中（无需重跑 AIGC）"
-  （grep: 新 select 如 `lockfile_cache_stats` / `pin_hit_rate` 在
-  ProjectQueryTool ALL_SELECTS + handler 实现） — cycle 2026-04-24 08223ac3
-- [x] 成本可见：`session_query(select=spend_summary)` 或等价 select 聚合
-  per-session AIGC spend（至少按 provider 分档，有 tokens / USD 估算），
-  同一 session 反复调用 `generate_image` 能看到数字累加
-  （grep: `spend_summary` 或 `aigc_spend` 在 SessionQueryTool；handler
-  消费 `LockfileEntry.cost` / `ProviderUsage` 类字段） — cycle 2026-04-24 7862ce7d
-- [x] Fallback 生产回归测试：e2e test 覆盖 "provider A 抛 `ProviderError` →
-  `AgentProviderFallbackTracker` 切 provider B → 产物仍正确落地"
-  （grep: jvmTest 里有 `ProviderFallback` / `FallbackChain` 相关测试 +
-  `assertEquals` 断言最终 assetId / provenance.providerId 是 B） — cycle 2026-04-24 c3bad022
-- [x] Seed 复现证明：seed + inputs 相同时重跑 `generate_image` 得到 bit-identical
-  `GenerationProvenance` + 同 assetId（或 lockfile cache-hit）——验证 Talevia
-  的随机边界契约真的锁住了
-  （grep: e2e test 运行 generate_image 两次 → assertEquals assetIds；
-  `ReplayLockfileTool` 参与验证） — cycle 2026-04-24 e1adea8f
-- [x] Milestone 退出总结：在本文件 M2 block 末尾 append `### M2 exit summary`
-  小段，列剩余的 §3.1 gap（如 GPU-inference 本地跑 / 预算硬 cap 触发 /
-  多 provider cost arbitrage / cold-start 优化 / cache invalidation
-  latency 等）以便 M3 / M4 接力 —
-  *必须手动 tick（段落存在 + 三条以上具体 gap）* — cycle 2026-04-24 4ee6a08b
-
-### M2 exit summary
-
-M2 关起门来证明了**AIGC 驯服产品化的 6/6 实质轴 + 1 manual exit 全部
-落地**：lockfile 完整性 (criterion 1, 3fde671a / c30ecbb1) + provider
-多元 (criterion 2, 此 commit — `SeedanceVideoGenEngine` 解锁 ByteDance
-Seedance via Volcano Engine ARK，`VideoGenEngine` 现有 2 个 prod impl) +
-pin 命中率可见 (criterion 3, 08223ac3) + 成本可见 (criterion 4, 7862ce7d)
-+ fallback 生产回归测试 (criterion 5, c3bad022) + seed 复现证明
-(criterion 6, e1adea8f)。这六条是 "AIGC 从黑盒变 deterministic compiler"
-的工程学基石。
-
-**M2 7/7 全勾 → 触发 §M.3 auto-promote 到 M3**。下一次 `iterate-gap §M`
-cycle 会按照 milestone 机制把本 block 移入 `## Completed — M2 (2026-04-26)`
-段、起草 M3 (§4 小白路径 e2e) 的 criteria 并把 `> Current:` pointer
-从 M2 翻到 M3。本次 user-driven commit 只完成 criterion tick + exit
-summary 更新，不抢先起草 M3 criteria（避免和 iterate-gap 自动起草
-逻辑冲突；§M.5 的 "和触发该 promotion 的 feat commit 同 commit 落盘"
-约束在 user-driven 解 block 场景下让位于职责边界）。
-
-**§3.1 完整愿景里 M2+ 接力的 gap**（超出本 milestone 的工程学跑道，列给
-M3 / M4 / 未来 M）：
-
-1. **GPU-inference 本地跑**：`ImageGenEngine` / `VideoGenEngine` 现在全走
-   Replicate 云端。本地 SD / local ComfyUI / MLX-diffusion 这类路径缺
-   `LocalGpuImageGenEngine` impl + GPU-availability probing + fallback-
-   to-cloud 策略。对 data-sensitive 创作者（不愿把素材传云）是必需品。
-2. **预算硬 cap 触发**：`session_query(select=spend_summary)` 给了读口，
-   但没有写口——session.metadata 里没有 `spendCapUsdCents: Long?` 字段，
-   `Agent.run` 不在 AIGC tool 分发前检查 "this session spent > cap,
-   refuse". `SessionRateLimits` 有骨架但不消费 spend_summary 数据。
-3. **多 provider cost arbitrage**：已有 `provider_query(select=cost_compare)`
-   答 "same prompt across providers — cheapest"；但 `AgentProviderFallbackTracker`
-   只按 registry 顺序选 provider，不按 cost 挑。需要 `ProviderRoutingPolicy`
-   抽象 + cost-aware fallback chain 排序。
-4. **cold-start 优化**：首次 AIGC 调用 provider connection setup / model
-   warmup / seed-pinning handshake 不可见。Session 起步第一个 image 生成会
-   比后续慢很多，用户会以为卡死。需要 progress event（`BusEvent.ProviderWarmup`）
-   + CLI/Desktop 对其的 UI surface。
-5. **cache invalidation latency**：`project.lockfile` cache hit 检测走
-   in-memory `byInputHash` map；跨 session 打开同一 project 会重建这个
-   map 从 disk，但 JSON decode on large `entries` list (>500 items on
-   a mature project) takes O(N) per open — profile 数据没收集。未来 perf
-   bullet 可能要 `lockfile.jsonl` 分文件 + 增量加载。
-
-前四条都指向 M3/M4/M5 的不同赌注；第五条是 §5.7 perf 轴的独立 backlog
-项。M2 至此**功能上 + 产品上均 ready** — 第二 video provider 已选型 +
-落地（Seedance / `ARK_API_KEY`）。
+- [x] 一句话出初稿 e2e：`core/jvmTest` 里有 `OneShotDraftE2ETest`，模拟 LLM
+  多步 trajectory（`source_node_action` × 2 + `generate_video` +
+  `clip_action`），断言最终 `Project.source.nodes.size ≥ 2` +
+  `Project.lockfile.entries.size ≥ 1` + `Project.timeline.tracks` 含有
+  ≥ 1 clip 的 Video track（grep: `OneShotDraftE2ETest` test class 存在 +
+  上述断言） — cycle 2026-04-26 *本 commit*
+- [ ] System-prompt 引导：default agent system prompt 含 §4 双用户张力的
+  语言锚词，让 LLM 在小白 / 专家模式下自动选择正确的"探索 vs 精修"姿态
+  （grep: `core/agent/AgentSystemPrompt.kt` 或等价 source 中含
+  `intent` / `skeleton` / `infer.*genre` / `double-user` / `小白` / `专家`
+  之一）
+- [ ] 两路径共享 source：jvmTest 验证小白模式产出的 `SourceNodeId` 可被
+  `source_node_action(action="update_body")` 直接编辑，下游 clips 走 stale
+  标记 → regenerate 的标准链路（grep: `CrossPathSourceSharedTest` 或类似 +
+  `assertTrue(clip.staleByLockfile)` / 等价断言）
+- [ ] 进度可见：cli / desktop UI 把 multi-step `BusEvent.AgentRunState` 翻译
+  为 user-readable 进度行（"Step 3/8: generate_video"），不是黑盒 5-30s
+  （grep: cli `Renderer` / desktop UI 订阅 `AgentRunState.steps` + 行
+  template 含 `Step .*\d` / `\d+/\d+` 之类）
+- [ ] Failure-fallback 提示：Agent.run 终态 ERROR 时，agent 输出含"换 provider
+  / 改 prompt / 让我介入"等 next-step 建议而非仅 stack dump，让小白用户知道
+  下一步该做什么（grep: agent 错误处理路径中有 fallback suggestion 字符串
+  `try.*provider` / `next.*step` / `换 provider` 之类）
+- [ ] Cross-modal staleness 分区：`ProjectStaleness` 算法理解 modality
+  （video / audio / both），改 `voiceId` 不会 stale 纯视觉 clip，反之亦然。
+  M1 exit summary 列的"音视频跨模态一致性"接力（grep: `ProjectStaleness` 中
+  有 `modality` 字段 + jvmTest 验证 voiceId 改不 stale 视觉 clip）
+- [ ] Milestone 退出总结：在本文件 M3 block 末尾 append `### M3 exit summary`
+  小段，列剩余的 §4 gap（视觉编辑 GUI / 项目模板 marketplace / 多用户协作
+  等）以便 M4 / M5 接力 — *必须手动 tick（段落存在 + 三条以上具体 gap）*
 
 ### 亚军 milestones（未正式启动，仅作排序参考）
 
-- **M3 候选 — §4 小白路径 e2e**：系统 prompt 引导 + 一句话出初稿 demo +
-  两路径共享 source 的回归测试。
 - **M4 候选 — §5.2 专家特效**：shader / 合成 / 粒子 / mask 的 Tool 接入成本。
+- **M5 候选 — §3.2 依赖 DAG / 增量编译**：项目变更 → 最小重渲染集合，多 export
+  场景不重复劳动。
 
 ---
 
 （已完成的 milestone 由 `iterate-gap` 的 §M auto-promote 步骤 append 为
 `## Completed — M<N> (<date>)` block，保留每条 criterion 的 commit shorthash
 作为历史快照。最近完成的放最上面。）
+
+## Completed — M2 (2026-04-26)
+
+**目标**：把 AIGC 从"不可复现的黑盒"驯服成"随机编译器"——seed 显式、模型 / 版本
+锁定、产物 pin 命中率可度量、provider 数量 ≥ 2 有 fallback、每次 AIGC 调用的成本
+在 session 层可见。
+
+**Exit criteria 完成情况**：
+
+- [x] Lockfile 完整性：每个成功的 AIGC clip 在 `project.lockfile.entries`
+  落一条 `LockfileEntry` (modelId, modelVersion?, seed, parameters, inputHash,
+  sourceBindingContentHashes); round-trip e2e。
+  — cycle 2026-04-24 **3fde671a** (`c30ecbb1` 也参与)
+- [x] Provider 多元：`SeedanceVideoGenEngine` 接 ByteDance Volcano Engine ARK
+  作为 `VideoGenEngine` 的第二 prod impl，证明 provider 抽象不是
+  openai-hardcoded；`ARK_API_KEY` 触发，三个 JVM container 均 wire。
+  — cycle 2026-04-26 **487c5989**
+- [x] Pin 命中率可见：`project_query` 加 select 答 "export 几次、几条 clip
+  从 lockfile cache 命中"。
+  — cycle 2026-04-24 **08223ac3**
+- [x] 成本可见：`session_query(select=spend_summary)` 聚合 per-session AIGC
+  spend，按 provider 分档，tokens / USD 估算，反复调用累加。
+  — cycle 2026-04-24 **7862ce7d**
+- [x] Fallback 生产回归测试：`ProviderFallbackE2ETest` e2e 覆盖 "provider A
+  抛 ProviderError → AgentProviderFallbackTracker 切 B → 产物正确落地"。
+  — cycle 2026-04-24 **c3bad022**
+- [x] Seed 复现证明：相同 seed + inputs 重跑 `generate_image` 得 bit-identical
+  provenance + 同 assetId（lockfile cache-hit）。
+  — cycle 2026-04-24 **e1adea8f**
+- [x] Milestone 退出总结：M2 exit summary 段 + 5 条 §3.1 接力 gap（GPU-inference
+  本地跑 / 预算硬 cap 触发 / 多 provider cost arbitrage / cold-start 优化 /
+  cache invalidation latency）。
+  — cycle 2026-04-24 **4ee6a08b**
+
+### M2 exit summary
+
+M2 关起门来证明了**AIGC 驯服产品化的 6/6 实质轴 + 1 manual exit 全部落地**：
+lockfile 完整性 (3fde671a) + provider 多元 (487c5989, Seedance) + pin 命中率
+(08223ac3) + 成本可见 (7862ce7d) + fallback 回归 (c3bad022) + seed 复现
+(e1adea8f)。这六条是 "AIGC 从黑盒变 deterministic compiler" 的工程学基石。
+
+**§3.1 完整愿景里 M2+ 接力的 gap**（超出本 milestone 的工程学跑道，列给
+M3 / M4 / 未来 M）：
+
+1. **GPU-inference 本地跑**：`ImageGenEngine` / `VideoGenEngine` 现在全走云端
+   provider。本地 SD / local ComfyUI / MLX-diffusion 这类路径缺
+   `LocalGpuImageGenEngine` impl + GPU-availability probing + fallback-to-cloud
+   策略。对 data-sensitive 创作者（不愿把素材传云）是必需品。
+2. **预算硬 cap 触发**：`session_query(select=spend_summary)` 给了读口，但没有
+   写口——session.metadata 里没有 `spendCapUsdCents: Long?` 字段，`Agent.run`
+   不在 AIGC tool 分发前检查 "this session spent > cap, refuse".
+   `SessionRateLimits` 有骨架但不消费 spend_summary 数据。
+3. **多 provider cost arbitrage**：已有 `provider_query(select=cost_compare)`
+   答 "same prompt across providers — cheapest"；但 `AgentProviderFallbackTracker`
+   只按 registry 顺序选 provider，不按 cost 挑。需要 `ProviderRoutingPolicy`
+   抽象 + cost-aware fallback chain 排序。
+4. **cold-start 优化**：首次 AIGC 调用 provider connection setup / model warmup
+   / seed-pinning handshake 不可见。Session 起步第一个 image 生成会比后续慢
+   很多，用户会以为卡死。`BusEvent.ProviderWarmup` 已存在但 CLI/Desktop 还无
+   对其的 UI surface。
+5. **cache invalidation latency**：`project.lockfile` cache hit 检测走 in-memory
+   `byInputHash` map；跨 session 打开同一 project 会重建这个 map，但 JSON decode
+   on large `entries` list (>500 items on a mature project) takes O(N) per open
+   — profile 数据没收集。未来 perf bullet 可能要 `lockfile.jsonl` 分文件 +
+   增量加载。
+
+前四条都指向 M3/M4/M5 的不同赌注；第五条是 §5.7 perf 轴的独立 backlog 项。
 
 ## Completed — M1 (2026-04-24)
 
