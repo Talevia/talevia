@@ -47,10 +47,13 @@ compiler + agent + UX** 全栈轴的。
   之一） — cycle 2026-04-26 *本 commit*（`PROMPT_DUAL_USER` lane 加进
   `TALEVIA_SYSTEM_PROMPT_BASE`，含 `小白` / `专家` / `operation depth` /
   `Two paths, one project` 锚词）
-- [ ] 两路径共享 source：jvmTest 验证小白模式产出的 `SourceNodeId` 可被
+- [x] 两路径共享 source：jvmTest 验证小白模式产出的 `SourceNodeId` 可被
   `source_node_action(action="update_body")` 直接编辑，下游 clips 走 stale
   标记 → regenerate 的标准链路（grep: `CrossPathSourceSharedTest` 或类似 +
-  `assertTrue(clip.staleByLockfile)` / 等价断言）
+  `assertTrue(clip.staleByLockfile)` / 等价断言） — cycle 2026-04-26 *本 commit*
+  （`CrossPathSourceSharedTest` 验证 small-user 创建 character_ref + 绑定 →
+  pro-user `update_body` → `staleClipsFromLockfile` 命中 + regen lockfile entry
+  含 post-edit hash）
 - [ ] 进度可见：cli / desktop UI 把 multi-step `BusEvent.AgentRunState` 翻译
   为 user-readable 进度行（"Step 3/8: generate_video"），不是黑盒 5-30s
   （grep: cli `Renderer` / desktop UI 订阅 `AgentRunState.steps` + 行
