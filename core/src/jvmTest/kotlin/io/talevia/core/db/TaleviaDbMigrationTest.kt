@@ -165,4 +165,55 @@ class TaleviaDbMigrationTest {
             "Schema.version (${TaleviaDb.Schema.version}) should be at least 4 after 1.sqm / 2.sqm / 3.sqm",
         )
     }
+
+    @Test fun dbFactoryOpenRefusesFutureSchemaVersion() {
+        // Critical-path runtime gate (R.5 #10): TaleviaDbFactory.open file-
+        // backed path refuses to open a DB whose `PRAGMA user_version` is
+        // higher than this build's `Schema.version`. Without this gate, an
+        // older binary loading a newer schema would silently miss columns /
+        // tables and corrupt later writes.
+        //
+        // Test shape: bootstrap a real on-disk DB at the current schema
+        // version, force `user_version=99`, re-open via the factory, assert
+        // it throws with a recognisable message. In-memory DBs skip the
+        // gate by design (every in-memory open is fresh) so the test must
+        // hit the file-backed branch — uses Files.createTempFile under
+        // java.io to give the factory a real path it can probe.
+        val tmpDir = java.nio.file.Files.createTempDirectory("talevia-db-future-").toFile()
+        try {
+            val dbFile = java.io.File(tmpDir, "talevia.db")
+            // 1. Bootstrap: factory opens, runs Schema.create, leaves
+            //    user_version at the current target. Close so we can mutate
+            //    the file out-of-band.
+            val first = TaleviaDbFactory.open(path = dbFile.absolutePath)
+            first.driver.close()
+            assertTrue(dbFile.exists(), "factory should have created the db file")
+
+            // 2. Force user_version = 99 (any value > current Schema.version
+            //    triggers the refusal branch).
+            val mutator = JdbcSqliteDriver("jdbc:sqlite:${dbFile.absolutePath}")
+            try {
+                mutator.execute(null, "PRAGMA user_version = 99", 0)
+            } finally {
+                mutator.close()
+            }
+
+            // 3. Re-open: factory must throw the "newer than this build"
+            //    error. The `error(...)` call in TaleviaDbFactory.openFile
+            //    raises IllegalStateException via Kotlin's stdlib helper.
+            var threwExpected = false
+            try {
+                TaleviaDbFactory.open(path = dbFile.absolutePath)
+            } catch (e: Throwable) {
+                threwExpected = "newer than this build" in (e.message ?: "") ||
+                    "Refusing to open" in (e.message ?: "")
+            }
+            assertTrue(
+                threwExpected,
+                "factory must refuse to open a DB with user_version > Schema.version with a recognisable message",
+            )
+        } finally {
+            tmpDir.deleteRecursively()
+        }
+    }
 }
