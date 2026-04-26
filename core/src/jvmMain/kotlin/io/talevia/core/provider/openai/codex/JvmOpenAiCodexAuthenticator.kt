@@ -73,7 +73,13 @@ class JvmOpenAiCodexAuthenticator(
         // port. We MUST know the final port before constructing the authorize
         // URL because redirect_uri is part of PKCE-bound state.
         val resolvedPort = pickPort()
-        val redirectUri = "http://127.0.0.1:$resolvedPort${OpenAiCodexConstants.CALLBACK_PATH}"
+        // OpenAI's authorize endpoint matches the redirect_uri host as a literal
+        // string against the whitelist for the Codex CLI client_id. The
+        // whitelisted host is `localhost`, NOT `127.0.0.1` — using the IP
+        // returns `unknown_error` from auth.openai.com. We still bind the
+        // loopback server on 127.0.0.1 below; the browser resolves "localhost"
+        // to that interface anyway.
+        val redirectUri = "http://localhost:$resolvedPort${OpenAiCodexConstants.CALLBACK_PATH}"
         val authorizeUrl = buildAuthorizeUrl(pkce.challenge, state, redirectUri)
 
         val server = embeddedServer(CIO, host = "127.0.0.1", port = resolvedPort, module = {
