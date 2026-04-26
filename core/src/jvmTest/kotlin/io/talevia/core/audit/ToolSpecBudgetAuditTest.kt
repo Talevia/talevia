@@ -115,11 +115,44 @@ class ToolSpecBudgetAuditTest {
         println("[audit] tool-spec-budget top=${row.topByTokens.joinToString("; ") { "${it.toolId}=${it.estimatedTokens}t" }}")
 
         assertTrue(row.toolCount > 0, "expected non-empty production registry; got ${row.toolCount}")
+
+        // Three-tier budget gate (R.6 #1 perf surface, M3 criterion-aligned
+        // `debt-shrink-tool-spec-surface-token-budget`):
+        //
+        // - LOWER ($MIN): catches regressions that silently shrink the
+        //   registry (e.g. an `register*Tools` call accidentally elided
+        //   under a refactor); current audit-subset baseline ≈ 16.5k so
+        //   any drop > 27% means "tools went missing", not "we got
+        //   leaner".
+        // - WARNING ($SOFT): printed as `[warn]` when crossed but does
+        //   NOT fail the test. Lets cycles detect creep early without
+        //   blocking work in flight; the `:core:jvmTest --info` log /
+        //   commit-body monitoring lane records the trigger so the
+        //   pattern is visible across cycles.
+        // - HARD CEILING ($MAX): assertion fails. Hard limit on the
+        //   audit subset's per-turn LLM context tax. If the registry
+        //   genuinely needs to grow past this, do it as an explicit
+        //   ceiling-bump commit with rationale (`debt-shrink-tool-spec-surface-token-budget`
+        //   resolution / re-promote), not silently.
+        val MIN = 12_000
+        val SOFT = 18_000
+        val MAX = 22_000
         assertTrue(
-            row.estimatedTokens in 1..30_000,
-            "tool-spec budget ${row.estimatedTokens} outside sanity ceiling; " +
-                "check whether a very heavy tool spec landed, or update the ceiling if the registry genuinely grew.",
+            row.estimatedTokens >= MIN,
+            "tool-spec budget ${row.estimatedTokens} below $MIN — registry shrank unexpectedly; " +
+                "check if a register*Tools call was accidentally dropped",
         )
+        assertTrue(
+            row.estimatedTokens <= MAX,
+            "tool-spec budget ${row.estimatedTokens} exceeds hard ceiling $MAX — runaway tool-spec growth; " +
+                "consolidate or shrink before merging, do not bump the ceiling silently",
+        )
+        if (row.estimatedTokens > SOFT) {
+            println(
+                "[warn] tool-spec budget ${row.estimatedTokens} crossed soft threshold $SOFT (hard $MAX) — " +
+                    "consolidate near-prefix tool groups or trim helpText before the next cycle",
+            )
+        }
     }
 
     private object StubBundleBlobWriter : BundleBlobWriter {
