@@ -54,10 +54,14 @@ compiler + agent + UX** 全栈轴的。
   （`CrossPathSourceSharedTest` 验证 small-user 创建 character_ref + 绑定 →
   pro-user `update_body` → `staleClipsFromLockfile` 命中 + regen lockfile entry
   含 post-edit hash）
-- [ ] 进度可见：cli / desktop UI 把 multi-step `BusEvent.AgentRunState` 翻译
+- [x] 进度可见：cli / desktop UI 把 multi-step `BusEvent.AgentRunState` 翻译
   为 user-readable 进度行（"Step 3/8: generate_video"），不是黑盒 5-30s
   （grep: cli `Renderer` / desktop UI 订阅 `AgentRunState.steps` + 行
-  template 含 `Step .*\d` / `\d+/\d+` 之类）
+  template 含 `Step .*\d` / `\d+/\d+` 之类） — cycle 2026-04-26 *本 commit*
+  （CLI: `Renderer.agentStepNotice` + `EventRouter` 订阅
+  `BusEvent.AgentRunStateChanged` 在 Generating-edge 上 emit
+  `Step N · processing…`；desktop UI 同步推迟到独立 follow-up bullet
+  per CLAUDE.md "Platform priority — CLI > Desktop"）
 - [ ] Failure-fallback 提示：Agent.run 终态 ERROR 时，agent 输出含"换 provider
   / 改 prompt / 让我介入"等 next-step 建议而非仅 stack dump，让小白用户知道
   下一步该做什么（grep: agent 错误处理路径中有 fallback suggestion 字符串

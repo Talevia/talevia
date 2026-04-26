@@ -2,6 +2,7 @@ package io.talevia.cli.event
 
 import io.talevia.cli.repl.Renderer
 import io.talevia.core.SessionId
+import io.talevia.core.agent.AgentRunState
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
 import io.talevia.core.session.Message
@@ -71,6 +72,45 @@ class EventRouter(
             bus.subscribe<BusEvent.AssetsMissing>()
                 .collect { ev ->
                     renderer.assetsMissingNotice(ev.missing.map { it.originalPath })
+                }
+        }
+        // Multi-step trajectory progress: surface "Step N · processing…" on
+        // every Generating-edge transition so users aren't staring at silent
+        // CLI for 5-30 s between tool dispatches. Counter resets per session
+        // (so /resume / /new doesn't carry over a stale count) and resets to
+        // 0 on terminal Idle. AwaitingTool / Compacting are separately
+        // surfaced (toolRunning + compactedNotice respectively) so we don't
+        // double-render here.
+        jobs += scope.launch {
+            val stepBySession = mutableMapOf<SessionId, Int>()
+            val prevStateBySession = mutableMapOf<SessionId, AgentRunState>()
+            bus.sessionScopedSubscribe<BusEvent.AgentRunStateChanged>(activeSessionId)
+                .collect { ev ->
+                    val sid = ev.sessionId
+                    val prev = prevStateBySession[sid]
+                    val state = ev.state
+                    when (state) {
+                        is AgentRunState.Generating -> {
+                            // Render only on the *transition* into Generating —
+                            // a Generating → Generating self-loop (which the
+                            // current state machine doesn't emit but a future
+                            // refactor might) would otherwise increment per
+                            // event and noise the UI.
+                            if (prev !is AgentRunState.Generating) {
+                                val n = (stepBySession[sid] ?: 0) + 1
+                                stepBySession[sid] = n
+                                renderer.agentStepNotice(n)
+                            }
+                        }
+                        is AgentRunState.Idle -> {
+                            // Run ended; reset counter so the next run starts
+                            // fresh at Step 1. Pre-run Idle (no prev state)
+                            // doesn't trigger the reset path.
+                            if (prev != null) stepBySession.remove(sid)
+                        }
+                        else -> Unit
+                    }
+                    prevStateBySession[sid] = state
                 }
         }
         jobs += scope.launch {

@@ -281,6 +281,52 @@ class EventRouterTest {
         assertEquals("", rig.stdout().trim(), "empty-text finalize must be a no-op")
     }
 
+    @Test fun agentRunStateChangedRendersIncrementingStepNotices() = runTest {
+        // M3 criterion 4 (`small-user-progress-surface`): each
+        // AgentRunState.Generating-edge transition surfaces a "Step N"
+        // notice. Drives 3 Generating transitions interleaved with
+        // AwaitingTool (the realistic agent-loop shape: think → tool →
+        // think → tool → think) and asserts Step 1 / 2 / 3 all print.
+        val rig = rig()
+        suspend fun publishState(state: io.talevia.core.agent.AgentRunState) {
+            rig.bus.publish(
+                BusEvent.AgentRunStateChanged(
+                    sessionId = sessionId,
+                    state = state,
+                    retryAttempt = null,
+                ),
+            )
+            rig.settle()
+        }
+        publishState(io.talevia.core.agent.AgentRunState.Generating)
+        publishState(io.talevia.core.agent.AgentRunState.AwaitingTool)
+        publishState(io.talevia.core.agent.AgentRunState.Generating)
+        publishState(io.talevia.core.agent.AgentRunState.AwaitingTool)
+        publishState(io.talevia.core.agent.AgentRunState.Generating)
+        rig.settle()
+        val out = rig.stdout()
+        assertTrue("Step 1" in out, "first Generating must render Step 1; got <$out>")
+        assertTrue("Step 2" in out, "second Generating must render Step 2; got <$out>")
+        assertTrue("Step 3" in out, "third Generating must render Step 3; got <$out>")
+    }
+
+    @Test fun agentRunStateChangedDoesNotRenderForNonGeneratingTransitions() = runTest {
+        // AwaitingTool / Compacting / Cancelled / Failed go through other
+        // Renderer methods (toolRunning / compactedNotice / error) and must
+        // not double-render via the step lane. Pin this so a future
+        // overzealous "render every state change" refactor trips the test.
+        val rig = rig()
+        rig.bus.publish(
+            BusEvent.AgentRunStateChanged(
+                sessionId = sessionId,
+                state = io.talevia.core.agent.AgentRunState.AwaitingTool,
+                retryAttempt = null,
+            ),
+        )
+        rig.settle()
+        assertFalse("Step " in rig.stdout(), "AwaitingTool transition must not render a Step notice; got <${rig.stdout()}>")
+    }
+
     @Test fun partUpdatedToolRunningSurfacesToolId() = runTest {
         val rig = rig()
         val assistantId = MessageId("m-tool-host")

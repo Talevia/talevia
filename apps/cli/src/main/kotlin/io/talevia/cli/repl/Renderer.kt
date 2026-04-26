@@ -392,6 +392,33 @@ class Renderer(
     }
 
     /**
+     * Per-step progress notice for multi-step agent trajectories — fires on
+     * every [io.talevia.core.agent.AgentRunState.Generating] transition (i.e.
+     * the start of each LLM step in a tool_use / tool_result loop). Without
+     * this line, multi-step runs go silent for 5–30 s between tool dispatches
+     * while the LLM reasons but hasn't yet streamed text or tool-call deltas
+     * — users see "tool finished, then nothing", and `:apps:cli` looks
+     * frozen.
+     *
+     * Total step count is intentionally unknown (the LLM decides as it goes),
+     * so the format is `Step N · processing…` rather than `Step N/M`. The
+     * `processing…` tail collapses naturally once the next text-delta or
+     * tool-running line lands.
+     *
+     * VISION §4 small-user / pro-user calibration: the line is short and
+     * mode-neutral so neither path feels chatty.
+     */
+    suspend fun agentStepNotice(stepNumber: Int) = mutex.withLock {
+        breakAssistantLineLocked()
+        markAllPartsUnrepaintableLocked()
+        invalidateBottomLocked()
+        terminal.writer().println(
+            "  ${Styles.running("⟳")} ${Styles.meta("Step $stepNumber · processing…")}",
+        )
+        terminal.writer().flush()
+    }
+
+    /**
      * If we're mid-assistant-line (no trailing newline emitted yet), close it
      * so the next printed line starts at column 0. We deliberately do not reset
      * [assistantOpen] — the next delta will still want to flow inline on its
