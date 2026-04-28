@@ -27,7 +27,6 @@
 
 ## P2 — 记债 / 观望
 
-- **perf-mediabundle-blob-streaming** — `BundleBlobWriter.writeBlob(bytes: ByteArray)` 接口接收已在内存中的 ByteArray。AIGC 产物 / `import_media` 复制路径在 4K 视频 / 大 LoRA 文件场景（≥ 100MB）下要先把整个文件载入内存才写出。**方向：** 暴露 `writeBlobStreaming(source: okio.Source): MediaSource.BundleFile` 让大文件不入内存；旧 `writeBlob(ByteArray)` 走 wrapper；`import_media` 的 `copy_into_bundle=true` 路径优先切流式。Rubric §5.7 / §3a-3。Milestone §later.
 - **debt-near-tool-prefix-list-find-2026-04** — R.5 #2 scan: 跨 2026-04 后 tool count 仍 60；近似工具群的 `list_X` / `find_X` / `describe_X` 旧 pair 几乎都已 fold 进 `*_query` 或 `*_action` dispatcher。当前无新 hit。**方向：** observational，下一轮 repopulate 重扫；若新增专题 dispatcher 或单领域工具 ≥ 2 个 prefix-pair 立即 promote。**触发条件：** 新出现 prefix-pair 或某领域工具新增数 ≥ 2。Rubric §5.6。Milestone §later.
 - **debt-todo-fixme-baseline-31** — R.5.6 scan: 31 TODO/FIXME/HACK occurrences in core/commonMain (unchanged from cycle 154 baseline of 31). **方向：** observational; trigger watches for *increases* (the count drift is asymmetric — a slow ratchet down is healthy). **触发条件：** next repopulate count > 31. Rubric §5.6。Milestone §later.
 - **debt-tool-count-watch-60** — R.5.1 scan 60 tools (unchanged from cycle 153/154 — `debt-shrink-tool-spec-surface` umbrella's ≤ 60 cap target still held). **方向：** observational; if count climbs back above 60, next repopulate should re-promote `debt-shrink-tool-spec-surface` to P0/P1. **触发条件：** next repopulate count > 60. Rubric §5.6。Milestone §later.
