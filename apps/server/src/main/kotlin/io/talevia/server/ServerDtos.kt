@@ -99,6 +99,7 @@ internal fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.AssetsMissing -> "project.assets.missing"
     is BusEvent.ProviderWarmup -> "provider.warmup"
     is BusEvent.AigcJobProgress -> "aigc.job.progress"
+    is BusEvent.ToolSpecBudgetWarning -> "tool.spec.budget.warning"
 }
 
 /**
@@ -188,6 +189,12 @@ data class BusEventDto(
     val ratio: Float? = null,
     /** Set for `aigc.job.progress` — provider's ETA hint (seconds), null if unknown. */
     val etaSec: Int? = null,
+    /** Set for `tool.spec.budget.warning` — current tool-spec budget estimate in tokens. */
+    val estimatedTokens: Int? = null,
+    /** Set for `tool.spec.budget.warning` — soft-warning threshold the budget crossed. */
+    val thresholdTokensBudget: Int? = null,
+    /** Set for `tool.spec.budget.warning` — number of tools registered when the warning fired. */
+    val toolCount: Int? = null,
 ) {
     companion object {
         fun from(e: BusEvent): BusEventDto = when (e) {
@@ -328,6 +335,12 @@ data class BusEventDto(
                 etaSec = e.etaSec,
                 message = e.message,
                 providerId = e.providerId,
+            )
+            is BusEvent.ToolSpecBudgetWarning -> BusEventDto(
+                "tool.spec.budget.warning",
+                estimatedTokens = e.estimatedTokens,
+                thresholdTokensBudget = e.threshold,
+                toolCount = e.toolCount,
             )
         }
     }

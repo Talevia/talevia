@@ -342,4 +342,33 @@ sealed interface BusEvent {
     ) : SessionEvent
 
     enum class AigcProgressPhase { Started, Progress, Completed, Failed }
+
+    /**
+     * Tool-spec budget upward threshold crossing. Fires once on each
+     * `under-threshold → over-threshold` edge — never spammed while the
+     * registry stays continuously over the threshold (`ToolSpecBudgetMonitor`
+     * holds the hysteresis state). Not a [SessionEvent]: the registry is
+     * runtime-wide, the same number applies to every session in this process.
+     *
+     * Why this lane exists at runtime when `session_query(select=tool_spec_budget)`
+     * already exposes the metric: the audit test pins an upper-bound gate
+     * (cycle-167 12k–22k), but no runtime path consumes the metric. A PR
+     * that nudges the registry from 13k → 18k would slip past the audit
+     * (still under the 22k cap) without any user-visible signal — by the
+     * time someone notices "every turn is a few hundred tokens slower",
+     * the regression is already shipped. The [BusEvent] surfaces the
+     * crossing so CLI / desktop UIs can render a non-blocking warning,
+     * and `EventBusMetricsSink` records a counter that Prometheus scrapes
+     * for ops alerting.
+     *
+     * VISION §5.7 / §3a-10. Threshold defaulted to `18_000` to mirror the
+     * audit test's soft-warning gate; composition roots can override.
+     */
+    data class ToolSpecBudgetWarning(
+        val estimatedTokens: Int,
+        val threshold: Int,
+        val toolCount: Int,
+    ) : BusEvent {
+        val exceededBy: Int get() = estimatedTokens - threshold
+    }
 }

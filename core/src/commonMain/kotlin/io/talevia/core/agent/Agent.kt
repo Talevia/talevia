@@ -139,6 +139,18 @@ class Agent(
      * cacheable and test-friendly.
      */
     private val routingPolicy: ProviderRoutingPolicy = ProviderRoutingPolicy.Default,
+    /**
+     * Runtime watchdog for the tool-spec token budget — fires
+     * [BusEvent.ToolSpecBudgetWarning] on each upward threshold crossing
+     * so a PR that bloats the registry surfaces in CLI / desktop / Prometheus
+     * before users notice "every turn is a few hundred tokens slower"
+     * (VISION §5.7 / §3a-10). Defaults to a registry-wide instance with
+     * `ToolSpecBudgetMonitor.DEFAULT_THRESHOLD` (18k tokens, mirroring
+     * the audit test gate). Pass a separately-constructed monitor when
+     * tests want to assert hysteresis explicitly; pass an instance with
+     * a no-op registry hook to disable the lane entirely.
+     */
+    private val toolSpecBudgetMonitor: ToolSpecBudgetMonitor = ToolSpecBudgetMonitor(),
 ) : AutoCloseable {
 
     private val log = Loggers.get("agent")
@@ -238,6 +250,7 @@ class Agent(
             "promptLen" to input.text.length,
         )
         bus.publish(BusEvent.AgentRunStateChanged(input.sessionId, AgentRunState.Generating))
+        toolSpecBudgetMonitor.check(registry)?.let { bus.publish(it) }
         try {
             val result = runLoop(input, handle)
             log.info(

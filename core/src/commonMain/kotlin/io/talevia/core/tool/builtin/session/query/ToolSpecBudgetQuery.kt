@@ -69,14 +69,14 @@ private const val TOP_N: Int = 5
  */
 private fun bytesToTokens(bytes: Int): Int = (bytes + 2) / 4
 
-internal fun runToolSpecBudgetQuery(
-    toolRegistry: ToolRegistry?,
-    input: SessionQueryTool.Input,
-): ToolResult<SessionQueryTool.Output> {
-    require(input.sessionId == null) {
-        "select='${SessionQueryTool.SELECT_TOOL_SPEC_BUDGET}' is a registry-wide snapshot; " +
-            "sessionId does not apply."
-    }
+/**
+ * Compute the registry-wide tool-spec budget snapshot. Shared by the
+ * `select=tool_spec_budget` query and by the runtime warning monitor in
+ * [io.talevia.core.agent.ToolSpecBudgetMonitor], so both lanes use the
+ * same `(id + helpText + schema).length / 4` heuristic and any future
+ * tokenizer swap lands in one place.
+ */
+internal fun computeToolSpecBudget(toolRegistry: ToolRegistry?): ToolSpecBudgetRow {
     val tools: List<RegisteredTool> = toolRegistry?.all().orEmpty()
     val entries = tools.map { rt ->
         val schemaJson = JsonConfig.default.encodeToString(JsonElement.serializer(), rt.spec.inputSchema)
@@ -90,14 +90,28 @@ internal fun runToolSpecBudgetQuery(
     val totalBytes = entries.sumOf { it.specBytes }
     val totalTokens = entries.sumOf { it.estimatedTokens }
     val top = entries.sortedByDescending { it.estimatedTokens }.take(TOP_N)
-
-    val row = ToolSpecBudgetRow(
+    return ToolSpecBudgetRow(
         toolCount = tools.size,
         estimatedTokens = totalTokens,
         specBytes = totalBytes,
         registryResolved = toolRegistry != null,
         topByTokens = top,
     )
+}
+
+internal fun runToolSpecBudgetQuery(
+    toolRegistry: ToolRegistry?,
+    input: SessionQueryTool.Input,
+): ToolResult<SessionQueryTool.Output> {
+    require(input.sessionId == null) {
+        "select='${SessionQueryTool.SELECT_TOOL_SPEC_BUDGET}' is a registry-wide snapshot; " +
+            "sessionId does not apply."
+    }
+    val row = computeToolSpecBudget(toolRegistry)
+    val tools: List<RegisteredTool> = toolRegistry?.all().orEmpty()
+    val totalBytes = row.specBytes
+    val totalTokens = row.estimatedTokens
+    val top = row.topByTokens
     val rows: JsonArray = JsonConfig.default.encodeToJsonElement(
         ListSerializer(ToolSpecBudgetRow.serializer()),
         listOf(row),

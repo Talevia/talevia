@@ -206,6 +206,7 @@ class EventBusMetricsSink(
             BusEvent.AigcProgressPhase.Completed -> "aigc.job.completed"
             BusEvent.AigcProgressPhase.Failed -> "aigc.job.failed"
         }
+        is BusEvent.ToolSpecBudgetWarning -> "tool.spec.budget.warning"
     }
 
     /**
