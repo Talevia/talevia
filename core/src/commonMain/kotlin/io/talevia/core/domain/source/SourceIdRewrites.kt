@@ -119,7 +119,8 @@ fun Lockfile.rewriteSourceBinding(oldId: SourceNodeId, newId: SourceNodeId): Pai
     val rewritten = entries.map { entry ->
         val inBinding = oldId in entry.sourceBinding
         val inHashes = oldId in entry.sourceContentHashes
-        if (!inBinding && !inHashes) {
+        val inHashesByModality = oldId in entry.sourceContentHashesByModality
+        if (!inBinding && !inHashes && !inHashesByModality) {
             entry
         } else {
             touched += 1
@@ -134,9 +135,16 @@ fun Lockfile.rewriteSourceBinding(oldId: SourceNodeId, newId: SourceNodeId): Pai
             } else {
                 entry.sourceContentHashes
             }
+            val nextHashesByModality = if (inHashesByModality) {
+                entry.sourceContentHashesByModality
+                    .mapKeys { (k, _) -> if (k == oldId) newId else k }
+            } else {
+                entry.sourceContentHashesByModality
+            }
             entry.copy(
                 sourceBinding = nextBinding,
                 sourceContentHashes = nextHashes,
+                sourceContentHashesByModality = nextHashesByModality,
             )
         }
     }

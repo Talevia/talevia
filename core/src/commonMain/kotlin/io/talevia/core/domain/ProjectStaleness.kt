@@ -3,7 +3,10 @@ package io.talevia.core.domain
 import io.talevia.core.AssetId
 import io.talevia.core.ClipId
 import io.talevia.core.SourceNodeId
+import io.talevia.core.domain.source.Modality
 import io.talevia.core.domain.source.deepContentHashOf
+import io.talevia.core.domain.source.deepContentHashOfFor
+import io.talevia.core.domain.source.modalityNeeds
 import io.talevia.core.domain.source.stale
 import kotlinx.serialization.Serializable
 
@@ -222,9 +225,19 @@ fun Project.staleClipsFromLockfile(): List<StaleClipReport> {
     // contentHash folded with ancestors') is recomputed and diffed against
     // the recorded snapshot. Missing node → deleted source → non-comparable
     // (skipped), matching the pre-transitive shallow-hash behaviour for
-    // removed nodes. `deepCache` is shared across all clips so each DAG
-    // node is walked at most once per call.
-    val deepCache = mutableMapOf<SourceNodeId, String>()
+    // removed nodes.
+    //
+    // Modality lane (VISION §5.5 cross-modal staleness): when an entry
+    // carries `sourceContentHashesByModality`, we compare only the slice
+    // the consuming clip's modality actually depends on — flipping a
+    // `character_ref.voiceId` does not stale visual-only clips bound to
+    // the character, and vice versa. Legacy entries (empty modality map)
+    // fall back to the whole-body comparison. Per-modality caches are
+    // independent because each modality folds different shallow hashes;
+    // sharing a single cache would alias across modalities.
+    val fullCache = mutableMapOf<SourceNodeId, String>()
+    val visualCache = mutableMapOf<SourceNodeId, String>()
+    val audioCache = mutableMapOf<SourceNodeId, String>()
     val out = mutableListOf<StaleClipReport>()
     for (track in timeline.tracks) {
         for (clip in track.clips) {
@@ -234,12 +247,27 @@ fun Project.staleClipsFromLockfile(): List<StaleClipReport> {
                 is Clip.Text -> null
             } ?: continue
             val entry = lockfile.findByAssetId(assetId) ?: continue
-            if (entry.sourceContentHashes.isEmpty()) continue
+            val byModality = entry.sourceContentHashesByModality
+            val useModality = byModality.isNotEmpty()
+            if (!useModality && entry.sourceContentHashes.isEmpty()) continue
+            val clipModality = clip.modalityNeeds
             val changed = LinkedHashSet<SourceNodeId>()
-            for ((nodeId, snapshot) in entry.sourceContentHashes) {
-                if (source.byId[nodeId] == null) continue
-                val nowDeep = source.deepContentHashOf(nodeId, deepCache)
-                if (nowDeep != snapshot) changed += nodeId
+            if (useModality) {
+                val cache = when (clipModality) {
+                    Modality.Visual -> visualCache
+                    Modality.Audio -> audioCache
+                }
+                for ((nodeId, snapshot) in byModality) {
+                    if (source.byId[nodeId] == null) continue
+                    val nowDeep = source.deepContentHashOfFor(nodeId, clipModality, cache)
+                    if (nowDeep != snapshot.forModality(clipModality)) changed += nodeId
+                }
+            } else {
+                for ((nodeId, snapshot) in entry.sourceContentHashes) {
+                    if (source.byId[nodeId] == null) continue
+                    val nowDeep = source.deepContentHashOf(nodeId, fullCache)
+                    if (nowDeep != snapshot) changed += nodeId
+                }
             }
             if (changed.isNotEmpty()) {
                 out += StaleClipReport(

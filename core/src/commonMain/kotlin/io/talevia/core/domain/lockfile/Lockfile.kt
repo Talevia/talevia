@@ -3,6 +3,7 @@ package io.talevia.core.domain.lockfile
 import io.talevia.core.AssetId
 import io.talevia.core.MessageId
 import io.talevia.core.SourceNodeId
+import io.talevia.core.domain.source.Modality
 import io.talevia.core.platform.GenerationProvenance
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
@@ -173,4 +174,41 @@ data class LockfileEntry(
     val sessionId: String? = null,
     val resolvedPrompt: String? = null,
     val originatingMessageId: MessageId? = null,
+    /**
+     * Modality-segmented snapshot of each bound node's deep content hash, keyed
+     * by [Modality]. Lets [io.talevia.core.domain.staleClipsFromLockfile] compare
+     * only the slice the consuming clip actually depends on — e.g. a pure-video
+     * generation does not stale when its bound `character_ref`'s `voiceId`
+     * flips, because the visual slice's hash is unaffected.
+     *
+     * Default empty for forward compatibility: legacy entries (and any entries
+     * written before this field landed) have no per-modality snapshot, and the
+     * staleness detector falls back to the whole-body [sourceContentHashes]
+     * comparison — i.e., the same "edit anything → stale" behavior we had
+     * before. Once an entry carries this map, the modality-aware comparison
+     * supersedes the legacy field.
+     *
+     * Populated by [io.talevia.core.tool.builtin.aigc.AigcPipeline.record] using
+     * [io.talevia.core.domain.source.deepContentHashOfFor], so every AIGC tool
+     * stamps both modality slices for every bound node — without each tool
+     * needing to know which slice its consumer will read.
+     */
+    val sourceContentHashesByModality: Map<SourceNodeId, ModalityHashes> = emptyMap(),
 )
+
+/**
+ * Snapshot of one source node's deep content hash, segmented by [Modality]
+ * (visual vs audio). Stored on [LockfileEntry] so the staleness detector can
+ * compare only the slice the consuming clip actually consumes — see
+ * [LockfileEntry.sourceContentHashesByModality].
+ */
+@Serializable
+data class ModalityHashes(
+    val visual: String,
+    val audio: String,
+) {
+    fun forModality(modality: Modality): String = when (modality) {
+        Modality.Visual -> visual
+        Modality.Audio -> audio
+    }
+}

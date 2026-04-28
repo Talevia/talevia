@@ -10,12 +10,15 @@ import io.talevia.core.domain.MediaAsset
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.lockfile.LockfileEntry
+import io.talevia.core.domain.lockfile.ModalityHashes
+import io.talevia.core.domain.source.Modality
 import io.talevia.core.domain.source.consistency.FoldedPrompt
 import io.talevia.core.domain.source.consistency.FoldedVoice
 import io.talevia.core.domain.source.consistency.consistencyNodes
 import io.talevia.core.domain.source.consistency.foldConsistencyIntoPrompt
 import io.talevia.core.domain.source.consistency.resolveConsistencyBindings
 import io.talevia.core.domain.source.deepContentHashOf
+import io.talevia.core.domain.source.deepContentHashOfFor
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.session.Part
 import io.talevia.core.tool.ToolContext
@@ -264,16 +267,37 @@ internal object AigcPipeline {
         newAsset: MediaAsset? = null,
     ) {
         store.mutate(projectId) { project ->
-            val snapshot: Map<SourceNodeId, String> = if (sourceBinding.isEmpty()) emptyMap()
-            else buildMap {
-                // Use the deep content hash so the stale-clip lane catches edits
-                // to any ancestor in the DAG (VISION §5.1) — shallow contentHash
-                // only tracks (kind, body, parents-by-id) and silently misses
-                // body edits on grandparents.
-                val cache = mutableMapOf<SourceNodeId, String>()
-                for (id in sourceBinding) {
-                    if (project.source.byId[id] == null) continue
-                    put(id, project.source.deepContentHashOf(id, cache))
+            val snapshot: Map<SourceNodeId, String>
+            val snapshotByModality: Map<SourceNodeId, ModalityHashes>
+            if (sourceBinding.isEmpty()) {
+                snapshot = emptyMap()
+                snapshotByModality = emptyMap()
+            } else {
+                // Compute both the legacy whole-body deep hash (kept so the
+                // staleness detector can fall back when reading entries that
+                // happen to be missing per-modality data, and so existing
+                // assertions on this field stay green) and the per-modality
+                // slice the modality-aware comparison consults preferentially.
+                val fullCache = mutableMapOf<SourceNodeId, String>()
+                val visualCache = mutableMapOf<SourceNodeId, String>()
+                val audioCache = mutableMapOf<SourceNodeId, String>()
+                snapshot = buildMap {
+                    for (id in sourceBinding) {
+                        if (project.source.byId[id] == null) continue
+                        put(id, project.source.deepContentHashOf(id, fullCache))
+                    }
+                }
+                snapshotByModality = buildMap {
+                    for (id in sourceBinding) {
+                        if (project.source.byId[id] == null) continue
+                        put(
+                            id,
+                            ModalityHashes(
+                                visual = project.source.deepContentHashOfFor(id, Modality.Visual, visualCache),
+                                audio = project.source.deepContentHashOfFor(id, Modality.Audio, audioCache),
+                            ),
+                        )
+                    }
                 }
             }
             val updatedAssets = if (newAsset != null && project.assets.none { it.id == newAsset.id }) {
@@ -296,6 +320,7 @@ internal object AigcPipeline {
                         sessionId = sessionId?.value,
                         resolvedPrompt = resolvedPrompt,
                         originatingMessageId = originatingMessageId,
+                        sourceContentHashesByModality = snapshotByModality,
                     ),
                 ),
             )
