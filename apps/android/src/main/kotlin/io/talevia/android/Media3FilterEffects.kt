@@ -13,6 +13,8 @@ import androidx.media3.effect.HslAdjustment
 import androidx.media3.effect.OverlayEffect
 import androidx.media3.effect.SingleColorLut
 import io.talevia.core.domain.Filter
+import io.talevia.core.domain.FilterKind
+import io.talevia.core.domain.kind
 import io.talevia.core.logging.Loggers
 import io.talevia.core.logging.warn
 import io.talevia.core.platform.lut.CubeLutParser
@@ -46,13 +48,13 @@ internal fun mapFilterToEffect(
     filter: Filter,
     filterAssetPaths: Map<String, String>,
     lutCache: MutableMap<String, SingleColorLut>,
-): Effect? = when (filter.name.lowercase()) {
-    "brightness" -> {
+): Effect? = when (filter.kind) {
+    FilterKind.Brightness -> {
         val v = (filter.params["intensity"] ?: filter.params["value"] ?: 0f)
             .coerceIn(-1f, 1f)
         Brightness(v)
     }
-    "saturation" -> {
+    FilterKind.Saturation -> {
         // Core's apply_filter semantics for saturation: `intensity` is a 0..1
         // knob where 0.5 ≈ unchanged (matches the FFmpeg engine's 0..1 → 0..2
         // mapping). Remap to Media3's [-100, 100] "saturation delta" scale
@@ -66,7 +68,7 @@ internal fun mapFilterToEffect(
         }
         HslAdjustment.Builder().adjustSaturation(delta).build()
     }
-    "blur" -> {
+    FilterKind.Blur -> {
         // Match the FFmpeg engine's two-knob shape: `sigma` verbatim, else
         // `radius` on 0..1 mapped to 0..10 sigma.
         val sigma = filter.params["sigma"]
@@ -74,7 +76,7 @@ internal fun mapFilterToEffect(
             ?: 5f
         GaussianBlur(sigma)
     }
-    "vignette" -> {
+    FilterKind.Vignette -> {
         // Media3 has no built-in Vignette. Instead of a custom GlShaderProgram
         // (needs a shader + texture lifecycle + format negotiation), bake a
         // radial-gradient `BitmapOverlay` at the video frame size — same
@@ -86,7 +88,7 @@ internal fun mapFilterToEffect(
             .coerceIn(0f, 1f)
         OverlayEffect(listOf(VignetteOverlay(intensity)))
     }
-    "lut" -> {
+    FilterKind.Lut -> {
         val aid = filter.assetId
         val path = aid?.value?.let { filterAssetPaths[it] }
         if (aid == null || path == null) {
@@ -105,7 +107,10 @@ internal fun mapFilterToEffect(
             }
         }
     }
-    else -> {
+    null -> {
+        // Unknown filter name → unrecognised kind → drop silently with a
+        // log line. Same semantic as the prior else-branch on the
+        // string-switch.
         log.warn(
             "unknown filter on Media3 engine — skipping",
             "filter" to filter.name,

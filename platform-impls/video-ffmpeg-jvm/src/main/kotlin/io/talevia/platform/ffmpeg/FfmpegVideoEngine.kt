@@ -3,12 +3,14 @@ package io.talevia.platform.ffmpeg
 import io.talevia.core.AssetId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.Filter
+import io.talevia.core.domain.FilterKind
 import io.talevia.core.domain.FrameRate
 import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
+import io.talevia.core.domain.kind
 import io.talevia.core.domain.render.TransitionFades
 import io.talevia.core.domain.render.transitionFadesPerClip
 import io.talevia.core.platform.MediaPathResolver
@@ -546,31 +548,34 @@ class FfmpegVideoEngine(
         return if (segments.isEmpty()) null else segments.joinToString(",")
     }
 
-    private fun renderFilter(f: Filter, resolvedAssetPaths: Map<AssetId, String>): String? = when (f.name.lowercase()) {
+    private fun renderFilter(f: Filter, resolvedAssetPaths: Map<AssetId, String>): String? = when (f.kind) {
         // eq brightness range is [-1.0, 1.0]; default 0.
-        "brightness" -> {
+        FilterKind.Brightness -> {
             val v = f.params["intensity"] ?: f.params["value"] ?: 0f
             "eq=brightness=${formatFloat(v.coerceIn(-1f, 1f))}"
         }
         // eq saturation range is [0, 3]; default 1. Accept intensity as 0..1 mapping to 0..2.
-        "saturation" -> {
+        FilterKind.Saturation -> {
             val raw = f.params["intensity"] ?: f.params["value"] ?: 1f
             val v = if (f.params.containsKey("intensity")) (raw * 2f).coerceIn(0f, 3f) else raw.coerceIn(0f, 3f)
             "eq=saturation=${formatFloat(v)}"
         }
         // gblur sigma; default 0.5. A friendlier knob called radius/intensity maps 0..1 to 0..10.
-        "blur" -> {
+        FilterKind.Blur -> {
             val sigma = f.params["sigma"] ?: f.params["radius"]?.let { (it * 10f).coerceIn(0f, 50f) } ?: 5f
             "gblur=sigma=${formatFloat(sigma)}"
         }
-        "vignette" -> "vignette"
+        FilterKind.Vignette -> "vignette"
         // lut3d applies a 3D LUT file (.cube / .3dl). We drop silently when the
         // path can't be resolved — consistent with "unknown filter names are
         // dropped" rather than breaking a whole render for one missing asset.
-        "lut" -> f.assetId?.let { resolvedAssetPaths[it] }?.let { path ->
+        FilterKind.Lut -> f.assetId?.let { resolvedAssetPaths[it] }?.let { path ->
             "lut3d=file=${escapeFiltergraphArg(path)}"
         }
-        else -> null
+        // Unknown filter name → unrecognised kind → drop silently. Matches
+        // the prior `else -> null` branch that the string-switch had,
+        // preserving the M1+ "tolerate forward-compat filter names" contract.
+        null -> null
     }
 
     /**
