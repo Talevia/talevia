@@ -1,6 +1,6 @@
 # Milestones
 
-> **Current: M3 — §4 小白路径 e2e**
+> **Current: M4 — §5.2 专家特效**
 
 迭代聚焦的粗粒度指针。每个 milestone 对应 `docs/VISION.md` §3 的一个**核心赌注**。
 机制参考 media-engine 的 `docs/MILESTONES.md` + 三处本地化：**软优先级**（当前 M
@@ -19,85 +19,167 @@ bullet 打 tag；现有 bullet 不手动 backfill。
 
 ---
 
-## M3 — §4 小白路径 e2e （VISION §4）
+## M4 — §5.2 专家特效 （VISION §5.2）
 
-**目标**：证明 Talevia 同时服务小白用户（一句话出初稿）和专家用户（精修单帧）
-两条路径**共享同一套 Project / Source / Tool Registry**，操作深度差异不分裂
-系统。M2 把 AIGC 驯服成 deterministic compiler 之后，M3 验证从"用户意图"到
-"可 export 时间线"的 agent-driven 闭环：source 创建 → AIGC 调度 → timeline
-排列 → 专家可介入精修。
+**目标**：让"加一个新特效"——shader / 合成 / 粒子 / mask——的接入成本
+**只跨少数抽象层**，不再要求改 5 个 AppContainer + engine 契约 + core.domain。
+专家用户能直接在 source 层定义自己的 effect kind，agent 能在一次意图下
+混合调度传统引擎 / AIGC / 特效渲染 三类工具。M3 把 §4 双用户张力变成
+不变量后，M4 验证"专家路径"那一边的可扩展性——一致性 binding 已经
+extensible (M1)，AIGC 已经 deterministic (M2)，特效是最后没收口的赌注。
 
-选 §4 作 M3 的理由：M2 亚军列表头条；M2 的 deterministic AIGC 是小白路径
-agent-trajectory 跑通的前提（不可复现的 AIGC 让"一句话出初稿"永远像拼运气）；
-§4 双用户张力是 VISION 三条核心战略（§3.1 / §3.3 / §4）里唯一**横跨 source +
-compiler + agent + UX** 全栈轴的。
+选 §5.2 作 M4 的理由：M3 亚军列表头条；M3 的"两路径共享 source"已经
+证明 source 层是双用户共有的"扩展点"，但今天 source 层的 effect-kind
+注册成本还非常高（特效要么走 Filter 闭集枚举，要么走 SourceNode kind
+但没有运行时执行链路）。M4 收敛"专家加一个 shader / 粒子要跨几层"
+这个判断题，把 §5.2 从"部分"推到"有"。
 
 ### Exit criteria
 
-- [x] 一句话出初稿 e2e：`core/jvmTest` 里有 `OneShotDraftE2ETest`，模拟 LLM
-  多步 trajectory（`source_node_action` × 2 + `generate_video` +
-  `clip_action`），断言最终 `Project.source.nodes.size ≥ 2` +
-  `Project.lockfile.entries.size ≥ 1` + `Project.timeline.tracks` 含有
-  ≥ 1 clip 的 Video track（grep: `OneShotDraftE2ETest` test class 存在 +
-  上述断言） — cycle 2026-04-26 *本 commit*
-- [x] System-prompt 引导：default agent system prompt 含 §4 双用户张力的
-  语言锚词，让 LLM 在小白 / 专家模式下自动选择正确的"探索 vs 精修"姿态
-  （grep: `core/agent/AgentSystemPrompt.kt` 或等价 source 中含
-  `intent` / `skeleton` / `infer.*genre` / `double-user` / `小白` / `专家`
-  之一） — cycle 2026-04-26 *本 commit*（`PROMPT_DUAL_USER` lane 加进
-  `TALEVIA_SYSTEM_PROMPT_BASE`，含 `小白` / `专家` / `operation depth` /
-  `Two paths, one project` 锚词）
-- [x] 两路径共享 source：jvmTest 验证小白模式产出的 `SourceNodeId` 可被
-  `source_node_action(action="update_body")` 直接编辑，下游 clips 走 stale
-  标记 → regenerate 的标准链路（grep: `CrossPathSourceSharedTest` 或类似 +
-  `assertTrue(clip.staleByLockfile)` / 等价断言） — cycle 2026-04-26 *本 commit*
-  （`CrossPathSourceSharedTest` 验证 small-user 创建 character_ref + 绑定 →
-  pro-user `update_body` → `staleClipsFromLockfile` 命中 + regen lockfile entry
-  含 post-edit hash）
-- [x] 进度可见：cli / desktop UI 把 multi-step `BusEvent.AgentRunState` 翻译
-  为 user-readable 进度行（"Step 3/8: generate_video"），不是黑盒 5-30s
-  （grep: cli `Renderer` / desktop UI 订阅 `AgentRunState.steps` + 行
-  template 含 `Step .*\d` / `\d+/\d+` 之类） — cycle 2026-04-26 *本 commit*
-  （CLI: `Renderer.agentStepNotice` + `EventRouter` 订阅
-  `BusEvent.AgentRunStateChanged` 在 Generating-edge 上 emit
-  `Step N · processing…`；desktop UI 同步推迟到独立 follow-up bullet
-  per CLAUDE.md "Platform priority — CLI > Desktop"）
-- [x] Failure-fallback 提示：Agent.run 终态 ERROR 时，agent 输出含"换 provider
-  / 改 prompt / 让我介入"等 next-step 建议而非仅 stack dump，让小白用户知道
-  下一步该做什么（grep: agent 错误处理路径中有 fallback suggestion 字符串
-  `try.*provider` / `next.*step` / `换 provider` 之类） — cycle 2026-04-28 *本 commit*
-  （新增 `core/agent/FallbackHint.kt` sealed type — 4 variants
-  ProviderUnavailable/RateLimited/Network/Uncaught，每个携带 1–3 prose 建议；
-  `FallbackClassifier` 复用 `RetryClassifier.kind` 把异常 message 分类；
-  `AgentRunState.Failed` 加 `fallback: FallbackHint = Uncaught()` 默认字段
-  forward-compat decode 老 row；Agent.kt:252 + AgentRunFinalizer.kt 两处 emit
-  `Failed` 都通过 classifier 注入。CLI/desktop 订阅 BusEvent.AgentRunStateChanged
-  渲染 suggestions 是 follow-up cycle 的事；structural carrier 已就绪）
-- [x] Cross-modal staleness 分区：`ProjectStaleness` 算法理解 modality
-  （video / audio / both），改 `voiceId` 不会 stale 纯视觉 clip，反之亦然。
-  M1 exit summary 列的"音视频跨模态一致性"接力（grep: `ProjectStaleness` 中
-  有 `modality` 字段 + jvmTest 验证 voiceId 改不 stale 视觉 clip） — cycle 2026-04-28 7c30d534
-  （`Modality` enum + `Source.deepContentHashOfFor` per-modality deep hash +
-  `LockfileEntry.sourceContentHashesByModality` snapshot + ProjectStaleness 用
-  clip.modalityNeeds 选 visual/audio 切片比对；6-case ProjectStalenessModalityTest
-  钉住 voiceId-only edit 不 stale Video clip / visualDescription-only edit 不 stale
-  Audio clip / shared name 双 stale / 老 entry 走 fallback。tick 滞后一 cycle，
-  evidence 落 7c30d534 时本 cycle 才在 §M 自然命中 grep）
-- [ ] Milestone 退出总结：在本文件 M3 block 末尾 append `### M3 exit summary`
-  小段，列剩余的 §4 gap（视觉编辑 GUI / 项目模板 marketplace / 多用户协作
-  等）以便 M4 / M5 接力 — *必须手动 tick（段落存在 + 三条以上具体 gap）*
+- [ ] Effect-kind addition cost-of-three-layers：新增一个 shader / 粒子 /
+  mask 类型只需动 ≤ 3 层抽象 —— Filter sealed (or equivalent
+  `EffectKind` 注册点) + 一个 engine impl arm + 一个 source-body schema。
+  不必动 5 个 AppContainer，不必动 core.domain timeline 模型，不必新建
+  Tool。落地后 grep `EffectKind\.|FilterKind\.` 在 core/commonMain 产品
+  路径有 ≥ 5 种 kind（当前 4 种：vignette / blur / brightness / contrast
+  类，确切 size 待 plan 阶段核实），新增后 size 加 1 见证 cost-of-3 路径
+- [ ] Cross-engine 特效 parity 强制：任何新加的 effect kind 在 FFmpeg JVM
+  + Media3 (Android) + AVFoundation (iOS) 三引擎都有可跑的实现 OR
+  skip-aware test 显式声明缺失原因。grep: 至少一个 jvmTest /
+  androidTest 等价 / xcodebuild path 显式 assert 该 effect kind 跨三引擎
+  状态 —— `FilterCrossEngineParityTest` 类 / 同等覆盖
+- [ ] 专家精修反查：用户改 effect kind 的某个参数（比如 vignette intensity
+  从 0.4 → 0.7），下游 clips 走 stale → regenerate 标准链路（同 §3.2 /
+  M3 #3 的 source DAG 不变量）。grep: `EffectStalenessTest` 或同等覆盖断
+  言 effect-param edit → clip stale 命中
+- [ ] Effect tool spec budget：FilterAction / TransitionAction 等
+  effect-类 dispatchers 单工具 spec ≤ 1.5k token（避免特效膨胀
+  ratchet 整个 registry），并在 `tool_spec_budget` 的 `topByTokens` 报
+  告里 effect 工具不占 top 3。grep: `ToolSpecBudgetAuditTest` 类 / 等价
+  断言 filter_action / transition_action / effect_action 单条 ≤ 1500
+  tokens
+- [ ] Manual milestone exit summary：本文件 M4 block 末尾 append
+  `### M4 exit summary` 段，列剩余的 §5.2 gap（GPU shader pipeline / mask
+  blend modes / particle 物理 / 实时预览延迟等）以便 M5 / M6 接力 —
+  *必须手动 tick（段落存在 + 三条以上具体 gap）*
 
 ### 亚军 milestones（未正式启动，仅作排序参考）
 
-- **M4 候选 — §5.2 专家特效**：shader / 合成 / 粒子 / mask 的 Tool 接入成本。
 - **M5 候选 — §3.2 依赖 DAG / 增量编译**：项目变更 → 最小重渲染集合，多 export
   场景不重复劳动。
+- **M6 候选 — §4 后续 / 跨平台编辑 GUI**：desktop / iOS / Android timeline editor
+  surface 把"两路径共享 source" 的 UI 半边补齐（详见 M3 exit gap #1）。
 
 ---
 
 （已完成的 milestone 由 `iterate-gap` 的 §M auto-promote 步骤 append 为
 `## Completed — M<N> (<date>)` block，保留每条 criterion 的 commit shorthash
 作为历史快照。最近完成的放最上面。）
+
+## Completed — M3 (2026-04-28)
+
+**目标**：证明 Talevia 同时服务小白用户（一句话出初稿）和专家用户（精修
+单帧）两条路径**共享同一套 Project / Source / Tool Registry**，操作深度
+差异不分裂系统。
+
+**Exit criteria 完成情况**：
+
+- [x] 一句话出初稿 e2e：`OneShotDraftE2ETest` 多步 trajectory 跑通，断言
+  `Project.source.nodes.size ≥ 2` + `lockfile.entries.size ≥ 1` + Video
+  track ≥ 1 clip。— cycle 2026-04-26 **f30fe975**
+- [x] System-prompt 引导：`PROMPT_DUAL_USER` lane 加进
+  `TALEVIA_SYSTEM_PROMPT_BASE` 含小白 / 专家 / operation depth /
+  Two paths, one project 锚词。— cycle 2026-04-26 **b959ab15**
+- [x] 两路径共享 source：`CrossPathSourceSharedTest` 验证 small-user 创建
+  character_ref + 绑定 → pro-user `update_body` → `staleClipsFromLockfile`
+  命中 + regen lockfile entry 含 post-edit hash。
+  — cycle 2026-04-26 **cb5c5b7d**
+- [x] 进度可见：CLI `Renderer.agentStepNotice` + `EventRouter` 订阅
+  `BusEvent.AgentRunStateChanged` 在 Generating-edge 上 emit
+  `Step N · processing…`；desktop UI 同步推迟到独立 follow-up bullet
+  per CLAUDE.md "Platform priority — CLI > Desktop"。
+  — cycle 2026-04-26 **a0bd56eb**
+- [x] Failure-fallback 提示：`FallbackHint` sealed type (4 variants
+  ProviderUnavailable / RateLimited / Network / Uncaught) +
+  `FallbackClassifier` 复用 `RetryClassifier.kind`；`AgentRunState.Failed`
+  加 `fallback` 字段；Agent.kt + AgentRunFinalizer.kt 两处 emit 都通过
+  classifier 注入。— cycle 2026-04-28 **250b6655**
+- [x] Cross-modal staleness 分区：`Modality` enum +
+  `Source.deepContentHashOfFor` per-modality deep hash +
+  `LockfileEntry.sourceContentHashesByModality` snapshot；
+  `ProjectStaleness.staleClipsFromLockfile` 用 `clip.modalityNeeds` 选
+  visual / audio 切片比对；6-case `ProjectStalenessModalityTest`。
+  — cycle 2026-04-28 **7c30d534**
+- [x] Milestone 退出总结：M3 exit summary 段（本 block 下方）+ 6 条 §4
+  接力 gap 列入 M4 / M5 / M6 / 未来 M。
+  — cycle 2026-04-28 *本 commit*
+
+### M3 exit summary
+
+M3 关起门来证明了 **§4 双用户张力的 6/6 实质轴 + 1 manual exit 全部落地**：
+一句话出初稿 e2e (f30fe975) + system-prompt 双用户引导 (b959ab15) + 两路径
+共享 source 的 round-trip 回归 (cb5c5b7d) + CLI 多步 trajectory 进度行
+(a0bd56eb) + ERROR 终态 fallback 建议 (250b6655) + cross-modal staleness 分区
+(7c30d534)。这六条把"小白一句话出初稿 → 专家精修同一个 Project"从理论
+变成了 jvmTest 守护的不变量；下一个用户哪怕看 git log 也能看到"系统真的
+在朝双用户张力收敛，不只是嘴上说说"。
+
+**§4 完整愿景里 M3+ 接力的 gap**（超出本 milestone 的工程学跑道，列给
+M4 / M5 / 未来 M）：
+
+1. **专家路径精修 GUI**：M3 的两路径共享 source 是用 jvmTest 证明的——
+   `source_node_action(action="update_body")` 在 CLI 文本接口下能跑通。但
+   **专家用户实际场景是 timeline 上鼠标拖、单帧调参、shader 实时预览**，
+   而 desktop / iOS / Android 当前只有 chat 面板 + 没有 timeline editor。
+   "two paths, one project" 的 UI 半边在 M3 没动，是 M5 / M6 候选（取决于
+   平台优先级窗口）。
+2. **多人协作 merge conflict 工作流**：BACKLOG `re-evaluate-desktop-merge-
+   conflict-strategy` 跨 4+ repopulate cycles 等用户 promote/demote/delete
+   决策。VISION §4 第 4 题（"两个用户在同一个 project 上分别推进"）的写口
+   M3 没碰——`talevia.json` git-friendly 已经做到（pretty-print + 行级
+   diff），但**语义 3-way merge across timeline / source / lockfile** 的
+   工作流（`.gitattributes merge=talevia-json` driver / `talevia merge` CLI
+   / 冲突可视化）还在等真实多用户 case driver。
+3. **项目模板 marketplace + onboarding**：小白 v0 用户面对空 Project 会
+   呆住——"vlog / narrative / ad / musicmv 我选哪个？"。`docs/VISION.md` §6
+   列了 5 个 genre 但产品里没有"vlog 模板"按钮，Source 里也没有 starter
+   DAG 让 LLM 复用。`source_template_action` 类的 source-layer primitive +
+   ≥ 3 个 prebuilt template (vlog / narrative / ad) 是 §4 小白路径下一个
+   自然 driver。
+4. **Cross-mode handoff explicit**：VISION §4 提"在 agent 的某个决策点接管"。
+   M3 的 `agent-error-fallback-suggestion` (250b6655) 处理了 ERROR 路径的
+   handoff（"let me take over manually"），但**正常路径**下 agent 多步
+   trajectory 中"用户想中途接管编辑"没有结构化入口——CLI cancel 信号 +
+   重新 chat 是当前唯一手段。需要 `BusEvent.AgentHandoffRequest` /
+   `Part.HandoffOffer` 这类一等概念让 agent 主动暴露"我现在该让你接管吗"。
+5. **小白模式 / 专家模式自动切换 e2e**：M3 的 system-prompt 教 LLM 区分两
+   模式，但**LLM 自主切换的语义证明**没有 e2e 测试守护——比如"用户先要
+   mass-generate 后单帧精修"的 trajectory 应该自动从 batch generate 切到
+   single-clip update_body 。需要类似 `OneShotDraftE2ETest` 但 trajectory
+   更长 + 含 mode-flip 断言的 e2e。
+6. **跨模态 staleness 的下游消费**：250b6655 加了 `Modality` 分区 + lockfile
+   per-modality snapshot，但 `regenerate_stale_clips` 还是按 stale ClipId 一
+   把抓——没有"只 regen audio modality 的 clips" 这种 per-modality batch
+   选项。是 §3.2 增量编译 (M5 候选) 的正交切片。
+
+前两条由 desktop UX / 平台优先级窗口驱动；3 / 4 / 5 是 §4 内的产品深化；
+第 6 条进 §3.2 / §5.7 perf 轴并入下一轮 perf scan。M4 / M5 别扛全部，按
+平台优先级 + 现有 BACKLOG meta 的用户决策结果挑。
+
+### M3 → M4 promotion logic
+
+M3 的"两路径共享 source"既证明了双用户能共有 **state**，也暗示了双用户
+都会指向同一个**扩展点**——source 层。M4 选 §5.2 专家特效 candidate
+（M3 亚军列表头条）正因为 source 是双用户共有的扩展面：今天加一个新
+特效要跨 5 个 AppContainer + engine 契约 + core.domain 是 §5.2 打分
+"部分"的根因，把这个收敛到"≤ 3 抽象层"是 §5.2 推到"有"的直接路径。
+M4 criteria 起草逻辑：① 直接量化"跨几层"（cost-of-three-layers）+
+② 三引擎 parity 守护（同 M3 cross-modal 的 invariant pattern）+ ③ 专家
+精修反查（沿用 source DAG stale → regen 不变量，验证 effect 是该
+不变量的 first-class 公民）+ ④ effect tool spec budget（防止特效让
+M2 已驯服的 tool spec 预算反噬）+ ⑤ 手动 exit summary 给 M5 接力。
+M5 候选保留 §3.2 增量编译；新加 M6 候选 §4 跨平台 GUI 接住 M3 exit
+gap #1（专家路径 GUI 半边）。
 
 ## Completed — M2 (2026-04-26)
 
