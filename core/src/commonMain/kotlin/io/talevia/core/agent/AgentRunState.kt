@@ -76,7 +76,16 @@ sealed interface AgentRunState {
      * Run ended in an error the Agent didn't / couldn't retry. [cause] is
      * the exception's message (or class name when blank) — not the full
      * stack trace so the field stays bus-cheap. Terminal for this run.
+     *
+     * [fallback] carries structured next-step suggestions classified from
+     * [cause] via [FallbackClassifier] — see VISION §5.4 / M3 #5. Default
+     * is [FallbackHint.Uncaught] so legacy serialized rows decode (and so
+     * test fakes that build `Failed("…")` without thinking about hints
+     * still get a non-empty suggestion list).
      */
     @Serializable
-    data class Failed(val cause: String) : AgentRunState
+    data class Failed(
+        val cause: String,
+        val fallback: FallbackHint = FallbackHint.Uncaught(),
+    ) : AgentRunState
 }

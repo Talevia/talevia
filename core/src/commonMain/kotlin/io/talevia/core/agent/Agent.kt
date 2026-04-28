@@ -249,7 +249,11 @@ class Agent(
                 "ms" to (clock.now() - runStart).inWholeMilliseconds,
                 "error" to result.error,
             )
-            val terminal = if (result.error != null) AgentRunState.Failed(result.error!!) else AgentRunState.Idle
+            val terminal = if (result.error != null) {
+                AgentRunState.Failed(result.error!!, FallbackClassifier.classify(result.error!!))
+            } else {
+                AgentRunState.Idle
+            }
             bus.publish(
                 BusEvent.AgentRunStateChanged(input.sessionId, terminal, retryAttempt = handle.lastRetryAttempt),
             )

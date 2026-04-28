@@ -71,10 +71,11 @@ internal suspend fun finalizeFailedRun(
     handle: AgentRunHandle,
     cause: Throwable,
 ) {
+    val message = cause.message ?: cause::class.simpleName ?: "unknown"
     bus.publish(
         BusEvent.AgentRunStateChanged(
             sessionId,
-            AgentRunState.Failed(cause.message ?: cause::class.simpleName ?: "unknown"),
+            AgentRunState.Failed(message, FallbackClassifier.classify(cause)),
             retryAttempt = handle.lastRetryAttempt,
         ),
     )

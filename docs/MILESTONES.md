@@ -62,14 +62,27 @@ compiler + agent + UX** 全栈轴的。
   `BusEvent.AgentRunStateChanged` 在 Generating-edge 上 emit
   `Step N · processing…`；desktop UI 同步推迟到独立 follow-up bullet
   per CLAUDE.md "Platform priority — CLI > Desktop"）
-- [ ] Failure-fallback 提示：Agent.run 终态 ERROR 时，agent 输出含"换 provider
+- [x] Failure-fallback 提示：Agent.run 终态 ERROR 时，agent 输出含"换 provider
   / 改 prompt / 让我介入"等 next-step 建议而非仅 stack dump，让小白用户知道
   下一步该做什么（grep: agent 错误处理路径中有 fallback suggestion 字符串
-  `try.*provider` / `next.*step` / `换 provider` 之类）
-- [ ] Cross-modal staleness 分区：`ProjectStaleness` 算法理解 modality
+  `try.*provider` / `next.*step` / `换 provider` 之类） — cycle 2026-04-28 *本 commit*
+  （新增 `core/agent/FallbackHint.kt` sealed type — 4 variants
+  ProviderUnavailable/RateLimited/Network/Uncaught，每个携带 1–3 prose 建议；
+  `FallbackClassifier` 复用 `RetryClassifier.kind` 把异常 message 分类；
+  `AgentRunState.Failed` 加 `fallback: FallbackHint = Uncaught()` 默认字段
+  forward-compat decode 老 row；Agent.kt:252 + AgentRunFinalizer.kt 两处 emit
+  `Failed` 都通过 classifier 注入。CLI/desktop 订阅 BusEvent.AgentRunStateChanged
+  渲染 suggestions 是 follow-up cycle 的事；structural carrier 已就绪）
+- [x] Cross-modal staleness 分区：`ProjectStaleness` 算法理解 modality
   （video / audio / both），改 `voiceId` 不会 stale 纯视觉 clip，反之亦然。
   M1 exit summary 列的"音视频跨模态一致性"接力（grep: `ProjectStaleness` 中
-  有 `modality` 字段 + jvmTest 验证 voiceId 改不 stale 视觉 clip）
+  有 `modality` 字段 + jvmTest 验证 voiceId 改不 stale 视觉 clip） — cycle 2026-04-28 7c30d534
+  （`Modality` enum + `Source.deepContentHashOfFor` per-modality deep hash +
+  `LockfileEntry.sourceContentHashesByModality` snapshot + ProjectStaleness 用
+  clip.modalityNeeds 选 visual/audio 切片比对；6-case ProjectStalenessModalityTest
+  钉住 voiceId-only edit 不 stale Video clip / visualDescription-only edit 不 stale
+  Audio clip / shared name 双 stale / 老 entry 走 fallback。tick 滞后一 cycle，
+  evidence 落 7c30d534 时本 cycle 才在 §M 自然命中 grep）
 - [ ] Milestone 退出总结：在本文件 M3 block 末尾 append `### M3 exit summary`
   小段，列剩余的 §4 gap（视觉编辑 GUI / 项目模板 marketplace / 多用户协作
   等）以便 M4 / M5 接力 — *必须手动 tick（段落存在 + 三条以上具体 gap）*
