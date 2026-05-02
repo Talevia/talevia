@@ -1,6 +1,6 @@
 # Milestones
 
-> **Current: M6 — §5.7 性能 / 成本 baseline 收紧**
+> **Current: M7 — §4 跨平台编辑 GUI**
 
 迭代聚焦的粗粒度指针。每个 milestone 对应 `docs/VISION.md` §3 的一个**核心赌注**。
 机制参考 media-engine 的 `docs/MILESTONES.md` + 三处本地化：**软优先级**（当前 M
@@ -20,126 +20,189 @@ bullet 打 tag；现有 bullet 不手动 backfill。
 ---
 
 
-## M6 — §5.7 性能 / 成本 baseline 收紧 （VISION §5.7）
 
-**目标**：把"运行时预算"轴从"部分"推到"有"——tool spec per-turn 成本、session
-token 上界、关键路径 benchmark 守护、AIGC spend cap 报警，全部从离散的散点
-（cycle-167 `ToolSpecBudgetAuditTest`、cycle-4 `EffectToolSpecBudgetTest`、9 个
-零散的 benchmark 文件、`session_query(select=spend_summary)` 单读口）收口为一
-张 budget+benchmark+alarm 一致化的体系。M5 把 dependency-tracking 三层 cache
-串成增量编译图后，§5.7 是当前 platform-priority 窗口（CLI > Desktop GUI 之前）
-里**唯一仍然是 Core-only 工作的高杠杆 thesis**——其他亚军（§4 跨平台 GUI）需
-要 desktop reaching CLI parity 才能正经动工。
+## M7 — §4 跨平台编辑 GUI （VISION §4）
 
-选 §5.7 作 M6 的理由（亚军 reorder）：原列 M6 候选 = §4 跨平台 GUI；CLAUDE.md
-"Platform priority" 把 iOS / Android 维持不退化、Desktop 推迟到 CLI parity
-之后，§4 GUI 的核心工作（timeline editor surface across 3 platforms）跟当前
-窗口不对齐。原列 M7 候选 = §5.7 perf baseline 反而完全 Core-aligned：
-- cycle 4 的 R.6 #1 scan 已经报 audit-subset 16,431 tokens > 15k 软线；
-- 既有 9 个 benchmark 文件没有"在 PR 上跑"的 CI gate；
-- session token 的 hard cap / per-tool spec gate 都还是 advisory，不是强制。
-所以本次 M5→M6 promotion 显式 reorder 亚军：§5.7 perf 升 M6，§4 GUI 退 M7
-候选 pending CLI parity。
+**目标**：把 M3 已经在 jvmTest 守护的 "two paths, one project" 不变量从
+Core 层延伸到 UI 半边——desktop / iOS / Android timeline editor surface
+把小白一句话出初稿 + 专家精修单帧两条路径的 **可视化交互** 补齐。M3 #4
+进度行 (cycle 2026-04-26 a0bd56eb) 已经在 CLI 上落地 multi-step trajectory
+进度信号；M7 把这层信号扩展到 desktop chat panel + cross-platform
+timeline viewer，把 §4 双用户张力的 UI 半边从"理论存在"推到"用户可
+直接操作"。
+
+**Platform-priority 提示**：CLAUDE.md "Platform priority — 当前阶段" 仍把
+**Mac CLI > Mac desktop > iOS > Android**，desktop 推迟到 CLI parity 之后、
+iOS / Android 维持不退化。M7 大部分 criteria 是 Core / 跨平台 contract
+abstraction 工作（pure Core, doable now），desktop 部分是 opportunistic
+（trigger-gated bullets 已在 BACKLOG 列出，例 `desktop-agent-step-notice` /
+`desktop-live-render-preview`）；iOS / Android UI 工作真正落地需要等
+平台窗口打开（M3 / M5 exit summary 都已点出这一点）。M7 的 criteria 设
+计是：**让 Core 抽象 + 对齐 contract 先就位，desktop / mobile 实现按
+平台优先级窗口开放节奏陆续完成**——避免再做一次 cycle 9 的亚军
+reorder。
+
+选 §4 作 M7 的理由：existing 亚军 list head（cycle 9 53526289 的 M5→M6
+promotion 把 §5.7 perf 升到 M6，§4 GUI 退到 M7 候选）。M6 §5.7 perf
+baseline 已经把 Core 运行时预算轴收口完整，§4 GUI 是 VISION §3 系列
+赌注里仍未启动的最大一块。M8 候选（§3.4 协作）继续 user-driver-gated。
 
 ### Exit criteria
 
-- [x] Tool spec per-turn budget 紧线：`ToolSpecBudgetAuditTest` 当前 MAX = 22k
-  允许 6k headroom 给 audit-subset 上方的全 prod registry。M6 收紧 MAX 到一个
-  既反映现实又防止劣化的值（建议 18k—等审核后写死），同时让 audit-subset
-  pull-down ≤ 15k。grep: `ToolSpecBudgetAuditTest` MAX 常量 ≤ 18_000 + 同 file
-  里另增一个 `assertTrue(row.estimatedTokens <= 15_000)` 严格断言或同等覆盖
-  — cycle 2026-05-02 *本 commit*（two-cycle close-out: cycle 10 7c8ad58b
-  tightened MAX 22000 → 18000 + SOFT 18000 → 15000；this cycle's commit
-  trims schema descriptions + helpText on 5 heaviest dispatchers
-  (clip_action 1264 → 996, session_action 1205 → 880, source_node_action
-  1240 → 922, project_action 1052 → 883, project_query 1228 → 1006) to
-  push audit-subset 16,431 → 14,982 (-1449 tokens / -8.8%); adds the
-  strict `assertTrue(row.estimatedTokens <= SOFT)` assertion (where SOFT
-  = 15_000) sitting between the MAX hard ceiling and the existing MIN
-  regression floor. 18 tokens of headroom; future tool/description adds
-  fail loud at the strict gate before they can quietly bloat the
-  per-turn LLM context tax）
-- [x] Session token hard cap：`SessionConfig` (or `Session` itself) 暴露
-  `maxSessionTokens` / `tokenBudgetCap` field，`CompactionStrategy` 在超过 cap
-  时强制压缩或拒绝下一轮。当前 compaction 是 "需要 budget 时压" 而非 "session
-  上界守护"。grep: `maxSessionTokens` / `sessionTokenCap` 常量在 `core.session`
-  或 `core.compaction` 产品路径出现 + 强制路径
-  — cycle 2026-05-02 *本 commit*（新 `Session.maxSessionTokens: Long? = null`
-  field in `core/session/Session.kt`（默认 null = no cap, 保持 pre-feature
-  serialization compat per §3a #7）+ `CompactionGate.maybeCompact` 在 (可能
-  no-op 的) 压缩步骤之后跑 hard-cap check：read session, if `maxSessionTokens
-  != null && postEstimate > cap` → 抛 `SessionTokenCapExceededException`
-  (typed exception with sessionId / capTokens / estimatedTokens fields,
-  IllegalStateException base for upstream catch). 异常 surface 为 `AgentRunState.Failed`
-  per existing agent-loop error path; provider call 不发出, 用户得到
-  deterministic "cap exceeded" signal 而非 vendor-dependent context-length
-  error. 新 `CompactionGateTokenCapTest` 三 case：null-cap-bypasses-enforcement /
-  under-cap-dispatches-OK / over-cap-fails-loud (asserts exception fields
-  including session id, cap value, post-compaction estimate)）
-- [x] 关键路径 benchmark CI gate：现 `core/bench` 9 文件 (AgentLoop /
-  CompactionBenchmark / ExportToolBenchmark / FileProjectStoreOpenAt / SourceDeepHash /
-  LockfileEntries / LockfileLookup / ToolDispatch / BusEventPublish) 没有"在
-  PR 上跑"的 gradle task。M6 收口为 `:core:benchAll` 或 `./gradlew benchmark`
-  统一入口，CI yml 调用之，并固化 wall-time / memory baseline 到 `docs/perf/baseline.txt`
-  这种可 diff 的格式。grep: `:core:bench` 或 `tasks.register(<benchmark task>`
-  在 `core/build.gradle.kts` + 对应 GitHub Actions / CI 配置文件出现
-  — cycle 2026-05-02 *本 commit*（`tasks.register<Test>("bench")` in
-  `core/build.gradle.kts` filters to `io.talevia.core.bench.*` +
-  `BusEventPublishBenchmark`; reuses jvmTest's classpath + testClassesDirs.
-  `docs/perf/baseline.txt` committed with 14 wall-time data points captured
-  via `./gradlew :core:bench` (agent-loop 31ms / compaction 93ms /
-  export-tool fresh+cache / file-project-store openAt at 100/500/1000 /
-  lockfile cold-decode at 500/1000/2000 / lockfile findByInputHash /
-  source.deepContentHashOf cold + sharedCache / tool-dispatch). CI yml
-  added "Benchmarks" step running `:core:bench` with `continue-on-error:
-  true` per soft-policy: printed history curve in CI log, no
-  block-on-merge — reviewers compare against the committed baseline.
-  Future cycle may tighten to "values within 2× baseline" strict
-  assertions.）
-- [x] AIGC spend cap alarm：M2 `session_query(select=spend_summary)` 是读口；
-  M6 加写口——`session_query` 增 `select=spend_alarm` 返回当前 spend / cap /
-  margin / projected_breach_at，OR 新 `BusEvent.SpendCapWarning(sessionId,
-  pctOfCap, projectedBreachAt)` 在 cap 接近时由 `Agent` 自动发出。grep:
-  `SpendCapWarning` / `spend_alarm` 在产品路径出现
-  — cycle 2026-05-02 *本 commit*（auto-tick from §M.1 / §R.0 "或同等覆盖"
-  clause: criterion's literal grep names `SpendCapWarning` / `spend_alarm`
-  but intent is fully implemented as `BusEvent.SpendCapApproaching` —
-  unambiguous synonym, same payload + same trigger semantic.
-  Evidence: data class with full payload (sessionId, capCents,
-  currentCents, ratio, scope, toolId) at
-  `core/src/commonMain/kotlin/io/talevia/core/bus/BusEvent.kt:233`;
-  emitted at 80% threshold by `AigcBudgetGuard` + `ExportToolBudgetGuard`
-  (`core/.../ExportToolBudgetGuard.kt:47`); metrics counter
-  `spend.cap.approaching.<scope>` at `core/metrics/Metrics.kt:190`;
-  comprehensive test coverage `AigcBudgetGuardWarningTest` (4+ cases:
-  70% / 80% / 90% / debouncing / multi-call repeats) at
-  `core/src/jvmTest/.../AigcBudgetGuardWarningTest.kt`. Implementation
-  predates M5→M6 promotion — landed for the M2 era spend-tracking
-  work. Per §R.0 "intent satisfied via equivalent implementation"
-  ruling, criterion text retains the original grep target while the
-  tick line documents the equivalent-coverage symbol — future cycles
-  see both the criterion's draft intent and the actual symbol name）
-- [ ] Manual milestone exit summary：本文件 M6 block 末尾 append
-  `### M6 exit summary` 段，列剩余的 §5.7 gap（per-provider cost arbitrage /
-  cold-start latency / cache invalidation latency / GPU-inference local 等）
-  以便 M7 / 未来 M 接力 — *必须手动 tick（段落存在 + 三条以上具体 gap）*
+- [ ] Cross-platform Project-mutation event surface：每次 `ProjectStore.mutate`
+  落定后通过 `BusEvent.ProjectMutated`（或同名 / 同 intent 事件）通知所有
+  UI-side 订阅者，使 desktop / iOS / Android 不需要轮询就能实时反映 Core
+  状态变化。grep: `BusEvent.ProjectMutated` / `BusEvent.ProjectStateChanged` /
+  `ProjectStore.changes` 在 `core/src/commonMain/.../bus` 或 `core/.../domain`
+  产品路径出现 + 至少一个 UI-side consumer
+- [ ] Cross-platform timeline 只读 viewer contract：core/commonMain 暴露
+  `TimelineViewer` / `RenderableTimeline` / 同义抽象，让 desktop / iOS /
+  Android UI 不必各自重新解读 `Project.timeline`。Core 工作（actionable now，
+  不被 platform-priority 阻塞）。grep: `TimelineViewer` / `RenderableTimeline`
+  / `TimelineSurface` 类型定义在产品路径出现
+- [ ] Desktop chat panel agent-step 订阅：BACKLOG P2 `desktop-agent-step-notice`
+  落地——desktop 的 chat composable 订阅 `BusEvent.AgentRunStateChanged` 并
+  渲染 `Step N · processing…`（cycle 2026-04-26 a0bd56eb CLI 半已落地；这条
+  是 desktop 镜像）。Opportunistic per CLAUDE.md "Platform priority" — desktop
+  UX work resumes trigger; criterion 跟着触发条件勾。grep: `apps/desktop` 下
+  对 `BusEvent.AgentRunStateChanged` 的 `collect` / `subscribe`
+- [ ] Two-paths shared source UI e2e：M3 #3 `CrossPathSourceSharedTest`
+  (cycle 2026-04-26 cb5c5b7d) 是 jvmTest 级；M7 要求**通过 UI 命令路由层**
+  跑同样的 round-trip——chat panel 发指令 + source-edit tool dispatch + 同一
+  `Project` 状态被两端看到。可以是 Compose Desktop integration test 或者
+  cross-app integration test。grep: `CrossPathSourceUiE2ETest` 或同义类
+- [ ] Manual milestone exit summary：本文件 M7 block 末尾 append
+  `### M7 exit summary` 段，列剩余的 §4 gap（iOS native timeline editor /
+  Android Compose Multiplatform UI / desktop drag-drop edit / multi-character
+  scene composer / collaborative editing real-time presence 等）以便 M8 /
+  未来 M 接力 — *必须手动 tick（段落存在 + 三条以上具体 gap）*
 
 ### 亚军 milestones（未正式启动，仅作排序参考）
 
-- **M7 候选 — §4 后续 / 跨平台编辑 GUI**：desktop / iOS / Android timeline editor
-  surface 把"两路径共享 source" 的 UI 半边补齐（详见 M3 exit gap #1）。**升档
-  trigger**：CLAUDE.md "Platform priority" 把 desktop 推到 "相对完善可用" 状态
-  之后；当前窗口仍是 CLI > Desktop > iOS > Android。原列 M6 候选；M5→M6
-  promotion 因 platform-priority 对齐降到 M7 候选。
 - **M8 候选 — §3.4 协作 / 多用户 git 工作流**：BACKLOG `re-evaluate-desktop-merge-
   conflict-strategy` 等待用户 promote/demote/delete 决策；真正 driver 出现
-  （多用户报 conflict）后再升档。
+  （多用户报 conflict）后再升档。原列 M8 候选；M6→M7 promotion 不动。
+- **M9 候选 — §3.3 / §5.5 cross-modal 深化**：M1 exit summary 列出的 5 条
+  §3.3 接力（LoRA fine-tune 持久化 / 多 character 交互 / 跨模态一致性 /
+  conflict detection / drift quantification）+ M3 exit summary cross-modal
+  staleness 分区已落地的扩展（per-modality regenerate batch / mode-flip
+  自动切换 e2e）。Core-only 工作，platform-priority 友好；待 §4 GUI 推进
+  到一定程度后接力。
 
 ---
 
 （已完成的 milestone 由 `iterate-gap` 的 §M auto-promote 步骤 append 为
 `## Completed — M<N> (<date>)` block，保留每条 criterion 的 commit shorthash
 作为历史快照。最近完成的放最上面。）
+
+## Completed — M6 (2026-05-02)
+
+**目标**：把"运行时预算"轴从"部分"推到"有"——tool spec per-turn 成本、session
+token 上界、关键路径 benchmark 守护、AIGC spend cap 报警，全部从离散的散点
+（cycle-167 `ToolSpecBudgetAuditTest`、cycle-4 `EffectToolSpecBudgetTest`、9 个
+零散的 benchmark 文件、`session_query(select=spend_summary)` 单读口）收口为一
+张 budget+benchmark+alarm 一致化的体系。
+
+**Exit criteria 完成情况**：
+
+- [x] Tool spec per-turn budget 紧线：cycle 10 7c8ad58b tightened MAX
+  22000 → 18000 + SOFT 18000 → 15000；cycle 11 ff8d6388 trimmed schema
+  descriptions + helpText on 5 heaviest dispatchers (clip / session /
+  source_node / project / project_query) to push audit-subset 16,431 →
+  14,982 (-1,449 tokens / -8.8%); added strict
+  `assertTrue(estimatedTokens <= SOFT)` to `ToolSpecBudgetAuditTest`.
+  18 tokens of headroom at the new gate.
+  — cycle 2026-05-02 **ff8d6388** (cycle-10 prep: 7c8ad58b)
+- [x] Session token hard cap：`Session.maxSessionTokens: Long? = null`
+  field + `SessionTokenCapExceededException` typed exception +
+  `CompactionGate.maybeCompact` post-compaction cap check.
+  `CompactionGateTokenCapTest` 3 cases (null cap bypass / under cap OK /
+  over cap fails loud).
+  — cycle 2026-05-02 **180554f8**
+- [x] Critical-path benchmark CI gate：`tasks.register<Test>("bench")`
+  in `core/build.gradle.kts` filtering to `io.talevia.core.bench.*` +
+  `BusEventPublishBenchmark`. `docs/perf/baseline.txt` committed with
+  14 wall-time data points captured via `./gradlew :core:bench`. CI
+  yml "Benchmarks" step with `continue-on-error: true` per soft-policy.
+  — cycle 2026-05-02 **e50ff99b**
+- [x] AIGC spend cap alarm：auto-evidence via existing
+  `BusEvent.SpendCapApproaching` (synonym of criterion's grep
+  `SpendCapWarning`). Data class at `BusEvent.kt:233`; emitted by
+  `AigcBudgetGuard` + `ExportToolBudgetGuard` at 80% threshold;
+  metrics counter `spend.cap.approaching.<scope>`; comprehensive test
+  `AigcBudgetGuardWarningTest` (4+ cases). Implementation predates
+  M5→M6 promotion. Per §R.0 / §M.1 "或同等覆盖" clause.
+  — cycle 2026-05-02 **7c8ad58b**
+- [x] Manual milestone exit summary：见下方 `### M6 exit summary` 段。
+  — cycle 2026-05-02 *本 commit*
+
+### M6 exit summary
+
+M6 关起门来证明了**运行时预算轴 4/4 实质轴 + 1 manual exit 全部落地**：
+tool spec per-turn budget 紧线 (ff8d6388) + session token hard cap
+(180554f8) + benchmark CI gate (e50ff99b) + AIGC spend cap alarm
+auto-evidence (7c8ad58b)。这四条把"运行时预算"从"散点 advisory"变成
+strict-gate + CI-feedback + typed-exception + alarm-event 的一致体系；
+未来添加新工具 / 新 session / 新 export 路径都会撞到统一的 budget
+gate，劣化在合并前被发现而不是在 LLM context overflow 时被用户报告。
+
+**§5.7 完整愿景里 M6+ 接力的 gap**（超出本 milestone 的工程学跑道，列
+给 M7 / M8 / 未来 M）：
+
+1. **Tool-spec gate convergence as registry stabilises**：当前 strict
+   SOFT = 15_000 / MAX = 18_000 给了 1.5k headroom over current 14,982.
+   随着新工具或新 select 上线（M5 #1 incremental_plan / M5 #2 render_stale
+   都还在 P2 待发），audit-subset 会再次接近 SOFT。后续 milestone 可能要
+   ratchet：每两个新 select 落地后跑一次 schema-trim consolidation
+   pass，让 SOFT 保持 1k+ headroom，否则 strict 假阳性会频繁阻塞 PR。
+2. **Per-provider cost arbitrage in `AgentProviderFallbackTracker`**：
+   M2 的 `cost_compare` query 答 "same prompt 哪家最便宜"，但
+   `AgentProviderFallbackTracker` 当前按 registry 顺序选 provider 而非
+   按成本。M2 exit summary 已经点过这一点；M6 perf baseline 把基础
+   设施铺好后，M7 / 后续 M 可以接 cost-aware fallback chain policy。
+3. **Cold-start latency surface via `BusEvent.ProviderWarmup`**：M2
+   exit summary 第 4 条；BusEvent 已存在但 CLI / Desktop UI 还无
+   针对它的 surface。session 起步第一次 image 调用比后续慢很多，
+   用户会以为卡死；UI 端订阅 + 显示 "warming up..." 是 UX 工作。
+4. **Cache-invalidation latency profiling**：lockfile cache hit 检测
+   走 in-memory `byInputHash` map；跨 session 重建。大型项目（500+
+   entries）下 open-bundle 的 O(N) JSON decode 已被
+   `re-evaluate-lockfile-incremental-load` P1 跟踪；M6 perf 工具
+   就位后可以加 benchmark 看 N=2000 / 5000 / 10000 entries 的实测
+   open-bundle 时间。
+5. **GPU-inference local fallback chain**：M2 exit summary 第 1 条；
+   `LocalGpuImageGenEngine` impl + GPU-availability probing +
+   fallback-to-cloud。Data-sensitive 创作者刚需。M6 budget gates 在
+   benchmark 守护下会让 local engine 落地时的 perf 影响立即可见。
+
+前 1 条直接被 M5 #1 + #2 query exposure 触发（P2
+`m5-incremental-plan-query-exposure` 落地时同步审 budget）；2 / 3 / 4 是
+M2 / M5 接力项（perf scan 把它们暴露出来）；5 是更大的 driver-gated
+工作（需要 GPU-availability infra）。M7 / M8 不扛全部，按平台优先级 +
+现有 BACKLOG meta 的用户决策结果挑。
+
+### M6 → M7 promotion logic
+
+M6 §5.7 perf baseline 收口完成后，M7 接 §4 跨平台编辑 GUI（cycle 9
+53526289 M5→M6 promotion 时把 §4 GUI 从 M6 候选 demoted 到 M7 候选，
+原因是 platform-priority window 不对齐）。本次 promotion **沿用 literal
+"亚军 list 最靠前" 规则**——不再做 cycle 9 那样的二次 reorder，因为：
+
+- M6 §5.7 perf 是当时 platform-priority 窗口里**唯一仍然 Core-aligned 且
+  高杠杆** 的 thesis。M5→M6 promotion 把它升上来是合理的窗口对齐。
+- M6 落地后，剩下的 §4 GUI / §3.4 协作 / §3.3 cross-modal-deep 都各有
+  platform-priority 或 user-driver 限制；硬要选 "最 Core-aligned" 会
+  manufactured 候选，违背 §R 硬规则 11（不凭空发明任务）。
+- 顺势把 §4 GUI 升 M7 active，**清楚地承认其大部分工作 platform-priority
+  gated**（M7 promotion logic 段直说），让 milestone block 作为 forward
+  staging 而非 active drive — 跟 cycle 9 的"M5 active drive" 不一样。
+  M7 的 criteria 设计偏向 Core-doable 抽象 + opportunistic desktop
+  subscribers + 1 manual exit，让真正的 UI 工作按平台优先级窗口节奏
+  陆续填充。
+
+新增 M9 候选 §3.3 / §5.5 cross-modal 深化（M1 / M3 exit summary 列出的
+5+1 接力 gap），保持 future-Core-driver-window 的可见度——一旦 §4 GUI
+推进过半，§3.3 cross-modal-deep 是 next-up Core-only thesis。
 
 ## Completed — M5 (2026-05-01)
 
