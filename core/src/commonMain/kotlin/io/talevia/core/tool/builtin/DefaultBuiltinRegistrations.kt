@@ -281,14 +281,18 @@ fun ToolRegistry.registerAigcTools(
     val videoTool = videoGen?.let { GenerateVideoTool(it, bundleBlobWriter, projects) }
     val musicTool = musicGen?.let { GenerateMusicTool(it, bundleBlobWriter, projects) }
     val speechTool = tts?.let { SynthesizeSpeechTool(it, bundleBlobWriter, projects) }
-    imageTool?.let { register(it) }
-    videoTool?.let { register(it) }
-    musicTool?.let { register(it) }
     upscale?.let { register(UpscaleAssetTool(it, bundleBlobWriter, projects)) }
-    speechTool?.let { register(it) }
-    // `debt-aigc-tool-consolidation` phase 1 (cycle 23): unified
-    // dispatcher exposed alongside the 4 originals. Phase 2 will
-    // un-register the originals, leaving only this dispatcher.
+    // `aigc-tool-consolidation-phase2-unregister-originals` (cycle 27):
+    // the 4 generators are no longer registered as standalone tools —
+    // the LLM-facing surface is a single `aigc_generate(kind=...)`
+    // dispatcher. Underlying instances still exist (constructed above);
+    // the dispatcher holds them and routes per `kind`. Lockfile entries
+    // continue to stamp `toolId="generate_image"` etc. via the inner
+    // tool — phase 3 will internalise the helpers and unify the stamp.
+    // [ReplayLockfileTool] returns a clear error when asked to replay
+    // an entry whose toolId is no longer in the registry (the 4
+    // legacy ids surface as "post-phase-2; not replayable" rather
+    // than a generic "tool not found").
     register(AigcGenerateTool(imageTool, videoTool, musicTool, speechTool))
     register(CompareAigcCandidatesTool(this))
     register(ReplayLockfileTool(this, projects))

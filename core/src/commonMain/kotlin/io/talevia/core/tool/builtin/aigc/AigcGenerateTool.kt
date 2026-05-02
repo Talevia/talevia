@@ -25,20 +25,24 @@ import kotlinx.serialization.serializer
  * / [GenerateMusicTool] / [SynthesizeSpeechTool] with a single tool spec
  * gated on `kind: enum {image | video | music | speech}`.
  *
- * **Phase 1 scope**: introduce the dispatcher abstraction; register
- * alongside the 4 originals so both surfaces are reachable. Internal
- * dispatch is pure delegation — each kind's `execute()` calls the
- * corresponding existing tool's `execute()` and projects its rich per-kind
- * Output to this tool's flat unified [Output] shape (kind-specific fields
- * are nullable; `kind` discriminator says which to expect). LockfileEntry
- * still stamps `toolId="generate_image"` etc. via the inner tool —
- * `toolId="aigc_generate"` migration happens in phase 2.
+ * **Phases.** Phase 1 (cycle 23) introduced the dispatcher abstraction
+ * and registered it alongside the 4 originals so both surfaces were
+ * reachable. Phase 2 (cycle 27, this comment) un-registered the 4
+ * originals — the LLM-facing surface is now `aigc_generate(kind=...)`
+ * only. Phase 3 (`aigc-tool-consolidation-phase3-internalise-helpers`)
+ * will factor the 4 originals from `Tool<I, O>` to an internal
+ * `AigcGenerator` sealed interface that this dispatcher holds, dropping
+ * the `Tool<I, O>` boilerplate they no longer need.
  *
- * **Phase 2** (`aigc-tool-consolidation-phase2-unregister-originals`,
- * P1) removes the 4 originals from registration; only this dispatcher
- * stays. **Phase 3** (`aigc-tool-consolidation-phase3-internalise-helpers`,
- * P1) factors the 4 originals from `Tool<I, O>` to internal
- * `AigcGenerator` sealed-interface impls that this dispatcher holds.
+ * Internal dispatch is pure delegation — each kind's `execute()` calls
+ * the corresponding existing tool's `execute()` and projects its rich
+ * per-kind Output to this tool's flat unified [Output] shape (kind-
+ * specific fields are nullable; `kind` discriminator says which to
+ * expect). LockfileEntry continues to stamp `toolId="generate_image"`
+ * etc. via the inner tool — phase 3 will unify the stamp once the
+ * helpers are no longer `Tool<I, O>` (until then, changing the stamp
+ * would require plumbing an override through `ToolContext` which buys
+ * nothing the un-registration didn't already give us).
  *
  * Design choices in this phase:
  *

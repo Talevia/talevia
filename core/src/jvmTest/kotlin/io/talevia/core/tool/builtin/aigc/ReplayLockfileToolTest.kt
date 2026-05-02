@@ -218,7 +218,79 @@ class ReplayLockfileToolTest {
         assertEquals(1, store.get(projectId)!!.lockfile.entries.size)
     }
 
-    @Test fun unregisteredToolErrorsInsteadOfSilentlyDroppingTheReplay() = runTest {
+    @Test fun legacyAigcToolIdSurfacesPhase2SpecificError() = runTest {
+        // After `aigc-tool-consolidation-phase2-unregister-originals`
+        // (cycle 27), entries with toolId `generate_image` /
+        // `generate_video` / `generate_music` / `synthesize_speech`
+        // can't be replayed via the registry — the standalone tools
+        // are gone, and `aigc_generate`'s `baseInputs` shape doesn't
+        // match the inner tool's. The replay surface must say so
+        // specifically (so an agent reading the error knows to
+        // re-issue via `aigc_generate(kind=...)` rather than guess
+        // it was a misconfiguration). Cover all 4 legacy ids in one
+        // test — the routing logic is the same per id, only the
+        // suggested kind differs.
+        val store = freshStore()
+        val projectId = ProjectId("p-legacy-aigc")
+        store.upsert("demo", Project(id = projectId, timeline = Timeline()))
+        val pairs = listOf(
+            "generate_image" to "image",
+            "generate_video" to "video",
+            "generate_music" to "music",
+            "synthesize_speech" to "speech",
+        )
+        for ((toolId, expectedKind) in pairs) {
+            val hash = "legacy-$toolId"
+            val asset = AssetId("asset-$toolId")
+            store.mutate(projectId) { project ->
+                project.copy(
+                    assets = project.assets + MediaAsset(
+                        id = asset,
+                        source = MediaSource.File("/tmp/$toolId.bin"),
+                        metadata = MediaMetadata(duration = 0.seconds),
+                    ),
+                    lockfile = project.lockfile.append(
+                        LockfileEntry(
+                            inputHash = hash,
+                            toolId = toolId,
+                            assetId = asset,
+                            provenance = GenerationProvenance(
+                                providerId = "old",
+                                modelId = "m",
+                                modelVersion = null,
+                                seed = 0,
+                                parameters = JsonObject(emptyMap()),
+                                createdAtEpochMs = 0,
+                            ),
+                            baseInputs = buildJsonObject { put("prompt", JsonPrimitive("x")) },
+                        ),
+                    ),
+                )
+            }
+            val replay = ReplayLockfileTool(ToolRegistry(), store)
+            val ex = assertFailsWith<IllegalStateException> {
+                replay.execute(
+                    ReplayLockfileTool.Input(inputHash = hash, projectId = projectId.value),
+                    ctx(),
+                )
+            }
+            val msg = ex.message.orEmpty()
+            assertTrue(
+                "phase 2" in msg,
+                "[$toolId] error should mention the phase boundary; got: $msg",
+            )
+            assertTrue(
+                "aigc_generate(kind=$expectedKind" in msg,
+                "[$toolId] error should suggest the dispatcher kind=$expectedKind; got: $msg",
+            )
+        }
+    }
+
+    @Test fun unregisteredNonAigcToolErrorsWithGenericMessage() = runTest {
+        // The catch-all arm of the missing-registration branch — used
+        // when the toolId isn't one of the 4 legacy AIGC ids. Hit it
+        // with a made-up id so the assertion locks the generic-error
+        // surface for tools the dispatcher doesn't know about.
         val store = freshStore()
         val projectId = ProjectId("p-missing-tool")
         store.upsert("demo", Project(id = projectId, timeline = Timeline()))
@@ -233,7 +305,7 @@ class ReplayLockfileToolTest {
                 lockfile = project.lockfile.append(
                     LockfileEntry(
                         inputHash = "orphanhash",
-                        toolId = "generate_image",
+                        toolId = "some_old_removed_tool",
                         assetId = seededAsset,
                         provenance = GenerationProvenance(
                             providerId = "old",
@@ -248,7 +320,6 @@ class ReplayLockfileToolTest {
                 ),
             )
         }
-        // Registry intentionally left empty — the original tool is not wired here.
         val replay = ReplayLockfileTool(ToolRegistry(), store)
 
         val ex = assertFailsWith<IllegalStateException> {

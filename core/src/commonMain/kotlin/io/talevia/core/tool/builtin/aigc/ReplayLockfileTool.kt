@@ -159,11 +159,34 @@ class ReplayLockfileTool(
                     "not replayable.",
             )
         }
-        val target = registry[entry.toolId]
-            ?: error(
+        val target = registry[entry.toolId] ?: run {
+            // `aigc-tool-consolidation-phase2-unregister-originals` (cycle 27):
+            // the 4 generate_*/synthesize_speech tools are no longer
+            // registered as standalone surfaces — `aigc_generate` routes
+            // them via `kind`. Lockfile entries written before phase 2
+            // still carry the legacy toolId and can't be replayed
+            // through the dispatcher cleanly because `baseInputs` is
+            // the inner tool's Input shape (no `kind` discriminator,
+            // and SynthesizeSpeechTool used `text` where the dispatcher
+            // expects `prompt`). Surface the situation as a precise
+            // error rather than the generic "tool not found" so the
+            // user / agent knows the entry pre-dates the consolidation
+            // and re-running the original prompt through `aigc_generate`
+            // is the right next step.
+            if (entry.toolId in LEGACY_AIGC_TOOL_IDS) {
+                error(
+                    "Lockfile entry '${input.inputHash}' (tool=${entry.toolId}) pre-dates " +
+                        "aigc-tool-consolidation phase 2 — the standalone " +
+                        "${entry.toolId} tool is no longer registered. Re-issue the original " +
+                        "request via aigc_generate(kind=" +
+                        "${LEGACY_AIGC_TOOL_IDS[entry.toolId]}, prompt=...) instead.",
+                )
+            }
+            error(
                 "Target tool '${entry.toolId}' is not registered in this container. " +
                     "The provider / engine may have been removed since this entry was written.",
             )
+        }
 
         val lockfileSizeBefore = projectBefore.lockfile.entries.size
         // forReplay() flips ctx.isReplay=true so the AIGC tool skips its
@@ -204,6 +227,20 @@ class ReplayLockfileTool(
                 originalProvenance = entry.provenance,
                 newProvenance = newEntry.provenance,
             ),
+        )
+    }
+
+    private companion object {
+        // Legacy AIGC tool ids -> aigc_generate kind discriminator.
+        // The mapping is informational only (used to compose the error
+        // message above); we don't actually re-dispatch through the
+        // dispatcher because the stored `baseInputs` shape doesn't
+        // round-trip cleanly (see comment at the call site).
+        private val LEGACY_AIGC_TOOL_IDS: Map<String, String> = mapOf(
+            "generate_image" to "image",
+            "generate_video" to "video",
+            "generate_music" to "music",
+            "synthesize_speech" to "speech",
         )
     }
 }
