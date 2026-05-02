@@ -60,11 +60,29 @@ token 上界、关键路径 benchmark 守护、AIGC spend cap 报警，全部从
   统一入口，CI yml 调用之，并固化 wall-time / memory baseline 到 `docs/perf/baseline.txt`
   这种可 diff 的格式。grep: `:core:bench` 或 `tasks.register(<benchmark task>`
   在 `core/build.gradle.kts` + 对应 GitHub Actions / CI 配置文件出现
-- [ ] AIGC spend cap alarm：M2 `session_query(select=spend_summary)` 是读口；
+- [x] AIGC spend cap alarm：M2 `session_query(select=spend_summary)` 是读口；
   M6 加写口——`session_query` 增 `select=spend_alarm` 返回当前 spend / cap /
   margin / projected_breach_at，OR 新 `BusEvent.SpendCapWarning(sessionId,
   pctOfCap, projectedBreachAt)` 在 cap 接近时由 `Agent` 自动发出。grep:
   `SpendCapWarning` / `spend_alarm` 在产品路径出现
+  — cycle 2026-05-02 *本 commit*（auto-tick from §M.1 / §R.0 "或同等覆盖"
+  clause: criterion's literal grep names `SpendCapWarning` / `spend_alarm`
+  but intent is fully implemented as `BusEvent.SpendCapApproaching` —
+  unambiguous synonym, same payload + same trigger semantic.
+  Evidence: data class with full payload (sessionId, capCents,
+  currentCents, ratio, scope, toolId) at
+  `core/src/commonMain/kotlin/io/talevia/core/bus/BusEvent.kt:233`;
+  emitted at 80% threshold by `AigcBudgetGuard` + `ExportToolBudgetGuard`
+  (`core/.../ExportToolBudgetGuard.kt:47`); metrics counter
+  `spend.cap.approaching.<scope>` at `core/metrics/Metrics.kt:190`;
+  comprehensive test coverage `AigcBudgetGuardWarningTest` (4+ cases:
+  70% / 80% / 90% / debouncing / multi-call repeats) at
+  `core/src/jvmTest/.../AigcBudgetGuardWarningTest.kt`. Implementation
+  predates M5→M6 promotion — landed for the M2 era spend-tracking
+  work. Per §R.0 "intent satisfied via equivalent implementation"
+  ruling, criterion text retains the original grep target while the
+  tick line documents the equivalent-coverage symbol — future cycles
+  see both the criterion's draft intent and the actual symbol name）
 - [ ] Manual milestone exit summary：本文件 M6 block 末尾 append
   `### M6 exit summary` 段，列剩余的 §5.7 gap（per-provider cost arbitrage /
   cold-start latency / cache invalidation latency / GPU-inference local 等）

@@ -116,8 +116,7 @@ class ToolSpecBudgetAuditTest {
 
         assertTrue(row.toolCount > 0, "expected non-empty production registry; got ${row.toolCount}")
 
-        // Three-tier budget gate (R.6 #1 perf surface, M3 criterion-aligned
-        // `debt-shrink-tool-spec-surface-token-budget`):
+        // Three-tier budget gate (R.6 #1 perf surface, M6 §5.7 criterion #1):
         //
         // - LOWER ($MIN): catches regressions that silently shrink the
         //   registry (e.g. an `register*Tools` call accidentally elided
@@ -128,15 +127,36 @@ class ToolSpecBudgetAuditTest {
         //   NOT fail the test. Lets cycles detect creep early without
         //   blocking work in flight; the `:core:jvmTest --info` log /
         //   commit-body monitoring lane records the trigger so the
-        //   pattern is visible across cycles.
+        //   pattern is visible across cycles. M6 #1 lowered the SOFT
+        //   from 18k to 15k — the criterion's strict-assertion target.
+        //   The warning prints every `:core:jvmTest --info` run until
+        //   the audit-subset crosses below 15k (currently 16,431 after
+        //   cycle 5's 42b71191 trim of project_query). That's the
+        //   intended signal: "criterion #1 strict half not yet met;
+        //   trim work pending" surfaces every cycle until the
+        //   m6-audit-subset-strict-15k follow-up bullet ships.
         // - HARD CEILING ($MAX): assertion fails. Hard limit on the
-        //   audit subset's per-turn LLM context tax. If the registry
-        //   genuinely needs to grow past this, do it as an explicit
-        //   ceiling-bump commit with rationale (`debt-shrink-tool-spec-surface-token-budget`
-        //   resolution / re-promote), not silently.
+        //   audit subset's per-turn LLM context tax. M6 #1 (cycle 10)
+        //   tightened MAX from 22k → 18k now that the audit-subset has
+        //   been at ~16.4k since cycle 5's project_query helpText trim
+        //   (42b71191) — 6k headroom was generous; 1.5k headroom is
+        //   tight enough to catch runaway growth fast, loose enough to
+        //   not block legitimate prod-only registry adds (full registry
+        //   is ~26k including the audit-excluded fs/shell/aigc groups).
+        //   The criterion's second half — strict `audit-subset ≤ 15k`
+        //   assertion — depends on a token-reduction pass; tracked as
+        //   the m6-audit-subset-strict-15k follow-up bullet that picks
+        //   up where cycle 5 left off (consolidate next-3 dispatchers'
+        //   helpText: clip_action 1264t / source_node_action 1240t /
+        //   session_action 1205t; each ~10% trim ≈ 350-400 tokens off
+        //   total; aggregate gets the audit-subset under 15k).
+        //
+        // If the registry genuinely needs to grow past MAX (e.g. a
+        // major new tool family), do it as an explicit ceiling-bump
+        // commit with rationale, not silently.
         val MIN = 12_000
-        val SOFT = 18_000
-        val MAX = 22_000
+        val SOFT = 15_000
+        val MAX = 18_000
         assertTrue(
             row.estimatedTokens >= MIN,
             "tool-spec budget ${row.estimatedTokens} below $MIN — registry shrank unexpectedly; " +
