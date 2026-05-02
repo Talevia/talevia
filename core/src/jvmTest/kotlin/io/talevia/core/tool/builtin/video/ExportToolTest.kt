@@ -474,6 +474,114 @@ class ExportToolTest {
         assertEquals(0, second.data.perClipCacheMisses)
     }
 
+    /**
+     * M5 §3.2 criterion #3 e2e gate: exporting the same project twice
+     * to two **different** outputPaths in the same OutputSpec must yield
+     * `Output.perClipCacheHits == clipCount && perClipCacheMisses == 0`
+     * on the second run — pinning the public `ExportTool.Output` contract
+     * an LLM agent / orchestrator consumes, distinct from the
+     * `engine.renderClipCalls` counter assertion in
+     * `PerClipCacheInvalidationEdgeTest.differentOutputPathReusesCacheAtSameProfile`
+     * (which only exercises the engine call path, not the report).
+     *
+     * The combination "multi-clip × path drift × Output API" isn't directly
+     * asserted by any of the existing per-clip tests:
+     *   - `perClipEngineReusesCachedMezzanineOnIdenticalRerun` uses the
+     *     SAME outputPath, missing the path-drift dimension.
+     *   - `differentOutputPathReusesCacheAtSameProfile` is single-clip and
+     *     asserts via engine counters, not Output report.
+     * This test fills the gap and gives M5 #3 a clean grep target
+     * (`multiExportToDifferentPathsReusesCacheViaOutputApi`).
+     *
+     * `forceRender = true` on the retarget bypasses the whole-timeline
+     * `RenderCache` (which keys on clip JSON + output spec INCLUDING
+     * targetPath); without it, the second export would hit the
+     * higher-level cache and not exercise the per-clip lookup. The flag
+     * forces dispatch through `runPerClipRender`, which is where the
+     * `clipMezzanineFingerprint`'s outputPath exclusion takes effect.
+     */
+    @Test fun multiExportToDifferentPathsReusesCacheViaOutputApi() = runTest {
+        val store = ProjectStoreTestKit.create()
+        val engine = FakePerClipEngine()
+        val projectId = ProjectId("p-multi-export-reuse")
+        val timeline = Timeline(
+            tracks = listOf(
+                Track.Video(
+                    id = TrackId("v"),
+                    clips = listOf(
+                        Clip.Video(
+                            id = ClipId("c1"),
+                            timeRange = TimeRange(0.seconds, 3.seconds),
+                            sourceRange = TimeRange(0.seconds, 3.seconds),
+                            assetId = AssetId("a1"),
+                        ),
+                        Clip.Video(
+                            id = ClipId("c2"),
+                            timeRange = TimeRange(3.seconds, 2.seconds),
+                            sourceRange = TimeRange(0.seconds, 2.seconds),
+                            assetId = AssetId("a2"),
+                        ),
+                        Clip.Video(
+                            id = ClipId("c3"),
+                            timeRange = TimeRange(5.seconds, 4.seconds),
+                            sourceRange = TimeRange(0.seconds, 4.seconds),
+                            assetId = AssetId("a3"),
+                        ),
+                    ),
+                ),
+            ),
+            duration = 9.seconds,
+        )
+        store.upsert("multi-export", Project(id = projectId, timeline = timeline))
+        val tool = ExportTool(store, engine)
+
+        // First export: cold cache, every clip misses.
+        val first = tool.execute(
+            ExportTool.Input(projectId = projectId.value, outputPath = "/tmp/export-a.mp4"),
+            ctx(),
+        )
+        assertEquals(0, first.data.perClipCacheHits, "first export must report zero per-clip hits (cold cache)")
+        assertEquals(3, first.data.perClipCacheMisses, "first export must miss every clip")
+
+        // Second export to a DIFFERENT outputPath, same OutputSpec otherwise.
+        // forceRender bypasses the whole-timeline render cache so the per-clip
+        // path is exercised; without it, the higher-level cache would short-
+        // circuit before the per-clip fingerprint lookup runs.
+        val second = tool.execute(
+            ExportTool.Input(
+                projectId = projectId.value,
+                outputPath = "/tmp/export-b.mp4",
+                forceRender = true,
+            ),
+            ctx(),
+        )
+        assertEquals(
+            3, second.data.perClipCacheHits,
+            "M5 #3: second export to a different outputPath at the same profile must report " +
+                "perClipCacheHits == clipCount (3) — `clipMezzanineFingerprint`'s outputPath " +
+                "exclusion must translate to full reuse via the public Output API.",
+        )
+        assertEquals(
+            0, second.data.perClipCacheMisses,
+            "M5 #3: second export must report perClipCacheMisses == 0 — full mezzanine reuse.",
+        )
+
+        // Bonus: confirm the engine wasn't called to re-render any clip
+        // between exports — this catches a regression where the Output
+        // counters get the right answer but renderClip was called anyway
+        // (would surface as a wall-time slowdown the counters don't
+        // expose). The engine reports 3 renderClip calls total = 3 from
+        // first export + 0 from second.
+        assertEquals(
+            3, engine.renderClipCalls,
+            "engine renderClip count must equal first-export count — second export is pure cache reuse",
+        )
+        assertEquals(
+            2, engine.concatCalls,
+            "concat still runs once per export (2 total) to produce each output file",
+        )
+    }
+
     @Test fun perClipEngineReRendersOnlyTheStalyClip() = runTest {
         val store = ProjectStoreTestKit.create()
         val engine = FakePerClipEngine()
