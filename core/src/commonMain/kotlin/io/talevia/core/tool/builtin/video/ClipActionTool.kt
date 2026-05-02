@@ -258,21 +258,11 @@ class ClipActionTool(
 
     override val id: String = "clip_action"
     override val helpText: String =
-        "Nine-way clip edit verb dispatching on `action`: " +
-            "`add` + addItems (assetId, timelineStartSeconds?, sourceStartSeconds?, " +
-            "durationSeconds?, trackId?). " +
-            "`remove` + clipIds + optional `ripple` (default false). " +
-            "`duplicate` + duplicateItems (clipId, timelineStartSeconds, trackId?). " +
-            "`move` + moveItems (clipId, timelineStartSeconds?, toTrackId?). " +
-            "`split` + splitItems (clipId, atTimelineSeconds). " +
-            "`trim` + trimItems (clipId, newSourceStartSeconds?, newDurationSeconds?). " +
-            "`replace` + replaceItems (clipId, newAssetId). " +
-            "`fade` + fadeItems (clipId, fadeInSeconds?, fadeOutSeconds?). " +
-            "`edit_text` + editTextItems (clipId, newText?, fontFamily?, fontSize?, " +
-            "color?, backgroundColor?, bold?, italic?) — at least one field per item; " +
-            "preserves clip ids, tracks, transforms, timeRanges; backgroundColor=\"\" clears. " +
-            "All-or-nothing per call; one snapshot per call. text clips rejected by " +
-            "trim/replace; cross-kind trackId rejected."
+        "9-verb clip dispatcher: add / remove / duplicate / move / split / trim / replace / fade / " +
+            "edit_text. Per-action *Items arrays + shapes in schema. All-or-nothing per call; one " +
+            "snapshot. text clips reject trim/replace; cross-kind trackId rejected. " +
+            "ripple (remove) closes gap, default false. edit_text needs ≥ 1 field/item; " +
+            "preserves clip ids / tracks / transforms / timeRanges; backgroundColor=\"\" clears."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")

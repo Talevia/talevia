@@ -43,11 +43,22 @@ token 上界、关键路径 benchmark 守护、AIGC spend cap 报警，全部从
 
 ### Exit criteria
 
-- [ ] Tool spec per-turn budget 紧线：`ToolSpecBudgetAuditTest` 当前 MAX = 22k
+- [x] Tool spec per-turn budget 紧线：`ToolSpecBudgetAuditTest` 当前 MAX = 22k
   允许 6k headroom 给 audit-subset 上方的全 prod registry。M6 收紧 MAX 到一个
   既反映现实又防止劣化的值（建议 18k—等审核后写死），同时让 audit-subset
   pull-down ≤ 15k。grep: `ToolSpecBudgetAuditTest` MAX 常量 ≤ 18_000 + 同 file
   里另增一个 `assertTrue(row.estimatedTokens <= 15_000)` 严格断言或同等覆盖
+  — cycle 2026-05-02 *本 commit*（two-cycle close-out: cycle 10 7c8ad58b
+  tightened MAX 22000 → 18000 + SOFT 18000 → 15000；this cycle's commit
+  trims schema descriptions + helpText on 5 heaviest dispatchers
+  (clip_action 1264 → 996, session_action 1205 → 880, source_node_action
+  1240 → 922, project_action 1052 → 883, project_query 1228 → 1006) to
+  push audit-subset 16,431 → 14,982 (-1449 tokens / -8.8%); adds the
+  strict `assertTrue(row.estimatedTokens <= SOFT)` assertion (where SOFT
+  = 15_000) sitting between the MAX hard ceiling and the existing MIN
+  regression floor. 18 tokens of headroom; future tool/description adds
+  fail loud at the strict gate before they can quietly bloat the
+  per-turn LLM context tax）
 - [ ] Session token hard cap：`SessionConfig` (or `Session` itself) 暴露
   `maxSessionTokens` / `tokenBudgetCap` field，`CompactionStrategy` 在超过 cap
   时强制压缩或拒绝下一轮。当前 compaction 是 "需要 budget 时压" 而非 "session

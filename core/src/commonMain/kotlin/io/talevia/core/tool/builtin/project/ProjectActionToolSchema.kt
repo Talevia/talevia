@@ -20,11 +20,6 @@ internal val PROJECT_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
         putJsonObject("action") {
             put("type", "string")
             put(
-                "description",
-                "`create`, `create_from_template`, `open`, `delete`, `rename`, " +
-                    "`set_output_profile`, or `remove_asset`.",
-            )
-            put(
                 "enum",
                 JsonArray(
                     listOf(
@@ -41,106 +36,79 @@ internal val PROJECT_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
         }
         putJsonObject("projectId") {
             put("type", "string")
-            put(
-                "description",
-                "Required for delete / rename / set_output_profile / remove_asset. " +
-                    "Optional naming hint for create. Ignored by open.",
-            )
+            put("description", "delete / rename / set_output_profile / remove_asset: required. create: optional hint.")
         }
         putJsonObject("title") {
             put("type", "string")
-            put(
-                "description",
-                "create / create_from_template: human-readable initial title. rename: new title. " +
-                    "Must not be blank.",
-            )
+            put("description", "create / create_from_template: initial title. rename: new title. Non-blank.")
         }
         putJsonObject("path") {
             put("type", "string")
             put(
                 "description",
-                "create / create_from_template / open: filesystem path. create / " +
-                    "create_from_template: optional bundle location (must not already contain " +
-                    "talevia.json); omit for the store's default home. open: absolute path to an " +
-                    "existing bundle directory containing talevia.json.",
+                "create / create_from_template / open: filesystem path. " +
+                    "create*: bundle location (no talevia.json); omit for default home. " +
+                    "open: absolute path to existing bundle.",
             )
         }
         putJsonObject("resolutionPreset") {
             put("type", "string")
-            put(
-                "description",
-                "create / create_from_template only. 720p, 1080p (default), or 4k.",
-            )
+            put("description", "create / create_from_template: 720p | 1080p (default) | 4k.")
         }
         putJsonObject("fps") {
             put("type", "integer")
-            put(
-                "description",
-                "create / create_from_template: 24, 30 (default), or 60. " +
-                    "set_output_profile: any positive integer fps.",
-            )
+            put("description", "create*: 24 | 30 (default) | 60. set_output_profile: any positive int.")
         }
         putJsonObject("deleteFiles") {
             put("type", "boolean")
             put(
                 "description",
-                "delete only. When true, also delete the on-disk bundle (talevia.json, media/, " +
-                    ".talevia-cache/). Default false: only unregister from the recents list.",
+                "delete: also drop on-disk bundle (talevia.json, media/, .talevia-cache/). " +
+                    "Default false (just unregister from recents).",
             )
         }
         putJsonObject("assetId") {
             put("type", "string")
-            put("description", "remove_asset only. Asset id to drop from project.assets.")
+            put("description", "remove_asset: asset id.")
         }
         putJsonObject("force") {
             put("type", "boolean")
-            put(
-                "description",
-                "remove_asset only. Remove even if clips still reference the asset. " +
-                    "Default false (refuses with the dependent clip ids in the error).",
-            )
+            put("description", "remove_asset: remove even if referenced (default false; lists deps in error).")
         }
         putJsonObject("resolutionWidth") {
             put("type", "integer")
-            put("description", "set_output_profile only. Pixels. Pair with resolutionHeight.")
+            put("description", "set_output_profile: px (with resolutionHeight).")
         }
         putJsonObject("resolutionHeight") {
             put("type", "integer")
-            put("description", "set_output_profile only. Pixels. Pair with resolutionWidth.")
+            put("description", "set_output_profile: px (with resolutionWidth).")
         }
         putJsonObject("videoCodec") {
             put("type", "string")
-            put("description", "set_output_profile only. e.g. h264, h265, prores, vp9.")
+            put("description", "set_output_profile: h264 / h265 / prores / vp9.")
         }
         putJsonObject("audioCodec") {
             put("type", "string")
-            put("description", "set_output_profile only. e.g. aac, opus, mp3.")
+            put("description", "set_output_profile: aac / opus / mp3.")
         }
         putJsonObject("videoBitrate") {
             put("type", "integer")
-            put(
-                "description",
-                "set_output_profile only. Bits per second (e.g. 8000000 for 8 Mbps).",
-            )
+            put("description", "set_output_profile: bits/s (8000000 = 8 Mbps).")
         }
         putJsonObject("audioBitrate") {
             put("type", "integer")
-            put(
-                "description",
-                "set_output_profile only. Bits per second (e.g. 192000 for 192 kbps).",
-            )
+            put("description", "set_output_profile: bits/s (192000 = 192 kbps).")
         }
         putJsonObject("container") {
             put("type", "string")
-            put("description", "set_output_profile only. e.g. mp4, mov, mkv, webm.")
+            put("description", "set_output_profile: mp4 / mov / mkv / webm.")
         }
         putJsonObject("template") {
             put("type", "string")
             put(
                 "description",
-                "create_from_template only. Genre template id: narrative, vlog, ad, musicmv, " +
-                    "tutorial, or auto. auto requires `intent` and classifies the genre from " +
-                    "keywords (no LLM round-trip).",
+                "create_from_template: narrative / vlog / ad / musicmv / tutorial / auto. " +
+                    "auto needs `intent` and classifies on-device.",
             )
             put(
                 "enum",
@@ -158,12 +126,7 @@ internal val PROJECT_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
         }
         putJsonObject("intent") {
             put("type", "string")
-            put(
-                "description",
-                "create_from_template only. One-sentence user intent. Required when " +
-                    "template='auto'; ignored otherwise. Used to classify the genre via " +
-                    "on-device keyword match (no LLM round-trip).",
-            )
+            put("description", "create_from_template + template=auto: one-sentence intent for keyword classifier.")
         }
     }
     put("required", JsonArray(listOf(JsonPrimitive("action"))))

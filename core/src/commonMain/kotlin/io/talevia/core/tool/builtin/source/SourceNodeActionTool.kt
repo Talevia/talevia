@@ -325,27 +325,18 @@ class SourceNodeActionTool(
 
     override val id: String = "source_node_action"
     override val helpText: String =
-        "Six-way source-DAG verb dispatching on `action`. " +
-            "`action=\"add\"` + `nodeId` + `kind` (dotted-namespace string, e.g. narrative.scene, " +
-            "core.consistency.character_ref) + optional `body` (opaque JSON, {} default) + optional " +
-            "`parentIds` — create a node; rejects blank kind, blank id, duplicate ids, dangling parents. " +
-            "`action=\"remove\"` + `nodeId` — delete one node; does not cascade to descendant nodes or " +
-            "clips (bound clips will surface as stale on the next check). " +
-            "`action=\"fork\"` + `sourceNodeId` + optional `newNodeId` — duplicate a node under a fresh " +
-            "id within the same project; parents referenced not cloned, body copied verbatim so " +
-            "contentHash matches the source (AIGC cache hits transfer until the fork is tweaked). " +
-            "`action=\"rename\"` + `oldId` + `newId` — atomically rewrite the node itself, every " +
-            "descendant's parent-ref, every clip's sourceBinding, and every lockfile entry's binding + " +
-            "sourceContentHashes keys in one mutation; does NOT rewrite string ids embedded inside " +
-            "typed bodies; newId must match the source-id slug shape (lowercase letters / digits / '-'); " +
-            "same-id is a no-op; rejects loudly on unknown oldId or newId collision. " +
-            "`action=\"update_body\"` + `nodeId` + (one of: `body` for full replacement, " +
-            "`restoreFromRevisionIndex=N` to roll back to history[N], or `mergeFromRevisionIndex=N` + " +
-            "`mergeFieldPaths=[…]` for per-field merge from history[N]) — kind-agnostic body editor; " +
-            "does NOT touch kind / parents / id; bumps contentHash so bound clips go stale. Empty body " +
-            "rejected. " +
-            "`action=\"set_parents\"` + `nodeId` + `parentIds` — replace parents wholesale (empty list " +
-            "clears); cycles + dangling ids rejected loudly; bumps contentHash."
+        "7-verb source-DAG dispatcher: add / remove / fork / rename / update_body / set_parents / " +
+            "import. Per-verb fields in schema. Cross-cutting: " +
+            "add rejects blank kind/id, duplicate ids, dangling parents. " +
+            "remove does NOT cascade (descendants + bound clips surface as stale). " +
+            "fork copies body verbatim (contentHash matches → AIGC cache transfers until tweaked). " +
+            "rename rewrites node + every descendant parent-ref + every clip sourceBinding + every " +
+            "lockfile sourceContentHashes key atomically; does NOT rewrite ids inside typed bodies; " +
+            "newId must be lowercase-letters-digits-hyphen; same-id no-op; collision fails. " +
+            "update_body: one of body (full replace) / restoreFromRevisionIndex=N / " +
+            "mergeFromRevisionIndex=N + mergeFieldPaths; kind-agnostic, doesn't touch kind/parents/id; " +
+            "bumps contentHash → bound clips go stale; empty body rejected. " +
+            "set_parents: full replacement (empty clears); cycles + dangling rejected; bumps contentHash."
     override val inputSerializer: KSerializer<Input> = InputCompatSerializer
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("source.write")

@@ -167,7 +167,29 @@ class ToolSpecBudgetAuditTest {
             "tool-spec budget ${row.estimatedTokens} exceeds hard ceiling $MAX — runaway tool-spec growth; " +
                 "consolidate or shrink before merging, do not bump the ceiling silently",
         )
+        // M6 §5.7 criterion #1 second half (cycle 11
+        // m6-audit-subset-strict-15k): pin the audit-subset under 15k as
+        // a strict assertion. After cycle 5 (42b71191 — project_query
+        // helpText) and cycle 11 (this commit — clip / source_node /
+        // session / project / project_query schema descriptions trimmed),
+        // the audit-subset is at ~14,982 with ~18 tokens of headroom.
+        // Strict assertion catches any future cycle that tries to add a
+        // tool / extend a description without first thinking about the
+        // budget impact. Bump the threshold only with an explicit
+        // commit + rationale (mirroring the MAX-bump convention above).
+        assertTrue(
+            row.estimatedTokens <= SOFT,
+            "tool-spec budget ${row.estimatedTokens} exceeds the M6 #1 strict 15k ceiling — " +
+                "the audit-subset must stay ≤ 15_000. Trim helpText / schema descriptions on the heaviest " +
+                "dispatchers before merging (current top: see println above). Do not bump SOFT silently — " +
+                "if the registry genuinely needs to grow, do it as an explicit ceiling-bump commit with " +
+                "rationale.",
+        )
         if (row.estimatedTokens > SOFT) {
+            // Defensive — kept as a non-fatal echo for the case where the
+            // strict assertion above is temporarily relaxed (e.g. during
+            // a known-bad merge in flight). Normally unreachable since
+            // the assertion fails first.
             println(
                 "[warn] tool-spec budget ${row.estimatedTokens} crossed soft threshold $SOFT (hard $MAX) — " +
                     "consolidate near-prefix tool groups or trim helpText before the next cycle",

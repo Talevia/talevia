@@ -9,26 +9,22 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * JSON Schema for [ClipActionTool.Input] — pulled out of the dispatcher
- * file so the main file stays under the R.5.4 500-LOC threshold.
- * Byte-identical to the previous inline definition; every field
- * description is preserved verbatim so the LLM-visible schema does not
- * change. Mirrors `SessionQueryToolSchema` / `ProjectQueryToolSchema`
- * / `SourceQueryToolSchema` / `ImportMediaToolSchema`.
+ * JSON Schema for [ClipActionTool.Input]. Per-property descriptions
+ * trimmed cycle 11 (m6-audit-subset-strict-15k) — `enum` array carries
+ * the action value list (no need to duplicate in description); itemArray
+ * descriptions drop the `action=X.` prefix (the property name `XItems`
+ * already conveys it); per-property descriptions kept terse but
+ * preserve any non-obvious default / constraint info.
  */
 internal val CLIP_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
     put("type", "object")
     putJsonObject("properties") {
         putJsonObject("projectId") {
             put("type", "string")
-            put("description", "Optional — omit to use the session's current project (set via switch_project).")
+            put("description", "Optional; defaults to session project.")
         }
         putJsonObject("action") {
             put("type", "string")
-            put(
-                "description",
-                "One of: add, remove, duplicate, move, split, trim, replace, fade, edit_text.",
-            )
             put(
                 "enum",
                 JsonArray(
@@ -39,95 +35,74 @@ internal val CLIP_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
             )
         }
         putJsonObject("addItems") {
-            itemArray("action=add. Clips to append.", required = listOf("assetId")) {
+            itemArray("Clips to append.", required = listOf("assetId")) {
                 stringProp("assetId")
-                numberProp("timelineStartSeconds", "Default: append after last clip on track.")
-                numberProp("sourceStartSeconds", "Source-trim offset (s).")
-                numberProp("durationSeconds", "Default: asset's remaining duration.")
-                stringProp("trackId", "Default: first Video track (created if absent).")
+                numberProp("timelineStartSeconds", "Default: append after last clip.")
+                numberProp("sourceStartSeconds", "Source offset (s).")
+                numberProp("durationSeconds", "Default: asset's remaining.")
+                stringProp("trackId", "Default: first Video track (auto-create).")
             }
         }
         putJsonObject("clipIds") {
             put("type", "array")
-            put("description", "action=remove. Clip ids to delete.")
+            put("description", "Clip ids to delete.")
             putJsonObject("items") { put("type", "string") }
         }
         putJsonObject("ripple") {
             put("type", "boolean")
-            put("description", "action=remove. Close the gap on each removed clip's track. Default false.")
+            put("description", "remove: close gap on the removed clip's track (default false).")
         }
         putJsonObject("duplicateItems") {
-            itemArray(
-                "action=duplicate. Clones to produce.",
-                required = listOf("clipId", "timelineStartSeconds"),
-            ) {
+            itemArray("Clones.", required = listOf("clipId", "timelineStartSeconds")) {
                 stringProp("clipId")
-                numberProp("timelineStartSeconds", "Timeline start (s, >= 0).")
-                stringProp("trackId", "Optional same-kind target. Default: source's track.")
+                numberProp("timelineStartSeconds", "Start (s, >= 0).")
+                stringProp("trackId", "Same-kind target; default: source's track.")
             }
         }
         putJsonObject("moveItems") {
-            itemArray(
-                "action=move. Reposition operations.",
-                required = listOf("clipId"),
-            ) {
+            itemArray("Reposition.", required = listOf("clipId")) {
                 stringProp("clipId")
-                numberProp(
-                    "timelineStartSeconds",
-                    "Timeline start (s, >= 0). Omit only when toTrackId is set.",
-                )
-                stringProp("toTrackId", "Optional same-kind target. Omit for same-track reposition.")
+                numberProp("timelineStartSeconds", "Start (s, >= 0). Omit only with toTrackId.")
+                stringProp("toTrackId", "Same-kind target; omit for same-track reposition.")
             }
         }
         putJsonObject("splitItems") {
-            itemArray(
-                "action=split. Split operations.",
-                required = listOf("clipId", "atTimelineSeconds"),
-            ) {
+            itemArray("Splits.", required = listOf("clipId", "atTimelineSeconds")) {
                 stringProp("clipId")
-                numberProp("atTimelineSeconds", "Timeline split point (strictly inside the clip).")
+                numberProp("atTimelineSeconds", "Split point (inside clip).")
             }
         }
         putJsonObject("trimItems") {
-            itemArray(
-                "action=trim. Trim operations.",
-                required = listOf("clipId"),
-            ) {
+            itemArray("Trims.", required = listOf("clipId")) {
                 stringProp("clipId")
-                numberProp("newSourceStartSeconds", "Source-trim offset (s, >= 0). Omit to keep.")
-                numberProp("newDurationSeconds", "New duration (s, > 0); rewrites timeRange + sourceRange. Omit to keep.")
+                numberProp("newSourceStartSeconds", "Source offset (s, >= 0). Omit = keep.")
+                numberProp("newDurationSeconds", "New duration (s, > 0); rewrites timeRange + sourceRange. Omit = keep.")
             }
         }
         putJsonObject("replaceItems") {
-            itemArray(
-                "action=replace. Clip → new-asset swaps.",
-                required = listOf("clipId", "newAssetId"),
-            ) {
+            itemArray("Asset swaps.", required = listOf("clipId", "newAssetId")) {
                 stringProp("clipId")
-                stringProp("newAssetId", "Must already be in the project's asset catalog.")
+                stringProp("newAssetId", "Must be in asset catalog.")
             }
         }
         putJsonObject("fadeItems") {
-            itemArray(
-                "action=fade. Audio-clip fade envelope edits.",
-                required = listOf("clipId"),
-            ) {
+            itemArray("Audio-clip fade edits.", required = listOf("clipId")) {
                 stringProp("clipId")
-                numberProp("fadeInSeconds", "Fade-in ramp (s). 0.0 disables. Omit to keep.")
-                numberProp("fadeOutSeconds", "Fade-out ramp (s). 0.0 disables. Omit to keep.")
+                numberProp("fadeInSeconds", "Ramp (s); 0 disables; omit = keep.")
+                numberProp("fadeOutSeconds", "Ramp (s); 0 disables; omit = keep.")
             }
         }
         putJsonObject("editTextItems") {
             itemArray(
-                "action=edit_text. Per-text-clip body / style patch (at least one field per item).",
+                "Text-clip body / style patch (≥ 1 field/item).",
                 required = listOf("clipId"),
             ) {
                 stringProp("clipId")
-                stringProp("newText", "Replace the text body. Must be non-blank.")
+                stringProp("newText", "Replace body; non-blank.")
                 stringProp("fontFamily")
-                numberProp("fontSize", "Point size; must be > 0.")
-                stringProp("color", "CSS-style hex (e.g. #FFFFFF).")
-                stringProp("backgroundColor", "Background hex; '' clears (transparent).")
+                numberProp("fontSize", "Point size; > 0.")
+                stringProp("color", "Hex (#FFFFFF).")
+                stringProp("backgroundColor", "Hex; '' clears.")
                 boolProp("bold")
                 boolProp("italic")
             }
