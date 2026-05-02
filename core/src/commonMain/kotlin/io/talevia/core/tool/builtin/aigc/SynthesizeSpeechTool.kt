@@ -216,6 +216,7 @@ class SynthesizeSpeechTool(
                 "text" to input.text,
                 "language" to (input.language ?: ""),
             ),
+            variantIndex = ctx.variantIndex,
         )
 
         if (!ctx.isReplay) {
@@ -296,6 +297,7 @@ class SynthesizeSpeechTool(
             sessionId = ctx.sessionId,
             originatingMessageId = ctx.messageId,
             newAsset = newAsset,
+            variantIndex = ctx.variantIndex,
         )
         ctx.publishEvent(
             BusEvent.AigcCostRecorded(

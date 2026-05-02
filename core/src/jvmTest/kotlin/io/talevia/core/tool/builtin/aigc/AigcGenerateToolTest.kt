@@ -178,4 +178,139 @@ class AigcGenerateToolTest {
         }
         assertTrue(vidEx.message!!.contains("kind=video"), "video failure tagged: ${vidEx.message}")
     }
+
+    // ---------- aigc-multi-variant-phase2-dispatch (cycle 29) ---------
+
+    @Test fun n1DispatchPopulatesSingleElementVariantsList() = runTest {
+        // Regression for the default `variantCount=1` shape: even single-
+        // variant calls produce a non-empty `variants` list (size 1) so
+        // multi-variant-aware consumers can iterate uniformly. Top-level
+        // assetId mirrors variants[0].assetId.
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/n1".toPath(), title = "n1").id
+        val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image")
+        val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcGenerateTool(image = image)
+
+        val out = tool.execute(
+            AigcGenerateTool.Input.Image(prompt = "x", projectId = pid.value),
+            ctx(),
+        ).data
+
+        assertEquals(1, out.variantCount)
+        assertEquals(1, out.variants.size, "even n=1 surfaces a single-element variants list")
+        assertEquals(0, out.variants[0].variantIndex, "single variant has index 0")
+        assertEquals(out.assetId, out.variants[0].assetId, "top-level assetId mirrors variant[0]")
+    }
+
+    @Test fun imageVariantCount4ProducesFourDistinctLockfileEntries() = runTest {
+        // The core multi-variant invariant: variantCount=4 on image-gen
+        // produces 4 inner-tool calls, 4 distinct lockfile entries with
+        // variantIndex 0..3, and 4 distinct inputHashes (phase 1's
+        // canonical-string variant segment). Each iteration's assetId
+        // is unique because Uuid.random() mints fresh ids per call.
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/n4img".toPath(), title = "n4img").id
+        val engine = CountingImageGenEngine(
+            providerId = "fake-counting",
+            bytesForCall = { call -> byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, call.toByte()) },
+        )
+        val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcGenerateTool(image = image)
+
+        val out = tool.execute(
+            AigcGenerateTool.Input.Image(
+                prompt = "a hero shot",
+                seed = 42L,
+                projectId = pid.value,
+                variantCount = 4,
+            ),
+            ctx(),
+        ).data
+
+        assertEquals(4, out.variantCount)
+        assertEquals(4, out.variants.size)
+        assertEquals(listOf(0, 1, 2, 3), out.variants.map { it.variantIndex })
+        // 4 distinct asset ids — Uuid.random() per inner-tool call.
+        assertEquals(4, out.variants.map { it.assetId }.toSet().size, "all 4 variants have distinct assetIds")
+        assertEquals(4, engine.calls, "engine called once per variant (sequential N×1 — no native `n` batching)")
+
+        // Lockfile must hold all 4 entries with variantIndex 0..3 and
+        // 4 distinct inputHashes (variant segment makes them unique).
+        val project = store.get(pid)!!
+        val entries = project.lockfile.entries.filter { it.toolId == "generate_image" }
+        assertEquals(4, entries.size, "4 lockfile entries persisted")
+        assertEquals(setOf(0, 1, 2, 3), entries.map { it.variantIndex }.toSet())
+        assertEquals(4, entries.map { it.inputHash }.toSet().size, "4 distinct inputHashes")
+    }
+
+    @Test fun videoVariantCount3SequentialCallsAndDistinctEntries() = runTest {
+        // Cross-kind sanity: video also fans out through the same
+        // sequential loop. The bullet text noted "non-`n`-supporting
+        // providers (Sora 2 / Veo / TTS) 顺序 N 次调用" — this test pins
+        // that the loop itself works for every kind (the per-provider
+        // `n` optimisation is a follow-up; the dispatch shape is
+        // identical either way).
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/n3vid".toPath(), title = "n3vid").id
+        val engine = OneShotVideoGenEngine(tinyMp4, providerId = "fake-video")
+        val video = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcGenerateTool(video = video)
+
+        val out = tool.execute(
+            AigcGenerateTool.Input.Video(
+                prompt = "a chase scene",
+                durationSeconds = 4.0,
+                seed = 11L,
+                projectId = pid.value,
+                variantCount = 3,
+            ),
+            ctx(),
+        ).data
+
+        assertEquals(3, out.variantCount)
+        assertEquals(3, out.variants.size)
+        assertEquals(3, engine.calls, "video provider called 3 times (no native `n` for sora/veo)")
+        val project = store.get(pid)!!
+        val entries = project.lockfile.entries.filter { it.toolId == "generate_video" }
+        assertEquals(3, entries.size)
+        assertEquals(setOf(0, 1, 2), entries.map { it.variantIndex }.toSet())
+    }
+
+    @Test fun variantCountZeroRejectsLoudBeforeAnyDispatch() = runTest {
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/zero".toPath(), title = "zero").id
+        val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image")
+        val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcGenerateTool(image = image)
+
+        val ex = assertFails {
+            tool.execute(
+                AigcGenerateTool.Input.Image(prompt = "x", projectId = pid.value, variantCount = 0),
+                ctx(),
+            )
+        }
+        assertTrue("variantCount must be ≥ 1" in ex.message.orEmpty(), "got: ${ex.message}")
+        assertEquals(0, engine.calls, "loud reject must happen before any provider call")
+    }
+
+    @Test fun variantCountAboveMaxRejectsLoudBeforeAnyDispatch() = runTest {
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/big".toPath(), title = "big").id
+        val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image")
+        val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcGenerateTool(image = image)
+
+        val ex = assertFails {
+            tool.execute(
+                AigcGenerateTool.Input.Image(prompt = "x", projectId = pid.value, variantCount = 1_000),
+                ctx(),
+            )
+        }
+        assertTrue(
+            "exceeds upper bound" in ex.message.orEmpty(),
+            "should mention the upper bound; got: ${ex.message}",
+        )
+        assertEquals(0, engine.calls)
+    }
 }

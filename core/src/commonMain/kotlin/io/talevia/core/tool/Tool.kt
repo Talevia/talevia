@@ -167,6 +167,22 @@ class ToolContext(
      * one-off harnesses) keep compiling.
      */
     val spendCapCents: Long? = null,
+    /**
+     * Variant index of the current dispatch within a multi-variant
+     * AIGC generation (`aigc-multi-variant-phase2-dispatch`). Default
+     * `0` for single-variant calls; the [AigcGenerateTool] dispatcher
+     * sets this to `0..variantCount-1` via [forVariant] when looping
+     * its underlying generators. Each underlying AIGC tool reads this
+     * to flow `variantIndex` into [io.talevia.core.tool.builtin.aigc.AigcPipeline.inputHash]
+     * and [io.talevia.core.tool.builtin.aigc.AigcPipeline.record], so
+     * N variants of the same prompt land as N distinct lockfile entries
+     * (distinct inputHash via the canonical-string variant segment;
+     * distinct assetId because each iteration writes its own blob).
+     *
+     * Non-AIGC tools ignore this — it's a no-op for them. Default
+     * keeps existing single-variant call sites source-compatible.
+     */
+    val variantIndex: Int = 0,
 ) {
     /**
      * Resolve a project id for a tool that accepts an optional explicit
@@ -211,6 +227,29 @@ class ToolContext(
         publishEvent = publishEvent,
         isReplay = true,
         spendCapCents = spendCapCents,
+        variantIndex = variantIndex,
+    )
+
+    /**
+     * `aigc-multi-variant-phase2-dispatch`: return a child context whose
+     * [variantIndex] is set to [i]. Used exclusively by [AigcGenerateTool]
+     * when looping its underlying generators across `variantCount` —
+     * each iteration's inputHash differs because the AIGC pipeline folds
+     * `variantIndex` into the canonical hash string, so N variants land
+     * as N distinct lockfile entries.
+     */
+    fun forVariant(i: Int): ToolContext = ToolContext(
+        sessionId = sessionId,
+        messageId = messageId,
+        callId = callId,
+        askPermission = askPermission,
+        emitPart = emitPart,
+        messages = messages,
+        currentProjectId = currentProjectId,
+        publishEvent = publishEvent,
+        isReplay = isReplay,
+        spendCapCents = spendCapCents,
+        variantIndex = i,
     )
 }
 

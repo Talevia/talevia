@@ -186,6 +186,7 @@ class GenerateImageTool(
                 "refs" to folded.referenceAssetIds.joinToString(","),
                 "lora" to loraKey,
             ),
+            variantIndex = ctx.variantIndex,
         )
 
         if (!ctx.isReplay) {
@@ -258,6 +259,7 @@ class GenerateImageTool(
             resolvedPrompt = folded.effectivePrompt,
             originatingMessageId = ctx.messageId,
             newAsset = newAsset,
+            variantIndex = ctx.variantIndex,
         )
         ctx.publishEvent(
             BusEvent.AigcCostRecorded(

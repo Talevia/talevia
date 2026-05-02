@@ -82,6 +82,25 @@ class AigcGenerateTool(
         val projectId: String?
         val consistencyBindingIds: List<String>?
 
+        /**
+         * `aigc-multi-variant-phase2-dispatch`: how many distinct variants
+         * to produce in this dispatch. Default `1` (single-variant —
+         * existing behaviour). Each iteration calls the underlying
+         * generator with the same prompt + seed but a different
+         * [ToolContext.variantIndex] so its inputHash differs (phase 1's
+         * canonical-string variant segment) and the lockfile records N
+         * distinct entries. Providers exposing a native `n` parameter
+         * (OpenAI image-gen) are NOT folded into this phase — every kind
+         * goes the sequential N-call route. Treating image-gen specially
+         * is a perf optimisation deferred to a follow-up; functionally
+         * the loop produces identical lockfile shape either way.
+         *
+         * Values ≤ 0 reject as "must be ≥ 1"; values > 16 reject as
+         * "request implausibly large — pick ≤ 16 or split into multiple
+         * calls" so the LLM can't accidentally fan out into a huge bill.
+         */
+        val variantCount: Int
+
         @Serializable
         @SerialName("image")
         data class Image(
@@ -92,6 +111,7 @@ class AigcGenerateTool(
             override val seed: Long? = null,
             override val projectId: String? = null,
             override val consistencyBindingIds: List<String>? = null,
+            override val variantCount: Int = 1,
         ) : Input
 
         @Serializable
@@ -105,6 +125,7 @@ class AigcGenerateTool(
             override val seed: Long? = null,
             override val projectId: String? = null,
             override val consistencyBindingIds: List<String>? = null,
+            override val variantCount: Int = 1,
         ) : Input
 
         @Serializable
@@ -116,6 +137,7 @@ class AigcGenerateTool(
             override val seed: Long? = null,
             override val projectId: String? = null,
             override val consistencyBindingIds: List<String>? = null,
+            override val variantCount: Int = 1,
         ) : Input
 
         /**
@@ -136,6 +158,7 @@ class AigcGenerateTool(
             override val seed: Long? = null,
             override val projectId: String? = null,
             override val consistencyBindingIds: List<String>? = null,
+            override val variantCount: Int = 1,
         ) : Input
     }
 
@@ -144,6 +167,16 @@ class AigcGenerateTool(
      * kind-specific nullables are populated. Sealed Output was rejected
      * (the result-handling glue is uniform across kinds; sealed shape
      * would duplicate boilerplate without typing wins).
+     *
+     * Multi-variant shape (`aigc-multi-variant-phase2-dispatch`): for
+     * `variantCount > 1` dispatches, top-level fields (assetId, providerId,
+     * cacheHit, width, …) describe **variant 0** so existing single-
+     * variant call sites keep working without code changes. The full set
+     * of N variants is in [variants] (single-element list when
+     * variantCount=1; N elements 0..N-1 when variantCount>1). LLM-side
+     * consumers reading the unified Output should iterate [variants] when
+     * variantCount > 1 and treat the top-level fields as "variant 0
+     * shorthand".
      */
     @Serializable
     data class Output(
@@ -170,6 +203,29 @@ class AigcGenerateTool(
         val voice: String? = null,
         val format: String? = null,
         val language: String? = null,
+        // multi-variant
+        val variantCount: Int = 1,
+        val variants: List<VariantSummary> = emptyList(),
+    )
+
+    /**
+     * Per-variant summary for multi-variant dispatches. `variantIndex`
+     * matches the [ToolContext.variantIndex] / [LockfileEntry.variantIndex]
+     * stamped on the underlying lockfile record. `costCents` is the
+     * provider-side cents for that single variant — sum across `variants`
+     * for the total dispatch cost. Kind-specific fields are nullable so
+     * the same shape covers image / video / music / speech.
+     */
+    @Serializable
+    data class VariantSummary(
+        val variantIndex: Int,
+        val assetId: String,
+        val costCents: Long? = null,
+        // image / video
+        val width: Int? = null,
+        val height: Int? = null,
+        // video / music
+        val durationSeconds: Double? = null,
     )
 
     override val id: String = "aigc_generate"
@@ -179,7 +235,8 @@ class AigcGenerateTool(
             "durationSeconds + width/height; music: durationSeconds; speech: voice/format/speed). " +
             "Bytes persist into the project bundle's media/ dir so assets travel with the project. " +
             "Lockfile cache: identical inputs return the cached asset without re-billing the provider. " +
-            "Pass consistencyBindingIds to fold character / style / brand source nodes into the prompt."
+            "Pass consistencyBindingIds to fold character / style / brand source nodes into the prompt. " +
+            "Set variantCount > 1 to fan out into N variants (each its own lockfile entry; cost = N × single)."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("aigc.generate")
@@ -187,11 +244,41 @@ class AigcGenerateTool(
 
     override val inputSchema: JsonObject = buildOneOfInputSchema()
 
-    override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> = when (input) {
-        is Input.Image -> dispatchImage(input, ctx)
-        is Input.Video -> dispatchVideo(input, ctx)
-        is Input.Music -> dispatchMusic(input, ctx)
-        is Input.Speech -> dispatchSpeech(input, ctx)
+    override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+        validateVariantCount(input.variantCount)
+        return when (input) {
+            is Input.Image -> dispatchImage(input, ctx)
+            is Input.Video -> dispatchVideo(input, ctx)
+            is Input.Music -> dispatchMusic(input, ctx)
+            is Input.Speech -> dispatchSpeech(input, ctx)
+        }
+    }
+
+    private fun validateVariantCount(n: Int) {
+        require(n >= 1) { "aigc_generate variantCount must be ≥ 1; got $n" }
+        require(n <= MAX_VARIANT_COUNT) {
+            "aigc_generate variantCount $n exceeds upper bound $MAX_VARIANT_COUNT — split into multiple calls"
+        }
+    }
+
+    /**
+     * Common loop body for every kind. Calls [perVariant] for each
+     * `variantIndex in 0 until input.variantCount` with the per-variant
+     * [ToolContext] (set via [ToolContext.forVariant]). Returns a list of
+     * the underlying tool's [ToolResult]s in variant order; the first
+     * element corresponds to variant 0 and feeds the top-level Output
+     * fields below.
+     */
+    private suspend inline fun <O> runVariants(
+        variantCount: Int,
+        ctx: ToolContext,
+        perVariant: (variantIndex: Int, ctx: ToolContext) -> ToolResult<O>,
+    ): List<ToolResult<O>> {
+        val results = mutableListOf<ToolResult<O>>()
+        for (i in 0 until variantCount) {
+            results.add(perVariant(i, ctx.forVariant(i)))
+        }
+        return results
     }
 
     private suspend fun dispatchImage(input: Input.Image, ctx: ToolContext): ToolResult<Output> {
@@ -205,27 +292,39 @@ class AigcGenerateTool(
             projectId = input.projectId,
             consistencyBindingIds = input.consistencyBindingIds,
         )
-        val result = tool.execute(inner, ctx)
-        val o = result.data
+        val results = runVariants(input.variantCount, ctx) { _, variantCtx ->
+            tool.execute(inner, variantCtx)
+        }
+        val first = results.first().data
+        val variants = results.mapIndexed { i, r ->
+            VariantSummary(
+                variantIndex = i,
+                assetId = r.data.assetId,
+                width = r.data.width,
+                height = r.data.height,
+            )
+        }
         return ToolResult(
-            title = result.title,
-            outputForLlm = result.outputForLlm,
+            title = results.first().title,
+            outputForLlm = composeMultiVariantSummary(results.first().outputForLlm, variants, "image"),
             data = Output(
-                assetId = o.assetId,
+                assetId = first.assetId,
                 kind = "image",
-                providerId = o.providerId,
-                modelId = o.modelId,
-                modelVersion = o.modelVersion,
-                seed = o.seed,
-                parameters = o.parameters,
-                effectivePrompt = o.effectivePrompt,
-                appliedConsistencyBindingIds = o.appliedConsistencyBindingIds,
-                cacheHit = o.cacheHit,
-                width = o.width,
-                height = o.height,
-                negativePrompt = o.negativePrompt,
-                referenceAssetIds = o.referenceAssetIds,
-                loraAdapterIds = o.loraAdapterIds,
+                providerId = first.providerId,
+                modelId = first.modelId,
+                modelVersion = first.modelVersion,
+                seed = first.seed,
+                parameters = first.parameters,
+                effectivePrompt = first.effectivePrompt,
+                appliedConsistencyBindingIds = first.appliedConsistencyBindingIds,
+                cacheHit = first.cacheHit,
+                width = first.width,
+                height = first.height,
+                negativePrompt = first.negativePrompt,
+                referenceAssetIds = first.referenceAssetIds,
+                loraAdapterIds = first.loraAdapterIds,
+                variantCount = input.variantCount,
+                variants = variants,
             ),
         )
     }
@@ -242,28 +341,41 @@ class AigcGenerateTool(
             projectId = input.projectId,
             consistencyBindingIds = input.consistencyBindingIds,
         )
-        val result = tool.execute(inner, ctx)
-        val o = result.data
+        val results = runVariants(input.variantCount, ctx) { _, variantCtx ->
+            tool.execute(inner, variantCtx)
+        }
+        val first = results.first().data
+        val variants = results.mapIndexed { i, r ->
+            VariantSummary(
+                variantIndex = i,
+                assetId = r.data.assetId,
+                width = r.data.width,
+                height = r.data.height,
+                durationSeconds = r.data.durationSeconds,
+            )
+        }
         return ToolResult(
-            title = result.title,
-            outputForLlm = result.outputForLlm,
+            title = results.first().title,
+            outputForLlm = composeMultiVariantSummary(results.first().outputForLlm, variants, "video"),
             data = Output(
-                assetId = o.assetId,
+                assetId = first.assetId,
                 kind = "video",
-                providerId = o.providerId,
-                modelId = o.modelId,
-                modelVersion = o.modelVersion,
-                seed = o.seed,
-                parameters = o.parameters,
-                effectivePrompt = o.effectivePrompt,
-                appliedConsistencyBindingIds = o.appliedConsistencyBindingIds,
-                cacheHit = o.cacheHit,
-                width = o.width,
-                height = o.height,
-                durationSeconds = o.durationSeconds,
-                negativePrompt = o.negativePrompt,
-                referenceAssetIds = o.referenceAssetIds,
-                loraAdapterIds = o.loraAdapterIds,
+                providerId = first.providerId,
+                modelId = first.modelId,
+                modelVersion = first.modelVersion,
+                seed = first.seed,
+                parameters = first.parameters,
+                effectivePrompt = first.effectivePrompt,
+                appliedConsistencyBindingIds = first.appliedConsistencyBindingIds,
+                cacheHit = first.cacheHit,
+                width = first.width,
+                height = first.height,
+                durationSeconds = first.durationSeconds,
+                negativePrompt = first.negativePrompt,
+                referenceAssetIds = first.referenceAssetIds,
+                loraAdapterIds = first.loraAdapterIds,
+                variantCount = input.variantCount,
+                variants = variants,
             ),
         )
     }
@@ -278,23 +390,34 @@ class AigcGenerateTool(
             projectId = input.projectId,
             consistencyBindingIds = input.consistencyBindingIds,
         )
-        val result = tool.execute(inner, ctx)
-        val o = result.data
+        val results = runVariants(input.variantCount, ctx) { _, variantCtx ->
+            tool.execute(inner, variantCtx)
+        }
+        val first = results.first().data
+        val variants = results.mapIndexed { i, r ->
+            VariantSummary(
+                variantIndex = i,
+                assetId = r.data.assetId,
+                durationSeconds = r.data.durationSeconds,
+            )
+        }
         return ToolResult(
-            title = result.title,
-            outputForLlm = result.outputForLlm,
+            title = results.first().title,
+            outputForLlm = composeMultiVariantSummary(results.first().outputForLlm, variants, "music"),
             data = Output(
-                assetId = o.assetId,
+                assetId = first.assetId,
                 kind = "music",
-                providerId = o.providerId,
-                modelId = o.modelId,
-                modelVersion = o.modelVersion,
-                seed = o.seed,
-                parameters = o.parameters,
-                effectivePrompt = o.effectivePrompt,
-                appliedConsistencyBindingIds = o.appliedConsistencyBindingIds,
-                cacheHit = o.cacheHit,
-                durationSeconds = o.durationSeconds,
+                providerId = first.providerId,
+                modelId = first.modelId,
+                modelVersion = first.modelVersion,
+                seed = first.seed,
+                parameters = first.parameters,
+                effectivePrompt = first.effectivePrompt,
+                appliedConsistencyBindingIds = first.appliedConsistencyBindingIds,
+                cacheHit = first.cacheHit,
+                durationSeconds = first.durationSeconds,
+                variantCount = input.variantCount,
+                variants = variants,
             ),
         )
     }
@@ -311,28 +434,65 @@ class AigcGenerateTool(
             consistencyBindingIds = input.consistencyBindingIds,
             language = input.language,
         )
-        val result = tool.execute(inner, ctx)
-        val o = result.data
+        val results = runVariants(input.variantCount, ctx) { _, variantCtx ->
+            tool.execute(inner, variantCtx)
+        }
+        val first = results.first().data
+        val variants = results.mapIndexed { i, r ->
+            VariantSummary(
+                variantIndex = i,
+                assetId = r.data.assetId,
+            )
+        }
         return ToolResult(
-            title = result.title,
-            outputForLlm = result.outputForLlm,
+            title = results.first().title,
+            outputForLlm = composeMultiVariantSummary(results.first().outputForLlm, variants, "speech"),
             data = Output(
-                assetId = o.assetId,
+                assetId = first.assetId,
                 kind = "speech",
-                providerId = o.providerId,
-                modelId = o.modelId,
-                modelVersion = o.modelVersion,
+                providerId = first.providerId,
+                modelId = first.modelId,
+                modelVersion = first.modelVersion,
                 seed = input.seed ?: 0L, // TTS Output has no seed; reflect input or default
-                parameters = o.parameters,
+                parameters = first.parameters,
                 effectivePrompt = input.prompt, // TTS Output's text is in `voice` description; prompt = text
-                appliedConsistencyBindingIds = o.appliedConsistencyBindingIds,
-                cacheHit = o.cacheHit,
+                appliedConsistencyBindingIds = first.appliedConsistencyBindingIds,
+                cacheHit = first.cacheHit,
                 durationSeconds = null,
-                voice = o.voice,
-                format = o.format,
-                language = o.language,
+                voice = first.voice,
+                format = first.format,
+                language = first.language,
+                variantCount = input.variantCount,
+                variants = variants,
             ),
         )
+    }
+
+    /**
+     * For multi-variant dispatches, append a one-line summary of all
+     * generated variants after the underlying tool's first-variant
+     * outputForLlm. Single-variant dispatches return the underlying
+     * line verbatim. Keeps the LLM-facing token cost ≈ 80 chars per
+     * extra variant — well below the 500-token §3a threshold.
+     */
+    private fun composeMultiVariantSummary(
+        firstLine: String,
+        variants: List<VariantSummary>,
+        kind: String,
+    ): String {
+        if (variants.size <= 1) return firstLine
+        val rest = variants.drop(1).joinToString(", ") { "v${it.variantIndex}=${it.assetId}" }
+        return "$firstLine + ${variants.size - 1} more $kind variants: $rest"
+    }
+
+    companion object {
+        /**
+         * Hard upper bound on `variantCount` per dispatch. 16 is well
+         * above the realistic "give me a few options" use case while
+         * preventing accidental fan-out into a 1000-variant request.
+         * Bump only with explicit user need + cost discussion.
+         */
+        const val MAX_VARIANT_COUNT: Int = 16
     }
 }
 
@@ -461,6 +621,16 @@ private fun kotlinx.serialization.json.JsonObjectBuilder.sharedProps() {
         put(
             "description",
             "Source-node ids to fold. null = auto-fold all consistency nodes; [] = no folding; non-empty = fold only listed.",
+        )
+    }
+    putJsonObject("variantCount") {
+        put("type", "integer")
+        put(
+            "description",
+            "How many distinct variants to generate (default 1, max ${AigcGenerateTool.MAX_VARIANT_COUNT}). " +
+                "Each variant lands as its own lockfile entry — useful when the user wants to pick from " +
+                "several options. N variants = N provider calls = N × cost; pin the chosen one with " +
+                "project_pin_action(target=lockfile_entry).",
         )
     }
 }

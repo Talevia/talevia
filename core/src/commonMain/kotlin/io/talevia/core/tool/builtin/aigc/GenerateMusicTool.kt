@@ -171,6 +171,7 @@ class GenerateMusicTool(
                 "bindings" to folded.appliedNodeIds.joinToString(","),
                 "neg" to (folded.negativePrompt ?: ""),
             ),
+            variantIndex = ctx.variantIndex,
         )
 
         if (!ctx.isReplay) {
@@ -238,6 +239,7 @@ class GenerateMusicTool(
             resolvedPrompt = folded.effectivePrompt,
             originatingMessageId = ctx.messageId,
             newAsset = newAsset,
+            variantIndex = ctx.variantIndex,
         )
         ctx.publishEvent(
             BusEvent.AigcCostRecorded(

@@ -194,6 +194,7 @@ class GenerateVideoTool(
                 "refs" to folded.referenceAssetIds.joinToString(","),
                 "lora" to loraKey,
             ),
+            variantIndex = ctx.variantIndex,
         )
 
         if (!ctx.isReplay) {
@@ -267,6 +268,7 @@ class GenerateVideoTool(
             resolvedPrompt = folded.effectivePrompt,
             originatingMessageId = ctx.messageId,
             newAsset = newAsset,
+            variantIndex = ctx.variantIndex,
         )
         ctx.publishEvent(
             BusEvent.AigcCostRecorded(
