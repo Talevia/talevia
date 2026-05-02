@@ -19,6 +19,7 @@ import io.talevia.core.platform.VideoGenEngine
 import io.talevia.core.platform.VisionEngine
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolRegistry
+import io.talevia.core.tool.builtin.aigc.AigcGenerateTool
 import io.talevia.core.tool.builtin.aigc.CompareAigcCandidatesTool
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import io.talevia.core.tool.builtin.aigc.GenerateMusicTool
@@ -276,11 +277,19 @@ fun ToolRegistry.registerAigcTools(
     bundleBlobWriter: BundleBlobWriter,
     projects: ProjectStore,
 ) {
-    imageGen?.let { register(GenerateImageTool(it, bundleBlobWriter, projects)) }
-    videoGen?.let { register(GenerateVideoTool(it, bundleBlobWriter, projects)) }
-    musicGen?.let { register(GenerateMusicTool(it, bundleBlobWriter, projects)) }
+    val imageTool = imageGen?.let { GenerateImageTool(it, bundleBlobWriter, projects) }
+    val videoTool = videoGen?.let { GenerateVideoTool(it, bundleBlobWriter, projects) }
+    val musicTool = musicGen?.let { GenerateMusicTool(it, bundleBlobWriter, projects) }
+    val speechTool = tts?.let { SynthesizeSpeechTool(it, bundleBlobWriter, projects) }
+    imageTool?.let { register(it) }
+    videoTool?.let { register(it) }
+    musicTool?.let { register(it) }
     upscale?.let { register(UpscaleAssetTool(it, bundleBlobWriter, projects)) }
-    tts?.let { register(SynthesizeSpeechTool(it, bundleBlobWriter, projects)) }
+    speechTool?.let { register(it) }
+    // `debt-aigc-tool-consolidation` phase 1 (cycle 23): unified
+    // dispatcher exposed alongside the 4 originals. Phase 2 will
+    // un-register the originals, leaving only this dispatcher.
+    register(AigcGenerateTool(imageTool, videoTool, musicTool, speechTool))
     register(CompareAigcCandidatesTool(this))
     register(ReplayLockfileTool(this, projects))
     asr?.let {
