@@ -194,6 +194,28 @@ data class LockfileEntry(
      * needing to know which slice its consumer will read.
      */
     val sourceContentHashesByModality: Map<SourceNodeId, ModalityHashes> = emptyMap(),
+    /**
+     * Variant index of this generation when the producing AIGC tool requested
+     * multiple variants in a single dispatch (`aigc-result-multi-variant`
+     * phase 1). Default `0` for single-variant generations and pre-multi-
+     * variant entries — every entry in the codebase today is `0` because
+     * phase 2 (`aigc-multi-variant-phase2-dispatch`) hasn't surfaced
+     * `variantCount` to the AIGC tool inputs yet. Phase 1 lands the schema
+     * bit so the inputHash + Replay paths know about it.
+     *
+     * Included in the inputHash canonical string (see
+     * [io.talevia.core.tool.builtin.aigc.AigcPipeline.inputHash] callers)
+     * so two variants of the same prompt + seed produce distinct lockfile
+     * keys — preventing N variants from clobbering each other in the cache.
+     * Old entries (which didn't include the field in their hash) become
+     * non-replayable on this cycle's first read; acceptable per user
+     * authorization 2026-05-02 "无兼容性 + 理想架构推进".
+     *
+     * Forward-compat: default `0` so old serialised JSON / SQLite blobs
+     * decode to a single-variant entry — value is right by construction
+     * for every entry written before this field landed.
+     */
+    val variantIndex: Int = 0,
 )
 
 /**

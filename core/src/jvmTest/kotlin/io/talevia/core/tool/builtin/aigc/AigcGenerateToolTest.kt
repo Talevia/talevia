@@ -44,7 +44,6 @@ class AigcGenerateToolTest {
         messages = emptyList(),
     )
 
-
     @Test fun imageKindDispatchesAndProjectsToUnifiedOutput() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/img".toPath(), title = "img").id

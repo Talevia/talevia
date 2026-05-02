@@ -112,8 +112,19 @@ internal object AigcPipeline {
      * different tools keying their inputs differently is impossible (tool id is
      * always the first field).
      */
-    fun inputHash(fields: List<Pair<String, String>>): String {
-        val canonical = fields.joinToString(separator = "|") { (k, v) -> "$k=$v" }
+    fun inputHash(
+        fields: List<Pair<String, String>>,
+        variantIndex: Int = 0,
+    ): String {
+        // `aigc-multi-variant-phase1-schema-field` (cycle 26): variantIndex
+        // is appended to every hash so two variants of the same prompt +
+        // seed don't clobber each other in the cache. Default 0 means
+        // single-variant generations get `variant=0` baked in — old
+        // pre-phase-1 entries (which didn't include the segment) become
+        // non-matching on read and are non-replayable. Acceptable per
+        // user authorization 2026-05-02 "无兼容性".
+        val withVariant = fields + ("variant" to variantIndex.toString())
+        val canonical = withVariant.joinToString(separator = "|") { (k, v) -> "$k=$v" }
         return fnv1a64Hex(canonical)
     }
 
@@ -265,6 +276,15 @@ internal object AigcPipeline {
          * just wrote under `<bundleRoot>/media/<assetId>.<ext>`.
          */
         newAsset: MediaAsset? = null,
+        /**
+         * `aigc-multi-variant-phase1-schema-field` (cycle 26): variant index of
+         * this generation when the producing tool requested multiple variants
+         * in a single dispatch. Default `0` for single-variant generations.
+         * Phase 1: every AIGC tool passes 0 (no `variantCount` input yet).
+         * Phase 2 (`aigc-multi-variant-phase2-dispatch`): tools loop over
+         * variants and pass 0..N-1.
+         */
+        variantIndex: Int = 0,
     ) {
         store.mutate(projectId) { project ->
             val snapshot: Map<SourceNodeId, String>
@@ -321,6 +341,7 @@ internal object AigcPipeline {
                         resolvedPrompt = resolvedPrompt,
                         originatingMessageId = originatingMessageId,
                         sourceContentHashesByModality = snapshotByModality,
+                        variantIndex = variantIndex,
                     ),
                 ),
             )
