@@ -1,5 +1,6 @@
 package io.talevia.core.domain
 
+import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.render.ClipRenderCache
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -86,10 +87,13 @@ internal fun readBundle(fs: FileSystem, path: Path, json: Json): Project {
     } else {
         ClipRenderCache.EMPTY
     }
-    // `lockfile-extract-jsonl-phase1` (cycle 24): jsonl is authoritative
-    // when present. Envelope's `lockfile` field is the migration fallback
-    // for bundles that predate phase 1; the next mutate will dual-write
-    // both, after which jsonl wins on every read.
+    // `lockfile-extract-jsonl-phase1` (cycle 24) made jsonl authoritative
+    // when present. Phase 2 (cycle 28) stops writing the envelope's
+    // `lockfile` field — for bundles written post-phase-2 the field is
+    // always [Lockfile.EMPTY] in the envelope. The `?:` branch below is
+    // now load-bearing only for **pre-phase-1** bundles that have neither
+    // jsonl nor a phase-2 empty envelope; the next mutate after their
+    // first read migrates them to the jsonl-only shape.
     val lockfile = readLockfileJsonl(fs, path, json) ?: stored.project.lockfile
     return stored.project.copy(clipRenderCache = cache, lockfile = lockfile)
 }
@@ -123,15 +127,27 @@ internal fun writeBundleLocked(
         atomicWrite(fs, gitignore) { writeUtf8(FileProjectStore.AUTO_GITIGNORE_BODY) }
     }
 
-    // `lockfile-extract-jsonl-phase1` (cycle 24): write JSONL **first**
-    // so on crash between this and the envelope write, the more-recent
-    // lockfile state is recoverable from JSONL. Envelope's `lockfile`
-    // field still gets written below (dual-write during phase 1) — phase 2
-    // will drop the envelope's field entirely.
+    // `lockfile-extract-jsonl-phase1` (cycle 24) wrote JSONL first so a
+    // crash between this and the envelope write leaves the more-recent
+    // lockfile state recoverable from JSONL.
+    // `lockfile-extract-jsonl-phase2-envelope-shrink` (cycle 28): the
+    // envelope no longer carries the `lockfile.entries` payload — JSONL
+    // is the only place new entries land. Eliminates the O(N) re-encode
+    // tax on every `mutate(...)` (every project edit was rewriting the
+    // entire entries list into talevia.json regardless of which field
+    // actually changed). Pre-phase-1 bundles still decode fine: their
+    // envelope-borne `lockfile` field falls into [readBundle]'s
+    // `?: stored.project.lockfile` migration branch, gets materialised
+    // in memory, and the next mutate (this code path) writes JSONL +
+    // empties the envelope.
     writeLockfileJsonl(fs, path, project.lockfile, json)
 
-    // talevia.json carries everything except the (machine-local) clip render cache.
-    val slim = project.copy(clipRenderCache = ClipRenderCache.EMPTY)
+    // talevia.json carries everything except the (machine-local) clip render cache
+    // and the lockfile entries (now in lockfile.jsonl, see comment above).
+    val slim = project.copy(
+        clipRenderCache = ClipRenderCache.EMPTY,
+        lockfile = Lockfile.EMPTY,
+    )
     val stored = StoredProject(title = title, createdAtEpochMs = createdAtEpochMs, project = slim)
     writeStoredEnvelope(fs, path, stored, json)
 

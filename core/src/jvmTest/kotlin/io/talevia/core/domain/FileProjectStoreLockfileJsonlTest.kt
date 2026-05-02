@@ -165,25 +165,39 @@ class FileProjectStoreLockfileJsonlTest {
     }
 
     @Test fun fileProjectStoreOpenAtFallsBackToEnvelopeWhenJsonlMissing() = runTest {
-        // Simulate a pre-phase-1 bundle: write the project with lockfile
-        // entries via normal upsert, then manually delete the JSONL to
-        // simulate "this bundle predates phase 1". openAt should still
-        // read the entries from the envelope's lockfile field.
+        // Pre-phase-1 bundle migration path: a talevia.json with a
+        // populated `lockfile` field but no lockfile.jsonl on disk must
+        // round-trip through the envelope-fallback branch in
+        // [readBundle]. After phase 2 the production write code never
+        // emits this shape, so we hand-craft it by writing a
+        // [StoredProject] directly to bypass [FileProjectStore]'s phase
+        // 2 envelope-shrink path. Exercising the fallback keeps the
+        // migration code from rotting silently.
         val (store, fs) = ProjectStoreTestKit.createWithFs()
-        val pid = store.createAt(path = "/projects/legacy".toPath(), title = "legacy").id
-        store.mutate(pid) { p -> p.copy(lockfile = p.lockfile.append(entry("h-legacy", "a-legacy"))) }
-
-        // Sanity: JSONL exists (dual-write created it).
         val bundleRoot = "/projects/legacy".toPath()
-        val jsonlPath = bundleRoot.resolve(FileProjectStore.LOCKFILE_JSONL)
-        assertTrue(fs.exists(jsonlPath))
-
-        // Now delete the JSONL to simulate a legacy bundle.
-        fs.delete(jsonlPath)
-        assertTrue(!fs.exists(jsonlPath))
-
-        // Re-open; should fall back to envelope's lockfile.entries.
-        val reread = store.get(pid)
+        val pid = io.talevia.core.ProjectId("legacy-id")
+        // Build a phase-1-shape envelope: project carries a non-empty
+        // lockfile, no lockfile.jsonl exists on disk.
+        val project = Project(
+            id = pid,
+            timeline = Timeline(),
+            lockfile = Lockfile(entries = listOf(entry("h-legacy", "a-legacy"))),
+        )
+        val stored = StoredProject(
+            schemaVersion = 1,
+            title = "legacy",
+            createdAtEpochMs = 1_700_000_000_000L,
+            project = project,
+        )
+        fs.createDirectories(bundleRoot)
+        fs.write(bundleRoot.resolve(FileProjectStore.TALEVIA_JSON)) {
+            writeUtf8(json.encodeToString(StoredProject.serializer(), stored))
+        }
+        // Register so store.get can find it.
+        // Hack: createAt would clobber our hand-written envelope, so we
+        // register the bundle via the recents registry directly. Easiest
+        // path: call openAt which both registers and reads.
+        val reread = store.openAt(bundleRoot)
         assertNotNull(reread)
         assertEquals(1, reread.lockfile.entries.size, "fallback to envelope's lockfile field on missing JSONL")
         assertEquals("h-legacy", reread.lockfile.entries.single().inputHash)
