@@ -261,6 +261,13 @@ class FileProjectStore(
             val taleviaJson = root.resolve(TALEVIA_JSON)
             if (fs.exists(taleviaJson)) fs.delete(taleviaJson)
 
+            // `lockfile-extract-jsonl-phase1` (cycle 24): clean up the
+            // sibling JSONL alongside the envelope so a deleted bundle
+            // doesn't leave a phantom lockfile.jsonl behind that would
+            // block the empty-dir cleanup below.
+            val lockfileJsonl = root.resolve(LOCKFILE_JSONL)
+            if (fs.exists(lockfileJsonl)) fs.delete(lockfileJsonl)
+
             val gitignore = root.resolve(GITIGNORE)
             if (fs.exists(gitignore) && fs.read(gitignore) { readUtf8() }.trim() == AUTO_GITIGNORE_BODY.trim()) {
                 fs.delete(gitignore)
@@ -357,6 +364,15 @@ class FileProjectStore(
 
     companion object {
         const val TALEVIA_JSON = "talevia.json"
+        /**
+         * Phase 1 of `lockfile-extract-jsonl` (cycle 24): one
+         * [io.talevia.core.domain.lockfile.LockfileEntry] per line, append-
+         * only ledger. Authoritative when present; envelope's `lockfile`
+         * field is a fallback for pre-phase-1 bundles. See
+         * [FileProjectStoreLockfileIO] for read/write semantics + crash
+         * recovery (tail-truncate on partial-write last line).
+         */
+        const val LOCKFILE_JSONL = "lockfile.jsonl"
         const val GITIGNORE = ".gitignore"
         const val MEDIA_DIR = "media"
         /**

@@ -86,7 +86,12 @@ internal fun readBundle(fs: FileSystem, path: Path, json: Json): Project {
     } else {
         ClipRenderCache.EMPTY
     }
-    return stored.project.copy(clipRenderCache = cache)
+    // `lockfile-extract-jsonl-phase1` (cycle 24): jsonl is authoritative
+    // when present. Envelope's `lockfile` field is the migration fallback
+    // for bundles that predate phase 1; the next mutate will dual-write
+    // both, after which jsonl wins on every read.
+    val lockfile = readLockfileJsonl(fs, path, json) ?: stored.project.lockfile
+    return stored.project.copy(clipRenderCache = cache, lockfile = lockfile)
 }
 
 /**
@@ -117,6 +122,13 @@ internal fun writeBundleLocked(
     if (!fs.exists(gitignore)) {
         atomicWrite(fs, gitignore) { writeUtf8(FileProjectStore.AUTO_GITIGNORE_BODY) }
     }
+
+    // `lockfile-extract-jsonl-phase1` (cycle 24): write JSONL **first**
+    // so on crash between this and the envelope write, the more-recent
+    // lockfile state is recoverable from JSONL. Envelope's `lockfile`
+    // field still gets written below (dual-write during phase 1) — phase 2
+    // will drop the envelope's field entirely.
+    writeLockfileJsonl(fs, path, project.lockfile, json)
 
     // talevia.json carries everything except the (machine-local) clip render cache.
     val slim = project.copy(clipRenderCache = ClipRenderCache.EMPTY)
