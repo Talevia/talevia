@@ -81,3 +81,45 @@ sqldelight {
         }
     }
 }
+
+// M6 §5.7 #3 — `./gradlew :core:bench` unified entry for the wall-time +
+// memory regression suite under `core/src/jvmTest/.../bench/` (plus the
+// outlier `BusEventPublishBenchmark` that lives next to its bus package).
+//
+// Why a separate task rather than letting `:core:jvmTest` cover them: the
+// benchmarks print `[bench] <name> elapsed=<...> softBudget=<...>` lines
+// that the perf-baseline lane in `docs/perf/baseline.txt` consumes
+// directly. A scoped task lets CI run *only* the bench suite (faster
+// feedback, distinct artifact), keeps the printlns out of the main test
+// log, and gives `m6-benchmark-ci-gate` a stable grep target.
+//
+// Soft-policy: the task runs every benchmark and prints; current
+// benchmarks intentionally don't `assertTrue` against absolute wall-time
+// (cycle-2 budget — see e.g. `AgentLoopBenchmark` kdoc). Regressions
+// surface as printed `over` markers a reviewer eyeballs against the
+// committed baseline. A future cycle may tighten this to "values within
+// 2× baseline" strict assertions if perf instability proves to be the
+// dominant signal.
+tasks.register<Test>("bench") {
+    group = "verification"
+    description = "Runs core's *Benchmark.kt wall-time + memory regression suite — subset of " +
+        ":core:jvmTest scoped to the bench/ package + BusEventPublishBenchmark. Prints " +
+        "`[bench]` lines a reviewer compares against docs/perf/baseline.txt."
+
+    // Reuse jvmTest's compiled classes + classpath. Avoids re-running the
+    // full KMP test compilation; the task picks up whatever jvmTest just
+    // produced (or compiles on demand via dependsOn).
+    val jvmTest = tasks.named<Test>("jvmTest").get()
+    dependsOn(tasks.named("compileTestKotlinJvm"))
+    testClassesDirs = jvmTest.testClassesDirs
+    classpath = jvmTest.classpath
+
+    filter {
+        includeTestsMatching("io.talevia.core.bench.*")
+        includeTestsMatching("io.talevia.core.bus.BusEventPublishBenchmark")
+    }
+
+    testLogging {
+        showStandardStreams = true
+    }
+}

@@ -47,6 +47,19 @@ jobs:
       - name: Lint (ktlintCheck)
         run: ./gradlew ktlintCheck
 
+      # M6 §5.7 #3 — `:core:bench` runs the wall-time + memory regression
+      # suite under core/.../bench/. Soft-policy: prints `[bench]` lines
+      # but never `assertTrue` against absolute wall-time (per cycle-2
+      # budget — see each *Benchmark.kt's kdoc). CI invokes it for the
+      # printed history curve in the GitHub Actions log; reviewers
+      # compare against `docs/perf/baseline.txt`. `continue-on-error: true`
+      # keeps the soft-policy contract — perf is informational, not
+      # block-on-merge. A future cycle may tighten this to fail when the
+      # delta crosses 2× baseline.
+      - name: Benchmarks (`:core:bench`, soft-policy / non-blocking)
+        run: ./gradlew :core:bench
+        continue-on-error: true
+
       - name: Upload test reports on failure
         if: failure()
         uses: actions/upload-artifact@v4

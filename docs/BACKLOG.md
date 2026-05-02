@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **m6-benchmark-ci-gate** — M6 criterion #3 (Critical-path benchmark CI gate). The 9 existing `core/bench/*Benchmark.kt` files (AgentLoop / Compaction / ExportTool / FileProjectStoreOpenAt / SourceDeepHash / LockfileEntries / LockfileLookup / ToolDispatch / BusEventPublish) have no unified gradle entry + no CI integration. M6 wants `:core:bench` (or `./gradlew benchmark`) running them all + a baseline file at `docs/perf/baseline.txt` recording wall-time / memory mins. CI runs them on PR. **方向：** add gradle task that aggregates the 9 files; commit `docs/perf/baseline.txt` from a clean run; wire `.github/workflows/ci.yml` to invoke it. Initial baseline = soft assertion "values within 2× baseline" not strict — perf regressions surface but don't block. Rubric §5.7。Milestone §M6.
 - **re-evaluate-debt-aigc-tool-consolidation** — `debt-aigc-tool-consolidation` 跨 9+ repopulate cycles 持续 skip-tagged（自 cycle 113 起，原因 §3a-7：`LockfileEntry.toolId` 已 stamped `"generate_image"` 等在 on-disk bundle，删旧工具会让 `ReplayLockfileTool` 对老 entry 失效）。**方向：** 用户决定 promote (设计 alias-map: `"generate_image" → "aigc_generate" + kind="image"` 写进 ReplayLockfileTool) / demote (接受 4 个独立工具的 LLM context tax) / delete (criterion 不再相关)。Rubric §5.6 / §5.7 / §3a #1 / §3a #7。Milestone §later. · skipped 2026-04-25: meta bullet awaiting user decision (promote / demote / delete).
 
 ## P1 — 中优，做完 P0 再排

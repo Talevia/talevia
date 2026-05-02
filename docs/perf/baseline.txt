@@ -1,0 +1,51 @@
+# Talevia perf baseline
+
+Captured by `./gradlew :core:bench` on a single dev machine (M-series Mac).
+Each line: `<benchmark-name> elapsed=<wall-time> softBudget=<budget>`.
+
+Numbers are advisory. The benchmarks themselves never `assertTrue` against
+absolute wall-time (per the cycle-2 budget policy in each `*Benchmark.kt`'s
+KDoc) — they print, the reviewer eyeballs `over` markers, and a
+2× regression triggers a follow-up cycle. CI runs `:core:bench` on every
+PR (see `.github/workflows/ci.yml`); the printed lines accumulate in CI
+logs as the perf history curve.
+
+## Wall-time baselines (captured cycle 13, 2026-05-02)
+
+agent-loop.5-turn                                       elapsed= 31ms  softBudget=2s
+compaction.200-msg                                      elapsed= 93ms  softBudget=5s
+export-tool.5-clip.fresh-render                         elapsed=  9ms  softBudget=2s
+export-tool.5-clip.cache-hit                            elapsed= 15ms  softBudget=2s
+file-project-store.openAt.100-assets                    elapsed= 14ms  softBudget=100ms
+file-project-store.openAt.500-assets                    elapsed= 30ms  softBudget=100ms
+file-project-store.openAt.1000-assets                   elapsed= 39ms  softBudget=100ms
+lockfile.cold-decode.500-entries                        elapsed=  3ms  softBudget=50ms
+lockfile.cold-decode.1000-entries                       elapsed=  5ms  softBudget=50ms
+lockfile.cold-decode.2000-entries                       elapsed=  9ms  softBudget=50ms
+lockfile.findByInputHash.500entries.10000x2lookups      elapsed=  1ms  softBudget=250ms
+source.deepContentHashOf.100nodes.coldPath.50x          elapsed= 30ms  softBudget=250ms
+source.deepContentHashOf.61leaves.sharedCache.100x      elapsed= 37ms  softBudget=250ms
+tool-dispatch.100-calls                                 elapsed= 59ms  softBudget=1s
+
+## How to refresh
+
+```
+./gradlew :core:bench 2>&1 | grep '\[bench\]'
+```
+
+Update the table above when the wall-time deltas drift > 25% in a single
+cycle (regression OR improvement worth pinning). The soft-budget column
+matches each benchmark's own `softBudget` constant — change those at the
+benchmark's source if real perf shifts make them wrong.
+
+## What's NOT here
+
+- `BusEventPublishBenchmark` — uses `assertTrue` against an internal budget
+  rather than printing a `[bench]` line. It still runs under `:core:bench`
+  (the filter `io.talevia.core.bus.BusEventPublishBenchmark` matches it);
+  pass/fail is the signal.
+- Memory baselines — the v1 perf gate is wall-time only. Memory regression
+  tracking is a follow-up if heap profiles become a recurring pain point.
+- Cross-machine variance — these numbers are from one dev machine. CI's
+  `ubuntu-latest` will print different absolute numbers; the *shape* of
+  the curve (which benchmarks moved how much) is what matters.

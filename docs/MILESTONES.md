@@ -76,13 +76,26 @@ token 上界、关键路径 benchmark 守护、AIGC spend cap 报警，全部从
   error. 新 `CompactionGateTokenCapTest` 三 case：null-cap-bypasses-enforcement /
   under-cap-dispatches-OK / over-cap-fails-loud (asserts exception fields
   including session id, cap value, post-compaction estimate)）
-- [ ] 关键路径 benchmark CI gate：现 `core/bench` 9 文件 (AgentLoop /
+- [x] 关键路径 benchmark CI gate：现 `core/bench` 9 文件 (AgentLoop /
   CompactionBenchmark / ExportToolBenchmark / FileProjectStoreOpenAt / SourceDeepHash /
   LockfileEntries / LockfileLookup / ToolDispatch / BusEventPublish) 没有"在
   PR 上跑"的 gradle task。M6 收口为 `:core:benchAll` 或 `./gradlew benchmark`
   统一入口，CI yml 调用之，并固化 wall-time / memory baseline 到 `docs/perf/baseline.txt`
   这种可 diff 的格式。grep: `:core:bench` 或 `tasks.register(<benchmark task>`
   在 `core/build.gradle.kts` + 对应 GitHub Actions / CI 配置文件出现
+  — cycle 2026-05-02 *本 commit*（`tasks.register<Test>("bench")` in
+  `core/build.gradle.kts` filters to `io.talevia.core.bench.*` +
+  `BusEventPublishBenchmark`; reuses jvmTest's classpath + testClassesDirs.
+  `docs/perf/baseline.txt` committed with 14 wall-time data points captured
+  via `./gradlew :core:bench` (agent-loop 31ms / compaction 93ms /
+  export-tool fresh+cache / file-project-store openAt at 100/500/1000 /
+  lockfile cold-decode at 500/1000/2000 / lockfile findByInputHash /
+  source.deepContentHashOf cold + sharedCache / tool-dispatch). CI yml
+  added "Benchmarks" step running `:core:bench` with `continue-on-error:
+  true` per soft-policy: printed history curve in CI log, no
+  block-on-merge — reviewers compare against the committed baseline.
+  Future cycle may tighten to "values within 2× baseline" strict
+  assertions.）
 - [x] AIGC spend cap alarm：M2 `session_query(select=spend_summary)` 是读口；
   M6 加写口——`session_query` 增 `select=spend_alarm` 返回当前 spend / cap /
   margin / projected_breach_at，OR 新 `BusEvent.SpendCapWarning(sessionId,
