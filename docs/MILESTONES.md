@@ -1,6 +1,6 @@
 # Milestones
 
-> **Current: M5 — §3.2 依赖 DAG / 增量编译**
+> **Current: M6 — §5.7 性能 / 成本 baseline 收紧**
 
 迭代聚焦的粗粒度指针。每个 milestone 对应 `docs/VISION.md` §3 的一个**核心赌注**。
 机制参考 media-engine 的 `docs/MILESTONES.md` + 三处本地化：**软优先级**（当前 M
@@ -19,110 +19,184 @@ bullet 打 tag；现有 bullet 不手动 backfill。
 
 ---
 
-## M5 — §3.2 依赖 DAG / 增量编译 （VISION §3.2）
 
-**目标**：项目变更 → **最小重渲染集合**。改一个 source node、改一段 timeline、
-换一次 output profile，agent 都能精准答出"这次哪些 clips 需要重做、哪些
-mezzanine 还能复用"，多 export 场景不重复劳动；agent 在做计划时可以预先看到
-"如果改 X 会让 Y 个 clip 失效"，让用户在动手前评估 blast radius。M4 把"专家
-特效"路径打通后，§3.2 是唯一还没收口的运行时议题——M3 给了 source DAG、
-M2 给了 lockfile cache，M4 给了 mezzanine cache，但**把这三层 cache 串成一张
-统一的依赖图、并暴露成 agent 可查询的一等接口**还没做。
+## M6 — §5.7 性能 / 成本 baseline 收紧 （VISION §5.7）
 
-选 §3.2 作 M5 的理由：M4 亚军列表头条；前几个 M 已经把 dependency-tracking
-的零件交付完整（Source DAG / lockfile / mezzanine fingerprint），M5 的工作
-是把零件组合成一张 graph 并暴露面给 agent。这条不靠"加新功能"而靠"暴露已
-有不变量"。
+**目标**：把"运行时预算"轴从"部分"推到"有"——tool spec per-turn 成本、session
+token 上界、关键路径 benchmark 守护、AIGC spend cap 报警，全部从离散的散点
+（cycle-167 `ToolSpecBudgetAuditTest`、cycle-4 `EffectToolSpecBudgetTest`、9 个
+零散的 benchmark 文件、`session_query(select=spend_summary)` 单读口）收口为一
+张 budget+benchmark+alarm 一致化的体系。M5 把 dependency-tracking 三层 cache
+串成增量编译图后，§5.7 是当前 platform-priority 窗口（CLI > Desktop GUI 之前）
+里**唯一仍然是 Core-only 工作的高杠杆 thesis**——其他亚军（§4 跨平台 GUI）需
+要 desktop reaching CLI parity 才能正经动工。
+
+选 §5.7 作 M6 的理由（亚军 reorder）：原列 M6 候选 = §4 跨平台 GUI；CLAUDE.md
+"Platform priority" 把 iOS / Android 维持不退化、Desktop 推迟到 CLI parity
+之后，§4 GUI 的核心工作（timeline editor surface across 3 platforms）跟当前
+窗口不对齐。原列 M7 候选 = §5.7 perf baseline 反而完全 Core-aligned：
+- cycle 4 的 R.6 #1 scan 已经报 audit-subset 16,431 tokens > 15k 软线；
+- 既有 9 个 benchmark 文件没有"在 PR 上跑"的 CI gate；
+- session token 的 hard cap / per-tool spec gate 都还是 advisory，不是强制。
+所以本次 M5→M6 promotion 显式 reorder 亚军：§5.7 perf 升 M6，§4 GUI 退 M7
+候选 pending CLI parity。
 
 ### Exit criteria
 
-- [x] Source-to-clip dependency closure 暴露：`project_query(select=clips_for_source)`
-  (M1 落地的反查) 已经能在单个 sourceNodeId 上跑闭包；M5 要求闭包结果**直接驱动**
-  incremental render 计划——给定一组 source-node edits，返回受影响的 clip 列表
-  按 "需要 re-AIGC" / "只需 re-render" / "不变" 三类分桶。grep: `IncrementalPlan` /
-  `clipsAffectedBy` / `project_query(select=incremental_plan)` 或同等覆盖
-  — cycle 2026-05-01 *本 commit*（新 `data class IncrementalPlan(reAigc, onlyRender,
-  unchanged)` + `Project.incrementalPlan(changedSources, output, engineId)` in
-  `core/domain/ProjectStaleness.kt`。Capstone 工作：fold M1 source closure
-  (`clipsBoundTo`) + M2 lockfile staleness (`staleClipsFromLockfile`) + M5 #2
-  render staleness (`renderStaleClips`) into 3-bucket plan. Disjointness +
-  `reAigc ⊆ aigcStale, reAigc ⊆ renderStale` invariants pinned by
-  `IncrementalPlanTest.bucketsAreDisjointAndCoverAffectedSet` (3 clips × 3
-  buckets in one project)。其他 6 case：empty changedSources / unrelated
-  source / aigc-stale only (reAigc) / legacy-entry render-stale (onlyRender) /
-  cache-hit (unchanged) / unbound clip excluded。Query exposure (`select=
-  incremental_plan`) deferred to P2 `m5-incremental-plan-query-exposure` per
-  §3a #12 dispatcher-shape evaluation; the criterion's grep pattern
-  `IncrementalPlan` already matches in product path so M5 #1 auto-ticks）
-- [x] Render-stale 与 AIGC-stale 分轴：今天 `staleClipsFromLockfile` 只答"哪些
-  clip 需要 re-AIGC"（lockfile 比对），但**改 filter 参数 / 改 output profile**
-  时 clip 不需要 re-AIGC、只需要 re-render——这条信号当前埋在 mezzanine
-  fingerprint 里，没暴露成 query。M5 要求一个能答 "render-stale clips" 的
-  surface，区别于 lockfile-stale。grep: `renderStaleClips` / `RenderStalenessQuery`
-  / `project_query(select=render_stale)` 或同等覆盖
-  — cycle 2026-05-01 *本 commit*（新 `Project.renderStaleClips(output, engineId)`
-  in `core/domain/ProjectStaleness.kt`：返回 `RenderStaleClipReport(clipId,
-  fingerprint)` for every Video clip whose computed `clipMezzanineFingerprint`
-  没命中 `Project.clipRenderCache`。Eligibility gate 镜像
-  `timelineFitsPerClipPath`（exactly 1 Video track 才有意义；多轨返回空表）。
-  与 `staleClipsFromLockfile` 正交但非独立：lockfile-stale ⊆ render-stale on
-  bound clips（source binding 的 deepHash 漂移 perturbs fingerprint segment 3）；
-  reverse 不成立（filter param edit 不动 binding 但失效 mezzanine）。
-  `RenderStalenessTest` 8 case 守护：cold project / fully cached / edit-one-filter /
-  engine drift / resolution drift / multi-track empty / empty timeline / fingerprint
-  field debug aid。Query exposure (`project_query(select=render_stale)`) 推迟到
-  M5 #1 incremental_plan select 一起做 — 避免单独的 select 独自跑 §3a #12 21-select
-  门槛而 incremental_plan 的 input shape 又要重做; 两者一起在 same 23-select
-  增量里完成 dispatcher 的"3-bucket plan"语义）
-- [x] Multi-export mezzanine 复用 e2e：同一个 project 在同一 output profile 下
-  导出两次到不同 path，第二次必须 0 clip 再编（mezzanine 全 cache-hit）；
-  改 output profile 后再次导出，相关 clip 全部 cache-miss。grep:
-  `MultiExportCacheReuseE2ETest` / `multiExport.*cache.*hit` 或同等覆盖断言
-  导出 N+1 次的累计 mezzanine 编码次数 = 单次 fresh export 次数
-  — cycle 2026-05-01 *本 commit*（新 `ExportToolTest.multiExportToDifferentPathsReusesCacheViaOutputApi`：
-  3-clip project, 1st export `outputPath=/tmp/export-a.mp4` 报告
-  `perClipCacheHits=0, perClipCacheMisses=3`；2nd export 不同
-  `outputPath=/tmp/export-b.mp4` + `forceRender=true`（绕过 whole-timeline
-  cache 让 per-clip path 跑）报告 `perClipCacheHits=3, perClipCacheMisses=0`。
-  通过 ExportTool.Output 的公开 API 验证而非 engine call counters，与
-  `differentOutputPathReusesCacheAtSameProfile` (engine-counter 单 clip 覆盖)
-  互补；现有 `perClipEngineReusesCachedMezzanineOnIdenticalRerun` (Output API
-  multi-clip 但同 path) 也是补充。Inverse case "edit 一个 clip → 只该 clip
-  cache-miss" 已经由 `perClipEngineReRendersOnlyTheStalyClip` 守护
-  (`hits=1, misses=1` after editing 1 of 2 clips)。M5 #3 e2e 完整守护链路
-  落地）
-- [x] Mezzanine 缓存 GC：被 invalidate 的 mezzanine（fingerprint 永远不会再
-  recompute 到该 key）必须能被周期性 sweep 掉，不会无限制占盘。grep:
-  `gcRenderCache` / `RenderCacheGcTool` / `renderCacheSweep` 或同等覆盖
-  — cycle 2026-05-01 *本 commit*（auto-tick from §M.1 grep evidence:
-  `gcRenderCache` 命中产品路径
-  `core/src/commonMain/kotlin/io/talevia/core/tool/builtin/project/GcRenderCacheHandler.kt:20`
-  (`internal suspend fun executeGcRenderCache`); 通过
-  `ProjectMaintenanceActionTool.kt:214` 的 `"gc-render-cache"` 动词 dispatch。
-  完整 runtime test 覆盖 `ProjectMaintenanceActionToolGcRenderCacheTest`。
-  Implementation predates the M4→M5 promotion — built as `gc-render-cache`
-  verb on `ProjectMaintenanceActionTool` in earlier cycle for per-clip
-  cache hygiene。本 commit 不触碰 GC 实现，仅按 §R.0 pre-check 与 §M.1 抓
-  到的 grep evidence 把先前实现 surface 出来）
-- [ ] Manual milestone exit summary：本文件 M5 block 末尾 append
-  `### M5 exit summary` 段，列剩余的 §3.2 gap（cross-engine incremental /
-  Project DAG persistence / re-AIGC batch grouping 等）以便 M6 / 未来 M
-  接力 — *必须手动 tick（段落存在 + 三条以上具体 gap）*
+- [ ] Tool spec per-turn budget 紧线：`ToolSpecBudgetAuditTest` 当前 MAX = 22k
+  允许 6k headroom 给 audit-subset 上方的全 prod registry。M6 收紧 MAX 到一个
+  既反映现实又防止劣化的值（建议 18k—等审核后写死），同时让 audit-subset
+  pull-down ≤ 15k。grep: `ToolSpecBudgetAuditTest` MAX 常量 ≤ 18_000 + 同 file
+  里另增一个 `assertTrue(row.estimatedTokens <= 15_000)` 严格断言或同等覆盖
+- [ ] Session token hard cap：`SessionConfig` (or `Session` itself) 暴露
+  `maxSessionTokens` / `tokenBudgetCap` field，`CompactionStrategy` 在超过 cap
+  时强制压缩或拒绝下一轮。当前 compaction 是 "需要 budget 时压" 而非 "session
+  上界守护"。grep: `maxSessionTokens` / `sessionTokenCap` 常量在 `core.session`
+  或 `core.compaction` 产品路径出现 + 强制路径
+- [ ] 关键路径 benchmark CI gate：现 `core/bench` 9 文件 (AgentLoop /
+  CompactionBenchmark / ExportToolBenchmark / FileProjectStoreOpenAt / SourceDeepHash /
+  LockfileEntries / LockfileLookup / ToolDispatch / BusEventPublish) 没有"在
+  PR 上跑"的 gradle task。M6 收口为 `:core:benchAll` 或 `./gradlew benchmark`
+  统一入口，CI yml 调用之，并固化 wall-time / memory baseline 到 `docs/perf/baseline.txt`
+  这种可 diff 的格式。grep: `:core:bench` 或 `tasks.register(<benchmark task>`
+  在 `core/build.gradle.kts` + 对应 GitHub Actions / CI 配置文件出现
+- [ ] AIGC spend cap alarm：M2 `session_query(select=spend_summary)` 是读口；
+  M6 加写口——`session_query` 增 `select=spend_alarm` 返回当前 spend / cap /
+  margin / projected_breach_at，OR 新 `BusEvent.SpendCapWarning(sessionId,
+  pctOfCap, projectedBreachAt)` 在 cap 接近时由 `Agent` 自动发出。grep:
+  `SpendCapWarning` / `spend_alarm` 在产品路径出现
+- [ ] Manual milestone exit summary：本文件 M6 block 末尾 append
+  `### M6 exit summary` 段，列剩余的 §5.7 gap（per-provider cost arbitrage /
+  cold-start latency / cache invalidation latency / GPU-inference local 等）
+  以便 M7 / 未来 M 接力 — *必须手动 tick（段落存在 + 三条以上具体 gap）*
 
 ### 亚军 milestones（未正式启动，仅作排序参考）
 
-- **M6 候选 — §4 后续 / 跨平台编辑 GUI**：desktop / iOS / Android timeline editor
-  surface 把"两路径共享 source" 的 UI 半边补齐（详见 M3 exit gap #1）。
-- **M7 候选 — §5.7 性能 / 成本 baseline 收紧**：tool spec budget 16,585t（cycle 4
-  R.6 #1 scan）已经过 15k 软线；session token / latency 的回归基础设施还散在
-  9 个 benchmark 文件里，M7 收口"运行时预算"轴（cap、budget、benchmark 一致
-  化），把 §5.7 从"部分"推到"有"。
+- **M7 候选 — §4 后续 / 跨平台编辑 GUI**：desktop / iOS / Android timeline editor
+  surface 把"两路径共享 source" 的 UI 半边补齐（详见 M3 exit gap #1）。**升档
+  trigger**：CLAUDE.md "Platform priority" 把 desktop 推到 "相对完善可用" 状态
+  之后；当前窗口仍是 CLI > Desktop > iOS > Android。原列 M6 候选；M5→M6
+  promotion 因 platform-priority 对齐降到 M7 候选。
+- **M8 候选 — §3.4 协作 / 多用户 git 工作流**：BACKLOG `re-evaluate-desktop-merge-
+  conflict-strategy` 等待用户 promote/demote/delete 决策；真正 driver 出现
+  （多用户报 conflict）后再升档。
 
 ---
 
 （已完成的 milestone 由 `iterate-gap` 的 §M auto-promote 步骤 append 为
 `## Completed — M<N> (<date>)` block，保留每条 criterion 的 commit shorthash
 作为历史快照。最近完成的放最上面。）
+
+## Completed — M5 (2026-05-01)
+
+**目标**：项目变更 → **最小重渲染集合**。改一个 source node、改一段 timeline、
+换一次 output profile，agent 都能精准答出"这次哪些 clips 需要重做、哪些
+mezzanine 还能复用"，多 export 场景不重复劳动；agent 在做计划时可以预先看到
+"如果改 X 会让 Y 个 clip 失效"，让用户在动手前评估 blast radius。
+
+**Exit criteria 完成情况**：
+
+- [x] Source-to-clip dependency closure 暴露：M1 反查 (`clipsBoundTo`) + M2
+  lockfile staleness (`staleClipsFromLockfile`) + M5 #2 render staleness
+  (`renderStaleClips`) folded into `data class IncrementalPlan(reAigc, onlyRender,
+  unchanged)` + `Project.incrementalPlan(changedSources, output, engineId)` in
+  `core/domain/ProjectStaleness.kt`. Disjointness +
+  `reAigc ⊆ aigcStale, reAigc ⊆ renderStale` invariants pinned by
+  `IncrementalPlanTest`'s 7-case suite (3-clip-3-bucket capstone case +
+  edge cases). Query exposure deferred to P2 follow-up.
+  — cycle 2026-05-01 **b2f1bef6**
+- [x] Render-stale 与 AIGC-stale 分轴：`Project.renderStaleClips(output,
+  engineId)` returns `RenderStaleClipReport(clipId, fingerprint)` for
+  every Video clip whose computed `clipMezzanineFingerprint` doesn't
+  match the project's `clipRenderCache`. Eligibility gates per-clip
+  cache shape (single Video track). `RenderStalenessTest` 8 case suite.
+  — cycle 2026-05-01 **f8031a70**
+- [x] Multi-export mezzanine 复用 e2e：`ExportToolTest.multiExportToDifferentPathsReusesCacheViaOutputApi`
+  pins multi-clip × different paths × public Output API combo:
+  `perClipCacheHits=3, perClipCacheMisses=0` on second export.
+  Complementary to existing `differentOutputPathReusesCacheAtSameProfile`
+  (single-clip × engine-counter) and `perClipEngineReusesCachedMezzanineOnIdenticalRerun`
+  (multi-clip × same path).
+  — cycle 2026-05-01 **33d39092**
+- [x] Mezzanine 缓存 GC：`gcRenderCache` symbol matches in product path
+  (`GcRenderCacheHandler.kt:20`'s `executeGcRenderCache` + dispatch via
+  `ProjectMaintenanceActionTool.kt:214` `"gc-render-cache"` verb).
+  Implementation predates the M4→M5 promotion; full runtime test in
+  `ProjectMaintenanceActionToolGcRenderCacheTest`. Auto-evidence tick
+  via §M.1 grep gate on cycle 6 33d39092 commit.
+  — cycle 2026-05-01 **33d39092**
+- [x] Manual milestone exit summary：见下方 `### M5 exit summary` 段。
+  — cycle 2026-05-01 *本 commit*
+
+### M5 exit summary
+
+M5 关起门来证明了**dependency-tracking 三层 cache 串成一张统一依赖图的
+4/4 实质轴 + 1 manual exit 全部落地**：incremental_plan capstone (b2f1bef6) +
+render-staleness axis (f8031a70) + multi-export reuse e2e (33d39092) +
+mezzanine GC auto-evidence (33d39092)。这四条把"M1 source DAG + M2
+lockfile + M4 mezzanine fingerprint" 从三个零件（之前各自独立测试）变成
+一个 agent-queryable plan 的不变量；下一个用户哪怕看 git log 也能看到
+"系统能回答 '改这个 source 会让 N 个 clip 失效' 这种 blast-radius 问题"。
+
+**§3.2 完整愿景里 M5+ 接力的 gap**（超出本 milestone 的工程学跑道，列给
+M6 / M7 / 未来 M）：
+
+1. **Cross-engine incremental render Android+iOS**：当前 per-clip cache
+   仅 FFmpeg JVM 引擎支持 (`supportsPerClipCache=true`)；Media3 Android +
+   AVFoundation iOS 的 `supportsPerClipCache=false`，导出走 whole-timeline
+   re-encode。BACKLOG `cross-engine-incremental-render-{android,ios}` 跨 4+
+   repopulate cycle 持续 skip-tagged for CLAUDE.md "Platform priority"
+   stance — 当 desktop 达到 CLI parity / iOS / Android 平台优先级窗口
+   开放时，per-clip cache 跨引擎落地。
+2. **Incremental plan caching**：`Project.incrementalPlan(...)` 当前是
+   compute-on-demand，每次 query 都重跑 `staleClipsFromLockfile` +
+   `renderStaleClips` 全表扫描。大型项目（500+ clips）下查询会有可见
+   latency。可加 `Project.incrementalPlanCache: Map<edits, plan>` 由
+   tool-mutation 路径增量失效。需要测项目尺寸到达 perf 警戒线再做，
+   否则过早优化。
+3. **Per-modality bucket split**：M3 #6 cross-modal staleness 已经分
+   visual / audio modality；M5 incremental plan 的 reAigc 桶里所有 clip
+   都会"全部 re-AIGC"，但其实只需要 re-AIGC 触及 modality 的那一份。
+   `IncrementalPlan.reAigc: Map<Modality, List<ClipId>>` 是自然扩展，
+   bound clip 的 `modalityNeeds` 已经能驱动这个区分。
+4. **Export progress per-bucket**：现 `Part.RenderProgress` 报全 timeline
+   ratio；M5 已经能算出 reAigc / onlyRender / unchanged 三个集合。导出
+   时把进度按桶报告（"3 cache hits skipped, 1 re-render in progress,
+   0 re-AIGC pending"）让用户看到 cache 复用的价值。需要 ExportTool +
+   Renderer 协议扩展。
+5. **Agent-loop pre-edit "blast radius" preview**：`incrementalPlan(
+   changedSources={N})` 答 "if I edited N, what would happen?"。Agent
+   loop 应该在用户明确意图之前主动跑这个 query, 把 work-units 数据
+   surface 给 LLM 作为决策上下文（"这个改动会触发 12 clip 重渲，需要
+   ~3 分钟；你确定吗？"）。是 §3.2 + §5.5 的交叉项。
+
+前 1 条由 desktop CLI parity / 平台优先级窗口驱动；2 / 3 / 4 都是
+M6 §5.7 perf baseline 之后的精修工作；5 是 §3.2 + §5.5 (cross-modal) 的
+延伸。M6 / M7 不扛全部，按 platform-priority 窗口 + 现有 BACKLOG meta 的
+用户决策结果挑。
+
+### M5 → M6 promotion logic
+
+M5 的 dependency-tracking 三层 cache 收口完成后，**当前 platform-priority
+窗口（CLI > Desktop > iOS > Android）下唯一仍然 Core-aligned 且高杠杆
+的 thesis 是 §5.7 perf baseline 收紧**。原列 M6 候选 = §4 跨平台编辑 GUI；
+但 CLAUDE.md 把 desktop 推迟到 CLI parity 之后、iOS / Android 维持不退化
+不主动扩，§4 GUI 的核心工作（timeline editor surface across 3 platforms）
+跟当前窗口不对齐。
+
+显式 reorder 亚军：M5→M6 promotion 把 §5.7 perf baseline （原列 M7 候选）
+升到 M6 active；§4 跨平台 GUI （原 M6 候选）退到 M7 候选 pending CLI
+parity；新增 M8 候选 §3.4 协作 / 多用户 git 工作流（BACKLOG `re-evaluate-
+desktop-merge-conflict-strategy` 等用户决策驱动）。
+
+选 §5.7 作 M6 的具体理由：① cycle 4 的 R.6 #1 scan 已报 audit-subset
+16,431 tokens > 15k 软线；② 既有 9 个 benchmark 文件没有"在 PR 上跑"的
+CI gate；③ session token hard cap / per-tool spec gate 都还是 advisory，
+不是强制；④ M2 spend_summary 是读口、还没有写口报警。M6 收口为：① tool
+spec budget 紧线 (audit-subset ≤ 15k, MAX 22k → 18k)；② session token
+hard cap；③ benchmark CI gate；④ AIGC spend cap alarm；⑤ 手动 exit
+summary。前四条都是 grep-able 实体，M6 #5 沿用 M3/M4/M5 的 manual-tick
+pattern。
 
 ## Completed — M4 (2026-05-01)
 
