@@ -22,45 +22,41 @@ import kotlinx.serialization.json.putJsonObject
 /**
  * The [ProjectQueryTool.helpText] body — the paragraph the LLM reads to
  * discover which `select` discriminator values exist and what filter fields
- * each accepts. Extracted to this sibling file so the dispatcher stays
- * focused on routing (§5.2 file hygiene). Byte-identical to what shipped
- * before the extraction — every description sentence is preserved verbatim.
+ * each accepts. Trimmed for `debt-shrink-tool-spec-surface` (cycle 5,
+ * 2026-05-01): "  • " → "•", " — filter: " → ": ", "sortBy:" → "| sort:";
+ * single-row tags collapsed onto shared line; verbose validation blurb
+ * shortened — the per-row schema is already documented by the row data
+ * classes, so prose only carries semantic guidance the schema can't (e.g.
+ * "use regenerate_stale_clips" cross-tool pointer).
  */
 internal val PROJECT_QUERY_HELP_TEXT: String =
     "Unified read-only query over a project. Pick one `select`:\n" +
-        "  • tracks — filter: trackKind, onlyNonEmpty. sortBy: index|clipCount|span|recent.\n" +
-        "  • timeline_clips — filter: trackKind, trackId, fromSeconds, toSeconds, " +
-        "onlySourceBound, onlyPinned. sortBy: startSeconds|durationSeconds|recent.\n" +
-        "  • assets — filter: kind (video|audio|image|all), onlyUnused, onlyReferenced. " +
-        "sortBy: insertion|duration|duration-asc|id|recent.\n" +
-        "  • transitions — filter: onlyOrphaned.\n" +
-        "  • lockfile_entries — filter: toolId, onlyPinned, sourceNodeId, sinceEpochMs.\n" +
-        "  • clips_for_asset — required: assetId.\n" +
-        "  • clips_for_source — required: sourceNodeId. Transitive closure.\n" +
-        "  • consistency_propagation — required: sourceNodeId.\n" +
-        "  • clip — required: clipId. Drill-down.\n" +
-        "  • lockfile_entry — required: exactly one of inputHash (forward) | assetId (reverse). Drill-down.\n" +
-        "  • project_metadata — single-row aggregate.\n" +
-        "  • snapshots — filter: maxAgeDays.\n" +
-        "  • spend — single-row AIGC cost aggregate.\n" +
-        "  • lockfile_cache_stats — single-row hit/miss + perModelBreakdown.\n" +
-        "  • lockfile_orphans — gc candidates {assetId, inputHash, toolId, providerId, modelId, " +
-        "costCents, createdAtEpochMs, pinned}.\n" +
-        "  • timeline_diff — filter: fromSnapshotId, toSnapshotId (≥1).\n" +
-        "  • lockfile_diff — filter: fromSnapshotId, toSnapshotId (≥1). " +
-        "Diffs lockfile entries by inputHash (added / removed / unchangedCount).\n" +
-        "  • source_binding_stats — per-kind {kind, totalNodes, boundDirectly, " +
-        "boundTransitively, orphans, coverageRatio, orphanNodeIds}.\n" +
-        "  • stale_clips — rows: {clipId, assetId, changedSourceIds}. Every AIGC clip " +
-        "whose lockfile-snapshot of bound source-node hashes no longer matches the project's " +
-        "current value. Sorted by clipId. Use after editing a source node to plan which clips " +
-        "to regenerate (call regenerate_stale_clips for the batch verb).\n" +
-        "  • validation — rows: {severity, code, message, trackId?, clipId?}. Structural " +
-        "lint over the project: dangling asset / source-binding refs, non-positive durations, " +
-        "audio volume / fade out of range, timeline duration mismatch, source DAG dangling " +
-        "parents / cycles. severity in {error, warn}; passed iff zero errors (read total). " +
-        "Run before export. Does NOT cover content staleness — use select=stale_clips.\n" +
-        "Common: limit (1..500, default 100), offset. Filter-on-wrong-select fails loud."
+        "• tracks: trackKind, onlyNonEmpty | sort: index|clipCount|span|recent\n" +
+        "• timeline_clips: trackKind, trackId, fromSeconds, toSeconds, onlySourceBound, " +
+        "onlyPinned | sort: startSeconds|durationSeconds|recent\n" +
+        "• assets: kind (video|audio|image|all), onlyUnused, onlyReferenced | " +
+        "sort: insertion|duration|duration-asc|id|recent\n" +
+        "• transitions: onlyOrphaned\n" +
+        "• lockfile_entries: toolId, onlyPinned, sourceNodeId, sinceEpochMs\n" +
+        "• clips_for_asset: assetId (required)\n" +
+        "• clips_for_source: sourceNodeId (required) — transitive closure\n" +
+        "• consistency_propagation: sourceNodeId (required)\n" +
+        "• clip: clipId (required) — drill-down\n" +
+        "• lockfile_entry: exactly one of inputHash (forward) | assetId (reverse) — drill-down\n" +
+        "• project_metadata, spend, lockfile_cache_stats — single-row aggregates\n" +
+        "• snapshots: maxAgeDays\n" +
+        "• lockfile_orphans — gc candidates {assetId, inputHash, toolId, providerId, modelId, " +
+        "costCents, createdAtEpochMs, pinned}\n" +
+        "• timeline_diff, lockfile_diff: fromSnapshotId, toSnapshotId (≥1) — " +
+        "lockfile_diff buckets by inputHash (added/removed/unchangedCount)\n" +
+        "• source_binding_stats — per-kind {kind, totalNodes, boundDirectly, boundTransitively, " +
+        "orphans, coverageRatio, orphanNodeIds}\n" +
+        "• stale_clips — {clipId, assetId, changedSourceIds} for every AIGC clip whose " +
+        "bound source-node hashes drifted; sorted by clipId. Pair with regenerate_stale_clips.\n" +
+        "• validation — {severity, code, message, trackId?, clipId?} structural lint " +
+        "(severity error|warn). Passed iff zero errors. Run before export; does NOT cover " +
+        "content staleness — use stale_clips.\n" +
+        "Common: limit 1..500 (default 100), offset. Filter-on-wrong-select fails loud."
 
 internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
     put("type", "object")
