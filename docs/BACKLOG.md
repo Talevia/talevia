@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **debt-split-project-staleness** — `core/domain/ProjectStaleness.kt` 528 LOC（cycle 17 新加的 `incrementalPlan` + `renderStaleClips` 把这个文件从 ~370 推到 528，跨过 §3a #3 / R.5 #4 的 500-LOC 阈值）。文件里塞了 4 个独立 lane：autoRegenHint / staleClips (forward) / staleClipsFromLockfile (backward AIGC) / renderStaleClips (render cache) / incrementalPlan (capstone)。**方向：** 按 staleness lane 切分 — `ProjectStalenessLockfile.kt` (AIGC-stale)、`ProjectStalenessRender.kt` (render-cache stale)、`ProjectStalenessPlan.kt` (incremental plan 折叠)、`ProjectStalenessCommon.kt` (autoRegenHint / staleClips forward index)。每个文件 100-200 LOC，配套 test 不动 (它们 import 的是 top-level 函数)。Rubric §5.6 / §3a-3。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排
 
