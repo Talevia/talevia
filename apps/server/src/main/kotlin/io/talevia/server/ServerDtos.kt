@@ -93,6 +93,7 @@ internal fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.AgentRunStateChanged -> "agent.run.state.changed"
     is BusEvent.SessionProjectBindingChanged -> "session.project.binding.changed"
     is BusEvent.ProjectValidationWarning -> "project.validation.warning"
+    is BusEvent.ProjectMutated -> "project.mutated"
     is BusEvent.AigcCostRecorded -> "aigc.cost.recorded"
     is BusEvent.SpendCapApproaching -> "spend.cap.approaching"
     is BusEvent.AigcCacheProbe -> "aigc.cache.probe"
@@ -282,6 +283,12 @@ data class BusEventDto(
                 sessionId = null,
                 projectId = e.projectId.value,
                 validationIssues = e.issues,
+            )
+            is BusEvent.ProjectMutated -> BusEventDto(
+                "project.mutated",
+                sessionId = null,
+                projectId = e.projectId.value,
+                epochMs = e.mutatedAtEpochMs,
             )
             is BusEvent.AigcCostRecorded -> BusEventDto(
                 "aigc.cost.recorded",

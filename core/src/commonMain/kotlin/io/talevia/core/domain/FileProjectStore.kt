@@ -228,7 +228,7 @@ class FileProjectStore(
         val entry = registry.get(id) ?: error("Project ${id.value} does not exist")
         val path = entry.path.toPath()
         require(fs.exists(path.resolve(TALEVIA_JSON))) { "Project ${id.value} bundle missing at $path" }
-        withBundleLock(path) {
+        val (stamped, mutatedAt) = withBundleLock(path) {
             val stored = decodeStored(fs, path, json)
             val current = readBundle(fs, path, json)
             val updated = block(current)
@@ -237,8 +237,14 @@ class FileProjectStore(
             val stamped = ProjectRecencyStamper.stamp(updated, prior = current, now = now)
             writeBundleLocked(fs, path, stored.title, stamped, createdAtEpochMs = createdAt, json = json)
             registry.upsert(id, path, stored.title, lastOpenedAtEpochMs = now)
-            stamped
+            stamped to now
         }
+        // M7 §4 #1 cross-platform Project-mutation event surface. Emitted
+        // exactly once per successful mutate; failures inside `block`
+        // propagate before reaching this point. Bus is optional — the store
+        // still works in pure-persistence test rigs without a wired bus.
+        bus?.publish(BusEvent.ProjectMutated(projectId = id, mutatedAtEpochMs = mutatedAt))
+        stamped
     }
 
     override suspend fun delete(id: ProjectId, deleteFiles: Boolean): Unit = mutex.withLock {

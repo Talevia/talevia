@@ -264,6 +264,33 @@ sealed interface BusEvent {
     ) : BusEvent
 
     /**
+     * `ProjectStore.mutate(projectId, …)` returned successfully — the on-disk
+     * bundle has been updated (envelope + media writes flushed). UI consumers
+     * (desktop / iOS / Android timeline editors) that previously had to poll
+     * `projects.get(projectId)` subscribe here and re-read on each event.
+     * M7 §4 #1 cross-platform Project-mutation event surface.
+     *
+     * Fired exactly once per successful `mutate(...)` call. The block inside
+     * `mutate` may touch any field (timeline / source / lockfile / cache);
+     * one event regardless. Failures inside the block propagate and do NOT
+     * emit. `upsert` / `createAt` / `setTitle` / `delete` paths are not
+     * covered — only the agent-facing `mutate(...)` lane that tools dispatch
+     * through. Add sibling events explicitly if those paths need surface.
+     *
+     * Payload is deliberately minimal — `projectId` + post-mutate timestamp.
+     * Consumers re-read via `projects.get(projectId)` to get the new state.
+     * Avoids bus-as-data-channel (sending the whole Project body would
+     * balloon SSE buffers for large projects). The timestamp is the same
+     * `now` written into the bundle's envelope `updatedAtEpochMs` so a UI
+     * that already cached an older Project knows whether the event
+     * supersedes its cache.
+     */
+    data class ProjectMutated(
+        val projectId: ProjectId,
+        val mutatedAtEpochMs: Long,
+    ) : BusEvent
+
+    /**
      * Cross-machine bundle-open failure: ≥ 1 asset references a
      * `MediaSource.File` absolute path that doesn't exist on this machine.
      * UI shows "relink your source footage" panel; CLI can block / warn before
