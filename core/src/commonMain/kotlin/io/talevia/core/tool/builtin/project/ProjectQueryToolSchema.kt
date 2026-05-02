@@ -42,20 +42,16 @@ internal val PROJECT_QUERY_HELP_TEXT: String =
         "• clips_for_source: sourceNodeId (required) — transitive closure\n" +
         "• consistency_propagation: sourceNodeId (required)\n" +
         "• clip: clipId (required) — drill-down\n" +
-        "• lockfile_entry: exactly one of inputHash (forward) | assetId (reverse) — drill-down\n" +
+        "• lockfile_entry: exactly one of inputHash | assetId — drill-down\n" +
         "• project_metadata, spend, lockfile_cache_stats — single-row aggregates\n" +
         "• snapshots: maxAgeDays\n" +
-        "• lockfile_orphans — gc candidates {assetId, inputHash, toolId, providerId, modelId, " +
-        "costCents, createdAtEpochMs, pinned}\n" +
-        "• timeline_diff, lockfile_diff: fromSnapshotId, toSnapshotId (≥1) — " +
-        "lockfile_diff buckets by inputHash (added/removed/unchangedCount)\n" +
-        "• source_binding_stats — per-kind {kind, totalNodes, boundDirectly, boundTransitively, " +
-        "orphans, coverageRatio, orphanNodeIds}\n" +
-        "• stale_clips — {clipId, assetId, changedSourceIds} for every AIGC clip whose " +
-        "bound source-node hashes drifted; sorted by clipId. Pair with regenerate_stale_clips.\n" +
-        "• validation — {severity, code, message, trackId?, clipId?} structural lint " +
-        "(severity error|warn). Passed iff zero errors. Run before export; does NOT cover " +
-        "content staleness — use stale_clips.\n" +
+        "• lockfile_orphans — gc candidates\n" +
+        "• timeline_diff, lockfile_diff: fromSnapshotId, toSnapshotId (≥1)\n" +
+        "• source_binding_stats — per-kind coverage stats\n" +
+        "• stale_clips — AIGC-stale clips {clipId,assetId,changedSourceIds}; pair regenerate_stale_clips\n" +
+        "• render_stale: engineId? — clips whose mezzanine cache misses at the project output\n" +
+        "• incremental_plan: sourceNodeIds[], engineId? — single-row {reAigc,onlyRender,unchanged,workCount}\n" +
+        "• validation — pre-export lint {severity,code,message,trackId?,clipId?}\n" +
         "Common: limit 1..500 (default 100), offset. Filter-on-wrong-select fails loud."
 
 internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
@@ -163,6 +159,15 @@ internal val PROJECT_QUERY_INPUT_SCHEMA: JsonObject = buildJsonObject {
         putJsonObject("toSnapshotId") {
             put("type", "string")
             put("description", "timeline_diff / lockfile_diff: \"to\" side. Null = live.")
+        }
+        putJsonObject("sourceNodeIds") {
+            put("type", "array")
+            putJsonObject("items") { put("type", "string") }
+            put("description", "incremental_plan: changed source-node ids (required).")
+        }
+        putJsonObject("engineId") {
+            put("type", "string")
+            put("description", "render_stale, incremental_plan: default ffmpeg-jvm.")
         }
     }
     put("required", JsonArray(listOf(JsonPrimitive("select"))))

@@ -13,12 +13,14 @@ import io.talevia.core.tool.builtin.project.query.ClipForAssetRow
 import io.talevia.core.tool.builtin.project.query.ClipForSourceRow
 import io.talevia.core.tool.builtin.project.query.ClipRow
 import io.talevia.core.tool.builtin.project.query.ConsistencyPropagationRow
+import io.talevia.core.tool.builtin.project.query.IncrementalPlanRow
 import io.talevia.core.tool.builtin.project.query.LockfileCacheStatsRow
 import io.talevia.core.tool.builtin.project.query.LockfileDiffRow
 import io.talevia.core.tool.builtin.project.query.LockfileEntryDetailRow
 import io.talevia.core.tool.builtin.project.query.LockfileEntryRow
 import io.talevia.core.tool.builtin.project.query.LockfileOrphanRow
 import io.talevia.core.tool.builtin.project.query.ProjectMetadataRow
+import io.talevia.core.tool.builtin.project.query.RenderStaleClipReportRow
 import io.talevia.core.tool.builtin.project.query.SnapshotRow
 import io.talevia.core.tool.builtin.project.query.SourceBindingStatsRow
 import io.talevia.core.tool.builtin.project.query.SpendSummaryRow
@@ -32,12 +34,14 @@ import io.talevia.core.tool.builtin.project.query.runClipDetailQuery
 import io.talevia.core.tool.builtin.project.query.runClipsForAssetQuery
 import io.talevia.core.tool.builtin.project.query.runClipsForSourceQuery
 import io.talevia.core.tool.builtin.project.query.runConsistencyPropagationQuery
+import io.talevia.core.tool.builtin.project.query.runIncrementalPlanQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileCacheStatsQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileDiffQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileEntriesQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileEntryDetailQuery
 import io.talevia.core.tool.builtin.project.query.runLockfileOrphansQuery
 import io.talevia.core.tool.builtin.project.query.runProjectMetadataQuery
+import io.talevia.core.tool.builtin.project.query.runRenderStaleQuery
 import io.talevia.core.tool.builtin.project.query.runSnapshotsQuery
 import io.talevia.core.tool.builtin.project.query.runSourceBindingStatsQuery
 import io.talevia.core.tool.builtin.project.query.runSpendQuery
@@ -164,6 +168,22 @@ class ProjectQueryTool(
         // ---- lockfile_entry drill-down (required for that select) ----
         /** Lockfile entry inputHash. Required for `select=lockfile_entry`; rejected elsewhere. */
         val inputHash: String? = null,
+        // ---- incremental_plan input (required for that select) ----
+        /**
+         * Source-node ids whose edits the agent wants the plan to evaluate. Required
+         * for `select=incremental_plan`; rejected elsewhere. Empty list yields an
+         * empty plan (no clips affected).
+         */
+        val sourceNodeIds: List<String>? = null,
+        // ---- render_stale / incremental_plan engine override ----
+        /**
+         * Render engine id whose per-clip mezzanine cache is consulted. Optional —
+         * defaults to `"ffmpeg-jvm"` (the only engine with `supportsPerClipCache=true`
+         * today). Other engines fall back to whole-timeline rendering and won't
+         * report any per-clip render-staleness. Valid for `select=render_stale` and
+         * `select=incremental_plan`; rejected elsewhere.
+         */
+        val engineId: String? = null,
         // ---- timeline_diff inputs (required for that select) ----
         /**
          * Snapshot id for the "from" side of a timeline diff. Null means
@@ -236,6 +256,8 @@ class ProjectQueryTool(
         SELECT_TIMELINE_DIFF -> TimelineDiffRow.serializer()
         SELECT_SOURCE_BINDING_STATS -> SourceBindingStatsRow.serializer()
         SELECT_STALE_CLIPS -> StaleClipReportRow.serializer()
+        SELECT_RENDER_STALE -> RenderStaleClipReportRow.serializer()
+        SELECT_INCREMENTAL_PLAN -> IncrementalPlanRow.serializer()
         SELECT_VALIDATION -> ValidationIssue.serializer()
         else -> error("No row serializer registered for select='$select'")
     }
@@ -271,6 +293,8 @@ class ProjectQueryTool(
             SELECT_TIMELINE_DIFF -> runTimelineDiffQuery(project, input)
             SELECT_SOURCE_BINDING_STATS -> runSourceBindingStatsQuery(project, limit, offset)
             SELECT_STALE_CLIPS -> runStaleClipsQuery(project, limit, offset)
+            SELECT_RENDER_STALE -> runRenderStaleQuery(project, input, limit, offset)
+            SELECT_INCREMENTAL_PLAN -> runIncrementalPlanQuery(project, input)
             SELECT_VALIDATION -> runValidationQuery(project)
             else -> error("unreachable — select validated above: '$select'")
         }
@@ -296,6 +320,8 @@ class ProjectQueryTool(
         const val SELECT_TIMELINE_DIFF = "timeline_diff"
         const val SELECT_SOURCE_BINDING_STATS = "source_binding_stats"
         const val SELECT_STALE_CLIPS = "stale_clips"
+        const val SELECT_RENDER_STALE = "render_stale"
+        const val SELECT_INCREMENTAL_PLAN = "incremental_plan"
         const val SELECT_VALIDATION = "validation"
         internal val ALL_SELECTS = setOf(
             SELECT_TRACKS, SELECT_TIMELINE_CLIPS, SELECT_ASSETS,
@@ -305,7 +331,7 @@ class ProjectQueryTool(
             SELECT_CONSISTENCY_PROPAGATION, SELECT_SPEND,
             SELECT_LOCKFILE_CACHE_STATS, SELECT_LOCKFILE_DIFF, SELECT_LOCKFILE_ORPHANS,
             SELECT_SNAPSHOTS, SELECT_TIMELINE_DIFF, SELECT_SOURCE_BINDING_STATS,
-            SELECT_STALE_CLIPS, SELECT_VALIDATION,
+            SELECT_STALE_CLIPS, SELECT_RENDER_STALE, SELECT_INCREMENTAL_PLAN, SELECT_VALIDATION,
         )
 
         private const val DEFAULT_LIMIT = 100

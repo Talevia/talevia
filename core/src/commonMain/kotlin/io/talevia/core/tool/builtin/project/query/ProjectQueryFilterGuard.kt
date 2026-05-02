@@ -92,6 +92,21 @@ internal fun rejectIncompatibleProjectQueryFilters(
             if (input.fromSnapshotId != null) add("fromSnapshotId (select=timeline_diff or lockfile_diff only)")
             if (input.toSnapshotId != null) add("toSnapshotId (select=timeline_diff or lockfile_diff only)")
         }
+        // sourceNodeIds is the required input for incremental_plan; reject
+        // anywhere else so a typo (sourceNodeIds vs sourceNodeId) is caught
+        // loud rather than silently routed to a different select's empty list.
+        if (select != ProjectQueryTool.SELECT_INCREMENTAL_PLAN && input.sourceNodeIds != null) {
+            add("sourceNodeIds (select=incremental_plan only)")
+        }
+        // engineId scopes the render-cache fingerprint; valid for both
+        // render_stale and incremental_plan, rejected elsewhere so callers
+        // don't supply it for selects whose semantics ignore the engine.
+        if (select != ProjectQueryTool.SELECT_RENDER_STALE &&
+            select != ProjectQueryTool.SELECT_INCREMENTAL_PLAN &&
+            input.engineId != null
+        ) {
+            add("engineId (select=render_stale or incremental_plan only)")
+        }
     }
     if (misapplied.isNotEmpty()) {
         error(
