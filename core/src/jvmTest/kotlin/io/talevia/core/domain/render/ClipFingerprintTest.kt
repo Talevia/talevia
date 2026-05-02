@@ -79,6 +79,92 @@ class ClipFingerprintTest {
         assertNotEquals(base, withFilter, "adding a filter must perturb fingerprint")
     }
 
+    // ----- M4 #3 (专家精修反查) effect-param edit → mezzanine invalidation -----
+    //
+    // The M4 §5.2 expert-effects criterion #3 wants "edit Filter param →
+    // clip stale → regenerate standard chain". Talevia routes effect
+    // staleness through the per-clip mezzanine fingerprint (this file's
+    // `clipMezzanineFingerprint`), NOT through `staleClipsFromLockfile`:
+    //   - lockfile staleness gates AIGC asset cache hits (changing a
+    //     filter doesn't invalidate the underlying generated asset);
+    //   - mezzanine fingerprint gates per-clip render cache hits
+    //     (changing a filter MUST trigger a re-render at the next export).
+    // The cases below pin the expert-edit semantic that MILESTONES.md M4
+    // #3 names — vignette intensity 0.4 → 0.7, brightness value drift,
+    // and multi-filter list where only one slot edits — so a future
+    // refactor that drops `filters` from the canonical clip JSON (the
+    // accidental-deletion failure mode) breaks the test instead of
+    // silently reusing stale mezzanines.
+
+    @Test fun effectParamEditOnVignetteIntensityPerturbsFingerprint() {
+        // Canonical example from MILESTONES.md M4 #3: "比如 vignette
+        // intensity 从 0.4 → 0.7". Same filter name, same enclosing clip,
+        // single param value drifts → mezzanine fingerprint must perturb.
+        val v04 = fp(
+            clip = baseClip.copy(
+                filters = listOf(Filter(name = "vignette", params = mapOf("intensity" to 0.4f))),
+            ),
+        )
+        val v07 = fp(
+            clip = baseClip.copy(
+                filters = listOf(Filter(name = "vignette", params = mapOf("intensity" to 0.7f))),
+            ),
+        )
+        assertNotEquals(
+            v04, v07,
+            "M4 #3: editing vignette intensity 0.4 → 0.7 must perturb the mezzanine fingerprint " +
+                "so the next export re-renders the clip",
+        )
+    }
+
+    @Test fun effectParamEditOnBrightnessValuePerturbsFingerprint() {
+        // Sibling case for the brightness knob — covers a different filter
+        // name + different param key from vignette so a regression that
+        // accidentally hashes only specific params (not the whole map)
+        // fails here too.
+        val b02 = fp(
+            clip = baseClip.copy(
+                filters = listOf(Filter(name = "brightness", params = mapOf("value" to 0.2f))),
+            ),
+        )
+        val b05 = fp(
+            clip = baseClip.copy(
+                filters = listOf(Filter(name = "brightness", params = mapOf("value" to 0.5f))),
+            ),
+        )
+        assertNotEquals(
+            b02, b05,
+            "M4 #3: editing brightness value 0.2 → 0.5 must perturb the mezzanine fingerprint",
+        )
+    }
+
+    @Test fun effectParamEditOnOneFilterInChainPerturbsFingerprint() {
+        // Multi-filter chain where only one slot's param edits. Pins that
+        // chains aren't summarised lossily (e.g. by name set only) and
+        // that ordering-stable encoding catches a single inner mutation.
+        val before = fp(
+            clip = baseClip.copy(
+                filters = listOf(
+                    Filter(name = "vignette", params = mapOf("intensity" to 0.4f)),
+                    Filter(name = "brightness", params = mapOf("value" to 0.2f)),
+                ),
+            ),
+        )
+        val after = fp(
+            clip = baseClip.copy(
+                filters = listOf(
+                    Filter(name = "vignette", params = mapOf("intensity" to 0.7f)),
+                    Filter(name = "brightness", params = mapOf("value" to 0.2f)),
+                ),
+            ),
+        )
+        assertNotEquals(
+            before, after,
+            "M4 #3: editing one filter param in a multi-filter chain must perturb the fingerprint " +
+                "even when other slots stay byte-identical",
+        )
+    }
+
     @Test fun transitionFadesPerturbFingerprint() {
         val noFades = fp()
         val headOnly = fp(fades = TransitionFades(headFade = 0.5.seconds))
