@@ -1,6 +1,6 @@
 # Milestones
 
-> **Current: M4 — §5.2 专家特效**
+> **Current: M5 — §3.2 依赖 DAG / 增量编译**
 
 迭代聚焦的粗粒度指针。每个 milestone 对应 `docs/VISION.md` §3 的一个**核心赌注**。
 机制参考 media-engine 的 `docs/MILESTONES.md` + 三处本地化：**软优先级**（当前 M
@@ -19,103 +19,171 @@ bullet 打 tag；现有 bullet 不手动 backfill。
 
 ---
 
-## M4 — §5.2 专家特效 （VISION §5.2）
+## M5 — §3.2 依赖 DAG / 增量编译 （VISION §3.2）
 
-**目标**：让"加一个新特效"——shader / 合成 / 粒子 / mask——的接入成本
-**只跨少数抽象层**，不再要求改 5 个 AppContainer + engine 契约 + core.domain。
-专家用户能直接在 source 层定义自己的 effect kind，agent 能在一次意图下
-混合调度传统引擎 / AIGC / 特效渲染 三类工具。M3 把 §4 双用户张力变成
-不变量后，M4 验证"专家路径"那一边的可扩展性——一致性 binding 已经
-extensible (M1)，AIGC 已经 deterministic (M2)，特效是最后没收口的赌注。
+**目标**：项目变更 → **最小重渲染集合**。改一个 source node、改一段 timeline、
+换一次 output profile，agent 都能精准答出"这次哪些 clips 需要重做、哪些
+mezzanine 还能复用"，多 export 场景不重复劳动；agent 在做计划时可以预先看到
+"如果改 X 会让 Y 个 clip 失效"，让用户在动手前评估 blast radius。M4 把"专家
+特效"路径打通后，§3.2 是唯一还没收口的运行时议题——M3 给了 source DAG、
+M2 给了 lockfile cache，M4 给了 mezzanine cache，但**把这三层 cache 串成一张
+统一的依赖图、并暴露成 agent 可查询的一等接口**还没做。
 
-选 §5.2 作 M4 的理由：M3 亚军列表头条；M3 的"两路径共享 source"已经
-证明 source 层是双用户共有的"扩展点"，但今天 source 层的 effect-kind
-注册成本还非常高（特效要么走 Filter 闭集枚举，要么走 SourceNode kind
-但没有运行时执行链路）。M4 收敛"专家加一个 shader / 粒子要跨几层"
-这个判断题，把 §5.2 从"部分"推到"有"。
+选 §3.2 作 M5 的理由：M4 亚军列表头条；前几个 M 已经把 dependency-tracking
+的零件交付完整（Source DAG / lockfile / mezzanine fingerprint），M5 的工作
+是把零件组合成一张 graph 并暴露面给 agent。这条不靠"加新功能"而靠"暴露已
+有不变量"。
 
 ### Exit criteria
 
-- [x] Effect-kind addition cost-of-three-layers：新增一个 shader / 粒子 /
-  mask 类型只需动 ≤ 3 层抽象 —— Filter sealed (or equivalent
-  `EffectKind` 注册点) + 一个 engine impl arm + 一个 source-body schema。
-  不必动 5 个 AppContainer，不必动 core.domain timeline 模型，不必新建
-  Tool。落地后 grep `EffectKind\.|FilterKind\.` 在 core/commonMain 产品
-  路径有 ≥ 5 种 kind（当前 4 种：vignette / blur / brightness / contrast
-  类，确切 size 待 plan 阶段核实），新增后 size 加 1 见证 cost-of-3 路径
-  — cycle 2026-05-01 *本 commit*（FilterKind.entries.size 5 → 6 加入
-  Contrast；`FilterKindTest.registrySizeMeetsM4OneCriterion` 5 → 6；
-  实测 cost-of-three-layers = ① Core enum 1 处 (FilterKind.kt) +
-  ② Kotlin engine 2 处 sealed arm (FfmpegVideoEngine.renderFilter,
-  Media3FilterEffects.mapFilterToEffect) + 1 处 Swift case
-  (AVFoundationVideoEngine.swift) + ③ 3 处 manifest 条目
-  (FilterEngineCapabilities.{ffmpegJvm,media3Android,avFoundationIos})。
-  零 AppContainer 改动，零 Tool 注册，零 Project 字段，零 core.domain
-  timeline 改动 —— 实测确认 ≤ 3 抽象层不变量在新 kind 落地路径上成立）
-- [x] Cross-engine 特效 parity 强制：任何新加的 effect kind 在 FFmpeg JVM
-  + Media3 (Android) + AVFoundation (iOS) 三引擎都有可跑的实现 OR
-  skip-aware test 显式声明缺失原因。grep: 至少一个 jvmTest /
-  androidTest 等价 / xcodebuild path 显式 assert 该 effect kind 跨三引擎
-  状态 —— `FilterCrossEngineParityTest` 类 / 同等覆盖 — cycle 2026-04-28
-  *本 commit*（`FilterEngineCapabilities` 枚举 ffmpegJvm / media3Android /
-  avFoundationIos 三集合；`FilterCrossEngineParityTest` 三 case 断言 every
-  kind covered + no unknown kinds + 3-engine baseline locked。Kotlin 引擎
-  双重 gate（sealed when 编译期 + manifest 测试期）；iOS Swift 当前是单
-  gate — 仅 manifest 抓 drift，Swift 端 drift 由 follow-up debt-ios-filter-
-  parity-test P2 负责）
-- [x] 专家精修反查：用户改 effect kind 的某个参数（比如 vignette intensity
-  从 0.4 → 0.7），下游 clips 走 stale → regenerate 标准链路（同 §3.2 /
-  M3 #3 的 source DAG 不变量）。grep: `EffectStalenessTest` 或同等覆盖断
-  言 effect-param edit → clip stale 命中
-  — cycle 2026-05-01 *本 commit*（**Design conclusion**: effect staleness
-  在 Talevia 走的是**per-clip mezzanine fingerprint**（`clipMezzanineFingerprint`
-  in `core/domain/render/ClipFingerprint.kt`），不走 `staleClipsFromLockfile`。
-  原因：lockfile staleness 守护的是 AIGC asset cache（改 filter 不会让
-  underlying generated asset 失效）；mezzanine fingerprint 守护的是 per-clip
-  render cache（改 filter 必须触发下次 export 重渲）。两条路径分别对应
-  不同的 cache 层，不重叠也不替代。`Clip.Video` 的完整 JSON（含 `filters`）
-  是 fingerprint segment #1，所以 effect-param edit 自动 cache-miss + 走
-  `runPerClipRender` 重渲该 clip。新 `ClipFingerprintTest` 三 case 显式 pin
-  此契约：`effectParamEditOnVignetteIntensityPerturbsFingerprint` (0.4 → 0.7
-  正中 criterion 例子) + `effectParamEditOnBrightnessValuePerturbsFingerprint`
-  + `effectParamEditOnOneFilterInChainPerturbsFingerprint`（multi-filter
-  chain 中单一槽位变化）。三案均 `assertNotEquals` 守护 fingerprint 改变 →
-  cache-miss → 重渲 — 即 M4 #3 的"clip stale 命中"在本 lane 下的同义实现。
-  `runPerClipRender` 的 cache-miss 路径已经在 P1 期 `PerClipCacheInvalidationEdgeTest`
-  覆盖（grandparent edit / cross-engine 等 5 case），与本三 case 一起构成
-  effect-staleness 完整守护）
-- [x] Effect tool spec budget：FilterAction / TransitionAction 等
-  effect-类 dispatchers 单工具 spec ≤ 1.5k token（避免特效膨胀
-  ratchet 整个 registry），并在 `tool_spec_budget` 的 `topByTokens` 报
-  告里 effect 工具不占 top 3。grep: `ToolSpecBudgetAuditTest` 类 / 等价
-  断言 filter_action / transition_action / effect_action 单条 ≤ 1500
-  tokens
-  — cycle 2026-05-01 *本 commit*（新 `EffectToolSpecBudgetTest` 三 case：
-  `filterActionToolSpecBudgetUnder1500Tokens` (现 560 tokens，gate
-  ≤ 1500，2.7x headroom) + `transitionActionToolSpecBudgetUnder1500Tokens`
-  (现 345 tokens，gate ≤ 1500，4.3x headroom) + `effectToolsNotInTopThreeOfFullRegistry`
-  (full audit registry top3=[project_query, clip_action, source_node_action] —
-  effect tools 不在 top-3，符合 M4 #4 "broad query dispatchers 占头部，
-  effect dispatchers 让位" 设计)。共享 `computeToolSpecBudget` heuristic
-  与 `ToolSpecBudgetAuditTest` 一致，所以 LLM per-turn cost 计量同源。
-  Gate 现役 headroom 大 → 防御未来 schema 增长 ratchet)
-- [ ] Manual milestone exit summary：本文件 M4 block 末尾 append
-  `### M4 exit summary` 段，列剩余的 §5.2 gap（GPU shader pipeline / mask
-  blend modes / particle 物理 / 实时预览延迟等）以便 M5 / M6 接力 —
-  *必须手动 tick（段落存在 + 三条以上具体 gap）*
+- [ ] Source-to-clip dependency closure 暴露：`project_query(select=clips_for_source)`
+  (M1 落地的反查) 已经能在单个 sourceNodeId 上跑闭包；M5 要求闭包结果**直接驱动**
+  incremental render 计划——给定一组 source-node edits，返回受影响的 clip 列表
+  按 "需要 re-AIGC" / "只需 re-render" / "不变" 三类分桶。grep: `IncrementalPlan` /
+  `clipsAffectedBy` / `project_query(select=incremental_plan)` 或同等覆盖
+- [ ] Render-stale 与 AIGC-stale 分轴：今天 `staleClipsFromLockfile` 只答"哪些
+  clip 需要 re-AIGC"（lockfile 比对），但**改 filter 参数 / 改 output profile**
+  时 clip 不需要 re-AIGC、只需要 re-render——这条信号当前埋在 mezzanine
+  fingerprint 里，没暴露成 query。M5 要求一个能答 "render-stale clips" 的
+  surface，区别于 lockfile-stale。grep: `renderStaleClips` / `RenderStalenessQuery`
+  / `project_query(select=render_stale)` 或同等覆盖
+- [ ] Multi-export mezzanine 复用 e2e：同一个 project 在同一 output profile 下
+  导出两次到不同 path，第二次必须 0 clip 再编（mezzanine 全 cache-hit）；
+  改 output profile 后再次导出，相关 clip 全部 cache-miss。grep:
+  `MultiExportCacheReuseE2ETest` / `multiExport.*cache.*hit` 或同等覆盖断言
+  导出 N+1 次的累计 mezzanine 编码次数 = 单次 fresh export 次数
+- [ ] Mezzanine 缓存 GC：被 invalidate 的 mezzanine（fingerprint 永远不会再
+  recompute 到该 key）必须能被周期性 sweep 掉，不会无限制占盘。grep:
+  `gcRenderCache` / `RenderCacheGcTool` / `renderCacheSweep` 或同等覆盖
+- [ ] Manual milestone exit summary：本文件 M5 block 末尾 append
+  `### M5 exit summary` 段，列剩余的 §3.2 gap（cross-engine incremental /
+  Project DAG persistence / re-AIGC batch grouping 等）以便 M6 / 未来 M
+  接力 — *必须手动 tick（段落存在 + 三条以上具体 gap）*
 
 ### 亚军 milestones（未正式启动，仅作排序参考）
 
-- **M5 候选 — §3.2 依赖 DAG / 增量编译**：项目变更 → 最小重渲染集合，多 export
-  场景不重复劳动。
 - **M6 候选 — §4 后续 / 跨平台编辑 GUI**：desktop / iOS / Android timeline editor
   surface 把"两路径共享 source" 的 UI 半边补齐（详见 M3 exit gap #1）。
+- **M7 候选 — §5.7 性能 / 成本 baseline 收紧**：tool spec budget 16,585t（cycle 4
+  R.6 #1 scan）已经过 15k 软线；session token / latency 的回归基础设施还散在
+  9 个 benchmark 文件里，M7 收口"运行时预算"轴（cap、budget、benchmark 一致
+  化），把 §5.7 从"部分"推到"有"。
 
 ---
 
 （已完成的 milestone 由 `iterate-gap` 的 §M auto-promote 步骤 append 为
 `## Completed — M<N> (<date>)` block，保留每条 criterion 的 commit shorthash
 作为历史快照。最近完成的放最上面。）
+
+## Completed — M4 (2026-05-01)
+
+**目标**：让"加一个新特效"——shader / 合成 / 粒子 / mask——的接入成本
+**只跨少数抽象层**，不再要求改 5 个 AppContainer + engine 契约 + core.domain。
+专家用户能直接在 source 层定义自己的 effect kind，agent 能在一次意图下
+混合调度传统引擎 / AIGC / 特效渲染 三类工具。
+
+**Exit criteria 完成情况**：
+
+- [x] Effect-kind addition cost-of-three-layers：`FilterKind.entries.size`
+  5 → 6 加入 Contrast；实测 cost-of-three-layers = ① Core enum 1 处
+  (FilterKind.kt) + ② Kotlin engine 2 处 sealed arm
+  (FfmpegVideoEngine.renderFilter, Media3FilterEffects.mapFilterToEffect) +
+  1 处 Swift case (AVFoundationVideoEngine.swift) + ③ 3 处 manifest 条目
+  (FilterEngineCapabilities.{ffmpegJvm,media3Android,avFoundationIos})。
+  零 AppContainer 改动，零 Tool 注册，零 Project 字段，零 core.domain
+  timeline 改动。— cycle 2026-05-01 **b0bd222c**
+- [x] Cross-engine 特效 parity 强制：`FilterCrossEngineParityTest` 三 case
+  断言 every kind covered + no unknown kinds + 3-engine baseline locked。
+  Kotlin 引擎双重 gate（sealed when 编译期 + manifest 测试期）；iOS Swift
+  单 gate（manifest 抓 drift，由 follow-up `debt-ios-filter-parity-test`
+  P2 负责）。— cycle 2026-04-28（manifest + parity test 落地之 commit；
+  ticked 在 b0bd222c 的 commit 中作为先前 cycle 的 evidence cite）
+- [x] 专家精修反查：**Design conclusion** = effect staleness 走 per-clip
+  mezzanine fingerprint (`clipMezzanineFingerprint` in
+  `core/domain/render/ClipFingerprint.kt`)，不走 `staleClipsFromLockfile`。
+  Lockfile 守护 AIGC asset cache；fingerprint 守护 per-clip render cache。
+  `Clip.Video.filters` 是 fingerprint segment #1，effect-param edit 自动
+  cache-miss + 走 `runPerClipRender` 重渲。`ClipFingerprintTest` 三 case
+  (`effectParamEditOnVignetteIntensityPerturbsFingerprint` 0.4 → 0.7 正中
+  criterion 例子；`effectParamEditOnBrightnessValuePerturbsFingerprint`；
+  `effectParamEditOnOneFilterInChainPerturbsFingerprint`) 显式 pin 此契约。
+  — cycle 2026-05-01 **bff61b8c**
+- [x] Effect tool spec budget：`EffectToolSpecBudgetTest` 三 case：
+  `filterActionToolSpecBudgetUnder1500Tokens` (560 tokens；2.7x headroom) +
+  `transitionActionToolSpecBudgetUnder1500Tokens` (345 tokens；4.3x headroom) +
+  `effectToolsNotInTopThreeOfFullRegistry` (full registry top3 =
+  `[project_query, clip_action, source_node_action]`；effect tools not in
+  top-3)。共享 `computeToolSpecBudget` heuristic 与 `ToolSpecBudgetAuditTest`
+  一致。Gate headroom 大 → 防御未来 schema 增长 ratchet。
+  — cycle 2026-05-01 **c4cc9a96**
+- [x] Manual milestone exit summary：见下方 `### M4 exit summary` 段。
+  — cycle 2026-05-01 *本 commit*
+
+### M4 exit summary
+
+M4 关起门来证明了**专家特效路径的 4/4 实质轴 + 1 manual exit 全部落地**：
+cost-of-three-layers (b0bd222c) + cross-engine parity (cycle 2026-04-28
+落地，b0bd222c cite) + effect 精修反查 (bff61b8c) + effect tool spec
+budget (c4cc9a96)。这四条把"专家加一个新特效要跨几层、改了参数能否被
+正确捕获、是否会让 LLM context 预算崩盘"从理论变成了 jvmTest 守护的不
+变量；下一个用户哪怕看 git log 也能看到"系统真的在朝可扩展性收敛"。
+
+**§5.2 完整愿景里 M4+ 接力的 gap**（超出本 milestone 的工程学跑道，列
+给 M5 / M6 / 未来 M）：
+
+1. **GPU shader pipeline 接入**：当前 `FilterKind` 的 6 个 kind 全是
+   CPU-mappable primitive (eq / saturation / blur / vignette / lut /
+   contrast)。真正的 §5.2 "专家特效"——可写 GLSL / WGSL / Metal shader
+   并实时编译——还没有 entry point。需要 `ShaderEffectKind` 走
+   `SourceNode.body` 携带 shader 源码 + 缓存编译产物 + 走 Media3
+   `GlEffect` / Metal `MTLComputePipelineState` / FFmpeg `glslang` 等
+   平台 GPU 后端。这是 §5.2 "把专家从 Filter 闭集解放出来" 的真正释放。
+2. **Mask blend modes**：当前 `Filter` 是单层全画面应用；专家精修常需要
+   "只对此区域应用 vignette"、"通过 alpha mask 混合两个 LUT"。需要
+   `MaskFilter` / `BlendFilter` source-body 概念 + 渲染时的 layer
+   composition pipeline；与 cross-engine parity 强制一起设计（FFmpeg
+   `alphamerge` + `blend` filter / Media3 `OverlayEffect` mask /
+   AVFoundation `CIBlendWithMask`）。
+3. **Particle 物理 / GPU compute**：粒子系统需要 stateful per-frame
+   simulation（位置 / 速度 / 寿命），单帧 filter 模型装不下。需要专家
+   能定义"per-frame state evolution function"并在导出/预览时跑物理。
+   未来 M。
+4. **实时预览延迟**：M5 §3.2 增量编译 一旦落地，专家拖动 effect 参数
+   时希望预览在 < 100ms 内反映新值。当前 export 走 ffmpeg shell-out
+   的 wall-time 数百 ms 起步——预览需要一条**不离 process** 的快速渲染
+   路径（在 desktop 上 Compose Skia + FFmpeg `swscale`，iOS / Android
+   走原生 GL pipeline）。是 §5.4 desktop 预览 + §5.7 perf 的交叉项。
+5. **Hot-reload shader edit**：跟 #1 配套——专家改 GLSL 源码后，理想是
+   不重新生成 AIGC asset、只重新编译 shader + 重渲受影响的 clip
+   mezzanine。这条直接受益于 M5 的 render-stale vs AIGC-stale 分轴
+   （只需 re-render，不需 re-AIGC）。
+
+前两条由"用户真的开始写 shader / mask"驱动；3 是 §5.2 的远景；4 是
+M5 §3.2 增量编译的衍生项；5 同时受益于 M5 的 split。M5 / M6 不扛全部，
+按平台优先级 + 现有 BACKLOG meta 的用户决策结果挑。
+
+### M4 → M5 promotion logic
+
+M4 的"专家特效路径打通"既证明了 source 层是双用户共有的扩展点（M3 已
+铺路），也暴露了下一道隘口——**当专家修改一个 filter 参数 / 一个 source
+节点时，agent 必须能精准答出"这次哪些 clips 需要重做"**。M4 #3 的 Design
+conclusion 已经把"effect-param edit → mezzanine fingerprint perturb →
+re-render"的不变量定下来了（per-clip cache 守护 render-staleness），
+M2 的 lockfile 守护 AIGC-staleness，M3 的 source DAG 给了反查闭包。
+**三件零件齐了，但还没串成一张统一依赖图、并暴露成 agent 可查询的
+一等接口**——这是 §3.2 的全部内容。
+
+选 §3.2 作 M5 的理由：M4 亚军列表头条；前几个 M 已经把 dependency-tracking
+零件交付完整（Source DAG / lockfile / mezzanine fingerprint），M5 的工
+作不是"加新功能"而是"把零件组合成一张 graph 并暴露面给 agent"。Criteria
+起草逻辑：① source-to-clip 闭包驱动 incremental plan（M1 反查的下游消费
+者）+ ② render-stale vs AIGC-stale 分轴（M2 + M4 #3 的并集查询） +
+③ multi-export mezzanine 复用 e2e（M4 #3 mezzanine 守护的 cross-export
+应用）+ ④ mezzanine GC（防止 cache 无限增长——M5 落地后 cache 命中率
+会成为常态信号，没 GC 就漏盘）+ ⑤ 手动 exit summary 给 M6 接力。
+M6 候选保留 §4 跨平台 GUI；新加 M7 候选 §5.7 perf baseline 收紧（cycle 4
+R.6 #1 scan 提示 tool spec 16,585t > 15k 软线，运行时预算需要更明确的
+gate 体系）。
 
 ## Completed — M3 (2026-04-28)
 
