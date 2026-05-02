@@ -84,4 +84,29 @@ data class Session(
      * Flipped by `session_action(action="set_system_prompt", systemPromptOverride=...)`.
      */
     val systemPromptOverride: String? = null,
+    /**
+     * VISION §5.7 / M6 #2 hard cap — refuse-to-dispatch ceiling on the
+     * session's pre-turn history token estimate. After
+     * [io.talevia.core.agent.CompactionGate] runs (which may or may not
+     * bring the history under cap depending on the threshold settings
+     * and pruneable content), if the post-compaction estimate still
+     * exceeds [maxSessionTokens] the gate throws
+     * [io.talevia.core.agent.SessionTokenCapExceededException], which
+     * surfaces as `AgentRunState.Failed` and stops the turn.
+     *
+     * Distinct from the per-model `compactionThreshold` (soft signal that
+     * triggers auto-compaction) and from [spendCapCents] (AIGC dollar cap,
+     * not token cap). The compaction threshold says "consolidate now";
+     * the cap says "if consolidation didn't bring you under, don't run
+     * another turn at all" — protects against runaway sessions where
+     * compaction can't recover budget (e.g. compaction strategy is
+     * `prune_only` and there's nothing to prune, or the surviving recent
+     * turns alone already exceed cap).
+     *
+     * **Three-state:** `null` (default) = no cap; the session runs
+     * unbounded matching pre-feature behaviour. Positive Long = token
+     * ceiling. `0L` is a legitimate "stop dispatching now" but unusual;
+     * legacy sessions deserialize as null.
+     */
+    val maxSessionTokens: Long? = null,
 )

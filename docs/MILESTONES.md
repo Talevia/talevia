@@ -59,11 +59,23 @@ token 上界、关键路径 benchmark 守护、AIGC spend cap 报警，全部从
   regression floor. 18 tokens of headroom; future tool/description adds
   fail loud at the strict gate before they can quietly bloat the
   per-turn LLM context tax）
-- [ ] Session token hard cap：`SessionConfig` (or `Session` itself) 暴露
+- [x] Session token hard cap：`SessionConfig` (or `Session` itself) 暴露
   `maxSessionTokens` / `tokenBudgetCap` field，`CompactionStrategy` 在超过 cap
   时强制压缩或拒绝下一轮。当前 compaction 是 "需要 budget 时压" 而非 "session
   上界守护"。grep: `maxSessionTokens` / `sessionTokenCap` 常量在 `core.session`
   或 `core.compaction` 产品路径出现 + 强制路径
+  — cycle 2026-05-02 *本 commit*（新 `Session.maxSessionTokens: Long? = null`
+  field in `core/session/Session.kt`（默认 null = no cap, 保持 pre-feature
+  serialization compat per §3a #7）+ `CompactionGate.maybeCompact` 在 (可能
+  no-op 的) 压缩步骤之后跑 hard-cap check：read session, if `maxSessionTokens
+  != null && postEstimate > cap` → 抛 `SessionTokenCapExceededException`
+  (typed exception with sessionId / capTokens / estimatedTokens fields,
+  IllegalStateException base for upstream catch). 异常 surface 为 `AgentRunState.Failed`
+  per existing agent-loop error path; provider call 不发出, 用户得到
+  deterministic "cap exceeded" signal 而非 vendor-dependent context-length
+  error. 新 `CompactionGateTokenCapTest` 三 case：null-cap-bypasses-enforcement /
+  under-cap-dispatches-OK / over-cap-fails-loud (asserts exception fields
+  including session id, cap value, post-compaction estimate)）
 - [ ] 关键路径 benchmark CI gate：现 `core/bench` 9 文件 (AgentLoop /
   CompactionBenchmark / ExportToolBenchmark / FileProjectStoreOpenAt / SourceDeepHash /
   LockfileEntries / LockfileLookup / ToolDispatch / BusEventPublish) 没有"在

@@ -38,47 +38,102 @@ internal class CompactionGate(
      * return the post-compaction re-read history. Otherwise returns
      * [history] unchanged.
      *
+     * After the (possibly no-op) compaction step, if the surviving
+     * history still exceeds [Session.maxSessionTokens], raise
+     * [SessionTokenCapExceededException] — the M6 §5.7 hard-cap
+     * contract. Compaction is the soft-budget recovery path; the cap
+     * is the don't-dispatch-this-turn fail loud signal that fires when
+     * recovery wasn't enough.
+     *
      * Matches the pre-extraction inline block in `Agent.runLoop` byte-
      * for-byte — same `TokenEstimator.forHistory` input, same two
      * `BusEvent` publishes around the `compactor.process` call, same
-     * re-read after compaction.
+     * re-read after compaction. The cap check is layered on top.
      */
     suspend fun maybeCompact(
         input: RunInput,
         handle: AgentRunHandleView,
         history: List<MessageWithParts>,
     ): List<MessageWithParts> {
-        if (compactor == null) return history
-        val estimated = TokenEstimator.forHistory(history)
-        val perModelThreshold = compactionThreshold(input.model)
-        if (estimated <= perModelThreshold) return history
+        val final = if (compactor == null) {
+            history
+        } else {
+            val estimated = TokenEstimator.forHistory(history)
+            val perModelThreshold = compactionThreshold(input.model)
+            if (estimated <= perModelThreshold) {
+                history
+            } else {
+                bus.publish(
+                    BusEvent.SessionCompactionAuto(
+                        sessionId = input.sessionId,
+                        historyTokensBefore = estimated,
+                        thresholdTokens = perModelThreshold,
+                    ),
+                )
+                bus.publish(
+                    BusEvent.AgentRunStateChanged(
+                        input.sessionId,
+                        AgentRunState.Compacting,
+                        retryAttempt = handle.lastRetryAttempt,
+                    ),
+                )
+                compactor.process(input.sessionId, history, input.model)
+                val next = store.listMessagesWithParts(input.sessionId, includeCompacted = false)
+                bus.publish(
+                    BusEvent.AgentRunStateChanged(
+                        input.sessionId,
+                        AgentRunState.Generating,
+                        retryAttempt = handle.lastRetryAttempt,
+                    ),
+                )
+                next
+            }
+        }
 
-        bus.publish(
-            BusEvent.SessionCompactionAuto(
-                sessionId = input.sessionId,
-                historyTokensBefore = estimated,
-                thresholdTokens = perModelThreshold,
-            ),
-        )
-        bus.publish(
-            BusEvent.AgentRunStateChanged(
-                input.sessionId,
-                AgentRunState.Compacting,
-                retryAttempt = handle.lastRetryAttempt,
-            ),
-        )
-        compactor.process(input.sessionId, history, input.model)
-        val next = store.listMessagesWithParts(input.sessionId, includeCompacted = false)
-        bus.publish(
-            BusEvent.AgentRunStateChanged(
-                input.sessionId,
-                AgentRunState.Generating,
-                retryAttempt = handle.lastRetryAttempt,
-            ),
-        )
-        return next
+        // M6 §5.7 #2 — post-compaction hard-cap enforcement. Reads the
+        // session's `maxSessionTokens` fresh on each turn so an in-run
+        // `session_action(action="set_session_token_cap")` (future tool;
+        // not wired yet) takes effect immediately. Null cap = preserves
+        // pre-feature behavior (unbounded). Compaction may have dropped
+        // the estimate below cap; we re-measure on the post-compaction
+        // history rather than the input-history value.
+        val cap = store.getSession(input.sessionId)?.maxSessionTokens
+        if (cap != null) {
+            val postEstimate = TokenEstimator.forHistory(final)
+            if (postEstimate > cap) {
+                throw SessionTokenCapExceededException(
+                    sessionId = input.sessionId.value,
+                    capTokens = cap,
+                    estimatedTokens = postEstimate,
+                )
+            }
+        }
+        return final
     }
 }
+
+/**
+ * Thrown by [CompactionGate.maybeCompact] when a session's
+ * post-compaction history token estimate exceeds [Session.maxSessionTokens].
+ * Surfaces as `AgentRunState.Failed` upstream — the agent loop catches
+ * it the same way it handles other turn-level errors.
+ *
+ * Distinct from any provider-side rate limit / context-length error: this
+ * fires before the provider call goes out, so the user gets a deterministic
+ * "session is at cap, no dispatch happened" signal rather than a vendor-
+ * dependent error message arriving mid-stream.
+ */
+class SessionTokenCapExceededException(
+    val sessionId: String,
+    val capTokens: Long,
+    val estimatedTokens: Int,
+) : IllegalStateException(
+        "session token cap exceeded: session=$sessionId, " +
+            "estimatedTokens=$estimatedTokens > capTokens=$capTokens. " +
+            "Compaction did not recover enough budget — raise the cap " +
+            "(set_session_token_cap, when wired) or summarise + restart " +
+            "in a fresh session.",
+    )
 
 /**
  * View of [Agent.RunHandle] the gate + retry loop need without pulling
