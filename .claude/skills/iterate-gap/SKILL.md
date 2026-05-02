@@ -176,9 +176,11 @@ git pull --rebase origin main
 
 6. **TODO / FIXME / HACK 净增长** —
    ```
-   grep -rnE 'TODO|FIXME|HACK|XXX' core/src/commonMain/kotlin | wc -l
+   grep -rnE '^\s*(//|/\*+|\*)\s*(TODO|FIXME|HACK|XXX)\b' core/src/commonMain/kotlin --include='*.kt' | wc -l
    ```
-   和上次快照对比。净增长 > 0 → `debt-clean-todos`，decision 里列新增行号让下轮有据可查。
+   只数 **code-comment 形态**的 TODO/FIXME/HACK/XXX —— 行首（含可选缩进）必须是 `//` / `/*` / `*` 注释引导符。string literals (`"TODO: describe..."` 在 project template seed text、`"TODO.*\\bMei\\b"` 在 `GrepTool.helpText`) 和 kdoc 散文（`* set with a // TODO: comment beside...` 在 manifest 文档里 mid-line 提及）一律 load-bearing，不算真实债，所以 anchor 在行首拒掉。和上次快照对比净增长 > 0 → `debt-clean-todos`，decision 里列新增行号让下轮有据可查。
+
+   **历史教训**：cycle 15 用 catch-all `grep -rnE 'TODO|FIXME|HACK|XXX'` 报 32 hits / +1 since baseline → 触发 `debt-clean-todos` cycle，dispatch 时挨个核对 32 hits 全部是 template seed text + kdoc prose + helpText string，零 code-comment 形态。这种 false-positive 循环每次新加 template 字段就重演一次（VlogTemplate / NarrativeTemplate / TutorialTemplate / AdTemplate / MusicMvTemplate 各 5–10 个 `"TODO: ..."` 占位字段），完全是低价值 review。新的 anchored regex 直接报 0，trigger 只在真有 `// TODO:` 注释新增时才点亮，价值密度回到 100%。
 
 7. **@Deprecated 不清理** —
    ```
