@@ -198,6 +198,23 @@ internal fun ChatPanel(container: AppContainer, projectId: ProjectId, log: Snaps
         }
     }
 
+    // M7 §4 #3 — multi-step trajectory progress chip. Mirrors the CLI's
+    // `EventRouter` `bus.sessionScopedSubscribe<BusEvent.AgentRunStateChanged>`
+    // counter (cycle 166's `small-user-progress-surface`) so a session
+    // moved between CLI and desktop sees identical step numbering.
+    // `AgentStepCounter` (sibling file) holds the state machine and is
+    // unit-tested independently — keeping the @Composable lean.
+    var stepNotice by remember(projectId) { mutableStateOf<Int?>(null) }
+    LaunchedEffect(sessionId.value) {
+        val counter = AgentStepCounter()
+        container.bus.subscribe<BusEvent.AgentRunStateChanged>()
+            .filterIsInstance<BusEvent.AgentRunStateChanged>()
+            .collect { ev ->
+                if (ev.sessionId != sessionId.value) return@collect
+                stepNotice = counter.observe(ev)
+            }
+    }
+
     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
         SectionTitle("Chat")
         Spacer(Modifier.weight(1f))
@@ -277,6 +294,16 @@ internal fun ChatPanel(container: AppContainer, projectId: ProjectId, log: Snaps
         }
     }
     Spacer(Modifier.height(6.dp))
+    // M7 §4 #3 step-progress chip — visible only while a run is in
+    // flight (counter null = no run / between runs).
+    stepNotice?.let { n ->
+        Text(
+            "⟳ Step $n · processing…",
+            fontFamily = FontFamily.Monospace,
+            color = Color(0xFF7A7A7A),
+            modifier = Modifier.padding(vertical = 2.dp),
+        )
+    }
     OutlinedTextField(
         value = prompt,
         onValueChange = { prompt = it },

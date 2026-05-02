@@ -60,12 +60,12 @@ baseline 已经把 Core 运行时预算轴收口完整，§4 GUI 是 VISION §3 
   Android UI 不必各自重新解读 `Project.timeline`。Core 工作（actionable now，
   不被 platform-priority 阻塞）。grep: `TimelineViewer` / `RenderableTimeline`
   / `TimelineSurface` 类型定义在产品路径出现 — cycle 2026-05-02 *本 commit*
-- [ ] Desktop chat panel agent-step 订阅：BACKLOG P2 `desktop-agent-step-notice`
+- [x] Desktop chat panel agent-step 订阅：BACKLOG P2 `desktop-agent-step-notice`
   落地——desktop 的 chat composable 订阅 `BusEvent.AgentRunStateChanged` 并
   渲染 `Step N · processing…`（cycle 2026-04-26 a0bd56eb CLI 半已落地；这条
   是 desktop 镜像）。Opportunistic per CLAUDE.md "Platform priority" — desktop
   UX work resumes trigger; criterion 跟着触发条件勾。grep: `apps/desktop` 下
-  对 `BusEvent.AgentRunStateChanged` 的 `collect` / `subscribe`
+  对 `BusEvent.AgentRunStateChanged` 的 `collect` / `subscribe` — cycle 2026-05-02 *本 commit*
 - [ ] Two-paths shared source UI e2e：M3 #3 `CrossPathSourceSharedTest`
   (cycle 2026-04-26 cb5c5b7d) 是 jvmTest 级；M7 要求**通过 UI 命令路由层**
   跑同样的 round-trip——chat panel 发指令 + source-edit tool dispatch + 同一
