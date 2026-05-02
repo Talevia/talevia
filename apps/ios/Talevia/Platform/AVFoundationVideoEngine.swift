@@ -76,6 +76,22 @@ private func applyCoreFilter(_ spec: FilterSpec, to image: CIImage) -> CIImage {
         f?.setValue(image, forKey: kCIInputImageKey)
         f?.setValue(v, forKey: kCIInputBrightnessKey)
         return f?.outputImage ?? image
+    case "contrast":
+        // Core's apply_filter contrast intensity is 0..1 with 0.5 = neutral
+        // (matches FFmpeg's `eq=contrast` 0..2 / Media3 `Contrast` -1..+1).
+        // Remap to CI's multiplicative `inputContrast` where 1.0 = identity:
+        // intensity 0.5 → 1.0, 1.0 → 2.0, 0.0 → 0.0.
+        let raw = spec.params["intensity"] ?? spec.params["value"]
+        let contrast: Double
+        if let raw, spec.params["intensity"] != nil {
+            contrast = max(0.0, min(2.0, raw * 2.0))
+        } else {
+            contrast = 1.0
+        }
+        let f = CIFilter(name: "CIColorControls")
+        f?.setValue(image, forKey: kCIInputImageKey)
+        f?.setValue(contrast, forKey: kCIInputContrastKey)
+        return f?.outputImage ?? image
     case "saturation":
         let raw = spec.params["intensity"] ?? spec.params["value"]
         // Core's apply_filter semantics: 0.5 ≈ unchanged (matches FFmpeg's

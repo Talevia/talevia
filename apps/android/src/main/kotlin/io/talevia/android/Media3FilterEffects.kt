@@ -8,6 +8,7 @@ import androidx.media3.common.Effect
 import androidx.media3.common.util.Size
 import androidx.media3.effect.BitmapOverlay
 import androidx.media3.effect.Brightness
+import androidx.media3.effect.Contrast
 import androidx.media3.effect.GaussianBlur
 import androidx.media3.effect.HslAdjustment
 import androidx.media3.effect.OverlayEffect
@@ -53,6 +54,19 @@ internal fun mapFilterToEffect(
         val v = (filter.params["intensity"] ?: filter.params["value"] ?: 0f)
             .coerceIn(-1f, 1f)
         Brightness(v)
+    }
+    FilterKind.Contrast -> {
+        // Media3's `Contrast` takes a [-1, 1] delta where 0 = identity.
+        // Core's apply_filter contrast intensity is 0..1 with 0.5 = neutral
+        // (matches the FFmpeg engine's 0..2 mapping). Remap to Media3:
+        // intensity 0.5 → 0.0, 1.0 → +1.0, 0.0 → -1.0.
+        val raw = filter.params["intensity"] ?: filter.params["value"]
+        val delta = if (raw != null && filter.params.containsKey("intensity")) {
+            ((raw - 0.5f) * 2f).coerceIn(-1f, 1f)
+        } else {
+            0f
+        }
+        Contrast(delta)
     }
     FilterKind.Saturation -> {
         // Core's apply_filter semantics for saturation: `intensity` is a 0..1

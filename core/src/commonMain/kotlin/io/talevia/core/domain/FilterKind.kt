@@ -26,6 +26,15 @@ enum class FilterKind {
     /** EQ-style brightness adjustment; param `intensity` ∈ [-1, 1]. */
     Brightness,
 
+    /**
+     * EQ-style contrast; param `intensity` ∈ [0, 1] with 0.5 ≈ unchanged.
+     * Same shape as [Saturation] for consistency: 0 → flat-grey, 0.5 → identity,
+     * 1 → high contrast. Engines remap onto each platform's native scale
+     * (FFmpeg `eq=contrast` 0..2, Media3 `Contrast` -1..+1, AVFoundation
+     * `CIColorControls.inputContrast` 0..2).
+     */
+    Contrast,
+
     /** EQ-style saturation; param `intensity` ∈ [0, 1] (0 desaturated, 0.5 unchanged, 1 max). */
     Saturation,
 
@@ -65,6 +74,7 @@ enum class FilterKind {
             if (name == null) return null
             return when (name.trim().lowercase()) {
                 "brightness" -> Brightness
+                "contrast" -> Contrast
                 "saturation" -> Saturation
                 "blur" -> Blur
                 "vignette" -> Vignette

@@ -26,11 +26,14 @@ package io.talevia.core.domain
  * that gap. The two Kotlin engines (FFmpeg JVM, Media3 Android) get
  * both gates.
  *
- * Today's coverage (cycle 2026-04-28): all three engines support all
- * 5 kinds (Brightness / Saturation / Blur / Vignette / Lut), per
- * inspection of `FfmpegVideoEngine.renderFilter` (post-cycle-9
- * sealed `when`), `Media3FilterEffects.mapFilterToEffect` (same),
- * and `AVFoundationVideoEngine.swift:71-119` (Swift `switch`).
+ * Today's coverage: all three engines support all 6 kinds
+ * (Brightness / Contrast / Saturation / Blur / Vignette / Lut), per
+ * inspection of `FfmpegVideoEngine.renderFilter` (post-cycle-9 sealed
+ * `when`), `Media3FilterEffects.mapFilterToEffect` (same), and
+ * `AVFoundationVideoEngine.swift` (Swift `switch`). Contrast was the
+ * +1 kind that exercised the M4 §5.2 cost-of-three-layers path
+ * end-to-end (Core enum + 2 Kotlin engine arms + 1 Swift case +
+ * 3 manifest entries; no AppContainer / Tool / Project changes).
  */
 object FilterEngineCapabilities {
     /**
@@ -39,6 +42,7 @@ object FilterEngineCapabilities {
      */
     val ffmpegJvm: Set<FilterKind> = setOf(
         FilterKind.Brightness,
+        FilterKind.Contrast,
         FilterKind.Saturation,
         FilterKind.Blur,
         FilterKind.Vignette,
@@ -51,6 +55,7 @@ object FilterEngineCapabilities {
      */
     val media3Android: Set<FilterKind> = setOf(
         FilterKind.Brightness,
+        FilterKind.Contrast,
         FilterKind.Saturation,
         FilterKind.Blur,
         FilterKind.Vignette,
@@ -68,11 +73,12 @@ object FilterEngineCapabilities {
      *   - reviewer code-reading + the matching iOS-side test that a
      *     future cycle adds on the Swift side.
      *
-     * The current 5 entries match the Swift switch's 5 cases. New
+     * The current 6 entries match the Swift switch's 6 cases. New
      * iOS support → add an entry here in the same commit.
      */
     val avFoundationIos: Set<FilterKind> = setOf(
         FilterKind.Brightness,
+        FilterKind.Contrast,
         FilterKind.Saturation,
         FilterKind.Blur,
         FilterKind.Vignette,

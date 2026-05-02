@@ -25,6 +25,7 @@ class FilterKindTest {
 
     @Test fun fromStringMatchesEveryRegisteredKind() {
         assertEquals(FilterKind.Brightness, FilterKind.fromString("brightness"))
+        assertEquals(FilterKind.Contrast, FilterKind.fromString("contrast"))
         assertEquals(FilterKind.Saturation, FilterKind.fromString("saturation"))
         assertEquals(FilterKind.Blur, FilterKind.fromString("blur"))
         assertEquals(FilterKind.Vignette, FilterKind.fromString("vignette"))
@@ -86,12 +87,14 @@ class FilterKindTest {
 
     @Test fun registrySizeMeetsM4OneCriterion() {
         // M4 §5.2 criterion 1: registry must have ≥ 5 known kinds for
-        // the cost-of-three-layers measurement to be non-trivial.
-        // Adding the 6th kind exercises the full path (sealed arm +
-        // engine when arm + tool schema enum value), which is the
-        // measurement criterion this test guards.
+        // the cost-of-three-layers measurement to be non-trivial. The
+        // 6th kind (Contrast) was the +1 demonstration that exercised
+        // the full path end-to-end — Core enum + 2 Kotlin engine arms +
+        // 1 Swift case + 3 manifest entries — without touching any
+        // AppContainer / Tool / Project surface, validating ≤ 3
+        // abstraction layers per VISION §5.2 / MILESTONES.md M4 #1.
         assertEquals(
-            5,
+            6,
             FilterKind.entries.size,
             "FilterKind grew or shrank — update both the M4 §5.2 cost-of-three-layers " +
                 "evidence in MILESTONES.md and every engine's `when (filter.kind)` arms.",

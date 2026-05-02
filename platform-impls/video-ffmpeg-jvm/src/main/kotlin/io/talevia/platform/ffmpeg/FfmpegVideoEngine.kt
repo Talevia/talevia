@@ -554,6 +554,15 @@ class FfmpegVideoEngine(
             val v = f.params["intensity"] ?: f.params["value"] ?: 0f
             "eq=brightness=${formatFloat(v.coerceIn(-1f, 1f))}"
         }
+        // eq contrast range is [0, ~2]; default 1.0 (identity). Core's
+        // `intensity` ∈ [0, 1] with 0.5 = unchanged → linearly remap to
+        // [0, 2] via `intensity * 2`. Matches the Saturation knob shape
+        // so a UI slider can drive both with the same scale.
+        FilterKind.Contrast -> {
+            val raw = f.params["intensity"] ?: f.params["value"] ?: 0.5f
+            val v = if (f.params.containsKey("intensity")) (raw * 2f).coerceIn(0f, 2f) else raw.coerceIn(0f, 2f)
+            "eq=contrast=${formatFloat(v)}"
+        }
         // eq saturation range is [0, 3]; default 1. Accept intensity as 0..1 mapping to 0..2.
         FilterKind.Saturation -> {
             val raw = f.params["intensity"] ?: f.params["value"] ?: 1f
