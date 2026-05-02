@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **m7-cross-platform-timeline-viewer-contract** — desktop / iOS / Android UI 都需要"读 Project.timeline → 渲染只读视图"这个动作；今天每端各自直接消费 `Project.timeline`（Compose Desktop 的 ChatScreen / iOS Swift 的 TimelineView / Android 的 ComposeApp）。各端的 timeline-render 逻辑漂移会让 M7 §4 "two paths, one project" 在 UI 半边失败。**方向：** core/commonMain 暴露 `TimelineViewer` (or `RenderableTimeline` / `TimelineSurface`) interface — 给定一个 `Project`，产出 platform-agnostic 的 view-model（tracks / clip blocks / time range / overlay hints），让 UI 端只渲染这个 view-model，不直接读 `Project.timeline.tracks`。Rubric §5.4 / §3.4。Milestone §M7.
 - **debt-split-project-staleness** — `core/domain/ProjectStaleness.kt` 528 LOC（cycle 17 新加的 `incrementalPlan` + `renderStaleClips` 把这个文件从 ~370 推到 528，跨过 §3a #3 / R.5 #4 的 500-LOC 阈值）。文件里塞了 4 个独立 lane：autoRegenHint / staleClips (forward) / staleClipsFromLockfile (backward AIGC) / renderStaleClips (render cache) / incrementalPlan (capstone)。**方向：** 按 staleness lane 切分 — `ProjectStalenessLockfile.kt` (AIGC-stale)、`ProjectStalenessRender.kt` (render-cache stale)、`ProjectStalenessPlan.kt` (incremental plan 折叠)、`ProjectStalenessCommon.kt` (autoRegenHint / staleClips forward index)。每个文件 100-200 LOC，配套 test 不动 (它们 import 的是 top-level 函数)。Rubric §5.6 / §3a-3。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排

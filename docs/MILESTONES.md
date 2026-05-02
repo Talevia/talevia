@@ -55,11 +55,11 @@ baseline 已经把 Core 运行时预算轴收口完整，§4 GUI 是 VISION §3 
   状态变化。grep: `BusEvent.ProjectMutated` / `BusEvent.ProjectStateChanged` /
   `ProjectStore.changes` 在 `core/src/commonMain/.../bus` 或 `core/.../domain`
   产品路径出现 + 至少一个 UI-side consumer — cycle 2026-05-02 **23ebdc7f**
-- [ ] Cross-platform timeline 只读 viewer contract：core/commonMain 暴露
+- [x] Cross-platform timeline 只读 viewer contract：core/commonMain 暴露
   `TimelineViewer` / `RenderableTimeline` / 同义抽象，让 desktop / iOS /
   Android UI 不必各自重新解读 `Project.timeline`。Core 工作（actionable now，
   不被 platform-priority 阻塞）。grep: `TimelineViewer` / `RenderableTimeline`
-  / `TimelineSurface` 类型定义在产品路径出现
+  / `TimelineSurface` 类型定义在产品路径出现 — cycle 2026-05-02 *本 commit*
 - [ ] Desktop chat panel agent-step 订阅：BACKLOG P2 `desktop-agent-step-notice`
   落地——desktop 的 chat composable 订阅 `BusEvent.AgentRunStateChanged` 并
   渲染 `Step N · processing…`（cycle 2026-04-26 a0bd56eb CLI 半已落地；这条
