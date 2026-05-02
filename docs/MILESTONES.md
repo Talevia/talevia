@@ -54,7 +54,7 @@ baseline 已经把 Core 运行时预算轴收口完整，§4 GUI 是 VISION §3 
   UI-side 订阅者，使 desktop / iOS / Android 不需要轮询就能实时反映 Core
   状态变化。grep: `BusEvent.ProjectMutated` / `BusEvent.ProjectStateChanged` /
   `ProjectStore.changes` 在 `core/src/commonMain/.../bus` 或 `core/.../domain`
-  产品路径出现 + 至少一个 UI-side consumer — cycle 2026-05-02 **6d825382**
+  产品路径出现 + 至少一个 UI-side consumer — cycle 2026-05-02 **23ebdc7f**
 - [ ] Cross-platform timeline 只读 viewer contract：core/commonMain 暴露
   `TimelineViewer` / `RenderableTimeline` / 同义抽象，让 desktop / iOS /
   Android UI 不必各自重新解读 `Project.timeline`。Core 工作（actionable now，
