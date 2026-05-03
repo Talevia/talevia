@@ -34,6 +34,7 @@ import io.talevia.core.session.TokenUsage
 import io.talevia.core.session.ToolState
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
+import io.talevia.core.tool.builtin.aigc.toolShimForImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -163,7 +164,7 @@ class ProviderFallbackE2ETest {
 
         val imageEngine = OneShotImageEngine()
         val registry = ToolRegistry()
-        registry.register(GenerateImageTool(imageEngine, FakeBlobWriter(tmpDir), projectStore))
+        registry.register(toolShimForImage(GenerateImageTool(imageEngine, FakeBlobWriter(tmpDir), projectStore)))
 
         // Primary fails every attempt, across every agent step: the fallback
         // providerIndex resets at the top of each outer step in Agent.runLoop
@@ -303,7 +304,7 @@ class ProviderFallbackE2ETest {
 
         val imageEngine = OneShotImageEngine()
         val registry = ToolRegistry()
-        registry.register(GenerateImageTool(imageEngine, FakeBlobWriter(tmpDir), projectStore))
+        registry.register(toolShimForImage(GenerateImageTool(imageEngine, FakeBlobWriter(tmpDir), projectStore)))
 
         val failingTurn = listOf(
             LlmEvent.Error("HTTP 503: overloaded", retriable = true),
@@ -360,7 +361,7 @@ class ProviderFallbackE2ETest {
 
         val imageEngine = OneShotImageEngine()
         val registry = ToolRegistry()
-        registry.register(GenerateImageTool(imageEngine, FakeBlobWriter(tmpDir), projectStore))
+        registry.register(toolShimForImage(GenerateImageTool(imageEngine, FakeBlobWriter(tmpDir), projectStore)))
 
         val toolPartId = PartId("tool-happy")
         val callId = CallId("call-happy")

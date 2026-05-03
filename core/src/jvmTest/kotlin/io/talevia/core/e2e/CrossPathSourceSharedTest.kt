@@ -21,6 +21,7 @@ import io.talevia.core.platform.VideoGenResult
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
+import io.talevia.core.tool.builtin.aigc.toolShimForVideo
 import io.talevia.core.tool.builtin.source.SourceNodeActionTool
 import io.talevia.core.tool.builtin.video.ClipActionTool
 import kotlinx.coroutines.test.runTest
@@ -85,7 +86,7 @@ class CrossPathSourceSharedTest {
         val videoEngine = ScriptedVideoEngine()
         val registry = ToolRegistry().apply {
             register(SourceNodeActionTool(projectStore))
-            register(GenerateVideoTool(videoEngine, FakeBlobWriter(tmpDir), projectStore))
+            register(toolShimForVideo(GenerateVideoTool(videoEngine, FakeBlobWriter(tmpDir), projectStore)))
             register(ClipActionTool(projectStore))
         }
         val ctx = ToolContext(

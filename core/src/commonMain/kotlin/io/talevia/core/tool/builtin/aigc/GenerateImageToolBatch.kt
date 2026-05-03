@@ -59,7 +59,7 @@ internal suspend fun GenerateImageTool.executeBatch(
 ): List<ToolResult<GenerateImageTool.Output>> {
     require(variantCount >= 1) { "executeBatch variantCount must be ≥ 1" }
     val pid = ctx.resolveProjectId(input.projectId)
-    AigcBudgetGuard.enforce(id, projectStore, pid, ctx)
+    AigcBudgetGuard.enforce(GenerateImageTool.ID, projectStore, pid, ctx)
     val seed = AigcPipeline.ensureSeed(input.seed)
     val folded = resolveConsistency(input, pid)
     val referenceAssetPaths = resolveReferenceAssetPaths(pid, folded.referenceAssetIds)
@@ -70,7 +70,7 @@ internal suspend fun GenerateImageTool.executeBatch(
     val perVariantHashes: List<String> = (0 until variantCount).map { i ->
         AigcPipeline.inputHash(
             listOf(
-                "tool" to id,
+                "tool" to GenerateImageTool.ID,
                 "model" to input.model,
                 "w" to input.width.toString(),
                 "h" to input.height.toString(),
@@ -102,11 +102,11 @@ internal suspend fun GenerateImageTool.executeBatch(
     // calling the provider so observers see the per-variant
     // hit/miss split.
     cachedByIndex.keys.forEach {
-        ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = id, hit = true))
+        ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = GenerateImageTool.ID, hit = true))
     }
     val missingIndices = (0 until variantCount).filter { it !in cachedByIndex }
     missingIndices.forEach {
-        ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = id, hit = false))
+        ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = GenerateImageTool.ID, hit = false))
     }
 
     // Provider call — only when there's at least one cache miss.
@@ -117,7 +117,7 @@ internal suspend fun GenerateImageTool.executeBatch(
             ctx = ctx,
             jobId = "gen-image-batch-${perVariantHashes.first().take(8)}-n${missingIndices.size}",
             startMessage = "generating ${input.width}x${input.height} image batch ×${missingIndices.size} with ${input.model}",
-            toolId = id,
+            toolId = GenerateImageTool.ID,
             providerId = engine.providerId,
         ) {
             engine.generate(
@@ -177,11 +177,11 @@ internal suspend fun GenerateImageTool.executeBatch(
         val variantHash = perVariantHashes[i]
         val provenance: GenerationProvenance = batchProvenance
             ?: error("provenance must be set when there's at least one fresh image")
-        val costCents = AigcPricing.estimateCents(id, provenance, baseInputs)
+        val costCents = AigcPricing.estimateCents(GenerateImageTool.ID, provenance, baseInputs)
         AigcPipeline.record(
             store = projectStore,
             projectId = pid,
-            toolId = id,
+            toolId = GenerateImageTool.ID,
             inputHash = variantHash,
             assetId = newAssetId,
             provenance = provenance,
@@ -198,7 +198,7 @@ internal suspend fun GenerateImageTool.executeBatch(
             BusEvent.AigcCostRecorded(
                 sessionId = ctx.sessionId,
                 projectId = pid,
-                toolId = id,
+                toolId = GenerateImageTool.ID,
                 assetId = newAssetId.value,
                 costCents = costCents,
             ),

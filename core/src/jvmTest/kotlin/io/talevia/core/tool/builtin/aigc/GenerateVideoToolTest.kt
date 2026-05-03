@@ -60,7 +60,7 @@ class GenerateVideoToolTest {
         val engine = fakeVideoEngine(tinyMp4, fixedModelVersion = "v1")
         val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             GenerateVideoTool.Input(
                 prompt = "a tracking shot over the ocean",
                 model = "sora-2",
@@ -97,7 +97,7 @@ class GenerateVideoToolTest {
         val engine = fakeVideoEngine(tinyMp4)
         val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             GenerateVideoTool.Input(prompt = "no seed", seed = null, projectId = pid.value),
             ctx(),
         )
@@ -118,7 +118,7 @@ class GenerateVideoToolTest {
         val engine = fakeVideoEngine(tinyMp4)
         val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             GenerateVideoTool.Input(
                 prompt = "walking in the rain",
                 seed = 7L,
@@ -149,15 +149,15 @@ class GenerateVideoToolTest {
             projectId = pid.value,
         )
 
-        val first = tool.execute(input, ctx())
+        val first = tool.generate(input, ctx())
         assertEquals(false, first.data.cacheHit)
 
-        val second = tool.execute(input, ctx())
+        val second = tool.generate(input, ctx())
         assertEquals(true, second.data.cacheHit)
         assertEquals(first.data.assetId, second.data.assetId)
 
         // Change duration — distinct output, should bust.
-        val third = tool.execute(input.copy(durationSeconds = 8.0), ctx())
+        val third = tool.generate(input.copy(durationSeconds = 8.0), ctx())
         assertEquals(false, third.data.cacheHit)
         assertTrue(third.data.assetId != first.data.assetId)
 
@@ -178,7 +178,7 @@ class GenerateVideoToolTest {
 
         val engine = fakeVideoEngine(tinyMp4)
         val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
-        tool.execute(
+        tool.generate(
             GenerateVideoTool.Input(
                 prompt = "portrait pan",
                 seed = 7L,
@@ -228,7 +228,7 @@ class GenerateVideoToolTest {
         val engine = fakeVideoEngine(tinyMp4)
         val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             GenerateVideoTool.Input(
                 prompt = "pan across Mei",
                 seed = 1L,

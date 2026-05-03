@@ -10,24 +10,16 @@ import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.source.consistency.FoldedPrompt
-import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.ImageGenEngine
 import io.talevia.core.platform.ImageGenRequest
-import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import kotlinx.datetime.Clock
-import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 import kotlin.time.Duration
 import kotlin.uuid.ExperimentalUuidApi
@@ -72,9 +64,11 @@ class GenerateImageTool(
     override val engine: ImageGenEngine,
     internal val bundleBlobWriter: BundleBlobWriter,
     internal val projectStore: ProjectStore,
-) : Tool<GenerateImageTool.Input, GenerateImageTool.Output>, ImageAigcGenerator {
+) : ImageAigcGenerator {
 
-    override suspend fun generate(input: Input, ctx: ToolContext): ToolResult<Output> = execute(input, ctx)
+    companion object {
+        const val ID = "generate_image"
+    }
 
     override suspend fun generateBatch(
         input: Input,
@@ -115,64 +109,10 @@ class GenerateImageTool(
         val cacheHit: Boolean = false,
     )
 
-    override val id: String = "generate_image"
-    override val helpText: String =
-        "Generate an image from a text prompt via an AIGC provider and import it as a project asset. " +
-            "Bytes are persisted into the project bundle's media/ directory so the asset travels with " +
-            "the project (git push / cp -R reproduces it on another machine). Records seed + model in " +
-            "the project lockfile so a second call with identical inputs is a cache hit. " +
-            "Pass consistencyBindingIds to reuse character / style / brand source nodes across shots."
-    override val inputSerializer: KSerializer<Input> = serializer()
-    override val outputSerializer: KSerializer<Output> = serializer()
-    override val permission: PermissionSpec = PermissionSpec.fixed("aigc.generate")
-    override val applicability: ToolApplicability = ToolApplicability.RequiresProjectBinding
-
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("prompt") {
-                put("type", "string")
-                put("description", "Text description of the image to generate.")
-            }
-            putJsonObject("model") {
-                put("type", "string")
-                put("description", "Provider-scoped model id (default: gpt-image-1).")
-            }
-            putJsonObject("width") {
-                put("type", "integer")
-                put("description", "Output image width in pixels (default: 1024).")
-            }
-            putJsonObject("height") {
-                put("type", "integer")
-                put("description", "Output image height in pixels (default: 1024).")
-            }
-            putJsonObject("seed") {
-                put("type", "integer")
-                put("description", "Optional seed for reproducibility. If omitted the tool picks one client-side so provenance is still complete. Explicit seeds make cache hits meaningful.")
-            }
-            putJsonObject("projectId") {
-                put("type", "string")
-                put("description", "Required when consistencyBindingIds is non-empty or when the project lockfile cache should be consulted.")
-            }
-            putJsonObject("consistencyBindingIds") {
-                put("type", "array")
-                put(
-                    "description",
-                    "Source node ids (kind core.consistency.*) to fold into the prompt. " +
-                        "null (default) = auto-fold all project consistency nodes; [] = explicitly no binding; " +
-                        "non-empty = fold only the listed nodes.",
-                )
-                putJsonObject("items") { put("type", "string") }
-            }
-        }
-        put("required", JsonArray(listOf(JsonPrimitive("prompt"))))
-        put("additionalProperties", false)
-    }
-
     @OptIn(ExperimentalUuidApi::class)
-    override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+    override suspend fun generate(input: Input, ctx: ToolContext): ToolResult<Output> {
         val pid = ctx.resolveProjectId(input.projectId)
-        AigcBudgetGuard.enforce(id, projectStore, pid, ctx)
+        AigcBudgetGuard.enforce(ID, projectStore, pid, ctx)
         val seed = AigcPipeline.ensureSeed(input.seed)
         val folded = resolveConsistency(input, pid)
 
@@ -181,7 +121,7 @@ class GenerateImageTool(
 
         val inputHash = AigcPipeline.inputHash(
             listOf(
-                "tool" to id,
+                "tool" to ID,
                 "model" to input.model,
                 "w" to input.width.toString(),
                 "h" to input.height.toString(),
@@ -197,7 +137,7 @@ class GenerateImageTool(
 
         if (!ctx.isReplay) {
             val cached = AigcPipeline.findCached(projectStore, pid, inputHash)
-            ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = id, hit = cached != null))
+            ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = ID, hit = cached != null))
             if (cached != null) {
                 return hit(cached, folded, input)
             }
@@ -207,7 +147,7 @@ class GenerateImageTool(
             ctx = ctx,
             jobId = "gen-image-${inputHash.take(8)}",
             startMessage = "generating ${input.width}x${input.height} image with ${input.model}",
-            toolId = id,
+            toolId = ID,
             providerId = engine.providerId,
         ) {
             engine.generate(
@@ -250,11 +190,11 @@ class GenerateImageTool(
         )
 
         val baseInputs = JsonConfig.default.encodeToJsonElement(Input.serializer(), input).jsonObject
-        val costCents = AigcPricing.estimateCents(id, result.provenance, baseInputs)
+        val costCents = AigcPricing.estimateCents(ID, result.provenance, baseInputs)
         AigcPipeline.record(
             store = projectStore,
             projectId = pid,
-            toolId = id,
+            toolId = ID,
             inputHash = inputHash,
             assetId = newAssetId,
             provenance = result.provenance,
@@ -271,7 +211,7 @@ class GenerateImageTool(
             BusEvent.AigcCostRecorded(
                 sessionId = ctx.sessionId,
                 projectId = pid,
-                toolId = id,
+                toolId = ID,
                 assetId = newAssetId.value,
                 costCents = costCents,
             ),

@@ -98,10 +98,10 @@ class ReplayLockfileToolTest {
         store.upsert("demo", Project(id = projectId, timeline = Timeline()))
 
         val imageTool = GenerateImageTool(engine, writer, store)
-        val registry = ToolRegistry().apply { register(imageTool) }
+        val registry = ToolRegistry().apply { register(toolShimForImage(imageTool)) }
         val replay = ReplayLockfileTool(registry, store)
 
-        val gen1 = imageTool.execute(
+        val gen1 = imageTool.generate(
             GenerateImageTool.Input(
                 prompt = "a lighthouse",
                 seed = 42L,
@@ -115,7 +115,7 @@ class ReplayLockfileToolTest {
         val originalInputHash = originalEntry.inputHash
 
         // Baseline: a second normal call with the same inputs is a cache hit (no new engine call).
-        val cacheHit = imageTool.execute(
+        val cacheHit = imageTool.generate(
             GenerateImageTool.Input(
                 prompt = "a lighthouse",
                 seed = 42L,
@@ -359,10 +359,10 @@ class ReplayLockfileToolTest {
         store.upsert("demo", Project(id = projectId, timeline = Timeline()))
 
         val imageTool = GenerateImageTool(engine, writer, store)
-        val registry = ToolRegistry().apply { register(imageTool) }
+        val registry = ToolRegistry().apply { register(toolShimForImage(imageTool)) }
         val replay = ReplayLockfileTool(registry, store)
 
-        imageTool.execute(
+        imageTool.generate(
             GenerateImageTool.Input(
                 prompt = "sessioncontext",
                 seed = 7L,
@@ -421,7 +421,7 @@ class ReplayLockfileToolTest {
         store.upsert("demo", Project(id = projectId, timeline = Timeline()))
 
         val imageTool = GenerateImageTool(engine, writer, store)
-        val registry = ToolRegistry().apply { register(imageTool) }
+        val registry = ToolRegistry().apply { register(toolShimForImage(imageTool)) }
         val replay = ReplayLockfileTool(registry, store)
 
         // Seed: one entry to anchor the inputHash both calls will hit.
@@ -430,7 +430,7 @@ class ReplayLockfileToolTest {
             seed = 99L,
             projectId = projectId.value,
         )
-        imageTool.execute(seedInput, ctx())
+        imageTool.generate(seedInput, ctx())
         val seedHash = store.get(projectId)!!.lockfile.entries.single().inputHash
         assertEquals(1, engine.calls)
 
@@ -448,7 +448,7 @@ class ReplayLockfileToolTest {
             val r3 = async {
                 replay.execute(ReplayLockfileTool.Input(inputHash = seedHash, projectId = projectId.value), ctx())
             }
-            val genCacheHit = async { imageTool.execute(seedInput, ctx()) }
+            val genCacheHit = async { imageTool.generate(seedInput, ctx()) }
             r1.await()
             r2.await()
             r3.await()

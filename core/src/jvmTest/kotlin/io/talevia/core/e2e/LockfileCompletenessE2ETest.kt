@@ -24,6 +24,7 @@ import io.talevia.core.platform.ImageGenResult
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.GenerateImageTool
+import io.talevia.core.tool.builtin.aigc.toolShimForImage
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -145,7 +146,7 @@ class LockfileCompletenessE2ETest {
         val writer = FakeBlobWriter(tmpDir)
 
         val registry = ToolRegistry()
-        registry.register(GenerateImageTool(imageEngine, writer, store))
+        registry.register(toolShimForImage(GenerateImageTool(imageEngine, writer, store)))
 
         val pid = ProjectId("lockfile-completeness")
         store.upsert(
@@ -262,7 +263,7 @@ class LockfileCompletenessE2ETest {
         val writer = FakeBlobWriter(tmpDir)
 
         val registry = ToolRegistry()
-        registry.register(GenerateImageTool(imageEngine, writer, store))
+        registry.register(toolShimForImage(GenerateImageTool(imageEngine, writer, store)))
 
         val pid = ProjectId("lockfile-completeness-cache")
         store.upsert(
@@ -320,7 +321,7 @@ class LockfileCompletenessE2ETest {
         val writer = FakeBlobWriter(tmpDir)
 
         val registry = ToolRegistry()
-        registry.register(GenerateImageTool(imageEngine, writer, store))
+        registry.register(toolShimForImage(GenerateImageTool(imageEngine, writer, store)))
 
         val pid = ProjectId("lockfile-completeness-serde")
         store.upsert(

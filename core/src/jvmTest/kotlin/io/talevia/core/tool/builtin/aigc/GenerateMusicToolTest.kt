@@ -49,7 +49,7 @@ class GenerateMusicToolTest {
         val engine = FakeMusicGenEngine(tinyMp3)
         val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             GenerateMusicTool.Input(
                 prompt = "warm acoustic, slow tempo",
                 model = "musicgen-melody",
@@ -90,7 +90,7 @@ class GenerateMusicToolTest {
         val engine = FakeMusicGenEngine(tinyMp3)
         val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             GenerateMusicTool.Input(prompt = "no seed", projectId = pid.value),
             ctx(),
         )
@@ -111,7 +111,7 @@ class GenerateMusicToolTest {
         val engine = FakeMusicGenEngine(tinyMp3)
         val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             GenerateMusicTool.Input(
                 prompt = "late-night diner",
                 seed = 7L,
@@ -147,7 +147,7 @@ class GenerateMusicToolTest {
             publishEvent = { ev -> published += ev },
         )
 
-        tool.execute(
+        tool.generate(
             GenerateMusicTool.Input(prompt = "x", seed = 1L, projectId = pid.value),
             warmupCtx,
         )
@@ -176,17 +176,17 @@ class GenerateMusicToolTest {
             projectId = pid.value,
         )
 
-        val first = tool.execute(input, ctx())
+        val first = tool.generate(input, ctx())
         assertEquals(false, first.data.cacheHit)
         assertEquals(1, engine.calls)
 
-        val second = tool.execute(input, ctx())
+        val second = tool.generate(input, ctx())
         assertEquals(true, second.data.cacheHit)
         assertEquals(first.data.assetId, second.data.assetId)
         assertEquals(1, engine.calls, "cache hit must not call the engine")
 
         // Changing duration must bust the cache — 10s vs 20s is semantically distinct.
-        val third = tool.execute(input.copy(durationSeconds = 20.0), ctx())
+        val third = tool.generate(input.copy(durationSeconds = 20.0), ctx())
         assertEquals(false, third.data.cacheHit)
         assertTrue(third.data.assetId != first.data.assetId)
 

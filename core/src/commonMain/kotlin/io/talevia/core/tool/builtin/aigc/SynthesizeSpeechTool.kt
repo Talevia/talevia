@@ -11,25 +11,16 @@ import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.lockfile.LockfileEntry
-import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.TtsEngine
 import io.talevia.core.platform.TtsRequest
 import io.talevia.core.platform.TtsResult
-import io.talevia.core.tool.Tool
-import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import kotlinx.datetime.Clock
-import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.milliseconds
@@ -80,15 +71,17 @@ class SynthesizeSpeechTool(
     private val engines: List<TtsEngine>,
     private val bundleBlobWriter: BundleBlobWriter,
     private val projectStore: ProjectStore,
-) : Tool<SynthesizeSpeechTool.Input, SynthesizeSpeechTool.Output>, SpeechAigcGenerator {
+) : SpeechAigcGenerator {
+
+    companion object {
+        const val ID = "synthesize_speech"
+    }
 
     init {
         require(engines.isNotEmpty()) {
             "SynthesizeSpeechTool requires at least one TtsEngine; got empty list."
         }
     }
-
-    override suspend fun generate(input: Input, ctx: ToolContext): ToolResult<Output> = execute(input, ctx)
 
     /**
      * Single-engine convenience ctor — the common case. Mirrors the pre-fallback
@@ -136,81 +129,16 @@ class SynthesizeSpeechTool(
         val language: String? = null,
     )
 
-    override val id: String = "synthesize_speech"
-    override val helpText: String =
-        "Synthesize speech from text via a TTS provider (default: tts-1 / alloy / mp3) and " +
-            "import it as a project asset. Bytes land in the project bundle's media/ directory " +
-            "so the voiceover travels with the project. Lockfile caching kicks in automatically — " +
-            "a second call with identical (text, voice, model, format, speed) returns the same " +
-            "asset without re-billing the provider. Pass consistencyBindingIds with a character_ref " +
-            "id whose voiceId is set to use that character's voice automatically (overrides the " +
-            "explicit voice input). Use add_clip to drop the result onto an audio track."
-    override val inputSerializer: KSerializer<Input> = serializer()
-    override val outputSerializer: KSerializer<Output> = serializer()
-    override val permission: PermissionSpec = PermissionSpec.fixed("aigc.generate")
-    override val applicability: ToolApplicability = ToolApplicability.RequiresProjectBinding
-
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("text") {
-                put("type", "string")
-                put("description", "Script to speak. OpenAI caps single calls at ~4096 characters.")
-            }
-            putJsonObject("voice") {
-                put("type", "string")
-                put("description", "Provider-scoped voice id (OpenAI: alloy, echo, fable, onyx, nova, shimmer). Default: alloy.")
-            }
-            putJsonObject("model") {
-                put("type", "string")
-                put("description", "Provider-scoped model id (OpenAI: tts-1 fast, tts-1-hd higher quality). Default: tts-1.")
-            }
-            putJsonObject("format") {
-                put("type", "string")
-                put("description", "Audio container: mp3 (default), opus, aac, flac, wav, pcm.")
-            }
-            putJsonObject("speed") {
-                put("type", "number")
-                put("description", "Playback speed multiplier (1.0 = normal). OpenAI accepts 0.25–4.0.")
-            }
-            putJsonObject("projectId") {
-                put("type", "string")
-                put("description", "Required to consult the project lockfile or to resolve consistencyBindingIds.")
-            }
-            putJsonObject("consistencyBindingIds") {
-                put("type", "array")
-                put(
-                    "description",
-                    "Character_ref node ids whose voiceId should drive voice selection. " +
-                        "null (default) = auto-pick all character_refs; [] = explicitly no binding; non-empty = use only listed nodes. " +
-                        "Ambiguous auto (multiple characters with voiceIds) silently falls back to the explicit voice input.",
-                )
-                putJsonObject("items") { put("type", "string") }
-            }
-            putJsonObject("language") {
-                put("type", "string")
-                put(
-                    "description",
-                    "Optional ISO-639-1 language hint (e.g. en / es / zh). Participates in the " +
-                        "lockfile cache key so the same text in a different language is a fresh " +
-                        "generation, not a stale hit.",
-                )
-            }
-        }
-        put("required", JsonArray(listOf(JsonPrimitive("text"))))
-        put("additionalProperties", false)
-    }
-
     @OptIn(ExperimentalUuidApi::class)
-    override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+    override suspend fun generate(input: Input, ctx: ToolContext): ToolResult<Output> {
         val pid = ctx.resolveProjectId(input.projectId)
-        AigcBudgetGuard.enforce(id, projectStore, pid, ctx)
+        AigcBudgetGuard.enforce(ID, projectStore, pid, ctx)
         val folded = resolveVoice(input, pid)
         val resolvedVoice = folded.voiceId ?: input.voice
 
         val inputHash = AigcPipeline.inputHash(
             listOf(
-                "tool" to id,
+                "tool" to ID,
                 "model" to input.model,
                 "voice" to resolvedVoice,
                 "format" to input.format,
@@ -223,7 +151,7 @@ class SynthesizeSpeechTool(
 
         if (!ctx.isReplay) {
             val cached = AigcPipeline.findCached(projectStore, pid, inputHash)
-            ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = id, hit = cached != null))
+            ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = ID, hit = cached != null))
             if (cached != null) {
                 return hit(cached, input, resolvedVoice, folded.appliedNodeIds)
             }
@@ -245,7 +173,7 @@ class SynthesizeSpeechTool(
             ctx = ctx,
             jobId = "tts-${inputHash.take(8)}",
             startMessage = "synthesising speech (${input.text.length} chars) with ${input.model}",
-            toolId = id,
+            toolId = ID,
             providerId = engines.firstOrNull()?.providerId,
         ) {
             synthesizeWithFallback(engines, request) { phase, providerId ->
@@ -285,11 +213,11 @@ class SynthesizeSpeechTool(
         )
 
         val baseInputs = JsonConfig.default.encodeToJsonElement(Input.serializer(), input).jsonObject
-        val costCents = AigcPricing.estimateCents(id, result.provenance, baseInputs)
+        val costCents = AigcPricing.estimateCents(ID, result.provenance, baseInputs)
         AigcPipeline.record(
             store = projectStore,
             projectId = pid,
-            toolId = id,
+            toolId = ID,
             inputHash = inputHash,
             assetId = newAssetId,
             provenance = result.provenance,
@@ -305,7 +233,7 @@ class SynthesizeSpeechTool(
             BusEvent.AigcCostRecorded(
                 sessionId = ctx.sessionId,
                 projectId = pid,
-                toolId = id,
+                toolId = ID,
                 assetId = newAssetId.value,
                 costCents = costCents,
             ),

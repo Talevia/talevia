@@ -50,7 +50,7 @@ class SynthesizeSpeechToolTest {
         val engine = FakeTtsEngine(fakeMp3)
         val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             SynthesizeSpeechTool.Input(
                 text = "hello world",
                 voice = "nova",
@@ -94,17 +94,17 @@ class SynthesizeSpeechToolTest {
             projectId = pid.value,
         )
 
-        val first = tool.execute(input, ctx())
+        val first = tool.generate(input, ctx())
         assertEquals(false, first.data.cacheHit)
         assertEquals(1, engine.calls)
 
-        val second = tool.execute(input, ctx())
+        val second = tool.generate(input, ctx())
         assertEquals(true, second.data.cacheHit)
         assertEquals(first.data.assetId, second.data.assetId)
         assertEquals(1, engine.calls, "cache hit must not call the engine again")
 
         // Change voice → miss + new asset.
-        val third = tool.execute(input.copy(voice = "echo"), ctx())
+        val third = tool.generate(input.copy(voice = "echo"), ctx())
         assertEquals(false, third.data.cacheHit)
         assertEquals(2, engine.calls)
         assertTrue(third.data.assetId != first.data.assetId)
@@ -120,10 +120,10 @@ class SynthesizeSpeechToolTest {
         val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
         val base = SynthesizeSpeechTool.Input(text = "one", projectId = pid.value)
 
-        tool.execute(base, ctx()) // warm
-        tool.execute(base.copy(text = "two"), ctx())
-        tool.execute(base.copy(speed = 1.25), ctx())
-        tool.execute(base.copy(format = "wav"), ctx())
+        tool.generate(base, ctx()) // warm
+        tool.generate(base.copy(text = "two"), ctx())
+        tool.generate(base.copy(speed = 1.25), ctx())
+        tool.generate(base.copy(format = "wav"), ctx())
 
         // 4 distinct hashes → 4 engine calls + 4 lockfile entries.
         assertEquals(4, engine.calls)
@@ -142,7 +142,7 @@ class SynthesizeSpeechToolTest {
         val engine = FakeTtsEngine(fakeMp3)
         val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             SynthesizeSpeechTool.Input(
                 text = "hello",
                 voice = "alloy", // caller forgot to update; binding should win.
@@ -173,7 +173,7 @@ class SynthesizeSpeechToolTest {
         val engine = FakeTtsEngine(fakeMp3)
         val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             SynthesizeSpeechTool.Input(
                 text = "hi",
                 voice = "alloy",
@@ -211,7 +211,7 @@ class SynthesizeSpeechToolTest {
         val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
 
         assertFailsWith<IllegalStateException> {
-            tool.execute(
+            tool.generate(
                 SynthesizeSpeechTool.Input(
                     text = "hi",
                     projectId = pid.value,
@@ -236,7 +236,7 @@ class SynthesizeSpeechToolTest {
         val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
 
         // First: bind + different explicit voice — resolved voice is "nova".
-        val bound = tool.execute(
+        val bound = tool.generate(
             SynthesizeSpeechTool.Input(
                 text = "same text",
                 voice = "alloy",
@@ -246,7 +246,7 @@ class SynthesizeSpeechToolTest {
             ctx(),
         )
         // Second: no binding but caller passes the already-resolved voice — should re-use the cache.
-        val unbound = tool.execute(
+        val unbound = tool.generate(
             SynthesizeSpeechTool.Input(
                 text = "same text",
                 voice = "nova",
@@ -265,7 +265,7 @@ class SynthesizeSpeechToolTest {
         val secondary = FakeTtsEngine(fakeMp3)
         val tool = SynthesizeSpeechTool(listOf(primary, secondary), FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
             ctx(),
         )
@@ -284,7 +284,7 @@ class SynthesizeSpeechToolTest {
         val tool = SynthesizeSpeechTool(listOf(first, second), FileBundleBlobWriter(store, fs), store)
 
         val ex = assertFailsWith<IllegalStateException> {
-            tool.execute(
+            tool.generate(
                 SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
                 ctx(),
             )
@@ -303,12 +303,12 @@ class SynthesizeSpeechToolTest {
         val tool = SynthesizeSpeechTool(listOf(primary, secondary), FileBundleBlobWriter(store, fs), store)
 
         // First call produces a lockfile entry via the primary.
-        tool.execute(
+        tool.generate(
             SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
             ctx(),
         )
         // Second call with identical inputs cache-hits — neither engine runs.
-        val second = tool.execute(
+        val second = tool.generate(
             SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
             ctx(),
         )

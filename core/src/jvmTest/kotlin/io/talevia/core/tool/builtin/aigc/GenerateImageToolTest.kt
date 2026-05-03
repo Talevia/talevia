@@ -77,7 +77,7 @@ class GenerateImageToolTest {
         val engine = fakeImageEngine(tinyPng, fixedModelVersion = "v1")
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             GenerateImageTool.Input(
                 prompt = "a cat",
                 model = "gpt-image-1",
@@ -113,7 +113,7 @@ class GenerateImageToolTest {
         val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             GenerateImageTool.Input(prompt = "no seed", width = 32, height = 32, seed = null, projectId = pid.value),
             ctx(),
         )
@@ -128,7 +128,7 @@ class GenerateImageToolTest {
         val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             GenerateImageTool.Input(prompt = "sizes", width = 128, height = 256, seed = 1L, projectId = pid.value),
             ctx(),
         )
@@ -149,7 +149,7 @@ class GenerateImageToolTest {
         val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             GenerateImageTool.Input(
                 prompt = "walking in the rain",
                 width = 64,
@@ -182,15 +182,15 @@ class GenerateImageToolTest {
             projectId = pid.value,
         )
 
-        val first = tool.execute(input, ctx())
+        val first = tool.generate(input, ctx())
         assertEquals(false, first.data.cacheHit)
 
-        val second = tool.execute(input, ctx())
+        val second = tool.generate(input, ctx())
         assertEquals(true, second.data.cacheHit, "identical inputs must hit the lockfile")
         assertEquals(first.data.assetId, second.data.assetId, "cache hit must reuse the same asset id")
 
         // Change a field (seed) — should be a miss and regenerate a distinct asset.
-        val third = tool.execute(input.copy(seed = 9999L), ctx())
+        val third = tool.generate(input.copy(seed = 9999L), ctx())
         assertEquals(false, third.data.cacheHit)
         assertTrue(third.data.assetId != first.data.assetId)
 
@@ -212,7 +212,7 @@ class GenerateImageToolTest {
 
         val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
-        tool.execute(
+        tool.generate(
             GenerateImageTool.Input(
                 prompt = "portrait",
                 seed = 7L,
@@ -243,7 +243,7 @@ class GenerateImageToolTest {
         val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             GenerateImageTool.Input(
                 prompt = "base",
                 seed = 9L,
@@ -288,7 +288,7 @@ class GenerateImageToolTest {
         val engine = fakeImageEngine(tinyPng)
         val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
 
-        val result = tool.execute(
+        val result = tool.generate(
             GenerateImageTool.Input(
                 prompt = "portrait",
                 width = 64,
@@ -332,7 +332,7 @@ class GenerateImageToolTest {
             consistencyBindingIds = listOf("mei"),
         )
 
-        val first = tool.execute(input, ctx())
+        val first = tool.generate(input, ctx())
         assertEquals(false, first.data.cacheHit)
 
         // Flip the LoRA weight on the bound character.
@@ -348,7 +348,7 @@ class GenerateImageToolTest {
                 )
         }
 
-        val second = tool.execute(input, ctx())
+        val second = tool.generate(input, ctx())
         assertEquals(false, second.data.cacheHit, "changing LoRA weight must bust the cache")
     }
 
@@ -366,7 +366,7 @@ class GenerateImageToolTest {
             messages = emptyList(),
         )
 
-        tool.execute(
+        tool.generate(
             GenerateImageTool.Input(
                 prompt = "who asked",
                 width = 32,

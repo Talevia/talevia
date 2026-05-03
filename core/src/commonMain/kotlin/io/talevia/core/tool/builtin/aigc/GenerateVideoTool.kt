@@ -11,25 +11,16 @@ import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.domain.ProjectStore
 import io.talevia.core.domain.Resolution
 import io.talevia.core.domain.source.consistency.FoldedPrompt
-import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.BundleMediaPathResolver
 import io.talevia.core.platform.VideoGenEngine
 import io.talevia.core.platform.VideoGenRequest
-import io.talevia.core.tool.Tool
-import io.talevia.core.tool.ToolApplicability
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 import kotlinx.datetime.Clock
-import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.put
-import kotlinx.serialization.json.putJsonObject
 import kotlinx.serialization.serializer
 import kotlin.time.Duration.Companion.seconds
 import kotlin.uuid.ExperimentalUuidApi
@@ -71,9 +62,11 @@ class GenerateVideoTool(
     private val engine: VideoGenEngine,
     private val bundleBlobWriter: BundleBlobWriter,
     private val projectStore: ProjectStore,
-) : Tool<GenerateVideoTool.Input, GenerateVideoTool.Output>, VideoAigcGenerator {
+) : VideoAigcGenerator {
 
-    override suspend fun generate(input: Input, ctx: ToolContext): ToolResult<Output> = execute(input, ctx)
+    companion object {
+        const val ID = "generate_video"
+    }
 
     @Serializable
     data class Input(
@@ -114,68 +107,10 @@ class GenerateVideoTool(
         val cacheHit: Boolean = false,
     )
 
-    override val id: String = "generate_video"
-    override val helpText: String =
-        "Generate a short video from a text prompt via an AIGC provider and import it as a project asset. " +
-            "Bytes land in the project bundle's media/ directory so the asset travels with the project. " +
-            "Records seed + model in the project lockfile so a second call with identical inputs is a cache hit. " +
-            "Pass consistencyBindingIds to reuse character / style / brand source nodes across shots. " +
-            "Drop the returned assetId onto a video track via add_clip."
-    override val inputSerializer: KSerializer<Input> = serializer()
-    override val outputSerializer: KSerializer<Output> = serializer()
-    override val permission: PermissionSpec = PermissionSpec.fixed("aigc.generate")
-    override val applicability: ToolApplicability = ToolApplicability.RequiresProjectBinding
-
-    override val inputSchema: JsonObject = buildJsonObject {
-        put("type", "object")
-        putJsonObject("properties") {
-            putJsonObject("prompt") {
-                put("type", "string")
-                put("description", "Text description of the video to generate.")
-            }
-            putJsonObject("model") {
-                put("type", "string")
-                put("description", "Provider-scoped model id (default: sora-2).")
-            }
-            putJsonObject("width") {
-                put("type", "integer")
-                put("description", "Output video width in pixels (default: 1280).")
-            }
-            putJsonObject("height") {
-                put("type", "integer")
-                put("description", "Output video height in pixels (default: 720).")
-            }
-            putJsonObject("durationSeconds") {
-                put("type", "number")
-                put("description", "Target duration in seconds. Default 5. Provider may clamp/round to a supported value (Sora 2 accepts 4, 8, 12).")
-            }
-            putJsonObject("seed") {
-                put("type", "integer")
-                put("description", "Optional seed for reproducibility. If omitted the tool picks one client-side so provenance is still complete. Explicit seeds make cache hits meaningful.")
-            }
-            putJsonObject("projectId") {
-                put("type", "string")
-                put("description", "Required when consistencyBindingIds is non-empty or when the project lockfile cache should be consulted.")
-            }
-            putJsonObject("consistencyBindingIds") {
-                put("type", "array")
-                put(
-                    "description",
-                    "Source node ids (kind core.consistency.*) to fold into the prompt. " +
-                        "null (default) = auto-fold all project consistency nodes; [] = explicitly no binding; " +
-                        "non-empty = fold only the listed nodes.",
-                )
-                putJsonObject("items") { put("type", "string") }
-            }
-        }
-        put("required", JsonArray(listOf(JsonPrimitive("prompt"))))
-        put("additionalProperties", false)
-    }
-
     @OptIn(ExperimentalUuidApi::class)
-    override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
+    override suspend fun generate(input: Input, ctx: ToolContext): ToolResult<Output> {
         val pid = ctx.resolveProjectId(input.projectId)
-        AigcBudgetGuard.enforce(id, projectStore, pid, ctx)
+        AigcBudgetGuard.enforce(ID, projectStore, pid, ctx)
         val seed = AigcPipeline.ensureSeed(input.seed)
         val folded = resolveConsistency(input, pid)
 
@@ -184,7 +119,7 @@ class GenerateVideoTool(
 
         val inputHash = AigcPipeline.inputHash(
             listOf(
-                "tool" to id,
+                "tool" to ID,
                 "model" to input.model,
                 "w" to input.width.toString(),
                 "h" to input.height.toString(),
@@ -201,7 +136,7 @@ class GenerateVideoTool(
 
         if (!ctx.isReplay) {
             val cached = AigcPipeline.findCached(projectStore, pid, inputHash)
-            ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = id, hit = cached != null))
+            ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = ID, hit = cached != null))
             if (cached != null) {
                 return hit(cached, folded, input)
             }
@@ -212,7 +147,7 @@ class GenerateVideoTool(
             jobId = "gen-video-${inputHash.take(8)}",
             startMessage = "generating ${input.durationSeconds}s video " +
                 "(${input.width}x${input.height}) with ${input.model}",
-            toolId = id,
+            toolId = ID,
             providerId = engine.providerId,
         ) {
             engine.generate(
@@ -255,11 +190,11 @@ class GenerateVideoTool(
         )
 
         val baseInputs = JsonConfig.default.encodeToJsonElement(Input.serializer(), input).jsonObject
-        val costCents = AigcPricing.estimateCents(id, result.provenance, baseInputs)
+        val costCents = AigcPricing.estimateCents(ID, result.provenance, baseInputs)
         AigcPipeline.record(
             store = projectStore,
             projectId = pid,
-            toolId = id,
+            toolId = ID,
             inputHash = inputHash,
             assetId = newAssetId,
             provenance = result.provenance,
@@ -276,7 +211,7 @@ class GenerateVideoTool(
             BusEvent.AigcCostRecorded(
                 sessionId = ctx.sessionId,
                 projectId = pid,
-                toolId = id,
+                toolId = ID,
                 assetId = newAssetId.value,
                 costCents = costCents,
             ),
