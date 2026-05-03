@@ -44,7 +44,7 @@ internal suspend fun executeGcLockfile(
             title = if (input.dryRun) "gc lockfile (dry run)" else "gc lockfile",
             outputForLlm = "No GC policy set on project ${pid.value} (both maxAgeDays and " +
                 "keepLatestPerTool are null). Nothing to GC. Call " +
-                "project_maintenance_action(action=prune-lockfile) for an orphan sweep, or pass a policy argument.",
+                "project_action(kind=\"maintenance\", args={action=\"prune-lockfile\"}) for an orphan sweep, or pass a policy argument.",
             data = ProjectMaintenanceActionTool.Output(
                 projectId = pid.value,
                 action = "gc-lockfile",
