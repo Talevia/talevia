@@ -63,7 +63,7 @@ class OpenAiImageGenEngine(
     // wire body), so a single API call returns N distinct images.
     // `aigc-multi-variant-phase3-openai-native-n` (cycle 33): the
     // [AigcGenerateTool] dispatcher reads this flag to decide whether to
-    // batch-dispatch via [GenerateImageTool.executeBatch] or fall back
+    // batch-dispatch via [AigcImageGenerator.executeBatch] or fall back
     // to the sequential N×1 loop.
     override val supportsNativeBatch: Boolean = true
 

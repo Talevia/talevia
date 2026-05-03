@@ -29,7 +29,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 
-class GenerateImageToolTest {
+class AigcImageGeneratorTest {
 
     /** Minimal valid 1x1 PNG — 67 bytes of IHDR + IDAT + IEND. */
     private val tinyPng = byteArrayOf(
@@ -75,10 +75,10 @@ class GenerateImageToolTest {
         val bundleRoot = "/projects/img".toPath()
         val pid = store.createAt(path = bundleRoot, title = "img").id
         val engine = fakeImageEngine(tinyPng, fixedModelVersion = "v1")
-        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            GenerateImageTool.Input(
+            AigcImageGenerator.Input(
                 prompt = "a cat",
                 model = "gpt-image-1",
                 width = 64,
@@ -111,10 +111,10 @@ class GenerateImageToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/seed".toPath(), title = "seed").id
         val engine = fakeImageEngine(tinyPng)
-        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            GenerateImageTool.Input(prompt = "no seed", width = 32, height = 32, seed = null, projectId = pid.value),
+            AigcImageGenerator.Input(prompt = "no seed", width = 32, height = 32, seed = null, projectId = pid.value),
             ctx(),
         )
 
@@ -126,10 +126,10 @@ class GenerateImageToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/dim".toPath(), title = "dim").id
         val engine = fakeImageEngine(tinyPng)
-        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            GenerateImageTool.Input(prompt = "sizes", width = 128, height = 256, seed = 1L, projectId = pid.value),
+            AigcImageGenerator.Input(prompt = "sizes", width = 128, height = 256, seed = 1L, projectId = pid.value),
             ctx(),
         )
 
@@ -147,10 +147,10 @@ class GenerateImageToolTest {
             )
         }
         val engine = fakeImageEngine(tinyPng)
-        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            GenerateImageTool.Input(
+            AigcImageGenerator.Input(
                 prompt = "walking in the rain",
                 width = 64,
                 height = 48,
@@ -173,8 +173,8 @@ class GenerateImageToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/cache".toPath(), title = "cache").id
         val engine = fakeImageEngine(tinyPng, fixedModelVersion = "v1")
-        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
-        val input = GenerateImageTool.Input(
+        val tool = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
+        val input = AigcImageGenerator.Input(
             prompt = "a cat on a mat",
             width = 64,
             height = 48,
@@ -211,9 +211,9 @@ class GenerateImageToolTest {
         val expectedHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
 
         val engine = fakeImageEngine(tinyPng)
-        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
         tool.generate(
-            GenerateImageTool.Input(
+            AigcImageGenerator.Input(
                 prompt = "portrait",
                 seed = 7L,
                 projectId = pid.value,
@@ -241,10 +241,10 @@ class GenerateImageToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/ghost".toPath(), title = "ghost").id
         val engine = fakeImageEngine(tinyPng)
-        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            GenerateImageTool.Input(
+            AigcImageGenerator.Input(
                 prompt = "base",
                 seed = 9L,
                 projectId = pid.value,
@@ -286,10 +286,10 @@ class GenerateImageToolTest {
             )
         }
         val engine = fakeImageEngine(tinyPng)
-        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            GenerateImageTool.Input(
+            AigcImageGenerator.Input(
                 prompt = "portrait",
                 width = 64,
                 height = 48,
@@ -324,8 +324,8 @@ class GenerateImageToolTest {
             )
         }
         val engine = fakeImageEngine(tinyPng)
-        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
-        val input = GenerateImageTool.Input(
+        val tool = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
+        val input = AigcImageGenerator.Input(
             prompt = "portrait",
             seed = 42L,
             projectId = pid.value,
@@ -356,7 +356,7 @@ class GenerateImageToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/origin".toPath(), title = "origin").id
         val engine = fakeImageEngine(tinyPng)
-        val tool = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
         val ctxWithMsg = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("msg-42"),
@@ -367,7 +367,7 @@ class GenerateImageToolTest {
         )
 
         tool.generate(
-            GenerateImageTool.Input(
+            AigcImageGenerator.Input(
                 prompt = "who asked",
                 width = 32,
                 height = 32,

@@ -67,7 +67,7 @@ import kotlin.uuid.Uuid
  *   provider history is auditable after the fact. `require(engines.isNotEmpty())`:
  *   tool registration is gated on at least one wired engine.
  */
-class SynthesizeSpeechTool(
+class AigcSpeechGenerator(
     private val engines: List<TtsEngine>,
     private val bundleBlobWriter: BundleBlobWriter,
     private val projectStore: ProjectStore,
@@ -79,7 +79,7 @@ class SynthesizeSpeechTool(
 
     init {
         require(engines.isNotEmpty()) {
-            "SynthesizeSpeechTool requires at least one TtsEngine; got empty list."
+            "AigcSpeechGenerator requires at least one TtsEngine; got empty list."
         }
     }
 

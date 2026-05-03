@@ -21,7 +21,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class GenerateMusicToolTest {
+class AigcMusicGeneratorTest {
 
     private val tinyMp3 = byteArrayOf(0xFF.toByte(), 0xFB.toByte(), 0x90.toByte(), 0x00)
 
@@ -47,10 +47,10 @@ class GenerateMusicToolTest {
         val bundleRoot = "/projects/demo".toPath()
         val pid = store.createAt(path = bundleRoot, title = "demo").id
         val engine = FakeMusicGenEngine(tinyMp3)
-        val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcMusicGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            GenerateMusicTool.Input(
+            AigcMusicGenerator.Input(
                 prompt = "warm acoustic, slow tempo",
                 model = "musicgen-melody",
                 durationSeconds = 15.0,
@@ -88,10 +88,10 @@ class GenerateMusicToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/seed".toPath(), title = "seed").id
         val engine = FakeMusicGenEngine(tinyMp3)
-        val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcMusicGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            GenerateMusicTool.Input(prompt = "no seed", projectId = pid.value),
+            AigcMusicGenerator.Input(prompt = "no seed", projectId = pid.value),
             ctx(),
         )
 
@@ -109,10 +109,10 @@ class GenerateMusicToolTest {
             )
         }
         val engine = FakeMusicGenEngine(tinyMp3)
-        val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcMusicGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            GenerateMusicTool.Input(
+            AigcMusicGenerator.Input(
                 prompt = "late-night diner",
                 seed = 7L,
                 projectId = pid.value,
@@ -134,7 +134,7 @@ class GenerateMusicToolTest {
         // Shared `WarmingMusicGenEngine` (cycle 127 fake-extract phase 2)
         // pinned to the legacy providerId the assertion below checks.
         val engine = WarmingMusicGenEngine(tinyMp3, providerId = "warming-fake")
-        val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcMusicGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val published = mutableListOf<BusEvent>()
         val warmupCtx = ToolContext(
@@ -148,7 +148,7 @@ class GenerateMusicToolTest {
         )
 
         tool.generate(
-            GenerateMusicTool.Input(prompt = "x", seed = 1L, projectId = pid.value),
+            AigcMusicGenerator.Input(prompt = "x", seed = 1L, projectId = pid.value),
             warmupCtx,
         )
 
@@ -167,9 +167,9 @@ class GenerateMusicToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/cache".toPath(), title = "cache").id
         val engine = FakeMusicGenEngine(tinyMp3)
-        val tool = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcMusicGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
-        val input = GenerateMusicTool.Input(
+        val input = AigcMusicGenerator.Input(
             prompt = "warm acoustic",
             durationSeconds = 10.0,
             seed = 1234L,

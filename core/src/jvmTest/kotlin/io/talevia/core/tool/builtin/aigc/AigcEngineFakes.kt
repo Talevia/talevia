@@ -31,8 +31,8 @@ import kotlinx.serialization.json.buildJsonObject
  * (`debt-aigc-test-fake-extract`). Each engine returns a fixed asset
  * payload on every call and captures `lastRequest` + `calls` so tests
  * can assert what was sent. Used by the simple happy-path test cases
- * across `GenerateImageToolTest` / `GenerateVideoToolTest` /
- * `GenerateMusicToolTest` / `SynthesizeSpeechToolTest` /
+ * across `AigcImageGeneratorTest` / `AigcVideoGeneratorTest` /
+ * `AigcMusicGeneratorTest` / `AigcSpeechGeneratorTest` /
  * `UpscaleAssetToolTest`.
  *
  * Tests with engine-specific state — fallback chains, warmup events,
@@ -305,7 +305,7 @@ class CountingImageGenEngine(
 /**
  * Image-gen fake that **honours `request.n`** and reports
  * `supportsNativeBatch = true`. Use this to exercise
- * [io.talevia.core.tool.builtin.aigc.GenerateImageTool.executeBatch] —
+ * [io.talevia.core.tool.builtin.aigc.AigcImageGenerator.executeBatch] —
  * the cycle 33 native-batch path that issues a single provider call
  * for `n>1`. [calls] increments by 1 per `generate(...)` invocation
  * (so a successful batch of 4 looks like `calls=1`, not `calls=4`),

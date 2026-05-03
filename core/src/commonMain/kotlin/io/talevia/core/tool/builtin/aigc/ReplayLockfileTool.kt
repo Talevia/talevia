@@ -167,7 +167,7 @@ class ReplayLockfileTool(
             // still carry the legacy toolId and can't be replayed
             // through the dispatcher cleanly because `baseInputs` is
             // the inner tool's Input shape (no `kind` discriminator,
-            // and SynthesizeSpeechTool used `text` where the dispatcher
+            // and AigcSpeechGenerator used `text` where the dispatcher
             // expects `prompt`). Surface the situation as a precise
             // error rather than the generic "tool not found" so the
             // user / agent knows the entry pre-dates the consolidation

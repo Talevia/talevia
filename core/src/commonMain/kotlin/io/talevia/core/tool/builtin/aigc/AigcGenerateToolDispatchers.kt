@@ -52,7 +52,7 @@ internal suspend fun dispatchImage(
     ctx: ToolContext,
 ): ToolResult<AigcGenerateTool.Output> {
     val tool = image ?: error("aigc_generate(kind=image) — image generation engine not configured")
-    val inner = GenerateImageTool.Input(
+    val inner = AigcImageGenerator.Input(
         prompt = input.prompt,
         model = input.model,
         width = input.width,
@@ -115,7 +115,7 @@ internal suspend fun dispatchVideo(
     ctx: ToolContext,
 ): ToolResult<AigcGenerateTool.Output> {
     val tool = video ?: error("aigc_generate(kind=video) — video generation engine not configured")
-    val inner = GenerateVideoTool.Input(
+    val inner = AigcVideoGenerator.Input(
         prompt = input.prompt,
         model = input.model,
         width = input.width,
@@ -170,7 +170,7 @@ internal suspend fun dispatchMusic(
     ctx: ToolContext,
 ): ToolResult<AigcGenerateTool.Output> {
     val tool = music ?: error("aigc_generate(kind=music) — music generation engine not configured")
-    val inner = GenerateMusicTool.Input(
+    val inner = AigcMusicGenerator.Input(
         prompt = input.prompt,
         durationSeconds = input.durationSeconds,
         model = input.model,
@@ -216,7 +216,7 @@ internal suspend fun dispatchSpeech(
     ctx: ToolContext,
 ): ToolResult<AigcGenerateTool.Output> {
     val tool = speech ?: error("aigc_generate(kind=speech) — TTS engine not configured")
-    val inner = SynthesizeSpeechTool.Input(
+    val inner = AigcSpeechGenerator.Input(
         text = input.prompt,
         voice = input.voice,
         model = input.model,

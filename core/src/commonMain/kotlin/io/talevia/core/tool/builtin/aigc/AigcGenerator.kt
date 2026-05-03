@@ -16,11 +16,11 @@ import io.talevia.core.tool.ToolResult
  * provider call sites into bespoke generator bodies.
  *
  * Why a sealed interface instead of one umbrella interface with a `kind`
- * enum: per-kind input + output types (e.g. `GenerateImageTool.Input` vs
- * `GenerateVideoTool.Input`) make a single-method
+ * enum: per-kind input + output types (e.g. `AigcImageGenerator.Input` vs
+ * `AigcVideoGenerator.Input`) make a single-method
  * `generate(input: Any, ctx): ToolResult<Any>` shape lose the type
  * discipline the dispatcher relies on. Per-kind sub-interface gives the
- * dispatcher a typed `generate(input: GenerateImageTool.Input, ctx)`
+ * dispatcher a typed `generate(input: AigcImageGenerator.Input, ctx)`
  * signature without an `Any`-cast at the call site. Sealed marker keeps
  * the family closed — no rogue impls outside this package.
  */
@@ -36,34 +36,34 @@ sealed interface ImageAigcGenerator : AigcGenerator {
     val engine: ImageGenEngine
 
     suspend fun generate(
-        input: GenerateImageTool.Input,
+        input: AigcImageGenerator.Input,
         ctx: ToolContext,
-    ): ToolResult<GenerateImageTool.Output>
+    ): ToolResult<AigcImageGenerator.Output>
 
     suspend fun generateBatch(
-        input: GenerateImageTool.Input,
+        input: AigcImageGenerator.Input,
         ctx: ToolContext,
         variantCount: Int,
-    ): List<ToolResult<GenerateImageTool.Output>>
+    ): List<ToolResult<AigcImageGenerator.Output>>
 }
 
 sealed interface VideoAigcGenerator : AigcGenerator {
     suspend fun generate(
-        input: GenerateVideoTool.Input,
+        input: AigcVideoGenerator.Input,
         ctx: ToolContext,
-    ): ToolResult<GenerateVideoTool.Output>
+    ): ToolResult<AigcVideoGenerator.Output>
 }
 
 sealed interface MusicAigcGenerator : AigcGenerator {
     suspend fun generate(
-        input: GenerateMusicTool.Input,
+        input: AigcMusicGenerator.Input,
         ctx: ToolContext,
-    ): ToolResult<GenerateMusicTool.Output>
+    ): ToolResult<AigcMusicGenerator.Output>
 }
 
 sealed interface SpeechAigcGenerator : AigcGenerator {
     suspend fun generate(
-        input: SynthesizeSpeechTool.Input,
+        input: AigcSpeechGenerator.Input,
         ctx: ToolContext,
-    ): ToolResult<SynthesizeSpeechTool.Output>
+    ): ToolResult<AigcSpeechGenerator.Output>
 }

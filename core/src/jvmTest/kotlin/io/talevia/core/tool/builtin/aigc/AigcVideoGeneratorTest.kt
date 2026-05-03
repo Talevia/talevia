@@ -25,7 +25,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class GenerateVideoToolTest {
+class AigcVideoGeneratorTest {
 
     /** A handful of bytes standing in for an mp4 body — the tool does not parse it. */
     private val tinyMp4 = byteArrayOf(0, 0, 0, 0x1c, 'f'.code.toByte(), 't'.code.toByte(), 'y'.code.toByte(), 'p'.code.toByte())
@@ -58,10 +58,10 @@ class GenerateVideoToolTest {
         val bundleRoot = "/projects/vid".toPath()
         val pid = store.createAt(path = bundleRoot, title = "vid").id
         val engine = fakeVideoEngine(tinyMp4, fixedModelVersion = "v1")
-        val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcVideoGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            GenerateVideoTool.Input(
+            AigcVideoGenerator.Input(
                 prompt = "a tracking shot over the ocean",
                 model = "sora-2",
                 width = 1280,
@@ -95,10 +95,10 @@ class GenerateVideoToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/seed".toPath(), title = "seed").id
         val engine = fakeVideoEngine(tinyMp4)
-        val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcVideoGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            GenerateVideoTool.Input(prompt = "no seed", seed = null, projectId = pid.value),
+            AigcVideoGenerator.Input(prompt = "no seed", seed = null, projectId = pid.value),
             ctx(),
         )
 
@@ -116,10 +116,10 @@ class GenerateVideoToolTest {
             )
         }
         val engine = fakeVideoEngine(tinyMp4)
-        val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcVideoGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            GenerateVideoTool.Input(
+            AigcVideoGenerator.Input(
                 prompt = "walking in the rain",
                 seed = 7L,
                 projectId = pid.value,
@@ -140,9 +140,9 @@ class GenerateVideoToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/cache".toPath(), title = "cache").id
         val engine = fakeVideoEngine(tinyMp4)
-        val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcVideoGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
-        val input = GenerateVideoTool.Input(
+        val input = AigcVideoGenerator.Input(
             prompt = "a cat on a mat",
             durationSeconds = 4.0,
             seed = 1234L,
@@ -177,9 +177,9 @@ class GenerateVideoToolTest {
         val expectedHash = store.get(pid)!!.source.deepContentHashOf(SourceNodeId("mei"))
 
         val engine = fakeVideoEngine(tinyMp4)
-        val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcVideoGenerator(engine, FileBundleBlobWriter(store, fs), store)
         tool.generate(
-            GenerateVideoTool.Input(
+            AigcVideoGenerator.Input(
                 prompt = "portrait pan",
                 seed = 7L,
                 projectId = pid.value,
@@ -226,10 +226,10 @@ class GenerateVideoToolTest {
             )
         }
         val engine = fakeVideoEngine(tinyMp4)
-        val tool = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcVideoGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            GenerateVideoTool.Input(
+            AigcVideoGenerator.Input(
                 prompt = "pan across Mei",
                 seed = 1L,
                 projectId = pid.value,

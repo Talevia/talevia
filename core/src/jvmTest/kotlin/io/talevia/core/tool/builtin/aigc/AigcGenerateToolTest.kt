@@ -23,8 +23,8 @@ import kotlin.test.assertTrue
  *
  * The underlying per-kind correctness (lockfile cache, consistency
  * folding, asset persist) is exhaustively tested by
- * `GenerateImageToolTest` / `GenerateVideoToolTest` /
- * `GenerateMusicToolTest` / `SynthesizeSpeechToolTest` — this suite
+ * `AigcImageGeneratorTest` / `AigcVideoGeneratorTest` /
+ * `AigcMusicGeneratorTest` / `AigcSpeechGeneratorTest` — this suite
  * only verifies the dispatcher faithfully relays input + projects
  * output.
  */
@@ -48,7 +48,7 @@ class AigcGenerateToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/img".toPath(), title = "img").id
         val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image")
-        val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val image = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
         val tool = AigcGenerateTool(image = image)
 
         val out = tool.execute(
@@ -67,7 +67,7 @@ class AigcGenerateToolTest {
         assertEquals(42L, out.seed)
         assertEquals(512, out.width)
         assertEquals(512, out.height)
-        assertEquals(1, engine.calls, "inner GenerateImageTool was dispatched exactly once")
+        assertEquals(1, engine.calls, "inner AigcImageGenerator was dispatched exactly once")
         // Speech-only fields are null on image output.
         assertEquals(null, out.voice)
         assertEquals(null, out.format)
@@ -79,7 +79,7 @@ class AigcGenerateToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/vid".toPath(), title = "vid").id
         val engine = OneShotVideoGenEngine(tinyMp4, providerId = "fake-video")
-        val video = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
+        val video = AigcVideoGenerator(engine, FileBundleBlobWriter(store, fs), store)
         val tool = AigcGenerateTool(video = video)
 
         val out = tool.execute(
@@ -104,13 +104,13 @@ class AigcGenerateToolTest {
 
     @Test fun speechKindMapsTextThroughPromptField() = runTest {
         // For speech: the dispatcher's `prompt` carries the spoken text;
-        // it gets relayed to SynthesizeSpeechTool.Input.text. Verify the
+        // it gets relayed to AigcSpeechGenerator.Input.text. Verify the
         // round-trip preserves voice / format and surfaces the speech-
         // specific output fields.
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/spk".toPath(), title = "spk").id
         val engine = OneShotTtsEngine(tinyMp3, providerId = "fake-tts")
-        val speech = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
+        val speech = AigcSpeechGenerator(engine, FileBundleBlobWriter(store, fs), store)
         val tool = AigcGenerateTool(speech = speech)
 
         val out = tool.execute(
@@ -159,7 +159,7 @@ class AigcGenerateToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/mix".toPath(), title = "mix").id
         val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image")
-        val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val image = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
         val tool = AigcGenerateTool(image = image) // video / music / speech absent
 
         // Image kind succeeds.
@@ -189,7 +189,7 @@ class AigcGenerateToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/n1".toPath(), title = "n1").id
         val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image")
-        val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val image = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
         val tool = AigcGenerateTool(image = image)
 
         val out = tool.execute(
@@ -215,7 +215,7 @@ class AigcGenerateToolTest {
             providerId = "fake-counting",
             bytesForCall = { call -> byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, call.toByte()) },
         )
-        val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val image = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
         val tool = AigcGenerateTool(image = image)
 
         val out = tool.execute(
@@ -254,7 +254,7 @@ class AigcGenerateToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/n3vid".toPath(), title = "n3vid").id
         val engine = OneShotVideoGenEngine(tinyMp4, providerId = "fake-video")
-        val video = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
+        val video = AigcVideoGenerator(engine, FileBundleBlobWriter(store, fs), store)
         val tool = AigcGenerateTool(video = video)
 
         val out = tool.execute(
@@ -281,7 +281,7 @@ class AigcGenerateToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/zero".toPath(), title = "zero").id
         val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image")
-        val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val image = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
         val tool = AigcGenerateTool(image = image)
 
         val ex = assertFails {
@@ -299,7 +299,7 @@ class AigcGenerateToolTest {
     @Test fun nativeBatchEngineFiresOneProviderCallForVariantCount4() = runTest {
         // Cycle 33: when the underlying ImageGenEngine reports
         // `supportsNativeBatch = true` (OpenAI image-gen in production),
-        // the dispatcher routes through `GenerateImageTool.executeBatch`
+        // the dispatcher routes through `AigcImageGenerator.executeBatch`
         // which issues a **single** provider call with `n=variantCount`
         // instead of N separate `n=1` calls. The cycle 29 sequential
         // path is preserved as the fallback (asserted by
@@ -311,7 +311,7 @@ class AigcGenerateToolTest {
             providerId = "fake-native-batch",
             bytesForVariant = { call, v -> byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, call.toByte(), v.toByte()) },
         )
-        val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val image = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
         val tool = AigcGenerateTool(image = image)
 
         val out = tool.execute(
@@ -348,7 +348,7 @@ class AigcGenerateToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/big".toPath(), title = "big").id
         val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image")
-        val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val image = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
         val tool = AigcGenerateTool(image = image)
 
         val ex = assertFails {

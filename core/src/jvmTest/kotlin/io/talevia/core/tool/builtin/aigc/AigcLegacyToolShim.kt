@@ -48,30 +48,30 @@ internal class AigcLegacyToolShim<I : Any, O : Any>(
     override suspend fun execute(input: I, ctx: ToolContext): ToolResult<O> = executeFn(input, ctx)
 }
 
-internal fun toolShimForImage(gen: ImageAigcGenerator): Tool<GenerateImageTool.Input, GenerateImageTool.Output> =
+internal fun toolShimForImage(gen: ImageAigcGenerator): Tool<AigcImageGenerator.Input, AigcImageGenerator.Output> =
     AigcLegacyToolShim(
         toolId = "generate_image",
-        inputSerializer = GenerateImageTool.Input.serializer(),
-        outputSerializer = GenerateImageTool.Output.serializer(),
+        inputSerializer = AigcImageGenerator.Input.serializer(),
+        outputSerializer = AigcImageGenerator.Output.serializer(),
     ) { input, ctx -> gen.generate(input, ctx) }
 
-internal fun toolShimForVideo(gen: VideoAigcGenerator): Tool<GenerateVideoTool.Input, GenerateVideoTool.Output> =
+internal fun toolShimForVideo(gen: VideoAigcGenerator): Tool<AigcVideoGenerator.Input, AigcVideoGenerator.Output> =
     AigcLegacyToolShim(
         toolId = "generate_video",
-        inputSerializer = GenerateVideoTool.Input.serializer(),
-        outputSerializer = GenerateVideoTool.Output.serializer(),
+        inputSerializer = AigcVideoGenerator.Input.serializer(),
+        outputSerializer = AigcVideoGenerator.Output.serializer(),
     ) { input, ctx -> gen.generate(input, ctx) }
 
-internal fun toolShimForMusic(gen: MusicAigcGenerator): Tool<GenerateMusicTool.Input, GenerateMusicTool.Output> =
+internal fun toolShimForMusic(gen: MusicAigcGenerator): Tool<AigcMusicGenerator.Input, AigcMusicGenerator.Output> =
     AigcLegacyToolShim(
         toolId = "generate_music",
-        inputSerializer = GenerateMusicTool.Input.serializer(),
-        outputSerializer = GenerateMusicTool.Output.serializer(),
+        inputSerializer = AigcMusicGenerator.Input.serializer(),
+        outputSerializer = AigcMusicGenerator.Output.serializer(),
     ) { input, ctx -> gen.generate(input, ctx) }
 
-internal fun toolShimForSpeech(gen: SpeechAigcGenerator): Tool<SynthesizeSpeechTool.Input, SynthesizeSpeechTool.Output> =
+internal fun toolShimForSpeech(gen: SpeechAigcGenerator): Tool<AigcSpeechGenerator.Input, AigcSpeechGenerator.Output> =
     AigcLegacyToolShim(
         toolId = "synthesize_speech",
-        inputSerializer = SynthesizeSpeechTool.Input.serializer(),
-        outputSerializer = SynthesizeSpeechTool.Output.serializer(),
+        inputSerializer = AigcSpeechGenerator.Input.serializer(),
+        outputSerializer = AigcSpeechGenerator.Output.serializer(),
     ) { input, ctx -> gen.generate(input, ctx) }

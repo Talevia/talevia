@@ -8,7 +8,7 @@ import io.talevia.core.platform.BundleMediaPathResolver
 
 /**
  * Consistency-fold + reference-asset-path resolution helpers for
- * [GenerateImageTool] (`debt-split-generate-image-tool`, cycle 37).
+ * [AigcImageGenerator] (`debt-split-generate-image-tool`, cycle 37).
  * Extracted from the main file because both [resolveConsistency] and
  * [resolveReferenceAssetPaths] are called by both `execute()` (single-
  * variant) and `executeBatch()` (multi-variant) — keeping them together
@@ -17,11 +17,11 @@ import io.talevia.core.platform.BundleMediaPathResolver
  *
  * **Axis**: this file grows with consistency-fold complexity (per-genre
  * fold extensions, new SourceNode kinds becoming bindable, etc.). It
- * stays decoupled from the per-flow orchestration in `GenerateImageTool.kt`
- * + `GenerateImageToolBatch.kt`.
+ * stays decoupled from the per-flow orchestration in `AigcImageGenerator.kt`
+ * + `AigcImageGeneratorBatch.kt`.
  */
 
-internal suspend fun GenerateImageTool.resolveReferenceAssetPaths(
+internal suspend fun AigcImageGenerator.resolveReferenceAssetPaths(
     pid: ProjectId,
     assetIds: List<String>,
 ): List<String> {
@@ -37,8 +37,8 @@ internal suspend fun GenerateImageTool.resolveReferenceAssetPaths(
     return assetIds.map { resolver.resolve(AssetId(it)) }
 }
 
-internal suspend fun GenerateImageTool.resolveConsistency(
-    input: GenerateImageTool.Input,
+internal suspend fun AigcImageGenerator.resolveConsistency(
+    input: AigcImageGenerator.Input,
     pid: ProjectId,
 ): FoldedPrompt {
     val bindingIds = input.consistencyBindingIds

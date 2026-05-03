@@ -20,12 +20,12 @@ import io.talevia.core.platform.VisionEngine
 import io.talevia.core.session.SessionStore
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.aigc.AigcGenerateTool
+import io.talevia.core.tool.builtin.aigc.AigcImageGenerator
+import io.talevia.core.tool.builtin.aigc.AigcMusicGenerator
+import io.talevia.core.tool.builtin.aigc.AigcSpeechGenerator
+import io.talevia.core.tool.builtin.aigc.AigcVideoGenerator
 import io.talevia.core.tool.builtin.aigc.CompareAigcCandidatesTool
-import io.talevia.core.tool.builtin.aigc.GenerateImageTool
-import io.talevia.core.tool.builtin.aigc.GenerateMusicTool
-import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
 import io.talevia.core.tool.builtin.aigc.ReplayLockfileTool
-import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
 import io.talevia.core.tool.builtin.aigc.UpscaleAssetTool
 import io.talevia.core.tool.builtin.fs.EditTool
 import io.talevia.core.tool.builtin.fs.GlobTool
@@ -277,10 +277,10 @@ fun ToolRegistry.registerAigcTools(
     bundleBlobWriter: BundleBlobWriter,
     projects: ProjectStore,
 ) {
-    val imageTool = imageGen?.let { GenerateImageTool(it, bundleBlobWriter, projects) }
-    val videoTool = videoGen?.let { GenerateVideoTool(it, bundleBlobWriter, projects) }
-    val musicTool = musicGen?.let { GenerateMusicTool(it, bundleBlobWriter, projects) }
-    val speechTool = tts?.let { SynthesizeSpeechTool(it, bundleBlobWriter, projects) }
+    val imageTool = imageGen?.let { AigcImageGenerator(it, bundleBlobWriter, projects) }
+    val videoTool = videoGen?.let { AigcVideoGenerator(it, bundleBlobWriter, projects) }
+    val musicTool = musicGen?.let { AigcMusicGenerator(it, bundleBlobWriter, projects) }
+    val speechTool = tts?.let { AigcSpeechGenerator(it, bundleBlobWriter, projects) }
     upscale?.let { register(UpscaleAssetTool(it, bundleBlobWriter, projects)) }
     // `aigc-tool-consolidation-phase2-unregister-originals` (cycle 27):
     // the 4 generators are no longer registered as standalone tools —
@@ -295,7 +295,7 @@ fun ToolRegistry.registerAigcTools(
     // than a generic "tool not found").
     //
     // `debt-aigc-tool-consolidation-phase3c-1-collapse-adapter-layer`
-    // (cycle 39): the underlying `Generate*Tool` / `SynthesizeSpeechTool`
+    // (cycle 39): the underlying `Generate*Tool` / `AigcSpeechGenerator`
     // classes now implement their per-kind `*AigcGenerator` interface
     // directly (in addition to `Tool<I, O>`), so the `ToolBacked*Generator`
     // adapter layer phase 3a introduced is redundant — pass the classes

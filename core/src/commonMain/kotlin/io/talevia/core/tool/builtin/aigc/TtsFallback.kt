@@ -29,7 +29,7 @@ import io.talevia.core.platform.TtsResult
  * **successful** provider's cold-start latency — the fallback chain's
  * failed attempts don't pollute the provider's P50/P99.
  *
- * Extracted from `SynthesizeSpeechTool` for test reach (the old private
+ * Extracted from `AigcSpeechGenerator` for test reach (the old private
  * method couldn't be exercised without constructing the full tool plus
  * a fake session / project / bundle writer). The fallback pattern is
  * behaviour a future image / video engine chain may want to reuse; the

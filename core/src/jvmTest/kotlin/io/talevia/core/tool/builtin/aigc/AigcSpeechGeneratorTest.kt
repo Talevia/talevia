@@ -21,7 +21,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
-class SynthesizeSpeechToolTest {
+class AigcSpeechGeneratorTest {
 
     /** Tiny placeholder bytes — engine is fake so no real codec required. */
     private val fakeMp3 = byteArrayOf(0x49, 0x44, 0x33, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00)
@@ -48,10 +48,10 @@ class SynthesizeSpeechToolTest {
         val bundleRoot = "/projects/tts".toPath()
         val pid = store.createAt(path = bundleRoot, title = "tts").id
         val engine = FakeTtsEngine(fakeMp3)
-        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcSpeechGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            SynthesizeSpeechTool.Input(
+            AigcSpeechGenerator.Input(
                 text = "hello world",
                 voice = "nova",
                 model = "tts-1-hd",
@@ -86,8 +86,8 @@ class SynthesizeSpeechToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/cache".toPath(), title = "cache").id
         val engine = FakeTtsEngine(fakeMp3)
-        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
-        val input = SynthesizeSpeechTool.Input(
+        val tool = AigcSpeechGenerator(engine, FileBundleBlobWriter(store, fs), store)
+        val input = AigcSpeechGenerator.Input(
             text = "the quick brown fox",
             voice = "alloy",
             model = "tts-1",
@@ -117,8 +117,8 @@ class SynthesizeSpeechToolTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/keys".toPath(), title = "keys").id
         val engine = FakeTtsEngine(fakeMp3)
-        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
-        val base = SynthesizeSpeechTool.Input(text = "one", projectId = pid.value)
+        val tool = AigcSpeechGenerator(engine, FileBundleBlobWriter(store, fs), store)
+        val base = AigcSpeechGenerator.Input(text = "one", projectId = pid.value)
 
         tool.generate(base, ctx()) // warm
         tool.generate(base.copy(text = "two"), ctx())
@@ -140,10 +140,10 @@ class SynthesizeSpeechToolTest {
             )
         }
         val engine = FakeTtsEngine(fakeMp3)
-        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcSpeechGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            SynthesizeSpeechTool.Input(
+            AigcSpeechGenerator.Input(
                 text = "hello",
                 voice = "alloy", // caller forgot to update; binding should win.
                 projectId = pid.value,
@@ -171,10 +171,10 @@ class SynthesizeSpeechToolTest {
             )
         }
         val engine = FakeTtsEngine(fakeMp3)
-        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcSpeechGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            SynthesizeSpeechTool.Input(
+            AigcSpeechGenerator.Input(
                 text = "hi",
                 voice = "alloy",
                 projectId = pid.value,
@@ -208,11 +208,11 @@ class SynthesizeSpeechToolTest {
                 )
         }
         val engine = FakeTtsEngine(fakeMp3)
-        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcSpeechGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         assertFailsWith<IllegalStateException> {
             tool.generate(
-                SynthesizeSpeechTool.Input(
+                AigcSpeechGenerator.Input(
                     text = "hi",
                     projectId = pid.value,
                     consistencyBindingIds = listOf("mei", "jun"),
@@ -233,11 +233,11 @@ class SynthesizeSpeechToolTest {
             )
         }
         val engine = FakeTtsEngine(fakeMp3)
-        val tool = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcSpeechGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         // First: bind + different explicit voice — resolved voice is "nova".
         val bound = tool.generate(
-            SynthesizeSpeechTool.Input(
+            AigcSpeechGenerator.Input(
                 text = "same text",
                 voice = "alloy",
                 projectId = pid.value,
@@ -247,7 +247,7 @@ class SynthesizeSpeechToolTest {
         )
         // Second: no binding but caller passes the already-resolved voice — should re-use the cache.
         val unbound = tool.generate(
-            SynthesizeSpeechTool.Input(
+            AigcSpeechGenerator.Input(
                 text = "same text",
                 voice = "nova",
                 projectId = pid.value,
@@ -263,10 +263,10 @@ class SynthesizeSpeechToolTest {
         val pid = store.createAt(path = "/projects/fallback".toPath(), title = "fallback").id
         val primary = FailingTtsEngine(providerId = "fake-primary")
         val secondary = FakeTtsEngine(fakeMp3)
-        val tool = SynthesizeSpeechTool(listOf(primary, secondary), FileBundleBlobWriter(store, fs), store)
+        val tool = AigcSpeechGenerator(listOf(primary, secondary), FileBundleBlobWriter(store, fs), store)
 
         val result = tool.generate(
-            SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
+            AigcSpeechGenerator.Input(text = "hello", voice = "nova", projectId = pid.value),
             ctx(),
         )
         // Both fakes now share the `calls` counter (cycle-127 fake-extract
@@ -281,11 +281,11 @@ class SynthesizeSpeechToolTest {
         val pid = store.createAt(path = "/projects/fallback-dead".toPath(), title = "dead").id
         val first = FailingTtsEngine(providerId = "dead-primary", message = "first outage")
         val second = FailingTtsEngine(providerId = "dead-secondary", message = "second outage")
-        val tool = SynthesizeSpeechTool(listOf(first, second), FileBundleBlobWriter(store, fs), store)
+        val tool = AigcSpeechGenerator(listOf(first, second), FileBundleBlobWriter(store, fs), store)
 
         val ex = assertFailsWith<IllegalStateException> {
             tool.generate(
-                SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
+                AigcSpeechGenerator.Input(text = "hello", voice = "nova", projectId = pid.value),
                 ctx(),
             )
         }
@@ -300,16 +300,16 @@ class SynthesizeSpeechToolTest {
         val pid = store.createAt(path = "/projects/fallback-cache".toPath(), title = "cache").id
         val primary = FakeTtsEngine(fakeMp3)
         val secondary = FailingTtsEngine(providerId = "should-not-fire")
-        val tool = SynthesizeSpeechTool(listOf(primary, secondary), FileBundleBlobWriter(store, fs), store)
+        val tool = AigcSpeechGenerator(listOf(primary, secondary), FileBundleBlobWriter(store, fs), store)
 
         // First call produces a lockfile entry via the primary.
         tool.generate(
-            SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
+            AigcSpeechGenerator.Input(text = "hello", voice = "nova", projectId = pid.value),
             ctx(),
         )
         // Second call with identical inputs cache-hits — neither engine runs.
         val second = tool.generate(
-            SynthesizeSpeechTool.Input(text = "hello", voice = "nova", projectId = pid.value),
+            AigcSpeechGenerator.Input(text = "hello", voice = "nova", projectId = pid.value),
             ctx(),
         )
         assertEquals(true, second.data.cacheHit)
@@ -322,7 +322,7 @@ class SynthesizeSpeechToolTest {
 
     @Test fun emptyEngineListFailsLoudAtConstruction() {
         val ex = assertFailsWith<IllegalArgumentException> {
-            SynthesizeSpeechTool(
+            AigcSpeechGenerator(
                 engines = emptyList(),
                 bundleBlobWriter = FileBundleBlobWriter(ProjectStoreTestKit.create()),
                 projectStore = ProjectStoreTestKit.create(),

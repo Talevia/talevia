@@ -44,7 +44,7 @@ import kotlin.uuid.Uuid
  *
  * Placed under `tool/builtin/aigc/` (not `ml/`) because its engine output is
  * bytes rather than text — it shares the seed / lockfile / provenance
- * disciplines with [GenerateImageTool] et al. (`ml/` is the "analysis →
+ * disciplines with [AigcImageGenerator] et al. (`ml/` is the "analysis →
  * derived text" lane: `describe_asset`, `transcribe_asset`). The folder split
  * is operational; the semantic line is "does it emit bytes?". If we add
  * denoise / inpaint / style-transfer later they belong here too.

@@ -33,7 +33,7 @@ import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.session.TokenUsage
 import io.talevia.core.session.ToolState
 import io.talevia.core.tool.ToolRegistry
-import io.talevia.core.tool.builtin.aigc.GenerateImageTool
+import io.talevia.core.tool.builtin.aigc.AigcImageGenerator
 import io.talevia.core.tool.builtin.aigc.toolShimForImage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -77,7 +77,7 @@ import kotlin.time.Duration
  *
  * Deliberate layer choice: this exercises **LLM-provider** fallback (chat
  * completions chain inside the Agent), not AIGC-engine fallback (e.g.
- * `SynthesizeSpeechTool`'s priority-ordered `engines: List<TtsEngine>`).
+ * `AigcSpeechGenerator`'s priority-ordered `engines: List<TtsEngine>`).
  * The tracker is LLM-loop only — there's no equivalent per-tool tracker on
  * the AIGC side — so "tracker records A→B chain" pins this to the LLM
  * layer. The asset-landing check proves that the fallback on the chat side
@@ -164,7 +164,7 @@ class ProviderFallbackE2ETest {
 
         val imageEngine = OneShotImageEngine()
         val registry = ToolRegistry()
-        registry.register(toolShimForImage(GenerateImageTool(imageEngine, FakeBlobWriter(tmpDir), projectStore)))
+        registry.register(toolShimForImage(AigcImageGenerator(imageEngine, FakeBlobWriter(tmpDir), projectStore)))
 
         // Primary fails every attempt, across every agent step: the fallback
         // providerIndex resets at the top of each outer step in Agent.runLoop
@@ -304,7 +304,7 @@ class ProviderFallbackE2ETest {
 
         val imageEngine = OneShotImageEngine()
         val registry = ToolRegistry()
-        registry.register(toolShimForImage(GenerateImageTool(imageEngine, FakeBlobWriter(tmpDir), projectStore)))
+        registry.register(toolShimForImage(AigcImageGenerator(imageEngine, FakeBlobWriter(tmpDir), projectStore)))
 
         val failingTurn = listOf(
             LlmEvent.Error("HTTP 503: overloaded", retriable = true),
@@ -361,7 +361,7 @@ class ProviderFallbackE2ETest {
 
         val imageEngine = OneShotImageEngine()
         val registry = ToolRegistry()
-        registry.register(toolShimForImage(GenerateImageTool(imageEngine, FakeBlobWriter(tmpDir), projectStore)))
+        registry.register(toolShimForImage(AigcImageGenerator(imageEngine, FakeBlobWriter(tmpDir), projectStore)))
 
         val toolPartId = PartId("tool-happy")
         val callId = CallId("call-happy")

@@ -25,7 +25,7 @@ import io.talevia.core.platform.TtsRequest
 import io.talevia.core.platform.TtsResult
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
-import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
+import io.talevia.core.tool.builtin.aigc.AigcSpeechGenerator
 import io.talevia.core.tool.builtin.aigc.toolShimForSpeech
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
@@ -94,7 +94,7 @@ class ForkProjectLanguageVariantTest {
         val tts = FakeTtsEngine(fakeMp3)
         val writer = FakeBlobWriter(tmpDir)
         val registry = ToolRegistry()
-        registry.register(toolShimForSpeech(SynthesizeSpeechTool(tts, writer, store)))
+        registry.register(toolShimForSpeech(AigcSpeechGenerator(tts, writer, store)))
         val ctx = ToolContext(
             sessionId = SessionId("s"),
             messageId = MessageId("m"),

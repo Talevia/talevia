@@ -14,8 +14,8 @@ import kotlinx.serialization.serializer
 
 /**
  * Unified AIGC generation dispatcher (`debt-aigc-tool-consolidation` phase 1).
- * Replaces the LLM-facing surface of [GenerateImageTool] / [GenerateVideoTool]
- * / [GenerateMusicTool] / [SynthesizeSpeechTool] with a single tool spec
+ * Replaces the LLM-facing surface of [AigcImageGenerator] / [AigcVideoGenerator]
+ * / [AigcMusicGenerator] / [AigcSpeechGenerator] with a single tool spec
  * gated on `kind: enum {image | video | music | speech}`.
  *
  * **Phases.** Phase 1 (cycle 23) introduced the dispatcher abstraction
@@ -135,7 +135,7 @@ class AigcGenerateTool(
 
         /**
          * `prompt` carries the spoken text for [Speech]. `voice`, `model`,
-         * `format`, `speed`, `language` map to [SynthesizeSpeechTool.Input]
+         * `format`, `speed`, `language` map to [AigcSpeechGenerator.Input]
          * one-to-one. `seed` is unused by TTS today but kept for shape
          * symmetry — TTS engines may surface it later for prosody control.
          */

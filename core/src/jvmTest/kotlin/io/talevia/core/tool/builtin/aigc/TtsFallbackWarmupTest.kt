@@ -109,7 +109,7 @@ class TtsFallbackWarmupTest {
 
     /**
      * Publish [phase] as a ProviderWarmup event on [bus] for [providerId].
-     * Matches the exact shape SynthesizeSpeechTool emits — same
+     * Matches the exact shape AigcSpeechGenerator emits — same
      * (sessionId, providerId, phase, epochMs) tuple — so
      * ProviderWarmupStats observes what the production path would see.
      */

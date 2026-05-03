@@ -4,7 +4,7 @@ package io.talevia.core.platform.audio
  * Best-effort, pure-Kotlin audio duration probe. Returns duration in
  * milliseconds or null when the format / content isn't recognised.
  *
- * Motivation: the TTS pipeline (OpenAI → SynthesizeSpeechTool) writes
+ * Motivation: the TTS pipeline (OpenAI → AigcSpeechGenerator) writes
  * `MediaMetadata.duration = Duration.ZERO` on every produced audio
  * asset because commonMain has no portable audio probe and the TTS
  * endpoint doesn't echo a duration. That leaves every "how long is

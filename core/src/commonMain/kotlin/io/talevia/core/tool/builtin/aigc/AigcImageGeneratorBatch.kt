@@ -21,7 +21,7 @@ import kotlin.uuid.Uuid
 
 /**
  * Native-batch path for [aigc-multi-variant-phase3-openai-native-n] (cycle 33).
- * Extracted from `GenerateImageTool.kt` (`debt-split-generate-image-tool`,
+ * Extracted from `AigcImageGenerator.kt` (`debt-split-generate-image-tool`,
  * cycle 37) to keep the main file focused on the public Tool surface +
  * single-variant `execute()` orchestrator. The body is unchanged from
  * cycle 33's original; only the per-call `cachedProvenance` member-variable
@@ -34,10 +34,10 @@ import kotlin.uuid.Uuid
  * pre-warm shapes, multi-variant cost accounting, partial-failure recovery).
  * The single-variant `execute()` path doesn't trickle into this file —
  * only batch concerns. New batch features = new branches here, not in
- * `GenerateImageTool.kt`.
+ * `AigcImageGenerator.kt`.
  *
  * Used by [io.talevia.core.tool.builtin.aigc.dispatchImage] when
- * [GenerateImageTool.engine].`supportsNativeBatch` is true (currently
+ * [AigcImageGenerator.engine].`supportsNativeBatch` is true (currently
  * OpenAI only) and `variantCount > 1`. Engines without native batch fall
  * back to the sequential loop in [AigcGenerateToolDispatchers] — same
  * lockfile shape, more provider round-trips.
@@ -52,14 +52,14 @@ import kotlin.uuid.Uuid
  * list.
  */
 @OptIn(ExperimentalUuidApi::class)
-internal suspend fun GenerateImageTool.executeBatch(
-    input: GenerateImageTool.Input,
+internal suspend fun AigcImageGenerator.executeBatch(
+    input: AigcImageGenerator.Input,
     ctx: ToolContext,
     variantCount: Int,
-): List<ToolResult<GenerateImageTool.Output>> {
+): List<ToolResult<AigcImageGenerator.Output>> {
     require(variantCount >= 1) { "executeBatch variantCount must be ≥ 1" }
     val pid = ctx.resolveProjectId(input.projectId)
-    AigcBudgetGuard.enforce(GenerateImageTool.ID, projectStore, pid, ctx)
+    AigcBudgetGuard.enforce(AigcImageGenerator.ID, projectStore, pid, ctx)
     val seed = AigcPipeline.ensureSeed(input.seed)
     val folded = resolveConsistency(input, pid)
     val referenceAssetPaths = resolveReferenceAssetPaths(pid, folded.referenceAssetIds)
@@ -70,7 +70,7 @@ internal suspend fun GenerateImageTool.executeBatch(
     val perVariantHashes: List<String> = (0 until variantCount).map { i ->
         AigcPipeline.inputHash(
             listOf(
-                "tool" to GenerateImageTool.ID,
+                "tool" to AigcImageGenerator.ID,
                 "model" to input.model,
                 "w" to input.width.toString(),
                 "h" to input.height.toString(),
@@ -102,11 +102,11 @@ internal suspend fun GenerateImageTool.executeBatch(
     // calling the provider so observers see the per-variant
     // hit/miss split.
     cachedByIndex.keys.forEach {
-        ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = GenerateImageTool.ID, hit = true))
+        ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = AigcImageGenerator.ID, hit = true))
     }
     val missingIndices = (0 until variantCount).filter { it !in cachedByIndex }
     missingIndices.forEach {
-        ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = GenerateImageTool.ID, hit = false))
+        ctx.publishEvent(io.talevia.core.bus.BusEvent.AigcCacheProbe(toolId = AigcImageGenerator.ID, hit = false))
     }
 
     // Provider call — only when there's at least one cache miss.
@@ -117,7 +117,7 @@ internal suspend fun GenerateImageTool.executeBatch(
             ctx = ctx,
             jobId = "gen-image-batch-${perVariantHashes.first().take(8)}-n${missingIndices.size}",
             startMessage = "generating ${input.width}x${input.height} image batch ×${missingIndices.size} with ${input.model}",
-            toolId = GenerateImageTool.ID,
+            toolId = AigcImageGenerator.ID,
             providerId = engine.providerId,
         ) {
             engine.generate(
@@ -151,8 +151,8 @@ internal suspend fun GenerateImageTool.executeBatch(
         result.images to result.provenance
     }
 
-    val baseInputs = JsonConfig.default.encodeToJsonElement(GenerateImageTool.Input.serializer(), input).jsonObject
-    val results = MutableList<ToolResult<GenerateImageTool.Output>?>(variantCount) { null }
+    val baseInputs = JsonConfig.default.encodeToJsonElement(AigcImageGenerator.Input.serializer(), input).jsonObject
+    val results = MutableList<ToolResult<AigcImageGenerator.Output>?>(variantCount) { null }
 
     // Pair fresh images with their corresponding miss indices in order.
     var imageCursor = 0
@@ -177,11 +177,11 @@ internal suspend fun GenerateImageTool.executeBatch(
         val variantHash = perVariantHashes[i]
         val provenance: GenerationProvenance = batchProvenance
             ?: error("provenance must be set when there's at least one fresh image")
-        val costCents = AigcPricing.estimateCents(GenerateImageTool.ID, provenance, baseInputs)
+        val costCents = AigcPricing.estimateCents(AigcImageGenerator.ID, provenance, baseInputs)
         AigcPipeline.record(
             store = projectStore,
             projectId = pid,
-            toolId = GenerateImageTool.ID,
+            toolId = AigcImageGenerator.ID,
             inputHash = variantHash,
             assetId = newAssetId,
             provenance = provenance,
@@ -198,12 +198,12 @@ internal suspend fun GenerateImageTool.executeBatch(
             BusEvent.AigcCostRecorded(
                 sessionId = ctx.sessionId,
                 projectId = pid,
-                toolId = GenerateImageTool.ID,
+                toolId = AigcImageGenerator.ID,
                 assetId = newAssetId.value,
                 costCents = costCents,
             ),
         )
-        val out = GenerateImageTool.Output(
+        val out = AigcImageGenerator.Output(
             assetId = newAssetId.value,
             width = image.width,
             height = image.height,
@@ -229,5 +229,5 @@ internal suspend fun GenerateImageTool.executeBatch(
         )
     }
     @Suppress("UNCHECKED_CAST")
-    return results.toList() as List<ToolResult<GenerateImageTool.Output>>
+    return results.toList() as List<ToolResult<AigcImageGenerator.Output>>
 }

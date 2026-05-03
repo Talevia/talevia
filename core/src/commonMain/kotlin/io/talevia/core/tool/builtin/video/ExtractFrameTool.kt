@@ -29,7 +29,7 @@ import kotlin.uuid.Uuid
 /**
  * Extract a single frame from a video asset and register the resulting image
  * as a new project asset. Pairs with [io.talevia.core.tool.builtin.ml.DescribeAssetTool]
- * (video content understanding) and [io.talevia.core.tool.builtin.aigc.GenerateImageTool]
+ * (video content understanding) and [io.talevia.core.tool.builtin.aigc.AigcImageGenerator]
  * (reference image input) — both of those operate on stills, so this tool closes
  * the video→image edge that VISION §5.2 ML lane needs.
  *

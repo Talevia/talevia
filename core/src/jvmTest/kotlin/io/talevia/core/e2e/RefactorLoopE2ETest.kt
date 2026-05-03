@@ -34,7 +34,7 @@ import io.talevia.core.platform.RenderProgress
 import io.talevia.core.platform.VideoEngine
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
-import io.talevia.core.tool.builtin.aigc.GenerateImageTool
+import io.talevia.core.tool.builtin.aigc.AigcImageGenerator
 import io.talevia.core.tool.builtin.aigc.ReplayLockfileTool
 import io.talevia.core.tool.builtin.aigc.toolShimForImage
 import io.talevia.core.tool.builtin.project.RegenerateStaleClipsTool
@@ -200,7 +200,7 @@ class RefactorLoopE2ETest {
         val writer = FakeBlobWriter(tmpDir)
 
         val registry = ToolRegistry()
-        registry.register(toolShimForImage(GenerateImageTool(imageEngine, writer, store)))
+        registry.register(toolShimForImage(AigcImageGenerator(imageEngine, writer, store)))
         registry.register(SourceNodeActionTool(store))
         registry.register(RegenerateStaleClipsTool(store, registry))
         registry.register(ExportTool(store, videoEngine))
@@ -390,7 +390,7 @@ class RefactorLoopE2ETest {
         val writer = FakeBlobWriter(tmpDir)
 
         val registry = ToolRegistry()
-        registry.register(toolShimForImage(GenerateImageTool(imageEngine, writer, store)))
+        registry.register(toolShimForImage(AigcImageGenerator(imageEngine, writer, store)))
 
         val pid = ProjectId("e2e-seed")
         store.upsert(
@@ -465,7 +465,7 @@ class RefactorLoopE2ETest {
         val writer = FakeBlobWriter(tmpDir)
 
         val registry = ToolRegistry()
-        registry.register(toolShimForImage(GenerateImageTool(imageEngine, writer, store)))
+        registry.register(toolShimForImage(AigcImageGenerator(imageEngine, writer, store)))
 
         val pid = ProjectId("e2e-seed-diff")
         store.upsert(
@@ -534,7 +534,7 @@ class RefactorLoopE2ETest {
      *     byte-identical payloads (`capturedBytes[0].contentEquals(
      *     capturedBytes[1])`).
      *
-     * The assetIds themselves differ by design — `GenerateImageTool` mints a
+     * The assetIds themselves differ by design — `AigcImageGenerator` mints a
      * fresh `Uuid.random()` per generation rather than content-addressing on
      * bytes, so the second call lands a new lockfile entry next to the
      * original (the pattern `ReplayLockfileTool` documents as "pin the
@@ -549,7 +549,7 @@ class RefactorLoopE2ETest {
         val writer = FakeBlobWriter(tmpDir)
 
         val registry = ToolRegistry()
-        registry.register(toolShimForImage(GenerateImageTool(imageEngine, writer, store)))
+        registry.register(toolShimForImage(AigcImageGenerator(imageEngine, writer, store)))
         registry.register(ReplayLockfileTool(registry, store))
 
         val pid = ProjectId("e2e-replay")
@@ -649,7 +649,7 @@ class RefactorLoopE2ETest {
         // surfaces here rather than silently tightening the invariant.
         assertTrue(
             seedAssetId != newAssetId,
-            "GenerateImageTool mints fresh UUIDs per call — replay's assetId is expected to differ",
+            "AigcImageGenerator mints fresh UUIDs per call — replay's assetId is expected to differ",
         )
     }
 }

@@ -36,7 +36,7 @@ import kotlin.time.Duration.Companion.seconds
 
 /**
  * Behavioural coverage for [ReplayLockfileTool]. Uses a real
- * [GenerateImageTool] wired to a counting fake provider so we can prove the
+ * [AigcImageGenerator] wired to a counting fake provider so we can prove the
  * replay actually re-calls the engine (cache-bypass) rather than short-
  * circuiting back to the cached asset. Edge cases cover every error arm:
  * missing entry, legacy entry (empty baseInputs), unregistered tool, and a
@@ -97,12 +97,12 @@ class ReplayLockfileToolTest {
         val projectId = ProjectId("p-replay")
         store.upsert("demo", Project(id = projectId, timeline = Timeline()))
 
-        val imageTool = GenerateImageTool(engine, writer, store)
+        val imageTool = AigcImageGenerator(engine, writer, store)
         val registry = ToolRegistry().apply { register(toolShimForImage(imageTool)) }
         val replay = ReplayLockfileTool(registry, store)
 
         val gen1 = imageTool.generate(
-            GenerateImageTool.Input(
+            AigcImageGenerator.Input(
                 prompt = "a lighthouse",
                 seed = 42L,
                 projectId = projectId.value,
@@ -116,7 +116,7 @@ class ReplayLockfileToolTest {
 
         // Baseline: a second normal call with the same inputs is a cache hit (no new engine call).
         val cacheHit = imageTool.generate(
-            GenerateImageTool.Input(
+            AigcImageGenerator.Input(
                 prompt = "a lighthouse",
                 seed = 42L,
                 projectId = projectId.value,
@@ -358,12 +358,12 @@ class ReplayLockfileToolTest {
         val projectId = ProjectId("p-bound")
         store.upsert("demo", Project(id = projectId, timeline = Timeline()))
 
-        val imageTool = GenerateImageTool(engine, writer, store)
+        val imageTool = AigcImageGenerator(engine, writer, store)
         val registry = ToolRegistry().apply { register(toolShimForImage(imageTool)) }
         val replay = ReplayLockfileTool(registry, store)
 
         imageTool.generate(
-            GenerateImageTool.Input(
+            AigcImageGenerator.Input(
                 prompt = "sessioncontext",
                 seed = 7L,
                 projectId = projectId.value,
@@ -420,12 +420,12 @@ class ReplayLockfileToolTest {
         val projectId = ProjectId("p-concurrent")
         store.upsert("demo", Project(id = projectId, timeline = Timeline()))
 
-        val imageTool = GenerateImageTool(engine, writer, store)
+        val imageTool = AigcImageGenerator(engine, writer, store)
         val registry = ToolRegistry().apply { register(toolShimForImage(imageTool)) }
         val replay = ReplayLockfileTool(registry, store)
 
         // Seed: one entry to anchor the inputHash both calls will hit.
-        val seedInput = GenerateImageTool.Input(
+        val seedInput = AigcImageGenerator.Input(
             prompt = "concurrent lighthouse",
             seed = 99L,
             projectId = projectId.value,

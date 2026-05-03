@@ -27,8 +27,8 @@ import io.talevia.core.platform.BundleBlobWriter
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolRegistry
+import io.talevia.core.tool.builtin.aigc.AigcImageGenerator
 import io.talevia.core.tool.builtin.aigc.CountingImageGenEngine
-import io.talevia.core.tool.builtin.aigc.GenerateImageTool
 import io.talevia.core.tool.builtin.aigc.toolShimForImage
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.JsonObject
@@ -87,7 +87,7 @@ class RegenerateStaleClipsToolTest {
         val clipId = ClipId("c-1")
 
         val registry = ToolRegistry()
-        registry.register(toolShimForImage(GenerateImageTool(engine, writer, store)))
+        registry.register(toolShimForImage(AigcImageGenerator(engine, writer, store)))
         registry.register(RegenerateStaleClipsTool(store, registry))
 
         // Seed: character_ref + a clip bound to it + a lockfile entry with baseInputs.
@@ -197,7 +197,7 @@ class RegenerateStaleClipsToolTest {
         val pid = ProjectId("p-filter")
 
         val registry = ToolRegistry()
-        registry.register(toolShimForImage(GenerateImageTool(engine, writer, store)))
+        registry.register(toolShimForImage(AigcImageGenerator(engine, writer, store)))
         registry.register(RegenerateStaleClipsTool(store, registry))
 
         // Two clips, both stale, both bound to "mei" via lockfile snapshots.
@@ -306,7 +306,7 @@ class RegenerateStaleClipsToolTest {
         val clipId = ClipId("c-1")
 
         val registry = ToolRegistry()
-        registry.register(toolShimForImage(GenerateImageTool(engine, writer, store)))
+        registry.register(toolShimForImage(AigcImageGenerator(engine, writer, store)))
         registry.register(RegenerateStaleClipsTool(store, registry))
 
         store.upsert(
@@ -399,7 +399,7 @@ class RegenerateStaleClipsToolTest {
         val clipId = ClipId("c-hero")
 
         val registry = ToolRegistry()
-        registry.register(toolShimForImage(GenerateImageTool(engine, writer, store)))
+        registry.register(toolShimForImage(AigcImageGenerator(engine, writer, store)))
         registry.register(RegenerateStaleClipsTool(store, registry))
 
         store.upsert(

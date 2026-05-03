@@ -14,8 +14,8 @@ import kotlin.test.assertEquals
 
 /**
  * Pins the `AigcGenerator` sealed-interface family contract:
- * `GenerateImageTool` / `GenerateVideoTool` / `GenerateMusicTool` /
- * `SynthesizeSpeechTool` each implement their per-kind sub-interface
+ * `AigcImageGenerator` / `AigcVideoGenerator` / `AigcMusicGenerator` /
+ * `AigcSpeechGenerator` each implement their per-kind sub-interface
  * (`ImageAigcGenerator` / `VideoAigcGenerator` / `MusicAigcGenerator` /
  * `SpeechAigcGenerator`) directly — no adapter layer.
  *
@@ -50,14 +50,14 @@ class AigcGeneratorTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/img-gen".toPath(), title = "img-gen").id
         val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image-gen")
-        val generator: ImageAigcGenerator = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val generator: ImageAigcGenerator = AigcImageGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         // Engine reflects the inner tool's engine — phase 3b's
         // dispatcher reads this for the batch-vs-sequential decision.
         assertEquals(engine, generator.engine)
 
         val result = generator.generate(
-            GenerateImageTool.Input(prompt = "a cat", projectId = pid.value),
+            AigcImageGenerator.Input(prompt = "a cat", projectId = pid.value),
             ctx(),
         )
         assertEquals(1, engine.calls, "concrete impl must call inner engine exactly once")
@@ -68,10 +68,10 @@ class AigcGeneratorTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/vid-gen".toPath(), title = "vid-gen").id
         val engine = OneShotVideoGenEngine(tinyMp4, providerId = "fake-video-gen")
-        val generator: VideoAigcGenerator = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
+        val generator: VideoAigcGenerator = AigcVideoGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = generator.generate(
-            GenerateVideoTool.Input(prompt = "a chase", projectId = pid.value),
+            AigcVideoGenerator.Input(prompt = "a chase", projectId = pid.value),
             ctx(),
         )
         assertEquals(1, engine.calls)
@@ -82,10 +82,10 @@ class AigcGeneratorTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/mus-gen".toPath(), title = "mus-gen").id
         val engine = OneShotMusicGenEngine(tinyMusic, providerId = "fake-music-gen")
-        val generator: MusicAigcGenerator = GenerateMusicTool(engine, FileBundleBlobWriter(store, fs), store)
+        val generator: MusicAigcGenerator = AigcMusicGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = generator.generate(
-            GenerateMusicTool.Input(prompt = "lofi beats", projectId = pid.value),
+            AigcMusicGenerator.Input(prompt = "lofi beats", projectId = pid.value),
             ctx(),
         )
         assertEquals(1, engine.calls)
@@ -96,10 +96,10 @@ class AigcGeneratorTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/spk-gen".toPath(), title = "spk-gen").id
         val engine = OneShotTtsEngine(tinyMp3, providerId = "fake-tts-gen")
-        val generator: SpeechAigcGenerator = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
+        val generator: SpeechAigcGenerator = AigcSpeechGenerator(engine, FileBundleBlobWriter(store, fs), store)
 
         val result = generator.generate(
-            SynthesizeSpeechTool.Input(text = "hello world", projectId = pid.value),
+            AigcSpeechGenerator.Input(text = "hello world", projectId = pid.value),
             ctx(),
         )
         assertEquals(1, engine.calls)
@@ -113,10 +113,10 @@ class AigcGeneratorTest {
         // `: AigcGenerator` from one sub-interface — this fails
         // compilation, which is the point.
         val (store, fs) = ProjectStoreTestKit.createWithFs()
-        val image: AigcGenerator = GenerateImageTool(OneShotImageGenEngine(tinyPng), FileBundleBlobWriter(store, fs), store)
-        val video: AigcGenerator = GenerateVideoTool(OneShotVideoGenEngine(tinyMp4), FileBundleBlobWriter(store, fs), store)
-        val music: AigcGenerator = GenerateMusicTool(OneShotMusicGenEngine(tinyMusic), FileBundleBlobWriter(store, fs), store)
-        val speech: AigcGenerator = SynthesizeSpeechTool(OneShotTtsEngine(tinyMp3), FileBundleBlobWriter(store, fs), store)
+        val image: AigcGenerator = AigcImageGenerator(OneShotImageGenEngine(tinyPng), FileBundleBlobWriter(store, fs), store)
+        val video: AigcGenerator = AigcVideoGenerator(OneShotVideoGenEngine(tinyMp4), FileBundleBlobWriter(store, fs), store)
+        val music: AigcGenerator = AigcMusicGenerator(OneShotMusicGenEngine(tinyMusic), FileBundleBlobWriter(store, fs), store)
+        val speech: AigcGenerator = AigcSpeechGenerator(OneShotTtsEngine(tinyMp3), FileBundleBlobWriter(store, fs), store)
         val all = listOf(image, video, music, speech)
         assertEquals(4, all.size)
         // All four are distinct concrete types — no accidental fold.

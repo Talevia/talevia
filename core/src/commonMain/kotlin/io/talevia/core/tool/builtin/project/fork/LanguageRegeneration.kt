@@ -37,7 +37,7 @@ internal suspend fun regenerateTtsInLanguage(
     }
     val reg = registry ?: error(
         "variantSpec.language was set but this ForkProjectTool has no ToolRegistry wired — " +
-            "install TtsEngine/SynthesizeSpeechTool in the container or drop variantSpec.language.",
+            "install TtsEngine/AigcSpeechGenerator in the container or drop variantSpec.language.",
     )
     val tts = reg["synthesize_speech"] ?: error(
         "variantSpec.language requires the `synthesize_speech` tool to be registered on this " +
