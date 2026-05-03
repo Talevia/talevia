@@ -60,10 +60,10 @@ import kotlinx.serialization.serializer
  *   originals weren't registered.
  */
 class AigcGenerateTool(
-    private val image: GenerateImageTool? = null,
-    private val video: GenerateVideoTool? = null,
-    private val music: GenerateMusicTool? = null,
-    private val speech: SynthesizeSpeechTool? = null,
+    private val image: ImageAigcGenerator? = null,
+    private val video: VideoAigcGenerator? = null,
+    private val music: MusicAigcGenerator? = null,
+    private val speech: SpeechAigcGenerator? = null,
 ) : Tool<AigcGenerateTool.Input, AigcGenerateTool.Output> {
 
     @OptIn(kotlinx.serialization.ExperimentalSerializationApi::class)

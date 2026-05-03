@@ -30,7 +30,7 @@ import io.talevia.core.tool.ToolResult
  * the call site. Sealed marker keeps the family closed — no rogue
  * impls outside this package.
  */
-internal sealed interface AigcGenerator
+sealed interface AigcGenerator
 
 /**
  * Image-kind generator. Exposes `engine` so the dispatcher can read
@@ -38,7 +38,7 @@ internal sealed interface AigcGenerator
  * [generate] (single-call) and [generateBatch] (cycle 33's native-batch
  * path that issues one provider call for `n=variantCount`).
  */
-internal sealed interface ImageAigcGenerator : AigcGenerator {
+sealed interface ImageAigcGenerator : AigcGenerator {
     val engine: ImageGenEngine
 
     suspend fun generate(
@@ -53,21 +53,21 @@ internal sealed interface ImageAigcGenerator : AigcGenerator {
     ): List<ToolResult<GenerateImageTool.Output>>
 }
 
-internal sealed interface VideoAigcGenerator : AigcGenerator {
+sealed interface VideoAigcGenerator : AigcGenerator {
     suspend fun generate(
         input: GenerateVideoTool.Input,
         ctx: ToolContext,
     ): ToolResult<GenerateVideoTool.Output>
 }
 
-internal sealed interface MusicAigcGenerator : AigcGenerator {
+sealed interface MusicAigcGenerator : AigcGenerator {
     suspend fun generate(
         input: GenerateMusicTool.Input,
         ctx: ToolContext,
     ): ToolResult<GenerateMusicTool.Output>
 }
 
-internal sealed interface SpeechAigcGenerator : AigcGenerator {
+sealed interface SpeechAigcGenerator : AigcGenerator {
     suspend fun generate(
         input: SynthesizeSpeechTool.Input,
         ctx: ToolContext,

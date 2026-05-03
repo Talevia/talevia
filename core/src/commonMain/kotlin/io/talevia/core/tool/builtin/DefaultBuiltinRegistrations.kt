@@ -26,6 +26,10 @@ import io.talevia.core.tool.builtin.aigc.GenerateMusicTool
 import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
 import io.talevia.core.tool.builtin.aigc.ReplayLockfileTool
 import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
+import io.talevia.core.tool.builtin.aigc.ToolBackedImageGenerator
+import io.talevia.core.tool.builtin.aigc.ToolBackedMusicGenerator
+import io.talevia.core.tool.builtin.aigc.ToolBackedSpeechGenerator
+import io.talevia.core.tool.builtin.aigc.ToolBackedVideoGenerator
 import io.talevia.core.tool.builtin.aigc.UpscaleAssetTool
 import io.talevia.core.tool.builtin.fs.EditTool
 import io.talevia.core.tool.builtin.fs.GlobTool
@@ -293,7 +297,21 @@ fun ToolRegistry.registerAigcTools(
     // an entry whose toolId is no longer in the registry (the 4
     // legacy ids surface as "post-phase-2; not replayable" rather
     // than a generic "tool not found").
-    register(AigcGenerateTool(imageTool, videoTool, musicTool, speechTool))
+    //
+    // `debt-aigc-tool-consolidation-phase3b-dispatcher-switch` (cycle 38):
+    // the dispatcher now takes `AigcGenerator` interfaces, not raw
+    // `Tool<I, O>` impls. Wrap each tool in its `ToolBacked*Generator`
+    // adapter; phase 3c will drop the `Tool<I, O>` interface impl from
+    // the underlying classes entirely (they remain reachable via the
+    // adapter for replay + standalone wiring tests).
+    register(
+        AigcGenerateTool(
+            image = imageTool?.let { ToolBackedImageGenerator(it) },
+            video = videoTool?.let { ToolBackedVideoGenerator(it) },
+            music = musicTool?.let { ToolBackedMusicGenerator(it) },
+            speech = speechTool?.let { ToolBackedSpeechGenerator(it) },
+        ),
+    )
     register(CompareAigcCandidatesTool(this))
     register(ReplayLockfileTool(this, projects))
     asr?.let {

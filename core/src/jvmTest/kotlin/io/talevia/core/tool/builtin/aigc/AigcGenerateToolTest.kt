@@ -49,7 +49,7 @@ class AigcGenerateToolTest {
         val pid = store.createAt(path = "/projects/img".toPath(), title = "img").id
         val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image")
         val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
-        val tool = AigcGenerateTool(image = image)
+        val tool = AigcGenerateTool(image = ToolBackedImageGenerator(image))
 
         val out = tool.execute(
             AigcGenerateTool.Input.Image(
@@ -80,7 +80,7 @@ class AigcGenerateToolTest {
         val pid = store.createAt(path = "/projects/vid".toPath(), title = "vid").id
         val engine = OneShotVideoGenEngine(tinyMp4, providerId = "fake-video")
         val video = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
-        val tool = AigcGenerateTool(video = video)
+        val tool = AigcGenerateTool(video = ToolBackedVideoGenerator(video))
 
         val out = tool.execute(
             AigcGenerateTool.Input.Video(
@@ -111,7 +111,7 @@ class AigcGenerateToolTest {
         val pid = store.createAt(path = "/projects/spk".toPath(), title = "spk").id
         val engine = OneShotTtsEngine(tinyMp3, providerId = "fake-tts")
         val speech = SynthesizeSpeechTool(engine, FileBundleBlobWriter(store, fs), store)
-        val tool = AigcGenerateTool(speech = speech)
+        val tool = AigcGenerateTool(speech = ToolBackedSpeechGenerator(speech))
 
         val out = tool.execute(
             AigcGenerateTool.Input.Speech(
@@ -160,7 +160,7 @@ class AigcGenerateToolTest {
         val pid = store.createAt(path = "/projects/mix".toPath(), title = "mix").id
         val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image")
         val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
-        val tool = AigcGenerateTool(image = image) // video / music / speech absent
+        val tool = AigcGenerateTool(image = ToolBackedImageGenerator(image)) // video / music / speech absent
 
         // Image kind succeeds.
         val imgOut = tool.execute(
@@ -190,7 +190,7 @@ class AigcGenerateToolTest {
         val pid = store.createAt(path = "/projects/n1".toPath(), title = "n1").id
         val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image")
         val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
-        val tool = AigcGenerateTool(image = image)
+        val tool = AigcGenerateTool(image = ToolBackedImageGenerator(image))
 
         val out = tool.execute(
             AigcGenerateTool.Input.Image(prompt = "x", projectId = pid.value),
@@ -216,7 +216,7 @@ class AigcGenerateToolTest {
             bytesForCall = { call -> byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, call.toByte()) },
         )
         val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
-        val tool = AigcGenerateTool(image = image)
+        val tool = AigcGenerateTool(image = ToolBackedImageGenerator(image))
 
         val out = tool.execute(
             AigcGenerateTool.Input.Image(
@@ -255,7 +255,7 @@ class AigcGenerateToolTest {
         val pid = store.createAt(path = "/projects/n3vid".toPath(), title = "n3vid").id
         val engine = OneShotVideoGenEngine(tinyMp4, providerId = "fake-video")
         val video = GenerateVideoTool(engine, FileBundleBlobWriter(store, fs), store)
-        val tool = AigcGenerateTool(video = video)
+        val tool = AigcGenerateTool(video = ToolBackedVideoGenerator(video))
 
         val out = tool.execute(
             AigcGenerateTool.Input.Video(
@@ -282,7 +282,7 @@ class AigcGenerateToolTest {
         val pid = store.createAt(path = "/projects/zero".toPath(), title = "zero").id
         val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image")
         val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
-        val tool = AigcGenerateTool(image = image)
+        val tool = AigcGenerateTool(image = ToolBackedImageGenerator(image))
 
         val ex = assertFails {
             tool.execute(
@@ -312,7 +312,7 @@ class AigcGenerateToolTest {
             bytesForVariant = { call, v -> byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, call.toByte(), v.toByte()) },
         )
         val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
-        val tool = AigcGenerateTool(image = image)
+        val tool = AigcGenerateTool(image = ToolBackedImageGenerator(image))
 
         val out = tool.execute(
             AigcGenerateTool.Input.Image(
@@ -349,7 +349,7 @@ class AigcGenerateToolTest {
         val pid = store.createAt(path = "/projects/big".toPath(), title = "big").id
         val engine = OneShotImageGenEngine(tinyPng, providerId = "fake-image")
         val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
-        val tool = AigcGenerateTool(image = image)
+        val tool = AigcGenerateTool(image = ToolBackedImageGenerator(image))
 
         val ex = assertFails {
             tool.execute(
