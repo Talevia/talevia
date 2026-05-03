@@ -66,11 +66,12 @@ baseline 已经把 Core 运行时预算轴收口完整，§4 GUI 是 VISION §3 
   是 desktop 镜像）。Opportunistic per CLAUDE.md "Platform priority" — desktop
   UX work resumes trigger; criterion 跟着触发条件勾。grep: `apps/desktop` 下
   对 `BusEvent.AgentRunStateChanged` 的 `collect` / `subscribe` — cycle 2026-05-02 *本 commit*
-- [ ] Two-paths shared source UI e2e：M3 #3 `CrossPathSourceSharedTest`
+- [x] Two-paths shared source UI e2e：M3 #3 `CrossPathSourceSharedTest`
   (cycle 2026-04-26 cb5c5b7d) 是 jvmTest 级；M7 要求**通过 UI 命令路由层**
   跑同样的 round-trip——chat panel 发指令 + source-edit tool dispatch + 同一
   `Project` 状态被两端看到。可以是 Compose Desktop integration test 或者
   cross-app integration test。grep: `CrossPathSourceUiE2ETest` 或同义类
+  — cycle 2026-05-02 *本 commit*
 - [ ] Manual milestone exit summary：本文件 M7 block 末尾 append
   `### M7 exit summary` 段，列剩余的 §4 gap（iOS native timeline editor /
   Android Compose Multiplatform UI / desktop drag-drop edit / multi-character
