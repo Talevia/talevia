@@ -61,8 +61,8 @@ internal object AigcBudgetGuard {
         val store = projectStore ?: return
         val pid = projectId ?: return
         val project = store.get(pid) ?: return
-        val spentCents = project.lockfile.entries
-            .asSequence()
+        val spentCents = project.lockfile
+            .stream()
             .filter { it.sessionId == ctx.sessionId.value }
             .sumOf { it.costCents ?: 0L }
         if (spentCents < cap) {

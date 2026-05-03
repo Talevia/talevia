@@ -68,7 +68,7 @@ internal suspend fun runCostHistoryQuery(
     val rows = projects.asSequence()
         .flatMap { project ->
             val pid = project.id.value
-            project.lockfile.entries.asSequence().mapNotNull { entry ->
+            project.lockfile.stream().mapNotNull { entry ->
                 val cents = entry.costCents ?: return@mapNotNull null
                 val createdAt = entry.provenance.createdAtEpochMs
                 if (sinceEpochMs != null && createdAt < sinceEpochMs) return@mapNotNull null

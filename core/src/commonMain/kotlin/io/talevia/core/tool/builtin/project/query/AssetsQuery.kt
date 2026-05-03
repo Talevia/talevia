@@ -68,7 +68,7 @@ internal fun runAssetsQuery(
                 }
             }
         }
-        project.lockfile.entries.forEach { add(it.assetId.value) }
+        project.lockfile.stream().forEach { add(it.assetId.value) }
     }
 
     val filtered = project.assets.asSequence()

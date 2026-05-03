@@ -66,7 +66,7 @@ internal fun runLockfileOrphansQuery(
         }
     }
 
-    val orphans = project.lockfile.entries.filter { it.assetId !in referenced }
+    val orphans = project.lockfile.stream().filter { it.assetId !in referenced }.toList()
     val sorted = orphans.sortedWith(
         // Unpinned first so the top of the list is the actionable
         // drop-candidate set; within each pinned bucket, newest first so

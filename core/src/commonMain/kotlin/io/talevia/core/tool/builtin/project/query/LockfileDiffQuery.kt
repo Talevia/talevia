@@ -84,8 +84,8 @@ internal fun runLockfileDiffQuery(
     val (fromProject, fromLabel) = resolveDiffSide(project, fromSnap, "from")
     val (toProject, toLabel) = resolveDiffSide(project, toSnap, "to")
 
-    val fromByHash = fromProject.lockfile.entries.associateBy { it.inputHash }
-    val toByHash = toProject.lockfile.entries.associateBy { it.inputHash }
+    val fromByHash = fromProject.lockfile.stream().associateBy { it.inputHash }
+    val toByHash = toProject.lockfile.stream().associateBy { it.inputHash }
     val addedKeys = toByHash.keys - fromByHash.keys
     val removedKeys = fromByHash.keys - toByHash.keys
     val unchangedKeys = fromByHash.keys.intersect(toByHash.keys)

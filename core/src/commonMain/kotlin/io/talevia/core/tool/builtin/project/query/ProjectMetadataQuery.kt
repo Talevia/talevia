@@ -122,7 +122,7 @@ internal suspend fun runProjectMetadataQuery(
         .sortedBy { it.key }
         .associate { it.key to it.value }
 
-    val lockfileByTool: Map<String, Int> = project.lockfile.entries
+    val lockfileByTool: Map<String, Int> = project.lockfile.stream()
         .groupingBy { it.toolId }
         .eachCount()
         .entries

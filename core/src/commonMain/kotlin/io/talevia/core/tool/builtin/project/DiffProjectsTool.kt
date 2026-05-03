@@ -236,11 +236,17 @@ class DiffProjectsTool(
     }
 
     private fun diffLockfile(from: Project, to: Project): LockfileDiff {
-        val fromHashes = from.lockfile.entries.map { it.inputHash }.toSet()
-        val toEntries = to.lockfile.entries
+        // `debt-lockfile-lazy-interface-phase2b1b` (cycle 54): migrate
+        // from `entries.<op>` to `stream().<op>` for lazy-iter
+        // compatibility. `toEntries` materializes once for the two
+        // downstream passes (filter + map.toSet) — phase 2b-1c's
+        // lazy impl will need to either re-stream or memoize; current
+        // List shape stays correct as a transitional middle.
+        val fromHashes = from.lockfile.stream().map { it.inputHash }.toSet()
+        val toEntries = to.lockfile.stream().toList()
         val addedEntries = toEntries.filter { it.inputHash !in fromHashes }
         val toHashes = toEntries.map { it.inputHash }.toSet()
-        val removedCount = from.lockfile.entries.count { it.inputHash !in toHashes }
+        val removedCount = from.lockfile.stream().count { it.inputHash !in toHashes }
         val byTool = addedEntries.groupingBy { it.toolId }.eachCount()
         return LockfileDiff(
             entriesAdded = addedEntries.size,
