@@ -102,6 +102,42 @@ class AigcGenerateToolTest {
         assertEquals(1, engine.calls)
     }
 
+    @Test fun musicKindDispatchesAndPopulatesDurationField() = runTest {
+        // Cycle 72 follow-up: the dispatcher's 4-kind matrix had image /
+        // video / speech routing covered; music routing was missing. Pin
+        // the contract: `Input.Music` reaches `AigcMusicGenerator`,
+        // result.kind == "music", and the music-specific `durationSeconds`
+        // field surfaces correctly through the unified Output.
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/mus".toPath(), title = "mus").id
+        val engine = OneShotMusicGenEngine(tinyMusic, providerId = "fake-music")
+        val music = AigcMusicGenerator(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcGenerateTool(music = music)
+
+        val out = tool.execute(
+            AigcGenerateTool.Input.Music(
+                prompt = "lo-fi beats",
+                durationSeconds = 12.0,
+                model = "musicgen",
+                seed = 11L,
+                projectId = pid.value,
+            ),
+            ctx(),
+        ).data
+
+        assertEquals("music", out.kind)
+        assertEquals("fake-music", out.providerId)
+        assertEquals(12.0, out.durationSeconds)
+        // image/video-specific dimensions should be null on a music result.
+        assertEquals(null, out.width)
+        assertEquals(null, out.height)
+        // speech-specific fields (voice/format) should be null on music.
+        assertEquals(null, out.voice)
+        assertEquals(null, out.format)
+        assertEquals(11L, out.seed)
+        assertEquals(1, engine.calls)
+    }
+
     @Test fun speechKindMapsTextThroughPromptField() = runTest {
         // For speech: the dispatcher's `prompt` carries the spoken text;
         // it gets relayed to AigcSpeechGenerator.Input.text. Verify the
