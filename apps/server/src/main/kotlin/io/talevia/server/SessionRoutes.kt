@@ -174,9 +174,12 @@ internal fun Routing.sessionRoutes(
             return@post
         }
         if (container.cancel(sid)) {
-            call.respond(HttpStatusCode.OK, mapOf("cancelled" to true))
+            call.respond(HttpStatusCode.OK, CancelSessionResponse(cancelled = true))
         } else {
-            call.respond(HttpStatusCode.Conflict, mapOf("cancelled" to false, "reason" to "no in-flight run"))
+            call.respond(
+                HttpStatusCode.Conflict,
+                CancelSessionResponse(cancelled = false, reason = "no in-flight run"),
+            )
         }
     }
 
