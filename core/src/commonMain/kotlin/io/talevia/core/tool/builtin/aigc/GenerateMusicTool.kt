@@ -69,7 +69,9 @@ class GenerateMusicTool(
     private val engine: MusicGenEngine,
     private val bundleBlobWriter: BundleBlobWriter,
     private val projectStore: ProjectStore,
-) : Tool<GenerateMusicTool.Input, GenerateMusicTool.Output> {
+) : Tool<GenerateMusicTool.Input, GenerateMusicTool.Output>, MusicAigcGenerator {
+
+    override suspend fun generate(input: Input, ctx: ToolContext): ToolResult<Output> = execute(input, ctx)
 
     @Serializable
     data class Input(

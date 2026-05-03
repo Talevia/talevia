@@ -69,10 +69,18 @@ import kotlin.uuid.Uuid
  * [ToolApplicability.RequiresProjectBinding] gate.
  */
 class GenerateImageTool(
-    internal val engine: ImageGenEngine,
+    override val engine: ImageGenEngine,
     internal val bundleBlobWriter: BundleBlobWriter,
     internal val projectStore: ProjectStore,
-) : Tool<GenerateImageTool.Input, GenerateImageTool.Output> {
+) : Tool<GenerateImageTool.Input, GenerateImageTool.Output>, ImageAigcGenerator {
+
+    override suspend fun generate(input: Input, ctx: ToolContext): ToolResult<Output> = execute(input, ctx)
+
+    override suspend fun generateBatch(
+        input: Input,
+        ctx: ToolContext,
+        variantCount: Int,
+    ): List<ToolResult<Output>> = executeBatch(input, ctx, variantCount)
 
     @Serializable
     data class Input(

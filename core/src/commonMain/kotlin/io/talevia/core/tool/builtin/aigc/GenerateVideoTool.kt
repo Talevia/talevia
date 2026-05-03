@@ -71,7 +71,9 @@ class GenerateVideoTool(
     private val engine: VideoGenEngine,
     private val bundleBlobWriter: BundleBlobWriter,
     private val projectStore: ProjectStore,
-) : Tool<GenerateVideoTool.Input, GenerateVideoTool.Output> {
+) : Tool<GenerateVideoTool.Input, GenerateVideoTool.Output>, VideoAigcGenerator {
+
+    override suspend fun generate(input: Input, ctx: ToolContext): ToolResult<Output> = execute(input, ctx)
 
     @Serializable
     data class Input(

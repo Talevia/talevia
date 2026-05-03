@@ -26,10 +26,6 @@ import io.talevia.core.tool.builtin.aigc.GenerateMusicTool
 import io.talevia.core.tool.builtin.aigc.GenerateVideoTool
 import io.talevia.core.tool.builtin.aigc.ReplayLockfileTool
 import io.talevia.core.tool.builtin.aigc.SynthesizeSpeechTool
-import io.talevia.core.tool.builtin.aigc.ToolBackedImageGenerator
-import io.talevia.core.tool.builtin.aigc.ToolBackedMusicGenerator
-import io.talevia.core.tool.builtin.aigc.ToolBackedSpeechGenerator
-import io.talevia.core.tool.builtin.aigc.ToolBackedVideoGenerator
 import io.talevia.core.tool.builtin.aigc.UpscaleAssetTool
 import io.talevia.core.tool.builtin.fs.EditTool
 import io.talevia.core.tool.builtin.fs.GlobTool
@@ -298,20 +294,15 @@ fun ToolRegistry.registerAigcTools(
     // legacy ids surface as "post-phase-2; not replayable" rather
     // than a generic "tool not found").
     //
-    // `debt-aigc-tool-consolidation-phase3b-dispatcher-switch` (cycle 38):
-    // the dispatcher now takes `AigcGenerator` interfaces, not raw
-    // `Tool<I, O>` impls. Wrap each tool in its `ToolBacked*Generator`
-    // adapter; phase 3c will drop the `Tool<I, O>` interface impl from
-    // the underlying classes entirely (they remain reachable via the
-    // adapter for replay + standalone wiring tests).
-    register(
-        AigcGenerateTool(
-            image = imageTool?.let { ToolBackedImageGenerator(it) },
-            video = videoTool?.let { ToolBackedVideoGenerator(it) },
-            music = musicTool?.let { ToolBackedMusicGenerator(it) },
-            speech = speechTool?.let { ToolBackedSpeechGenerator(it) },
-        ),
-    )
+    // `debt-aigc-tool-consolidation-phase3c-1-collapse-adapter-layer`
+    // (cycle 39): the underlying `Generate*Tool` / `SynthesizeSpeechTool`
+    // classes now implement their per-kind `*AigcGenerator` interface
+    // directly (in addition to `Tool<I, O>`), so the `ToolBacked*Generator`
+    // adapter layer phase 3a introduced is redundant — pass the classes
+    // straight to the dispatcher. Phase 3c-2 will drop `Tool<I, O>` from
+    // the underlying classes once the e2e tests that still register them
+    // by-id move to a JVM-test-only legacy shim.
+    register(AigcGenerateTool(image = imageTool, video = videoTool, music = musicTool, speech = speechTool))
     register(CompareAigcCandidatesTool(this))
     register(ReplayLockfileTool(this, projects))
     asr?.let {

@@ -80,13 +80,15 @@ class SynthesizeSpeechTool(
     private val engines: List<TtsEngine>,
     private val bundleBlobWriter: BundleBlobWriter,
     private val projectStore: ProjectStore,
-) : Tool<SynthesizeSpeechTool.Input, SynthesizeSpeechTool.Output> {
+) : Tool<SynthesizeSpeechTool.Input, SynthesizeSpeechTool.Output>, SpeechAigcGenerator {
 
     init {
         require(engines.isNotEmpty()) {
             "SynthesizeSpeechTool requires at least one TtsEngine; got empty list."
         }
     }
+
+    override suspend fun generate(input: Input, ctx: ToolContext): ToolResult<Output> = execute(input, ctx)
 
     /**
      * Single-engine convenience ctor — the common case. Mirrors the pre-fallback
