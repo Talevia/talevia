@@ -28,9 +28,16 @@ internal fun friendly(t: Throwable): String {
     // first line so the provider's own error message survives but layout doesn't.
     val firstLine = raw.lineSequence().firstOrNull { it.isNotBlank() } ?: raw
     return when (t) {
+        // SerializationException must precede IllegalArgumentException
+        // because kotlinx.serialization.SerializationException :
+        // IllegalArgumentException — the more-specific arm needs to fire
+        // first for "schema mismatch — ..." to surface. Cycle 89 found
+        // this arm was dead code; fixed here.
+        is kotlinx.serialization.SerializationException -> "schema mismatch — $firstLine"
         is IllegalArgumentException -> "bad input — $firstLine"
         is NoSuchElementException -> "not found — $firstLine"
-        is kotlinx.serialization.SerializationException -> "schema mismatch — $firstLine"
+        // FileNotFoundException + UnknownHostException must precede
+        // IOException for the same reason — both extend IOException.
         is java.io.FileNotFoundException -> "file not found — $firstLine"
         is java.net.UnknownHostException -> "network — host not reachable ($firstLine)"
         is java.io.IOException -> "i/o — $firstLine"
