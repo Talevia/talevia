@@ -188,7 +188,7 @@ class ReplayLockfileTool(
             )
         }
 
-        val lockfileSizeBefore = projectBefore.lockfile.entries.size
+        val lockfileSizeBefore = projectBefore.lockfile.size
         // forReplay() flips ctx.isReplay=true so the AIGC tool skips its
         // findCached short-circuit and calls the provider even though an
         // entry with this inputHash already exists. Source consistency fold
@@ -199,7 +199,7 @@ class ReplayLockfileTool(
 
         val projectAfter = projects.get(pid)
             ?: error("Project ${pid.value} disappeared mid-replay")
-        val lockfileSizeAfter = projectAfter.lockfile.entries.size
+        val lockfileSizeAfter = projectAfter.lockfile.size
         if (lockfileSizeAfter <= lockfileSizeBefore) {
             error(
                 "Replay of ${entry.toolId} appended no new lockfile entry — the target tool " +
@@ -207,7 +207,8 @@ class ReplayLockfileTool(
                     "Original entry left untouched.",
             )
         }
-        val newEntry = projectAfter.lockfile.entries.last()
+        val newEntry = projectAfter.lockfile.lastOrNull()
+            ?: error("Replay appended no new lockfile entry — internal invariant broken")
 
         val stable = newEntry.inputHash == entry.inputHash
         val driftNote = if (stable) "" else

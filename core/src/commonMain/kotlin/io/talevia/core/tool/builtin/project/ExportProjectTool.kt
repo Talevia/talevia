@@ -117,7 +117,7 @@ class ExportProjectTool(
         val sourceNodeCount = project.source.nodes.size
         val trackCount = project.timeline.tracks.size
         val clipCount = project.timeline.tracks.sumOf { it.clips.size }
-        val lockfileEntryCount = project.lockfile.entries.size
+        val lockfileEntryCount = project.lockfile.size
         val snapshotCount = project.snapshots.size
 
         return ToolResult(

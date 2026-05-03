@@ -73,6 +73,32 @@ data class Lockfile(
      */
     fun stream(): Sequence<LockfileEntry> = entries.asSequence()
 
+    /**
+     * O(1) entry count without materialising a list view —
+     * `debt-lockfile-lazy-interface-phase2b1b-2` (cycle 57). Today it
+     * forwards to [List.size], but keeping size on the Lockfile API
+     * keeps the migration costless when phase 2b-1c swaps the eager
+     * list for a JSONL-backed impl that tracks count separately from
+     * the entry stream. `get()` (no backing field) keeps this out of
+     * the serialised shape.
+     */
+    val size: Int get() = entries.size
+
+    /**
+     * Most-recent entry by insertion order — append-only ledger
+     * semantics mean `lastOrNull()` is the entry just `append`-ed.
+     * Forward-compat with phase 2b-1c lazy impl (a tail pointer
+     * survives without materialising the list).
+     */
+    fun lastOrNull(): LockfileEntry? = entries.lastOrNull()
+
+    /**
+     * O(1) emptiness check. Same forward-compat motive as [size] /
+     * [lastOrNull]: a lazy JSONL impl will know its own emptiness
+     * without iterating.
+     */
+    fun isEmpty(): Boolean = entries.isEmpty()
+
     fun findByInputHash(hash: String): LockfileEntry? = byInputHash[hash]
 
     /**

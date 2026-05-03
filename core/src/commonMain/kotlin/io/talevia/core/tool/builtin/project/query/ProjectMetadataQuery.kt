@@ -162,7 +162,7 @@ internal suspend fun runProjectMetadataQuery(
         clipCount = clipCount,
         durationSeconds = durationSeconds,
         sourceNodesByKind = sourceNodesByKind,
-        lockfileEntryCount = project.lockfile.entries.size,
+        lockfileEntryCount = project.lockfile.size,
         lockfileByTool = lockfileByTool,
         snapshotCount = project.snapshots.size,
     )
@@ -179,7 +179,7 @@ internal suspend fun runProjectMetadataQuery(
         assetCount = project.assets.size,
         sourceNodeCount = project.source.nodes.size,
         sourceNodesByKind = sourceNodesByKind,
-        lockfileEntryCount = project.lockfile.entries.size,
+        lockfileEntryCount = project.lockfile.size,
         lockfileByTool = lockfileByTool,
         snapshotCount = project.snapshots.size,
         recentSnapshots = recentSnapshots,

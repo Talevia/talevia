@@ -211,7 +211,7 @@ class ImportProjectFromJsonTool(
         val trackCount = rehomed.timeline.tracks.size
         val clipCount = rehomed.timeline.tracks.sumOf { it.clips.size }
         val assetCount = rehomed.assets.size
-        val lockfileEntryCount = rehomed.lockfile.entries.size
+        val lockfileEntryCount = rehomed.lockfile.size
         val snapshotCount = rehomed.snapshots.size
 
         val validationNote = when {

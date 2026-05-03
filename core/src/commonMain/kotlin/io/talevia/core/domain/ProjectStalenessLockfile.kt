@@ -60,7 +60,7 @@ data class StaleClipReport(
  * naturally (oldest clip first). Empty list = nothing stale.
  */
 fun Project.staleClipsFromLockfile(): List<StaleClipReport> {
-    if (lockfile.entries.isEmpty()) return emptyList()
+    if (lockfile.isEmpty()) return emptyList()
     // Deep-hash comparison (VISION §5.1 transitive propagation): each
     // snapshotted binding id's **current** deep content hash (own
     // contentHash folded with ancestors') is recomputed and diffed against

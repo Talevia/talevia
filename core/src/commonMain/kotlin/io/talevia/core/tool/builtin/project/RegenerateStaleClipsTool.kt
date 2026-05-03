@@ -176,7 +176,7 @@ class RegenerateStaleClipsTool(
                 continue
             }
 
-            val lockfileSizeBefore = projectNow.lockfile.entries.size
+            val lockfileSizeBefore = projectNow.lockfile.size
             // Run the original tool with its raw inputs. Consistency folding inside
             // the tool re-runs against today's source graph, so the effective prompt
             // captures the edit that flagged this clip stale.
@@ -192,7 +192,7 @@ class RegenerateStaleClipsTool(
 
             val projectAfter = projects.get(pid)
                 ?: error("Project ${input.projectId} disappeared after dispatching ${entry.toolId}")
-            if (projectAfter.lockfile.entries.size <= lockfileSizeBefore) {
+            if (projectAfter.lockfile.size <= lockfileSizeBefore) {
                 // Cache hit or tool produced no new entry — either way, nothing new
                 // to splice. Could mean today's input hash matches a previous entry
                 // (e.g. someone reverted the source edit before calling us).
@@ -202,7 +202,8 @@ class RegenerateStaleClipsTool(
                 )
                 continue
             }
-            val newEntry = projectAfter.lockfile.entries.last()
+            val newEntry = projectAfter.lockfile.lastOrNull()
+                ?: error("regenerate dispatched ${entry.toolId} but no lockfile entry appeared — invariant broken")
             val newAssetId = newEntry.assetId
 
             var swapped = false
