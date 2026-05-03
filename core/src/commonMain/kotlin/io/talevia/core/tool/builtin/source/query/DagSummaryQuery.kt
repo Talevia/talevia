@@ -172,7 +172,7 @@ private fun buildSummary(
     }
     val kindBreakdown = nodesByKind.entries.joinToString(", ") { (k, v) -> "$v $k" }
     val rootsPart = "$rootCount root${if (rootCount == 1) "" else "s"}"
-    val leavesPart = "$leafCount leaf${if (leafCount == 1) "" else "ves"}"
+    val leavesPart = "$leafCount ${if (leafCount == 1) "leaf" else "leaves"}"
     val hotspotPart = if (hotspots.isEmpty()) {
         ""
     } else {
