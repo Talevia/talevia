@@ -90,18 +90,35 @@ class ProjectActionDispatcherTool(
 
     override val helpText: String =
         "Project action dispatcher with `kind` discriminator routing to one of four " +
-            "underlying tools: " +
-            "`kind=lifecycle` + args (action=create|create_from_template|open|delete|rename|" +
-            "set_output_profile|remove_asset, …) → project lifecycle (formerly the standalone " +
-            "`project_action` tool, renamed to `project_lifecycle_action` cycle 60). " +
-            "`kind=maintenance` + args → housekeeping (gc / prune / clear). " +
-            "`kind=pin` + args → toggle the `pinned` flag on lockfile entries. " +
-            "`kind=snapshot` + args (action=save|restore|delete) → project snapshots. " +
-            "Args are typed per kind; consult each underlying tool's helpText for the args " +
-            "field shape (project_lifecycle_action / project_maintenance_action / " +
-            "project_pin_action / project_snapshot_action). Until phase 2 unregisters them, " +
-            "the four underlying tools remain directly callable too — the dispatcher is " +
-            "additive."
+            "underlying handlers (cycle 63 phase 2 unregistered the standalone tools — " +
+            "this dispatcher is now the only LLM-facing surface for project-level actions). " +
+            "Wrap the per-kind args under `args`; the kind-specific shapes are: " +
+            "`kind=\"lifecycle\"` args: action ∈ {create | create_from_template | open | " +
+            "delete | rename | set_output_profile | remove_asset}, plus per-action fields. " +
+            "create + title (resolutionPreset?, fps?, projectId?, path?). " +
+            "create_from_template + title + template (narrative|vlog|ad|musicmv|tutorial|auto) " +
+            "+ intent? when template=auto. open + path. delete + projectId (deleteFiles?). " +
+            "rename + projectId + title. set_output_profile + projectId + ≥1 of " +
+            "(resolutionWidth+resolutionHeight paired, fps, videoCodec, audioCodec, " +
+            "videoBitrate, audioBitrate, container). remove_asset + projectId + assetId " +
+            "(force?). " +
+            "`kind=\"maintenance\"` args: action ∈ {prune-lockfile | gc-lockfile | " +
+            "gc-render-cache} + projectId. prune-lockfile drops orphan lockfile rows. " +
+            "gc-lockfile policy-sweeps lockfile (maxAgeDays + keepLatestPerTool both AND; " +
+            "pinned always kept; preserveLiveAssets keeps referenced rows). " +
+            "gc-render-cache policy-sweeps mezzanine cache (maxAgeDays + keepLastN both AND). " +
+            "All maintenance actions accept dryRun=true. " +
+            "`kind=\"pin\"` args: target ∈ {clip | lockfile_entry} + projectId + pinned + " +
+            "(clipId when target=clip OR inputHash when target=lockfile_entry). When " +
+            "pinned=true, gc_lockfile rescues the entry and regenerate_stale_clips leaves " +
+            "the clip stale-but-frozen. " +
+            "`kind=\"snapshot\"` args: action ∈ {save | restore | delete} + projectId. " +
+            "save + label? captures point-in-time. restore + snapshotId rolls back " +
+            "(preserves snapshots list). delete + snapshotId drops one snapshot. " +
+            "Output: `kind` discriminator field + per-kind nullable result " +
+            "(lifecycleResult / maintenanceResult / pinResult / snapshotResult). All " +
+            "underlying tool classes still exist in code as routing targets but are no " +
+            "longer registered; this dispatcher is the only public surface."
 
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
