@@ -7,7 +7,6 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
 import io.talevia.core.domain.lockfile.EagerLockfile
-import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.domain.lockfile.ModalityHashes
 import io.talevia.core.domain.source.Modality

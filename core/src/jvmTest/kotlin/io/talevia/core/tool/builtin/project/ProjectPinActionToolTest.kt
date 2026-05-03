@@ -15,7 +15,6 @@ import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
 import io.talevia.core.domain.lockfile.EagerLockfile
-import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.permission.PermissionDecision
 import io.talevia.core.platform.GenerationProvenance

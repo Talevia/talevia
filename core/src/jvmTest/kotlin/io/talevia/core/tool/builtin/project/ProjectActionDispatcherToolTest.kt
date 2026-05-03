@@ -8,6 +8,8 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.TrackId
 import io.talevia.core.domain.Clip
+import io.talevia.core.domain.MediaMetadata
+import io.talevia.core.domain.MediaSource
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.TimeRange
@@ -16,8 +18,6 @@ import io.talevia.core.domain.Track
 import io.talevia.core.domain.lockfile.EagerLockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.permission.PermissionDecision
-import io.talevia.core.domain.MediaSource
-import io.talevia.core.domain.MediaMetadata
 import io.talevia.core.platform.GenerationProvenance
 import io.talevia.core.platform.MediaPathResolver
 import io.talevia.core.platform.OutputSpec

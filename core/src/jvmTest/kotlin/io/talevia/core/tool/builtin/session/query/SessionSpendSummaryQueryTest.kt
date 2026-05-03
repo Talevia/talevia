@@ -14,7 +14,6 @@ import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.lockfile.EagerLockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.platform.GenerationProvenance
-import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Session
 import io.talevia.core.session.SqlDelightSessionStore
 import io.talevia.core.tool.builtin.session.SessionQueryTool

@@ -16,7 +16,6 @@ import io.talevia.core.domain.source.SourceNode
 import io.talevia.core.domain.source.SourceRef
 import io.talevia.core.tool.builtin.source.SourceQueryTool
 import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put

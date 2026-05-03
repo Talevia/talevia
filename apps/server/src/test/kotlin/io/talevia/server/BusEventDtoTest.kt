@@ -5,8 +5,8 @@ import io.talevia.core.PartId
 import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.agent.AgentRunState
-import io.talevia.core.bus.BusEvent
 import io.talevia.core.agent.FallbackHint
+import io.talevia.core.bus.BusEvent
 import kotlinx.datetime.Clock
 import kotlin.test.Test
 import kotlin.test.assertEquals

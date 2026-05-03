@@ -1,10 +1,10 @@
 package io.talevia.core.domain.source
 
 import io.talevia.core.AssetId
+import io.talevia.core.ClipId
 import io.talevia.core.MessageId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
-import io.talevia.core.ClipId
 import io.talevia.core.domain.Clip
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
@@ -17,8 +17,8 @@ import kotlinx.serialization.json.JsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
-import kotlin.test.assertNull
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
