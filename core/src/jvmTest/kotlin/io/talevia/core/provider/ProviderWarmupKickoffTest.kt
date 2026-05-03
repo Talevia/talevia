@@ -135,6 +135,74 @@ class ProviderWarmupKickoffTest {
         }
     }
 
+    // ── kickoffEagerProviderWarmupWithSupervisor (cycle 215) ────
+
+    @Test fun withSupervisorVariantWorksWithoutCallerSuppliedScope() = runTest {
+        // Cycle 215 audit: the convenience wrapper has been
+        // uncovered since landing; pin the scope-management
+        // contract so a future refactor can't break iOS / mobile
+        // call sites that rely on the wrapper instead of
+        // pre-constructing a scope. Same Starting+Ready event
+        // sequence as the explicit-scope variant — the wrapper
+        // delegates verbatim.
+        withContext(Dispatchers.Default) {
+            val provider = FakeProvider("anthropic-with-supervisor") { emptyList() }
+            val registry = ProviderRegistry(
+                byId = mapOf("anthropic-with-supervisor" to provider),
+                default = provider,
+            )
+            val bus = EventBus()
+            val (ready, collected) = collectWarmupEventsAfterSubscribed(bus, expected = 2)
+            withTimeout(2.seconds) { ready.await() }
+
+            // No `scope = ...` arg — the wrapper creates its own.
+            kickoffEagerProviderWarmupWithSupervisor(providers = registry, bus = bus)
+
+            val captured = withTimeout(15.seconds) { collected.await() }
+            assertEquals(2, captured.size, "wrapper produces same Starting+Ready pair")
+            assertEquals(BusEvent.ProviderWarmup.Phase.Starting, captured[0].phase)
+            assertEquals(BusEvent.ProviderWarmup.Phase.Ready, captured[1].phase)
+            assertEquals(1, provider.listModelsCallCount)
+        }
+    }
+
+    @Test fun withSupervisorVariantFailureInOneProviderDoesNotCancelSiblings() = runTest {
+        // Marquee SupervisorJob pin: per kdoc, the wrapper uses
+        // SupervisorJob so a failing provider doesn't propagate
+        // cancellation to siblings. Two providers — one throws
+        // on listModels, the other succeeds — both should emit
+        // Starting; only the success emits Ready.
+        withContext(Dispatchers.Default) {
+            val good = FakeProvider("good-provider") { emptyList() }
+            val bad = FakeProvider("bad-provider") { error("simulated 401") }
+            val registry = ProviderRegistry(
+                byId = mapOf("good-provider" to good, "bad-provider" to bad),
+                default = good,
+            )
+            val bus = EventBus()
+            // 3 events expected: 2 Starting (one per provider) + 1 Ready (only good).
+            val (ready, collected) = collectWarmupEventsAfterSubscribed(bus, expected = 3)
+            withTimeout(2.seconds) { ready.await() }
+
+            kickoffEagerProviderWarmupWithSupervisor(providers = registry, bus = bus)
+
+            val captured = withTimeout(15.seconds) { collected.await() }
+            // Both providers emitted Starting (SupervisorJob — the
+            // bad provider's failure didn't cancel the good
+            // sibling's coroutine before it published Starting).
+            val startingProviders = captured
+                .filter { it.phase == BusEvent.ProviderWarmup.Phase.Starting }
+                .map { it.providerId }
+                .toSet()
+            assertEquals(setOf("good-provider", "bad-provider"), startingProviders)
+            // Only the good provider emitted Ready.
+            val readyProviders = captured
+                .filter { it.phase == BusEvent.ProviderWarmup.Phase.Ready }
+                .map { it.providerId }
+            assertEquals(listOf("good-provider"), readyProviders)
+        }
+    }
+
     @Test fun emptyRegistryEmitsNothing() = runTest {
         val registry = ProviderRegistry(byId = emptyMap(), default = null)
         val bus = EventBus()
