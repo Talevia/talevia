@@ -176,16 +176,42 @@ class AigcSpeechGenerator(
             toolId = ID,
             providerId = engines.firstOrNull()?.providerId,
         ) {
-            synthesizeWithFallback(engines, request) { phase, providerId ->
-                ctx.publishEvent(
-                    BusEvent.ProviderWarmup(
-                        sessionId = ctx.sessionId,
-                        providerId = providerId,
-                        phase = phase,
-                        epochMs = Clock.System.now().toEpochMilliseconds(),
-                    ),
-                )
-            }
+            // `aigc-tool-streaming-first-emitter` (cycle 43): forward each
+            // audio chunk through `BusEvent.ToolStreamingPart` so UI
+            // subscribers see incremental progress before the final
+            // ToolResult. Non-streaming engines emit a single synthetic
+            // chunk (TtsEngine.synthesizeStreaming default impl); the
+            // `StreamingTtsEngine` test fake emits N chunks; future
+            // OpenAI HTTP-streaming wire-up will emit chunks at the
+            // provider's natural framing boundary. The chunk payload is
+            // a `<n bytes>` marker — keeping bytes off the bus avoids
+            // base64-bloat per CLAUDE.md "EventBus minimal payloads"
+            // and matches cycle 35's bullet text intent.
+            synthesizeStreamingWithFallback(
+                engines = engines,
+                request = request,
+                onChunk = { chunk ->
+                    ctx.publishEvent(
+                        BusEvent.ToolStreamingPart(
+                            sessionId = ctx.sessionId,
+                            callId = ctx.callId,
+                            toolId = ID,
+                            chunk = "<${chunk.size} bytes>",
+                            doneTokens = null,
+                        ),
+                    )
+                },
+                onWarmup = { phase, providerId ->
+                    ctx.publishEvent(
+                        BusEvent.ProviderWarmup(
+                            sessionId = ctx.sessionId,
+                            providerId = providerId,
+                            phase = phase,
+                            epochMs = Clock.System.now().toEpochMilliseconds(),
+                        ),
+                    )
+                },
+            )
         }
 
         val newAssetId = AssetId(Uuid.random().toString())

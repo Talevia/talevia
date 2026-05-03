@@ -58,3 +58,51 @@ internal suspend fun synthesizeWithFallback(
             "voice='${request.voice}'). Attempts: $attempted",
     )
 }
+
+/**
+ * Streaming variant of [synthesizeWithFallback] for
+ * `aigc-tool-streaming-first-emitter` (cycle 43). Each engine's
+ * `synthesizeStreaming` invocation forwards its [onChunk] callback to
+ * the caller — for the AIGC tool, that's where each chunk turns into a
+ * `BusEvent.ToolStreamingPart` publish before the final ToolResult.
+ *
+ * **Fallback semantics** mirror the non-streaming variant exactly:
+ * each engine's failure is remembered, the chain proceeds, and only
+ * the successful engine's chunks reach [onChunk]. A failed engine that
+ * emitted partial chunks before throwing CANNOT have those chunks
+ * "rolled back" — they already left the function — but the design is
+ * sound because non-streaming engines emit exactly one synthetic chunk
+ * via the default impl (the synthetic chunk fires AFTER the underlying
+ * `synthesize` call returns successfully, so a failure means zero
+ * chunks were emitted from that engine). For genuinely streaming
+ * engines (future OpenAI HTTP streaming wire-up), callers must tolerate
+ * "engine A emitted 2 chunks, then crashed; engine B emitted 5 chunks"
+ * — UI subscribers see 7 chunks total, and the result reflects only
+ * engine B's bytes. That's an honest representation of what happened
+ * over the wire.
+ */
+internal suspend fun synthesizeStreamingWithFallback(
+    engines: List<TtsEngine>,
+    request: TtsRequest,
+    onChunk: suspend (ByteArray) -> Unit,
+    onWarmup: suspend (BusEvent.ProviderWarmup.Phase, String) -> Unit = { _, _ -> },
+): TtsResult {
+    val failures = mutableListOf<Pair<String, Throwable>>()
+    for (engine in engines) {
+        try {
+            return engine.synthesizeStreaming(
+                request = request,
+                onChunk = onChunk,
+                onWarmup = { phase -> onWarmup(phase, engine.providerId) },
+            )
+        } catch (t: Throwable) {
+            if (t is kotlinx.coroutines.CancellationException) throw t
+            failures += engine.providerId to t
+        }
+    }
+    val attempted = failures.joinToString("; ") { (id, t) -> "$id: ${t.message ?: t::class.simpleName}" }
+    error(
+        "All ${engines.size} TTS engine(s) failed for streaming text-to-speech request (model='${request.modelId}', " +
+            "voice='${request.voice}'). Attempts: $attempted",
+    )
+}
