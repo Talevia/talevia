@@ -2,6 +2,7 @@ package io.talevia.core.provider
 
 import io.talevia.core.bus.BusEvent
 import io.talevia.core.bus.EventBus
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -10,6 +11,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
@@ -57,11 +59,14 @@ class ProviderWarmupKickoffTest {
             val bus = EventBus()
 
             // Barrier-based: subscribe with `take(2).toList()` so the
-            // collector completes deterministically once 2 events arrive
-            // — no busy-yield against `Dispatchers.Default` queue depth.
-            // Replaces the cycle-115 yield-loop that flaked at 5s on
-            // loaded CI runners (`debt-flaky-provider-warmup-test`).
-            val collected = collectWarmupEvents(bus, expected = 2)
+            // collector completes deterministically once 2 events arrive.
+            // Cycle 215: use the `AfterSubscribed` variant so the
+            // collector is GUARANTEED to be subscribed before kickoff
+            // publishes — eliminates the MutableSharedFlow replay=0
+            // race that flaked the prior `collectWarmupEvents`-only
+            // form on stop-hook runs.
+            val (ready, collected) = collectWarmupEventsAfterSubscribed(bus, expected = 2)
+            withTimeout(2.seconds) { ready.await() }
 
             kickoffEagerProviderWarmup(
                 providers = registry,
@@ -69,12 +74,9 @@ class ProviderWarmupKickoffTest {
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
             )
 
-            // 15s, not 5s: this test runs on Dispatchers.Default with N≈cores threads,
-            // and is sometimes invoked from a CI / stop-hook context immediately after
-            // a heavy gradle pass (compile + ktlint + sibling :test tasks). A fresh
-            // test JVM doing class-load + bus setup + 2 launched coroutines + bus
-            // collector can legitimately exceed 5s when the host is saturated. This
-            // is the upper bound — happy path completes in milliseconds.
+            // 15s upper bound: under stop-hook saturation the
+            // launched-coroutine + publish path can take seconds.
+            // Happy path completes in milliseconds.
             val captured = withTimeout(15.seconds) { collected.await() }
 
             // Both events fired in order, scoped to the eager session.
@@ -93,12 +95,19 @@ class ProviderWarmupKickoffTest {
             val registry = ProviderRegistry(byId = mapOf("openai-fake" to provider), default = provider)
             val bus = EventBus()
 
-            // Barrier 1: take(1) blocks until Starting arrives.
-            val starting = collectWarmupEvents(bus, expected = 1)
+            // Barrier 1: take(1) blocks until Starting arrives. Use
+            // the AfterSubscribed variant so the kickoff fires AFTER
+            // the subscriber is live (cycle 215 race fix).
+            val (startingReady, starting) = collectWarmupEventsAfterSubscribed(bus, expected = 1)
             // Barrier 2: try to collect 2 events with a short window —
             // expected to time out (no Ready ever arrives). Bounded
             // negative-evidence wait replaces the yield-10-times probe.
-            val phantomReady = collectWarmupEvents(bus, expected = 2)
+            val (phantomReadyReady, phantomReady) =
+                collectWarmupEventsAfterSubscribed(bus, expected = 2)
+            withTimeout(2.seconds) {
+                startingReady.await()
+                phantomReadyReady.await()
+            }
 
             kickoffEagerProviderWarmup(
                 providers = registry,
@@ -157,7 +166,9 @@ class ProviderWarmupKickoffTest {
             val bus = EventBus()
 
             // 4 events total: each provider emits Starting + Ready.
-            val collected = collectWarmupEvents(bus, expected = 4)
+            // Cycle 215 race fix: AfterSubscribed variant.
+            val (ready, collected) = collectWarmupEventsAfterSubscribed(bus, expected = 4)
+            withTimeout(2.seconds) { ready.await() }
 
             kickoffEagerProviderWarmup(
                 providers = registry,
@@ -165,12 +176,9 @@ class ProviderWarmupKickoffTest {
                 scope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
             )
 
-            // 15s, not 5s: this test runs on Dispatchers.Default with N≈cores threads,
-            // and is sometimes invoked from a CI / stop-hook context immediately after
-            // a heavy gradle pass (compile + ktlint + sibling :test tasks). A fresh
-            // test JVM doing class-load + bus setup + 2 launched coroutines + bus
-            // collector can legitimately exceed 5s when the host is saturated. This
-            // is the upper bound — happy path completes in milliseconds.
+            // 15s upper bound: under stop-hook saturation the
+            // launched-coroutine + publish path can take seconds.
+            // Happy path completes in milliseconds.
             val captured = withTimeout(15.seconds) { collected.await() }
 
             // Both providers got a Starting + Ready pair (4 total events).
@@ -190,11 +198,15 @@ class ProviderWarmupKickoffTest {
      * The returned Deferred completes deterministically once that many
      * events have been seen (or with the partial list if cancelled).
      *
-     * Replaces the cycle-115 yield-loop pattern (`while (captured.size
-     * < N) yield()`) which raced against `Dispatchers.Default` queue
-     * depth on loaded CI runners — see `debt-flaky-provider-warmup-test`.
-     * `Flow.take(N).toList()` completes structurally on the Nth emit;
-     * no busy polling, no dispatcher dependency.
+     * Cycle 215 (`debt-flaky-provider-warmup-test` revisit): the prior
+     * impl flaked on a stop-hook run because `async {}` schedules the
+     * collector but `bus.events.collect` doesn't subscribe to the
+     * underlying `MutableSharedFlow` until the dispatcher actually runs
+     * the body. If `kickoffEagerProviderWarmup` publishes its first
+     * event before the subscriber is registered (replay = 0), it's
+     * lost and the collector waits forever. Use
+     * [collectWarmupEventsAfterSubscribed] when you need the kickoff
+     * to fire AFTER the subscriber is guaranteed to be live.
      *
      * Caller MUST `withTimeout(...)` the await so the test fails loud
      * if the expected events never arrive.
@@ -204,5 +216,32 @@ class ProviderWarmupKickoffTest {
         expected: Int,
     ): Deferred<List<BusEvent.ProviderWarmup>> = async(Dispatchers.Default) {
         bus.events.filterIsInstance<BusEvent.ProviderWarmup>().take(expected).toList()
+    }
+
+    /**
+     * Same as [collectWarmupEvents] but returns a `(ready, collected)`
+     * pair: `ready.await()` blocks until the upstream `bus.events`
+     * subscription is live, so the caller can synchronously kick off
+     * the publisher AFTER the subscriber is registered. Eliminates the
+     * MutableSharedFlow `replay = 0` race that flakes when the host
+     * is loaded (compile + ktlint + sibling :test tasks before this).
+     */
+    private fun CoroutineScope.collectWarmupEventsAfterSubscribed(
+        bus: EventBus,
+        expected: Int,
+    ): Pair<CompletableDeferred<Unit>, Deferred<List<BusEvent.ProviderWarmup>>> {
+        val ready = CompletableDeferred<Unit>()
+        val collected = async(Dispatchers.Default) {
+            // `onSubscription` is a SharedFlow extension and fires
+            // AFTER the upstream subscription is registered with the
+            // SharedFlow. Apply it before chained operators
+            // (`filterIsInstance` etc. degrade SharedFlow to Flow).
+            bus.events
+                .onSubscription { ready.complete(Unit) }
+                .filterIsInstance<BusEvent.ProviderWarmup>()
+                .take(expected)
+                .toList()
+        }
+        return ready to collected
     }
 }
