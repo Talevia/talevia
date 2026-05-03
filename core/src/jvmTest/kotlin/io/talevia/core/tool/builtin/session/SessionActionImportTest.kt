@@ -198,9 +198,16 @@ class SessionActionImportTest {
     }
 
     @Test fun missingEnvelopeFailsLoud() = runTest {
+        // `debt-split-session-action-tool-input-phase1b` (cycle 53):
+        // missing-required-field validation moved from the handler's
+        // `error("…")` (IllegalStateException) to the verb decoder's
+        // `requireNotNull(…) { … }` (IllegalArgumentException). Same
+        // failure surface for the agent (loud throw with "envelope" in
+        // the message), different exception type — phase 1b's design
+        // accepts this break since the decoder is the typed boundary.
         val rig = rig()
         val tool = SessionActionTool(rig.sessions, projects = rig.projects)
-        val ex = assertFailsWith<IllegalStateException> {
+        val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(
                 SessionActionTool.Input(action = "import"),
                 rig.ctx,

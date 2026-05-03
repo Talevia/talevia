@@ -545,28 +545,34 @@ class SessionActionTool(
     override val inputSchema: JsonObject = SESSION_ACTION_INPUT_SCHEMA
 
     override suspend fun execute(input: Input, ctx: ToolContext): ToolResult<Output> {
-        return when (input.action) {
-            "archive" -> executeSessionArchive(sessions, clock, input, ctx)
-            "unarchive" -> executeSessionUnarchive(sessions, clock, input, ctx)
-            "rename" -> executeSessionRename(sessions, clock, input, ctx)
-            "delete" -> executeSessionDelete(sessions, input)
-            "remove_permission_rule" -> executeRemovePermissionRule(
+        // `debt-split-session-action-tool-input-phase1b` (cycle 53):
+        // dispatcher rewritten to consume the cycle-47 `SessionVerb`
+        // sealed family via `input.toVerb()` instead of switching on
+        // the `input.action` string. Required-field decoding moved to
+        // the verb decoder (fail-loud semantics preserved); the
+        // `else -> error("unknown action ...")` branch goes away
+        // because the decoder's exhaustive `when` already raises the
+        // accepted-list error on unknown actions. Phase 1c will
+        // migrate handler signatures from `(Input, ...)` to
+        // `(SessionVerb.X, ...)` typed parameters; phase 1d migrates
+        // tests + drops the legacy flat `Input` constructor.
+        return when (input.toVerb()) {
+            is SessionVerb.Archive -> executeSessionArchive(sessions, clock, input, ctx)
+            is SessionVerb.Unarchive -> executeSessionUnarchive(sessions, clock, input, ctx)
+            is SessionVerb.Rename -> executeSessionRename(sessions, clock, input, ctx)
+            is SessionVerb.Delete -> executeSessionDelete(sessions, input)
+            is SessionVerb.RemovePermissionRule -> executeRemovePermissionRule(
                 sessions, permissionRulesPersistence, input, ctx,
             )
-            "import" -> executeSessionImport(sessions, projects, input)
-            "set_system_prompt" -> executeSessionSetSystemPrompt(sessions, clock, input, ctx)
-            "export_bus_trace" -> executeSessionExportBusTrace(busTrace, input, ctx)
-            "set_tool_enabled" -> executeSessionSetToolEnabled(sessions, clock, input, ctx)
-            "set_spend_cap" -> executeSessionSetSpendCap(sessions, clock, input, ctx)
-            "fork" -> executeSessionFork(sessions, input, ctx)
-            "export" -> executeSessionExport(sessions, input, ctx)
-            "revert" -> executeSessionRevert(sessions, projects, bus, input)
-            "compact" -> executeSessionCompact(sessions, providers, bus, input, ctx)
-            else -> error(
-                "unknown action '${input.action}'; accepted: archive, unarchive, rename, delete, " +
-                    "remove_permission_rule, import, set_system_prompt, export_bus_trace, " +
-                    "set_tool_enabled, set_spend_cap, fork, export, revert, compact",
-            )
+            is SessionVerb.Import -> executeSessionImport(sessions, projects, input)
+            is SessionVerb.SetSystemPrompt -> executeSessionSetSystemPrompt(sessions, clock, input, ctx)
+            is SessionVerb.ExportBusTrace -> executeSessionExportBusTrace(busTrace, input, ctx)
+            is SessionVerb.SetToolEnabled -> executeSessionSetToolEnabled(sessions, clock, input, ctx)
+            is SessionVerb.SetSpendCap -> executeSessionSetSpendCap(sessions, clock, input, ctx)
+            is SessionVerb.Fork -> executeSessionFork(sessions, input, ctx)
+            is SessionVerb.Export -> executeSessionExport(sessions, input, ctx)
+            is SessionVerb.Revert -> executeSessionRevert(sessions, projects, bus, input)
+            is SessionVerb.Compact -> executeSessionCompact(sessions, providers, bus, input, ctx)
         }
     }
 

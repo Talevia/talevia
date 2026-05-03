@@ -135,9 +135,13 @@ class SessionActionRemovePermissionRuleTest {
     }
 
     @Test fun missingPermissionFailsLoud() = runTest {
+        // `debt-split-session-action-tool-input-phase1b` (cycle 53):
+        // required-field validation moved into the verb decoder
+        // (`requireNotNull` → IllegalArgumentException) instead of
+        // the handler's `error()` (IllegalStateException).
         val (store, sid, persistence) = newRig()
         val tool = SessionActionTool(store, permissionRulesPersistence = persistence)
-        val ex = assertFailsWith<IllegalStateException> {
+        val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(
                 SessionActionTool.Input(
                     sessionId = sid.value,
@@ -151,9 +155,10 @@ class SessionActionRemovePermissionRuleTest {
     }
 
     @Test fun missingPatternFailsLoud() = runTest {
+        // Same decoder-vs-handler exception-type shift as above.
         val (store, sid, persistence) = newRig()
         val tool = SessionActionTool(store, permissionRulesPersistence = persistence)
-        val ex = assertFailsWith<IllegalStateException> {
+        val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(
                 SessionActionTool.Input(
                     sessionId = sid.value,

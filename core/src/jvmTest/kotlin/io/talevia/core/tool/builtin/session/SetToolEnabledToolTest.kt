@@ -180,6 +180,10 @@ class SetToolEnabledToolTest {
     }
 
     @Test fun rejectsMissingEnabled() = runTest {
+        // `debt-split-session-action-tool-input-phase1b` (cycle 53):
+        // required-field validation moved to the verb decoder
+        // (`requireNotNull` → IllegalArgumentException) instead of
+        // the handler's `error()` (IllegalStateException).
         val sessions = freshSessions()
         val sid = sessions.seed("s-no-enabled")
         val tool = SessionActionTool(sessions)
@@ -189,7 +193,7 @@ class SetToolEnabledToolTest {
                 ctxFor(sid),
             )
         }.exceptionOrNull()
-        assertTrue(ex is IllegalStateException, "missing enabled flag must fail loud")
+        assertTrue(ex is IllegalArgumentException, "missing enabled flag must fail loud")
         assertTrue(ex.message!!.contains("enabled"), ex.message)
     }
 }
