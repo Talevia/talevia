@@ -22,6 +22,24 @@ interface ImageGenEngine {
     /** Stable identifier for the provider — recorded in [GenerationProvenance.providerId]. */
     val providerId: String
 
+    /**
+     * Whether the provider returns N distinct images in a **single API call**
+     * when `request.n > 1` (`aigc-multi-variant-phase3-openai-native-n`). True
+     * = caller can batch — issue one provider request for `n` variants and
+     * pay 1 round-trip + the per-variant cost on the provider's side. False
+     * = caller should loop `request.n` separate `n=1` calls (cycle 29 phase 2's
+     * sequential default), because the engine doesn't natively fan out and
+     * may either ignore `n` or error.
+     *
+     * Default `false` so any new ImageGenEngine impl is **safe by
+     * construction** (the dispatcher falls back to the proven sequential
+     * loop). Engines that DO natively batch (OpenAI image-gen) explicitly
+     * override this to true. Adding a new batch-supporting engine = one
+     * `override val` line + an integration test that asserts a single
+     * provider call for `n>1`.
+     */
+    val supportsNativeBatch: Boolean get() = false
+
     suspend fun generate(request: ImageGenRequest): ImageGenResult
 
     /**

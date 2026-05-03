@@ -61,8 +61,19 @@ internal suspend fun dispatchImage(
         projectId = input.projectId,
         consistencyBindingIds = input.consistencyBindingIds,
     )
-    val results = runVariants(input.variantCount, ctx) { _, variantCtx ->
-        tool.execute(inner, variantCtx)
+    // `aigc-multi-variant-phase3-openai-native-n` (cycle 33): when the
+    // image-gen provider supports a native `n` parameter (currently
+    // OpenAI image-gen) and the user requested multiple variants,
+    // route through [GenerateImageTool.executeBatch] which issues
+    // **one** provider call for N images. Other providers (Replicate
+    // / future Stability / etc.) fall back to the proven sequential
+    // N×1 loop — same lockfile shape, more provider round-trips.
+    val results = if (input.variantCount > 1 && tool.engine.supportsNativeBatch) {
+        tool.executeBatch(inner, ctx, input.variantCount)
+    } else {
+        runVariants(input.variantCount, ctx) { _, variantCtx ->
+            tool.execute(inner, variantCtx)
+        }
     }
     val first = results.first().data
     val variants = results.mapIndexed { i, r ->

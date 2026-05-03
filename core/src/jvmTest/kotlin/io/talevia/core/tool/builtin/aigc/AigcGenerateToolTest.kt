@@ -294,6 +294,56 @@ class AigcGenerateToolTest {
         assertEquals(0, engine.calls, "loud reject must happen before any provider call")
     }
 
+    // ---------- aigc-multi-variant-phase3-openai-native-n (cycle 33) ----
+
+    @Test fun nativeBatchEngineFiresOneProviderCallForVariantCount4() = runTest {
+        // Cycle 33: when the underlying ImageGenEngine reports
+        // `supportsNativeBatch = true` (OpenAI image-gen in production),
+        // the dispatcher routes through `GenerateImageTool.executeBatch`
+        // which issues a **single** provider call with `n=variantCount`
+        // instead of N separate `n=1` calls. The cycle 29 sequential
+        // path is preserved as the fallback (asserted by
+        // `imageVariantCount4ProducesFourDistinctLockfileEntries`,
+        // above).
+        val (store, fs) = ProjectStoreTestKit.createWithFs()
+        val pid = store.createAt(path = "/projects/native-batch".toPath(), title = "native-batch").id
+        val engine = NativeBatchImageGenEngine(
+            providerId = "fake-native-batch",
+            bytesForVariant = { call, v -> byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, call.toByte(), v.toByte()) },
+        )
+        val image = GenerateImageTool(engine, FileBundleBlobWriter(store, fs), store)
+        val tool = AigcGenerateTool(image = image)
+
+        val out = tool.execute(
+            AigcGenerateTool.Input.Image(
+                prompt = "hero shot variants",
+                seed = 42L,
+                projectId = pid.value,
+                variantCount = 4,
+            ),
+            ctx(),
+        ).data
+
+        // Single provider round-trip — the whole point of phase 3.
+        assertEquals(1, engine.calls, "native-batch engine must be called exactly once for variantCount=4")
+        // The single call must have requested n=4.
+        assertEquals(4, engine.lastRequest?.n, "the single call must propagate n=variantCount through to the engine")
+
+        // Same lockfile shape as the sequential path: 4 entries with
+        // variantIndex 0..3, 4 distinct inputHashes (variant segment),
+        // 4 distinct asset ids.
+        assertEquals(4, out.variantCount)
+        assertEquals(4, out.variants.size)
+        assertEquals(listOf(0, 1, 2, 3), out.variants.map { it.variantIndex })
+        assertEquals(4, out.variants.map { it.assetId }.toSet().size, "4 distinct assetIds")
+
+        val project = store.get(pid)!!
+        val entries = project.lockfile.entries.filter { it.toolId == "generate_image" }
+        assertEquals(4, entries.size, "4 lockfile entries persisted")
+        assertEquals(setOf(0, 1, 2, 3), entries.map { it.variantIndex }.toSet())
+        assertEquals(4, entries.map { it.inputHash }.toSet().size, "4 distinct inputHashes")
+    }
+
     @Test fun variantCountAboveMaxRejectsLoudBeforeAnyDispatch() = runTest {
         val (store, fs) = ProjectStoreTestKit.createWithFs()
         val pid = store.createAt(path = "/projects/big".toPath(), title = "big").id

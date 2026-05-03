@@ -59,6 +59,14 @@ class OpenAiImageGenEngine(
 
     override val providerId: String = "openai"
 
+    // OpenAI image-gen accepts `n` as a top-level field (line 114 of the
+    // wire body), so a single API call returns N distinct images.
+    // `aigc-multi-variant-phase3-openai-native-n` (cycle 33): the
+    // [AigcGenerateTool] dispatcher reads this flag to decide whether to
+    // batch-dispatch via [GenerateImageTool.executeBatch] or fall back
+    // to the sequential N×1 loop.
+    override val supportsNativeBatch: Boolean = true
+
     override suspend fun generate(request: ImageGenRequest): ImageGenResult =
         generate(request, onWarmup = { })
 

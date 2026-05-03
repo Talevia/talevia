@@ -303,6 +303,57 @@ class CountingImageGenEngine(
 }
 
 /**
+ * Image-gen fake that **honours `request.n`** and reports
+ * `supportsNativeBatch = true`. Use this to exercise
+ * [io.talevia.core.tool.builtin.aigc.GenerateImageTool.executeBatch] —
+ * the cycle 33 native-batch path that issues a single provider call
+ * for `n>1`. [calls] increments by 1 per `generate(...)` invocation
+ * (so a successful batch of 4 looks like `calls=1`, not `calls=4`),
+ * letting tests assert the round-trip count directly.
+ */
+class NativeBatchImageGenEngine(
+    override val providerId: String = "fake-native-batch",
+    private val bytesForVariant: (call: Int, variantIndex: Int) -> ByteArray = { call, v ->
+        byteArrayOf(call.toByte(), v.toByte())
+    },
+    private val fixedModelVersion: String? = null,
+) : ImageGenEngine {
+    override val supportsNativeBatch: Boolean = true
+
+    var lastRequest: ImageGenRequest? = null
+        private set
+    var calls: Int = 0
+        private set
+
+    override suspend fun generate(request: ImageGenRequest): ImageGenResult {
+        calls += 1
+        lastRequest = request
+        val images = (0 until request.n).map { i ->
+            GeneratedImage(
+                pngBytes = bytesForVariant(calls, i),
+                width = request.width,
+                height = request.height,
+            )
+        }
+        return ImageGenResult(
+            images = images,
+            provenance = GenerationProvenance(
+                providerId = providerId,
+                modelId = request.modelId,
+                modelVersion = fixedModelVersion,
+                seed = request.seed,
+                parameters = buildJsonObject {
+                    put("prompt", JsonPrimitive(request.prompt))
+                    put("call", JsonPrimitive(calls))
+                    put("n", JsonPrimitive(request.n))
+                },
+                createdAtEpochMs = FAKE_PROVENANCE_EPOCH_MS + calls,
+            ),
+        )
+    }
+}
+
+/**
  * Music-gen fake that emits the warmup callback pair (`Starting`
  * → `Ready`) before returning. Use to exercise tools that thread
  * provider warmup through `BusEvent.ProviderWarmup` — without this
