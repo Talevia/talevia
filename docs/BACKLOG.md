@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **debt-lockfile-lazy-interface-phase2b1a** — Phase 2b-1a sub-bullet of `debt-lockfile-lazy-interface-O1-open` (cycle 47 re-phase after cycle 42's interface-rename "pure addition" was assessed as 72 ctor renames). Add `stream(): Sequence<LockfileEntry>` + `findByInputHash(hash: String): LockfileEntry?` + `findByAssetId(assetId: String): LockfileEntry?` as MEMBER methods directly on the existing `Lockfile` data class. Truly pure addition: ~10 LOC delta, zero construction-site impact, zero caller change required. Phase 2b-1b will migrate 30+ callers from `entries.firstOrNull { ... }` / `entries.size` patterns to the new methods (mechanical mass-edit). Phase 2b-1c will extract the data class to interface + EagerLockfile impl after callers use methods (the actual lazy-impl swap). Rubric §5.7 / §5.3 / §3a-3。Milestone §later.
 - **debt-tool-consolidation-timeline-action-phase1a** — Phase 1a sub-bullet of `debt-tool-consolidation-timeline-action-phase1` (cycle 47 re-phase after cycle 45's 27-file scope assessment). Smallest sibling first: absorb `transition_action`'s 2 verbs (`add` / `remove`) into a renamed `track_action` → `timeline_action` (4 verbs become `add_track / remove_track / duplicate_track / reorder_track`; 2 new verbs `add_transition / remove_transition`). FilterActionTool stays separate (phase 1b). Scope: ~12 files (1 file rename, 1 file delete, ~5 prod refs, ~5 test files, desktop UI). Mirrors cycle 44's clip_action absorption shape. Rubric §5.7 / §5.6 / §3a-1。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排

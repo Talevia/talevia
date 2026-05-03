@@ -173,4 +173,30 @@ class LockfileTest {
         )
         assertEquals(msgId, roundTripped.originatingMessageId)
     }
+
+    @Test fun streamYieldsEntriesInInsertionOrderForLazyTraversal() {
+        // `debt-lockfile-lazy-interface-O1-open` phase 2b-1a (cycle 48)
+        // contract: stream() iterates entries in append order. Phase
+        // 2b-1b will migrate 30+ callers from `entries.firstOrNull` /
+        // `entries.size` patterns to this method; phase 2b-1c swaps the
+        // eager backing store for a lazy JSONL reader. The insertion-
+        // order contract is what those callers depend on (lockfile
+        // semantics are append-only with last-wins on duplicate hash).
+        val a = entry("h1", "asset-1")
+        val b = entry("h2", "asset-2")
+        val c = entry("h3", "asset-3")
+        val lockfile = Lockfile.EMPTY.append(a).append(b).append(c)
+
+        val streamed = lockfile.stream().toList()
+        assertEquals(listOf(a, b, c), streamed, "stream() must preserve append order")
+        assertEquals(lockfile.entries, streamed, "stream() observes the same logical sequence as entries")
+    }
+
+    @Test fun streamOnEmptyLockfileEmitsZeroElements() {
+        // Edge that phase 2b-1c's lazy impl will need to handle (the
+        // JSONL reader on an empty file yields an empty stream); pin
+        // the contract here so the swap remains transparent.
+        val empty = Lockfile.EMPTY.stream().toList()
+        assertEquals(0, empty.size)
+    }
 }

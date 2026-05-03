@@ -54,6 +54,25 @@ data class Lockfile(
     @Transient
     val byAssetId: Map<AssetId, LockfileEntry> = entries.associateBy { it.assetId }
 
+    /**
+     * Lazy iteration over entries — `debt-lockfile-lazy-interface-O1-open`
+     * phase 2b-1a (cycle 48). Equivalent to `entries.asSequence()` today
+     * (the data class still materialises every entry on construction);
+     * exposing it as a method gives 30+ caller sites a forward-compatible
+     * API to migrate to in phase 2b-1b. Phase 2b-1c will swap the eager
+     * data class for an interface + lazy `LockfileFile` impl that reads
+     * entries from JSONL on-demand — at that point [stream] becomes
+     * actually-lazy without any caller change. Keeping the migration
+     * costless is the whole point of the phasing.
+     *
+     * **Why not a property + asSequence**: a method matches the typed
+     * `findByInputHash` / `findByAssetId` siblings; future
+     * `stream()` overloads (e.g. paginated / since-offset variants) get
+     * a natural method-overload home rather than living as extension
+     * helpers fragmented across modules.
+     */
+    fun stream(): Sequence<LockfileEntry> = entries.asSequence()
+
     fun findByInputHash(hash: String): LockfileEntry? = byInputHash[hash]
 
     /**
