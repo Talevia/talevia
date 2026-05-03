@@ -188,27 +188,25 @@ class DeepContentHashTest {
     // ── Order-insensitivity at deep layer ─────────────────────
 
     @Test fun deepHashIsOrderSensitiveOverParentsBecauseShallowContributes() {
-        // KDOC/IMPL MISMATCH PIN: the kdoc claims "we
-        // intentionally normalise at the deep layer to
-        // make the deep hash order-insensitive over
-        // parents." But the implementation folds
-        // `node.contentHash` (shallow) into the result —
-        // and shallow IS order-sensitive over parents
-        // (hashes the serialised JSON list verbatim). So
-        // the deep hash also winds up order-sensitive,
-        // contradicting the kdoc's aspiration.
+        // CONTRACT PIN: the deep hash IS order-sensitive
+        // over parents because `node.contentHash` (shallow)
+        // folds in, and shallow hashes the serialised
+        // `parents: List<SourceRef>` verbatim. The
+        // implementation's parent-hash-projection is
+        // sorted by id at the join step, but that only
+        // stabilises the `parents=` portion of the fold —
+        // the `shallow=${node.contentHash}|` portion
+        // diverges with parent order.
         //
-        // The IMPLEMENTATION's parent-hash-projection IS
-        // sorted by id at line 75, but that only stabilises
-        // the parents= portion of the fold. The
-        // shallow=${node.contentHash}| portion still
-        // diverges.
-        //
-        // This test pins ACTUAL behavior. Flagged as P2
-        // debt this cycle so the user can decide whether
-        // to fix the impl (drop shallow from the fold —
-        // semantic change) or the kdoc (drop the
-        // order-insensitivity claim — doc-only fix).
+        // This is the safe / over-invalidating direction
+        // for the staleness cascade: a clip bound to a
+        // node whose only change is parent-order will be
+        // re-flagged stale and `regenerate_stale_clips`
+        // will re-run it, which is conservative but
+        // correct. The kdoc on `deepContentHashOf` was
+        // updated cycle 205 to document this contract
+        // (was previously mis-stated as
+        // "order-insensitive over parents").
         val srcAB = source(
             node("a"),
             node("b"),
@@ -234,7 +232,7 @@ class DeepContentHashTest {
         assertNotEquals(
             srcAB.deepContentHashOf(nodeId("child")),
             srcBA.deepContentHashOf(nodeId("child")),
-            "deep is ALSO order-sensitive (kdoc/impl mismatch — see backlog `debt-deep-content-hash-order-insensitive-claim-vs-impl`)",
+            "deep is order-sensitive over parents (over-invalidating safe direction; documented on deepContentHashOf kdoc)",
         )
     }
 

@@ -63,13 +63,21 @@ fun Source.deepContentHashOf(
     }
     inProgress += nodeId
 
-    // Canonical parent projection: sort by id so list-order permutations
-    // don't change the deep hash. The shallow contentHash already stabilises
-    // on `parents: List<SourceRef>` order, so a re-ordered parents list
-    // produces a different shallow hash; we intentionally normalise at the
-    // deep layer to make the deep hash order-insensitive over parents —
-    // it's expressing "what the set of upstream content is", not "what
-    // the order of references is".
+    // Canonical parent projection: sort by id so the `parents=` portion of
+    // the fold doesn't change with list-order permutations. Note this only
+    // stabilises the parents= projection — the deep hash overall remains
+    // **order-sensitive over parents** because the `shallow=${node.contentHash}`
+    // term immediately below also folds in, and shallow IS order-sensitive
+    // (it hashes the serialised `parents: List<SourceRef>` verbatim). A
+    // reordered parents list therefore yields a different shallow → different
+    // deep. This is acceptable for the staleness-cascade use case: re-ordering
+    // parents over-invalidates (the descendant's deep hash changes even
+    // though no upstream content actually changed) which is the safe
+    // direction — `regenerate_stale_clips` will re-run a clip whose only
+    // change is parent-order, which is conservative but correct. The sort
+    // here keeps the parents= projection deterministic so two runs over the
+    // same DAG produce the same hash, even as the cycle / cache state
+    // varies. See `DeepContentHashTest.deepHashIsOrderSensitiveOverParents…`.
     val parentHashes = node.parents
         .map { it.nodeId }
         .sortedBy { it.value }
