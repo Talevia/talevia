@@ -85,7 +85,7 @@ internal fun runPermissionHistoryQuery(
 
     val jsonRows = encodeRows(ListSerializer(PermissionHistoryRow.serializer()), rows)
 
-    val rejectedCount = rowsAll.count { !it.accepted!!.let { acc -> acc } || it.decision == "reject" }
+    val rejectedCount = rowsAll.count { it.decision == "reject" }
     val pendingCount = rowsAll.count { it.decision == "pending" }
     val narrative = when {
         recorder == null ->
