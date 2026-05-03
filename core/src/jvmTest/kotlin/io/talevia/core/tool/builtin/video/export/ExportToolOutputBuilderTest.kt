@@ -47,13 +47,14 @@ import kotlin.time.Duration.Companion.seconds
  *    cents per clip; the sum is intentional because each
  *    clip references the same paid output").
  *
- * 3. **Text clips ARE in the map with null cents (NOT
- *    skipped, despite the kdoc claim).** This is a
- *    kdoc/impl mismatch — the kdoc says "Empty inputs
- *    and clips without `assetId` (text clips) are
- *    skipped" but the impl writes
- *    `perClip[clip.id.value] = null` unconditionally.
- *    Test pins ACTUAL behavior + flagged as P2 debt.
+ * 3. **Text clips appear in the map with null cents
+ *    (the "unpriced" representation).** Same null-cents
+ *    treatment a video clip with no lockfile entry gets,
+ *    so downstream rendering doesn't need a separate
+ *    "missing key" branch. Drift to "skip text clips
+ *    entirely" would force every consumer to special-case
+ *    map gaps for text rows. The kdoc was corrected cycle
+ *    206 to document this.
  */
 class ExportToolOutputBuilderTest {
 
@@ -234,31 +235,33 @@ class ExportToolOutputBuilderTest {
 
     // ── buildPerClipCostAttribution: text clip handling ──────
 
-    @Test fun textClipIsInMapWithNullCentsKdocMismatch() {
-        // KDOC/IMPL MISMATCH PIN: the kdoc says "Empty
-        // inputs and clips without `assetId` (text clips)
-        // are skipped — they'd never have a lockfile entry
-        // anyway." But the impl unconditionally writes
-        // `perClip[clip.id.value] = cents` (which is null
-        // for text clips because their assetId match
-        // returns null). Test pins ACTUAL behavior — text
-        // clips ARE in the map with null cents.
+    @Test fun textClipIsInMapWithNullCentsAsUnpriced() {
+        // CONTRACT PIN: text clips appear in the per-clip
+        // cost map with null cents — the "unpriced"
+        // representation. This unifies their handling with
+        // video / audio clips that have no lockfile entry
+        // (e.g. user-imported source footage): both surface
+        // as null cents, which the agent reads as "unpriced"
+        // distinct from "0 cents" (paid AIGC produced for
+        // free).
         //
-        // Flagged as P2 debt this cycle so the user can
-        // decide whether to fix the kdoc (drop "skipped"
-        // claim, accept that text clips show as
-        // "unpriced") or fix the impl (add `continue`
-        // when assetId is null, exclude text clips from
-        // map). Same pattern as cycle 172's DeepContentHash
-        // finding.
+        // Cycle 205 (the prior cycle to 206 that updated
+        // this test) corrected the kdoc which previously
+        // claimed text clips were "skipped" — they aren't,
+        // they're treated identically to unpriced video.
+        // Drift to "skip text clips entirely" would force
+        // every downstream caller to special-case the map
+        // not having a key for every clip, which the
+        // existing "null = unpriced" convention already
+        // covers.
         val proj = project(clips = listOf(textClip("c-text")))
         val (perClip, total) = buildPerClipCostAttribution(proj)
         assertEquals(
             1,
             perClip.size,
-            "text clip IS in the map (NOT skipped per kdoc) — see backlog `debt-export-output-builder-text-clip-skipped-claim-vs-impl`",
+            "text clip IS in the map with null cents (unpriced — same as a video clip without a lockfile entry)",
         )
-        assertNull(perClip["c-text"], "text clip cents = null")
+        assertNull(perClip["c-text"], "text clip cents = null (unpriced)")
         assertEquals(0L, total)
     }
 

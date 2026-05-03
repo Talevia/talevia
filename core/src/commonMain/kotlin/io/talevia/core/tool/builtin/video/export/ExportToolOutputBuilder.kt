@@ -37,8 +37,11 @@ internal fun mimeTypeFor(path: String): String =
  * references the same paid output.
  *
  * Returns the (map, total) pair so the caller doesn't have to reduce
- * twice. Empty inputs and clips without `assetId` (text clips) are
- * skipped — they'd never have a lockfile entry anyway.
+ * twice. Clips without `assetId` (text clips) appear in the map with
+ * null cents — the same "unpriced" representation video clips with no
+ * lockfile entry already use, so the agent's downstream rendering
+ * doesn't need a separate "missing" branch. An empty timeline yields
+ * an empty map + total = 0.
  */
 internal fun buildPerClipCostAttribution(project: Project): Pair<Map<String, Long?>, Long> {
     val perClip = mutableMapOf<String, Long?>()
