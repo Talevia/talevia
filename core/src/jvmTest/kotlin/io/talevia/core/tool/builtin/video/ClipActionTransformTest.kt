@@ -27,7 +27,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-class ClipSetActionTransformTest {
+class ClipActionTransformTest {
 
     private data class Rig(
         val store: FileProjectStore,

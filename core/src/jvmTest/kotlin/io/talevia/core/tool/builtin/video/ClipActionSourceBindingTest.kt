@@ -29,7 +29,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-class ClipSetActionSourceBindingTest {
+class ClipActionSourceBindingTest {
 
     private fun ctx(parts: MutableList<Part>): ToolContext = ToolContext(
         sessionId = SessionId("s"),

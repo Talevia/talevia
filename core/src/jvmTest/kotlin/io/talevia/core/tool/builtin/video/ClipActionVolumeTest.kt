@@ -25,7 +25,7 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.seconds
 
-class ClipSetActionVolumeTest {
+class ClipActionVolumeTest {
 
     private data class Rig(
         val store: FileProjectStore,
