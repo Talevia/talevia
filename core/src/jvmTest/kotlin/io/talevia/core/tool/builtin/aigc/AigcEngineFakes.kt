@@ -212,6 +212,78 @@ class OneShotTtsEngine(
 }
 
 /**
+ * Streaming TTS fake that emits [chunkCount] equal-sized chunks of
+ * [bytes] via the `onChunk` callback before returning the assembled
+ * `TtsResult`. Used by `streaming-engine-api-tts-overload` (cycle 42)
+ * to exercise the multi-chunk contract path of [TtsEngine.synthesizeStreaming]
+ * — pins that callbacks fire BEFORE the final result returns and that
+ * the concatenation of chunks reconstructs the full audio body. Falls
+ * back to single-chunk behavior when [chunkCount] = 1, matching
+ * [OneShotTtsEngine] semantics; the override exists to model providers
+ * that natively stream audio bytes (e.g. OpenAI TTS chunked transfer)
+ * when their wire-level support eventually lands.
+ */
+class StreamingTtsEngine(
+    private val bytes: ByteArray,
+    private val chunkCount: Int,
+    override val providerId: String = "fake-tts-streaming",
+) : TtsEngine {
+    init {
+        require(chunkCount >= 1) { "chunkCount must be ≥ 1, got $chunkCount" }
+        require(bytes.isNotEmpty() || chunkCount == 1) {
+            "empty audio is only valid with chunkCount=1, got chunkCount=$chunkCount"
+        }
+    }
+
+    var lastRequest: TtsRequest? = null
+        private set
+    var calls: Int = 0
+        private set
+
+    override suspend fun synthesize(request: TtsRequest): TtsResult {
+        calls += 1
+        lastRequest = request
+        return TtsResult(
+            audio = SynthesizedAudio(audioBytes = bytes, format = request.format),
+            provenance = GenerationProvenance(
+                providerId = providerId,
+                modelId = request.modelId,
+                modelVersion = null,
+                seed = 0L,
+                parameters = buildJsonObject {
+                    put("model", JsonPrimitive(request.modelId))
+                    put("voice", JsonPrimitive(request.voice))
+                    put("input", JsonPrimitive(request.text))
+                    put("chunks", JsonPrimitive(chunkCount))
+                },
+                createdAtEpochMs = FAKE_PROVENANCE_EPOCH_MS,
+            ),
+        )
+    }
+
+    override suspend fun synthesizeStreaming(
+        request: TtsRequest,
+        onChunk: suspend (ByteArray) -> Unit,
+        onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
+    ): TtsResult {
+        // Emit chunks BEFORE building the result so subscribers see
+        // streaming progress during the call (the contract this fake
+        // pins for its consumers).
+        if (bytes.isEmpty()) {
+            onChunk(bytes)
+        } else {
+            val chunkSize = (bytes.size + chunkCount - 1) / chunkCount
+            for (i in 0 until chunkCount) {
+                val start = i * chunkSize
+                val end = minOf(start + chunkSize, bytes.size)
+                onChunk(bytes.copyOfRange(start, end))
+            }
+        }
+        return synthesize(request)
+    }
+}
+
+/**
  * Returns a single deterministic upscale result with [bytes] as the
  * image body. Output dimensions = `baseWidth * scale × baseHeight *
  * scale` from the request.

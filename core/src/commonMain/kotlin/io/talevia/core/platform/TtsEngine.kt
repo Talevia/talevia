@@ -34,6 +34,45 @@ interface TtsEngine {
         request: TtsRequest,
         onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit,
     ): TtsResult = synthesize(request)
+
+    /**
+     * Streaming-aware variant — `streaming-engine-api-tts-overload`
+     * (cycle 42). Prerequisite for `aigc-tool-streaming-first-emitter`:
+     * the AIGC tool wires `onChunk` to `ctx.publishEvent(BusEvent.
+     * ToolStreamingPart(...))` so UI subscribers see audio bytes
+     * arriving in chunks before the final `ToolResult`.
+     *
+     * Streaming-capable engines (eventually OpenAI TTS via chunked
+     * transfer; provider-side wire change tracked as a follow-up bullet)
+     * invoke [onChunk] one or more times during the response, then
+     * return [TtsResult] with the full assembled audio. Non-streaming
+     * engines fall back to a single synthetic [onChunk] call carrying
+     * the assembled blob — that path keeps the contract honest (≥ 1
+     * chunk) without forcing every impl to learn HTTP streaming.
+     *
+     * The default impl preserves backward-compat: existing engines
+     * keep working unchanged; the tool layer can opt into streaming
+     * by switching from [synthesize] to [synthesizeStreaming], and
+     * legacy fakes will emit exactly one chunk. Test fakes can override
+     * to simulate multi-chunk providers.
+     *
+     * **Why not generalize across modalities?** Image / video / music
+     * generation produces a single completed asset (no useful
+     * intermediate state to emit during the call). Speech synthesis
+     * is uniquely chunkable — each phoneme group is playable as it
+     * arrives. The streaming overload lives only on [TtsEngine] for
+     * that reason; introducing it on the others would cargo-cult the
+     * shape into engines that don't actually stream.
+     */
+    suspend fun synthesizeStreaming(
+        request: TtsRequest,
+        onChunk: suspend (ByteArray) -> Unit,
+        onWarmup: suspend (BusEvent.ProviderWarmup.Phase) -> Unit = {},
+    ): TtsResult {
+        val result = synthesize(request, onWarmup)
+        onChunk(result.audio.audioBytes)
+        return result
+    }
 }
 
 /**
