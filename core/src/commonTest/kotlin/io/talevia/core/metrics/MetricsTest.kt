@@ -51,6 +51,41 @@ class MetricsTest {
         assertEquals(0L, MetricsRegistry().get("nope"))
     }
 
+    @Test fun setWritesGaugeValueIdempotentlyOverwriting() = runTest {
+        // `MetricsRegistry.set(name, value)` (cycle 50) — gauge semantic for
+        // absolute-value metrics like `agent.tool_spec_budget.tokens`. Pin
+        // the contract: each call overwrites the previous value (NOT
+        // additive like increment); on first call seeds from zero.
+        val r = MetricsRegistry()
+
+        // First set on a never-seen name — establishes the gauge value.
+        r.set("agent.tool_spec_budget.tokens", 14982L)
+        assertEquals(14982L, r.get("agent.tool_spec_budget.tokens"))
+
+        // Subsequent set overwrites (NOT adds) — the contract distinguishing
+        // gauge from counter.
+        r.set("agent.tool_spec_budget.tokens", 13500L)
+        assertEquals(13500L, r.get("agent.tool_spec_budget.tokens"))
+
+        // Idempotent same-value set is a no-op (no surprises).
+        r.set("agent.tool_spec_budget.tokens", 13500L)
+        assertEquals(13500L, r.get("agent.tool_spec_budget.tokens"))
+
+        // Setting to 0 is allowed (semantically "current value is zero" not
+        // "delete"; the entry remains in the map).
+        r.set("agent.tool_spec_budget.tokens", 0L)
+        assertEquals(0L, r.get("agent.tool_spec_budget.tokens"))
+        assertTrue(
+            "agent.tool_spec_budget.tokens" in r.snapshot(),
+            "set(name, 0) keeps the entry — it's a measured zero, not absent",
+        )
+
+        // Snapshot reflects the latest value.
+        r.set("a.b", 42L)
+        r.set("a.b", 100L)
+        assertEquals(100L, r.snapshot()["a.b"])
+    }
+
     @Test fun sinkCountsEachBusEventOnce() = runTest {
         val bus = EventBus()
         val registry = MetricsRegistry()
