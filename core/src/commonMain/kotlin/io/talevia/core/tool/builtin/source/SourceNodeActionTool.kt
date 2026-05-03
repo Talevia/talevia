@@ -22,7 +22,7 @@ import kotlinx.serialization.serializer
  * Six-way source-node verb — the consolidated action-dispatched form that
  * replaces the previous `AddSourceNodeTool` + `RemoveSourceNodeTool` +
  * `ForkSourceNodeTool` trio (`debt-source-consolidate-add-remove-fork`,
- * 2026-04-24, following `ClipActionTool` / `TransitionActionTool` /
+ * 2026-04-24, following `ClipActionTool` / `TimelineActionTool` /
  * `SessionActionTool` precedent), extended with `action="rename"` in
  * `debt-source-rename-evaluate` (2026-04-23), and further extended with
  * `action="update_body"` + `action="set_parents"` in

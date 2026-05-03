@@ -27,7 +27,7 @@ import kotlin.time.Duration.Companion.seconds
 
 /**
  * Cycle 151 absorbed the standalone `ReorderTracksTool` into
- * [TrackActionTool] as `action="reorder"`; these tests pin the same
+ * [TimelineActionTool] as `action="reorder"`; these tests pin the same
  * semantics on the dispatcher (rename of class, same fixture, same
  * assertions) so a future fold doesn't silently lose the contract.
  */
@@ -35,7 +35,7 @@ class ReorderTracksToolTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: TrackActionTool,
+        val tool: TimelineActionTool,
         val ctx: ToolContext,
         val snapshots: MutableList<Part.TimelineSnapshot>,
         val projectId: ProjectId,
@@ -73,11 +73,11 @@ class ReorderTracksToolTest {
             timeline = Timeline(tracks = listOf(v1, v2, audio, subs, fx), duration = 5.seconds),
         )
         kotlinx.coroutines.runBlocking { store.upsert("demo", project) }
-        return Rig(store, TrackActionTool(store), ctx, snapshots, pid)
+        return Rig(store, TimelineActionTool(store), ctx, snapshots, pid)
     }
 
-    private fun reorder(projectId: String, ids: List<String>): TrackActionTool.Input =
-        TrackActionTool.Input(projectId = projectId, action = "reorder", trackIds = ids)
+    private fun reorder(projectId: String, ids: List<String>): TimelineActionTool.Input =
+        TimelineActionTool.Input(projectId = projectId, action = "reorder_track", trackIds = ids)
 
     private fun trackOrder(rig: Rig): List<String> =
         kotlinx.coroutines.runBlocking { rig.store.get(rig.projectId)!! }.timeline.tracks.map { it.id.value }
@@ -163,6 +163,6 @@ class ReorderTracksToolTest {
         val rig = newRig()
         val out = rig.tool.execute(reorder(rig.projectId.value, listOf("fg")), rig.ctx).data
         assertEquals(listOf("fg", "bg", "aud", "sub", "fx"), out.newOrder)
-        assertEquals("reorder", out.action)
+        assertEquals("reorder_track", out.action)
     }
 }

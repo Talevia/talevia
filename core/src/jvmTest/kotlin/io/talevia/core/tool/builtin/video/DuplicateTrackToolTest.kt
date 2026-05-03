@@ -32,7 +32,7 @@ import kotlin.time.Duration.Companion.seconds
 
 /**
  * Cycle 151 absorbed the standalone `DuplicateTrackTool` into
- * [TrackActionTool] as `action="duplicate"`; these tests pin the same
+ * [TimelineActionTool] as `action="duplicate"`; these tests pin the same
  * semantics on the dispatcher (rename of class, same fixture, same
  * assertions) so a future fold doesn't silently lose the contract.
  */
@@ -40,7 +40,7 @@ class DuplicateTrackToolTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: TrackActionTool,
+        val tool: TimelineActionTool,
         val ctx: ToolContext,
         val emittedParts: MutableList<Part>,
     )
@@ -57,14 +57,14 @@ class DuplicateTrackToolTest {
             emitPart = { emitted += it },
             messages = emptyList(),
         )
-        return Rig(store, TrackActionTool(store), ctx, emitted)
+        return Rig(store, TimelineActionTool(store), ctx, emitted)
     }
 
     private fun single(sourceTrackId: String, newTrackId: String? = null) =
-        TrackActionTool.Input(
+        TimelineActionTool.Input(
             projectId = "p",
-            action = "duplicate",
-            items = listOf(TrackActionTool.DuplicateItem(sourceTrackId, newTrackId)),
+            action = "duplicate_track",
+            items = listOf(TimelineActionTool.DuplicateItem(sourceTrackId, newTrackId)),
         )
 
     @Test fun duplicatesVideoTrackWithThreeClipsAndFreshIds() = runTest {
@@ -93,7 +93,7 @@ class DuplicateTrackToolTest {
         assertEquals("vt", only.sourceTrackId)
         assertEquals("vt-copy-1", only.newTrackId)
         assertEquals(3, only.clipCount)
-        assertEquals("duplicate", out.action)
+        assertEquals("duplicate_track", out.action)
 
         val saved = rig.store.get(ProjectId("p"))!!
         assertEquals(2, saved.timeline.tracks.size)
@@ -237,12 +237,12 @@ class DuplicateTrackToolTest {
         val rig = newRig(project)
 
         rig.tool.execute(
-            TrackActionTool.Input(
+            TimelineActionTool.Input(
                 projectId = "p",
-                action = "duplicate",
+                action = "duplicate_track",
                 items = listOf(
-                    TrackActionTool.DuplicateItem("vt"),
-                    TrackActionTool.DuplicateItem("at"),
+                    TimelineActionTool.DuplicateItem("vt"),
+                    TimelineActionTool.DuplicateItem("at"),
                 ),
             ),
             rig.ctx,
@@ -266,12 +266,12 @@ class DuplicateTrackToolTest {
         val before = rig.store.get(ProjectId("p"))!!
         assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                TrackActionTool.Input(
+                TimelineActionTool.Input(
                     projectId = "p",
-                    action = "duplicate",
+                    action = "duplicate_track",
                     items = listOf(
-                        TrackActionTool.DuplicateItem("vt"),
-                        TrackActionTool.DuplicateItem("ghost"),
+                        TimelineActionTool.DuplicateItem("vt"),
+                        TimelineActionTool.DuplicateItem("ghost"),
                     ),
                 ),
                 rig.ctx,

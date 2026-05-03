@@ -24,7 +24,7 @@ import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.ClipActionTool
 import io.talevia.core.tool.builtin.video.ExportTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
-import io.talevia.core.tool.builtin.video.TransitionActionTool
+import io.talevia.core.tool.builtin.video.TimelineActionTool
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.json.add
@@ -131,7 +131,7 @@ class FfmpegEndToEndTest {
         registry["clip_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("action", "add")
+                put("action", "add_transition")
                 putJsonArray("addItems") {
                     addJsonObject { put("assetId", assetIdA) }
                     addJsonObject { put("assetId", assetIdB) }
@@ -213,7 +213,7 @@ class FfmpegEndToEndTest {
         registry["clip_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("action", "add")
+                put("action", "add_transition")
                 putJsonArray("addItems") {
                     addJsonObject { put("assetId", assetId) }
                 }
@@ -280,7 +280,7 @@ class FfmpegEndToEndTest {
         val registry = ToolRegistry().apply {
             register(ImportMediaTool(engine, projects))
             register(ClipActionTool(projects))
-            register(TransitionActionTool(projects))
+            register(TimelineActionTool(projects))
             register(ExportTool(projects, engine))
         }
 
@@ -318,7 +318,7 @@ class FfmpegEndToEndTest {
         val addBoth = registry["clip_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("action", "add")
+                put("action", "add_transition")
                 putJsonArray("addItems") {
                     addJsonObject { put("assetId", assetIdA) }
                     addJsonObject { put("assetId", assetIdB) }
@@ -330,11 +330,11 @@ class FfmpegEndToEndTest {
         val clipIdA = addResults[0].clipId
         val clipIdB = addResults[1].clipId
 
-        registry["transition_action"]!!.dispatch(
+        registry["timeline_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("action", "add")
-                putJsonArray("items") {
+                put("action", "add_transition")
+                putJsonArray("transitionItems") {
                     addJsonObject {
                         put("fromClipId", clipIdA)
                         put("toClipId", clipIdB)
@@ -486,7 +486,7 @@ class FfmpegEndToEndTest {
         registry["clip_action"]!!.dispatch(
             buildJsonObject {
                 put("projectId", projectId.value)
-                put("action", "add")
+                put("action", "add_transition")
                 putJsonArray("addItems") {
                     addJsonObject { put("assetId", assetId) }
                 }

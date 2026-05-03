@@ -26,11 +26,11 @@ import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
-class TrackActionToolRemoveTest {
+class TimelineActionToolRemoveTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: TrackActionTool,
+        val tool: TimelineActionTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
         val emittedParts: MutableList<Part>,
@@ -38,7 +38,7 @@ class TrackActionToolRemoveTest {
 
     private fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val tool = TrackActionTool(store)
+        val tool = TimelineActionTool(store)
         val parts = mutableListOf<Part>()
         val ctx = ToolContext(
             sessionId = SessionId("s"),
@@ -62,9 +62,9 @@ class TrackActionToolRemoveTest {
     private fun removeInput(
         trackIds: List<String>,
         force: Boolean = false,
-    ): TrackActionTool.Input = TrackActionTool.Input(
+    ): TimelineActionTool.Input = TimelineActionTool.Input(
         projectId = "p",
-        action = "remove",
+        action = "remove_track",
         trackIds = trackIds,
         force = force,
     )
@@ -86,7 +86,7 @@ class TrackActionToolRemoveTest {
         )
 
         val out = rig.tool.execute(single("v1"), rig.ctx).data
-        assertEquals("remove", out.action)
+        assertEquals("remove_track", out.action)
         val only = out.results.single()
         assertEquals("v1", only.trackId)
         assertEquals("video", only.trackKind)

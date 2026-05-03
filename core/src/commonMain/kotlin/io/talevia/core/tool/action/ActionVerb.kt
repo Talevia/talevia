@@ -8,7 +8,7 @@ import io.talevia.core.tool.ToolResult
  * mirror of [io.talevia.core.tool.query.QuerySelect].
  *
  * The 8 `*ActionTool` dispatchers (FilterActionTool, ClipActionTool,
- * TrackActionTool, SessionActionTool, ProjectActionTool,
+ * TimelineActionTool, SessionActionTool, ProjectActionTool,
  * SourceNodeActionTool, ClipActionTool, ProjectMaintenanceActionTool,
  * ProjectPinActionTool, ProjectSnapshotActionTool) all encode their verbs
  * inline as `when (input.action) { "x" -> executeX(...) ; ... }` arm-trees.
@@ -37,7 +37,7 @@ import io.talevia.core.tool.ToolResult
  *
  * Cycle 161 introduces the interface and migrates [FilterActionTool]'s
  * 3 verbs as proof-of-concept; the migration recipe is documented in the
- * commit body so later cycles can take ClipActionTool / TrackActionTool /
+ * commit body so later cycles can take ClipActionTool / TimelineActionTool /
  * SessionActionTool / etc. one at a time without re-deriving the shape.
  *
  * Note: input-validation guards that need to see ALL verbs at once

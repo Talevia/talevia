@@ -20,7 +20,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
-class TrackActionToolAddTest {
+class TimelineActionToolAddTest {
 
     private val emittedSnapshots = mutableListOf<PartId>()
 
@@ -50,10 +50,10 @@ class TrackActionToolAddTest {
         pid: ProjectId,
         trackKind: String,
         trackId: String? = null,
-    ): TrackActionTool.Input =
-        TrackActionTool.Input(
+    ): TimelineActionTool.Input =
+        TimelineActionTool.Input(
             projectId = pid.value,
-            action = "add",
+            action = "add_track",
             trackKind = trackKind,
             trackId = trackId,
         )
@@ -61,11 +61,11 @@ class TrackActionToolAddTest {
     @Test
     fun adds_video_track_with_generated_id() = runTest {
         val (store, pid) = fixture()
-        val tool = TrackActionTool(store)
+        val tool = TimelineActionTool(store)
 
         val result = tool.execute(addInput(pid, "video"), ctx())
 
-        assertEquals("add", result.data.action)
+        assertEquals("add_track", result.data.action)
         assertEquals("video", result.data.trackKind)
         assertEquals(2, result.data.totalTrackCount)
         val after = store.get(pid)!!
@@ -76,7 +76,7 @@ class TrackActionToolAddTest {
     @Test
     fun adds_audio_track_with_explicit_id() = runTest {
         val (store, pid) = fixture()
-        val tool = TrackActionTool(store)
+        val tool = TimelineActionTool(store)
 
         val result = tool.execute(addInput(pid, "audio", trackId = "dialogue"), ctx())
 
@@ -88,7 +88,7 @@ class TrackActionToolAddTest {
     @Test
     fun adds_subtitle_track() = runTest {
         val (store, pid) = fixture()
-        val result = TrackActionTool(store).execute(addInput(pid, "subtitle"), ctx())
+        val result = TimelineActionTool(store).execute(addInput(pid, "subtitle"), ctx())
         assertEquals("subtitle", result.data.trackKind)
         val after = store.get(pid)!!
         assertTrue(after.timeline.tracks.any { it is Track.Subtitle })
@@ -97,7 +97,7 @@ class TrackActionToolAddTest {
     @Test
     fun adds_effect_track() = runTest {
         val (store, pid) = fixture()
-        val result = TrackActionTool(store).execute(addInput(pid, "effect"), ctx())
+        val result = TimelineActionTool(store).execute(addInput(pid, "effect"), ctx())
         assertEquals("effect", result.data.trackKind)
         val after = store.get(pid)!!
         assertTrue(after.timeline.tracks.any { it is Track.Effect })
@@ -106,14 +106,14 @@ class TrackActionToolAddTest {
     @Test
     fun trackKind_is_case_insensitive() = runTest {
         val (store, pid) = fixture()
-        val result = TrackActionTool(store).execute(addInput(pid, " VIDEO "), ctx())
+        val result = TimelineActionTool(store).execute(addInput(pid, " VIDEO "), ctx())
         assertEquals("video", result.data.trackKind)
     }
 
     @Test
     fun rejects_duplicate_track_id() = runTest {
         val (store, pid) = fixture()
-        val tool = TrackActionTool(store)
+        val tool = TimelineActionTool(store)
 
         assertFailsWith<IllegalStateException> {
             tool.execute(addInput(pid, "video", trackId = "existing-video"), ctx())
@@ -123,7 +123,7 @@ class TrackActionToolAddTest {
     @Test
     fun rejects_unknown_kind() = runTest {
         val (store, pid) = fixture()
-        val tool = TrackActionTool(store)
+        val tool = TimelineActionTool(store)
 
         assertFailsWith<IllegalArgumentException> {
             tool.execute(addInput(pid, "music"), ctx())
@@ -133,13 +133,13 @@ class TrackActionToolAddTest {
     @Test
     fun rejects_missing_project() = runTest {
         val store = ProjectStoreTestKit.create()
-        val tool = TrackActionTool(store)
+        val tool = TimelineActionTool(store)
 
         assertFailsWith<IllegalStateException> {
             tool.execute(
-                TrackActionTool.Input(
+                TimelineActionTool.Input(
                     projectId = "no-such",
-                    action = "add",
+                    action = "add_track",
                     trackKind = "video",
                 ),
                 ctx(),
@@ -154,10 +154,10 @@ class TrackActionToolAddTest {
         // `trackKind: String? = null` (remove doesn't need it), so the
         // per-action validation in executeAdd carries the not-null guard.
         val (store, pid) = fixture()
-        val tool = TrackActionTool(store)
+        val tool = TimelineActionTool(store)
         assertFailsWith<IllegalStateException> {
             tool.execute(
-                TrackActionTool.Input(projectId = pid.value, action = "add"),
+                TimelineActionTool.Input(projectId = pid.value, action = "add_track"),
                 ctx(),
             )
         }
@@ -167,7 +167,7 @@ class TrackActionToolAddTest {
     fun emits_timeline_snapshot() = runTest {
         val (store, pid) = fixture()
 
-        TrackActionTool(store).execute(addInput(pid, "audio"), ctx())
+        TimelineActionTool(store).execute(addInput(pid, "audio"), ctx())
 
         assertEquals(1, emittedSnapshots.size)
     }
@@ -175,7 +175,7 @@ class TrackActionToolAddTest {
     @Test
     fun multiple_audio_tracks_coexist() = runTest {
         val (store, pid) = fixture()
-        val tool = TrackActionTool(store)
+        val tool = TimelineActionTool(store)
 
         tool.execute(addInput(pid, "audio", "dialogue"), ctx())
         tool.execute(addInput(pid, "audio", "music"), ctx())
@@ -192,10 +192,10 @@ class TrackActionToolAddTest {
         // must fail loud (catches typos like "added" / "insert") rather
         // than silently falling through to a default branch.
         val (store, pid) = fixture()
-        val tool = TrackActionTool(store)
+        val tool = TimelineActionTool(store)
         assertFailsWith<IllegalStateException> {
             tool.execute(
-                TrackActionTool.Input(projectId = pid.value, action = "insert", trackKind = "video"),
+                TimelineActionTool.Input(projectId = pid.value, action = "insert", trackKind = "video"),
                 ctx(),
             )
         }

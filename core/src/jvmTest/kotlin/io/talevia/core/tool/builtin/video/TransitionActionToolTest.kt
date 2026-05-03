@@ -28,18 +28,18 @@ import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * Covers both action paths of the consolidated [TransitionActionTool]
+ * Covers both action paths of the consolidated [TimelineActionTool]
  * (debt-consolidate-video-add-remove-verbs, 2026-04-23 — landed for the
  * transition half first). The old `AddTransitionToolTest` +
  * `RemoveTransitionToolTest` test classes folded into this file; case
  * names preserved so a regression that flagged there still flags
  * by the same name here.
  */
-class TransitionActionToolTest {
+class TimelineActionToolTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: TransitionActionTool,
+        val tool: TimelineActionTool,
         val ctx: ToolContext,
         val snapshots: MutableList<Part.TimelineSnapshot>,
         val projectId: ProjectId,
@@ -57,7 +57,7 @@ class TransitionActionToolTest {
             messages = emptyList(),
         )
         kotlinx.coroutines.runBlocking { store.upsert("test", project) }
-        return Rig(store, TransitionActionTool(store), ctx, snapshots, project.id)
+        return Rig(store, TimelineActionTool(store), ctx, snapshots, project.id)
     }
 
     private fun videoClip(id: String, start: Duration, duration: Duration): Clip.Video = Clip.Video(
@@ -72,10 +72,10 @@ class TransitionActionToolTest {
         to: String,
         name: String = "fade",
         durationSeconds: Double = 0.5,
-    ): TransitionActionTool.Input = TransitionActionTool.Input(
+    ): TimelineActionTool.Input = TimelineActionTool.Input(
         projectId = "p",
-        action = "add",
-        items = listOf(TransitionActionTool.AddItem(from, to, name, durationSeconds)),
+        action = "add_transition",
+        transitionItems = listOf(TimelineActionTool.TransitionAddItem(from, to, name, durationSeconds)),
     )
 
     private suspend fun Rig.addOne(
@@ -83,14 +83,14 @@ class TransitionActionToolTest {
         to: String,
         name: String = "fade",
         durationSeconds: Double = 0.5,
-    ): TransitionActionTool.AddResult = tool.execute(
-        TransitionActionTool.Input(
+    ): TimelineActionTool.TransitionAddResult = tool.execute(
+        TimelineActionTool.Input(
             projectId = projectId.value,
-            action = "add",
-            items = listOf(TransitionActionTool.AddItem(from, to, name, durationSeconds)),
+            action = "add_transition",
+            transitionItems = listOf(TimelineActionTool.TransitionAddItem(from, to, name, durationSeconds)),
         ),
         ctx,
-    ).data.added.single()
+    ).data.addedTransitions.single()
 
     private fun projectWithTwoAdjacentClips(): Project {
         val v1 = videoClip("v1", Duration.ZERO, 5.seconds)
@@ -246,17 +246,17 @@ class TransitionActionToolTest {
             ),
         )
         val out = rig.tool.execute(
-            TransitionActionTool.Input(
+            TimelineActionTool.Input(
                 projectId = "p",
-                action = "add",
-                items = listOf(
-                    TransitionActionTool.AddItem("v1", "v2", "fade", 0.5),
-                    TransitionActionTool.AddItem("v2", "v3", "dissolve", 0.4),
+                action = "add_transition",
+                transitionItems = listOf(
+                    TimelineActionTool.TransitionAddItem("v1", "v2", "fade", 0.5),
+                    TimelineActionTool.TransitionAddItem("v2", "v3", "dissolve", 0.4),
                 ),
             ),
             rig.ctx,
         ).data
-        assertEquals(2, out.added.size)
+        assertEquals(2, out.addedTransitions.size)
         val refreshed = rig.store.get(rig.projectId)!!
         val effectClips = refreshed.timeline.tracks.filterIsInstance<Track.Effect>()
             .single().clips.filterIsInstance<Clip.Video>()
@@ -275,12 +275,12 @@ class TransitionActionToolTest {
         )
         val before = rig.snapshots.size
         rig.tool.execute(
-            TransitionActionTool.Input(
+            TimelineActionTool.Input(
                 projectId = "p",
-                action = "add",
-                items = listOf(
-                    TransitionActionTool.AddItem("v1", "v2"),
-                    TransitionActionTool.AddItem("v2", "v3"),
+                action = "add_transition",
+                transitionItems = listOf(
+                    TimelineActionTool.TransitionAddItem("v1", "v2"),
+                    TimelineActionTool.TransitionAddItem("v2", "v3"),
                 ),
             ),
             rig.ctx,
@@ -303,18 +303,18 @@ class TransitionActionToolTest {
 
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                TransitionActionTool.Input(
+                TimelineActionTool.Input(
                     projectId = "p",
-                    action = "add",
-                    items = listOf(
-                        TransitionActionTool.AddItem("v1", "v2"), // ok
-                        TransitionActionTool.AddItem("v2", "v3"), // not adjacent → fail
+                    action = "add_transition",
+                    transitionItems = listOf(
+                        TimelineActionTool.TransitionAddItem("v1", "v2"), // ok
+                        TimelineActionTool.TransitionAddItem("v2", "v3"), // not adjacent → fail
                     ),
                 ),
                 rig.ctx,
             )
         }
-        assertTrue(ex.message!!.contains("items[1]"), ex.message)
+        assertTrue(ex.message!!.contains("transitionItems[1]"), ex.message)
 
         val afterProject = rig.store.get(rig.projectId)!!
         assertEquals(beforeProject.timeline, afterProject.timeline)
@@ -325,7 +325,7 @@ class TransitionActionToolTest {
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline()))
         val ex = assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(
-                TransitionActionTool.Input("p", action = "add", items = emptyList()),
+                TimelineActionTool.Input("p", action = "add_transition", transitionItems = emptyList()),
                 rig.ctx,
             )
         }
@@ -335,9 +335,9 @@ class TransitionActionToolTest {
     @Test fun addRequiresItemsField() = runTest {
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline()))
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(TransitionActionTool.Input("p", action = "add"), rig.ctx)
+            rig.tool.execute(TimelineActionTool.Input("p", action = "add_transition"), rig.ctx)
         }
-        assertTrue(ex.message!!.contains("items"), ex.message)
+        assertTrue(ex.message!!.contains("transitionItems"), ex.message)
     }
 
     // ──────────── Remove action ────────────
@@ -350,15 +350,15 @@ class TransitionActionToolTest {
         assertEquals(1, beforeEffectClipCount)
 
         val out = rig.tool.execute(
-            TransitionActionTool.Input(
+            TimelineActionTool.Input(
                 projectId = rig.projectId.value,
-                action = "remove",
+                action = "remove_transition",
                 transitionClipIds = listOf(add.transitionClipId),
             ),
             rig.ctx,
         ).data
-        assertEquals(1, out.removed.size)
-        val only = out.removed.single()
+        assertEquals(1, out.removedTransitions.size)
+        val only = out.removedTransitions.single()
         assertEquals(add.transitionClipId, only.transitionClipId)
         assertEquals(add.trackId, only.trackId)
         assertEquals("fade", only.transitionName)
@@ -385,33 +385,33 @@ class TransitionActionToolTest {
             ),
         )
         val twoAdds = rig.tool.execute(
-            TransitionActionTool.Input(
+            TimelineActionTool.Input(
                 projectId = rig.projectId.value,
-                action = "add",
-                items = listOf(
-                    TransitionActionTool.AddItem("v1", "v2", "fade", 0.5),
-                    TransitionActionTool.AddItem("v2", "v3", "dissolve", 0.5),
+                action = "add_transition",
+                transitionItems = listOf(
+                    TimelineActionTool.TransitionAddItem("v1", "v2", "fade", 0.5),
+                    TimelineActionTool.TransitionAddItem("v2", "v3", "dissolve", 0.5),
                 ),
             ),
             rig.ctx,
-        ).data.added
+        ).data.addedTransitions
         val t1 = twoAdds[0]
         val t2 = twoAdds[1]
         assertEquals(t1.trackId, t2.trackId) // reused Effect track
 
         val out = rig.tool.execute(
-            TransitionActionTool.Input(
+            TimelineActionTool.Input(
                 projectId = rig.projectId.value,
-                action = "remove",
+                action = "remove_transition",
                 transitionClipIds = listOf(t1.transitionClipId, t2.transitionClipId),
             ),
             rig.ctx,
         ).data
-        assertEquals(2, out.removed.size)
+        assertEquals(2, out.removedTransitions.size)
         assertEquals(0, out.remainingTransitionsTotal)
         assertEquals(
             setOf("fade", "dissolve"),
-            out.removed.map { it.transitionName }.toSet(),
+            out.removedTransitions.map { it.transitionName }.toSet(),
         )
 
         val proj = rig.store.get(rig.projectId)!!
@@ -433,21 +433,21 @@ class TransitionActionToolTest {
             ),
         )
         val twoAdds = rig.tool.execute(
-            TransitionActionTool.Input(
+            TimelineActionTool.Input(
                 projectId = rig.projectId.value,
-                action = "add",
-                items = listOf(
-                    TransitionActionTool.AddItem("v1", "v2", "fade", 0.5),
-                    TransitionActionTool.AddItem("v2", "v3", "dissolve", 0.5),
+                action = "add_transition",
+                transitionItems = listOf(
+                    TimelineActionTool.TransitionAddItem("v1", "v2", "fade", 0.5),
+                    TimelineActionTool.TransitionAddItem("v2", "v3", "dissolve", 0.5),
                 ),
             ),
             rig.ctx,
-        ).data.added
+        ).data.addedTransitions
         val before = rig.snapshots.size
         rig.tool.execute(
-            TransitionActionTool.Input(
+            TimelineActionTool.Input(
                 projectId = rig.projectId.value,
-                action = "remove",
+                action = "remove_transition",
                 transitionClipIds = listOf(twoAdds[0].transitionClipId, twoAdds[1].transitionClipId),
             ),
             rig.ctx,
@@ -463,9 +463,9 @@ class TransitionActionToolTest {
 
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                TransitionActionTool.Input(
+                TimelineActionTool.Input(
                     projectId = rig.projectId.value,
-                    action = "remove",
+                    action = "remove_transition",
                     transitionClipIds = listOf(add.transitionClipId, "does-not-exist"),
                 ),
                 rig.ctx,
@@ -482,9 +482,9 @@ class TransitionActionToolTest {
         val rig = newRig(projectWithTwoAdjacentClips())
         val ex = assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(
-                TransitionActionTool.Input(
+                TimelineActionTool.Input(
                     projectId = rig.projectId.value,
-                    action = "remove",
+                    action = "remove_transition",
                     transitionClipIds = emptyList(),
                 ),
                 rig.ctx,
@@ -497,9 +497,9 @@ class TransitionActionToolTest {
         val rig = newRig(projectWithTwoAdjacentClips())
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                TransitionActionTool.Input(
+                TimelineActionTool.Input(
                     projectId = rig.projectId.value,
-                    action = "remove",
+                    action = "remove_transition",
                     transitionClipIds = listOf("v1"),
                 ),
                 rig.ctx,
@@ -513,9 +513,9 @@ class TransitionActionToolTest {
         val rig = newRig(projectWithTwoAdjacentClips())
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                TransitionActionTool.Input(
+                TimelineActionTool.Input(
                     projectId = rig.projectId.value,
-                    action = "remove",
+                    action = "remove_transition",
                     transitionClipIds = listOf("does-not-exist"),
                 ),
                 rig.ctx,
@@ -546,9 +546,9 @@ class TransitionActionToolTest {
         val rig = newRig(project)
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                TransitionActionTool.Input(
+                TimelineActionTool.Input(
                     projectId = rig.projectId.value,
-                    action = "remove",
+                    action = "remove_transition",
                     transitionClipIds = listOf("fx-1"),
                 ),
                 rig.ctx,
@@ -571,24 +571,24 @@ class TransitionActionToolTest {
             ),
         )
         val twoAdds = rig.tool.execute(
-            TransitionActionTool.Input(
+            TimelineActionTool.Input(
                 projectId = rig.projectId.value,
-                action = "add",
-                items = listOf(
-                    TransitionActionTool.AddItem("v1", "v2", "fade", 0.5),
-                    TransitionActionTool.AddItem("v2", "v3", "dissolve", 0.5),
+                action = "add_transition",
+                transitionItems = listOf(
+                    TimelineActionTool.TransitionAddItem("v1", "v2", "fade", 0.5),
+                    TimelineActionTool.TransitionAddItem("v2", "v3", "dissolve", 0.5),
                 ),
             ),
             rig.ctx,
-        ).data.added
+        ).data.addedTransitions
         val t1 = twoAdds[0]
         val t2 = twoAdds[1]
         assertEquals(t1.trackId, t2.trackId)
 
         val out = rig.tool.execute(
-            TransitionActionTool.Input(
+            TimelineActionTool.Input(
                 projectId = rig.projectId.value,
-                action = "remove",
+                action = "remove_transition",
                 transitionClipIds = listOf(t1.transitionClipId),
             ),
             rig.ctx,
@@ -604,23 +604,23 @@ class TransitionActionToolTest {
         val rig = newRig(projectWithTwoAdjacentClips())
         val add = rig.addOne("v1", "v2", "dissolve", 0.4)
         val out = rig.tool.execute(
-            TransitionActionTool.Input(
+            TimelineActionTool.Input(
                 projectId = rig.projectId.value,
-                action = "remove",
+                action = "remove_transition",
                 transitionClipIds = listOf(add.transitionClipId),
             ),
             rig.ctx,
         ).data
-        assertEquals("dissolve", out.removed.single().transitionName)
+        assertEquals("dissolve", out.removedTransitions.single().transitionName)
     }
 
     @Test fun removeSnapshotTimelineReflectsRemoval() = runTest {
         val rig = newRig(projectWithTwoAdjacentClips())
         val add = rig.addOne("v1", "v2")
         rig.tool.execute(
-            TransitionActionTool.Input(
+            TimelineActionTool.Input(
                 projectId = rig.projectId.value,
-                action = "remove",
+                action = "remove_transition",
                 transitionClipIds = listOf(add.transitionClipId),
             ),
             rig.ctx,
@@ -636,9 +636,9 @@ class TransitionActionToolTest {
         val add = rig.addOne("v1", "v2")
         val beforeSnapshotIds = rig.snapshots.map { it.id }.toSet()
         rig.tool.execute(
-            TransitionActionTool.Input(
+            TimelineActionTool.Input(
                 projectId = rig.projectId.value,
-                action = "remove",
+                action = "remove_transition",
                 transitionClipIds = listOf(add.transitionClipId),
             ),
             rig.ctx,
@@ -654,7 +654,7 @@ class TransitionActionToolTest {
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline()))
         val ex = assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                TransitionActionTool.Input("p", action = "delete"),
+                TimelineActionTool.Input("p", action = "delete"),
                 rig.ctx,
             )
         }

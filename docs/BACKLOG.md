@@ -13,7 +13,6 @@
 
 ## P0 — 高杠杆、下一步就该动
 
-- **debt-tool-consolidation-timeline-action-phase1a** — Phase 1a sub-bullet of `debt-tool-consolidation-timeline-action-phase1` (cycle 47 re-phase after cycle 45's 27-file scope assessment). Smallest sibling first: absorb `transition_action`'s 2 verbs (`add` / `remove`) into a renamed `track_action` → `timeline_action` (4 verbs become `add_track / remove_track / duplicate_track / reorder_track`; 2 new verbs `add_transition / remove_transition`). FilterActionTool stays separate (phase 1b). Scope: ~12 files (1 file rename, 1 file delete, ~5 prod refs, ~5 test files, desktop UI). Mirrors cycle 44's clip_action absorption shape. Rubric §5.7 / §5.6 / §3a-1。Milestone §later.
 
 ## P1 — 中优，做完 P0 再排
 

@@ -20,7 +20,7 @@ import io.talevia.core.tool.builtin.registerSessionAndMetaTools
 import io.talevia.core.tool.builtin.registerSourceNodeTools
 import io.talevia.core.tool.builtin.session.query.computeToolSpecBudget
 import io.talevia.core.tool.builtin.video.FilterActionTool
-import io.talevia.core.tool.builtin.video.TransitionActionTool
+import io.talevia.core.tool.builtin.video.TimelineActionTool
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -45,7 +45,7 @@ import kotlin.test.assertTrue
  *   - `filter_action` ≤ 1500 tokens — a single dispatcher covering
  *     apply / remove / set verbs across ≤ 6 FilterKind variants
  *     should not approach the top-3 threshold.
- *   - `transition_action` ≤ 1500 tokens — same shape on the
+ *   - `timeline_action` ≤ 1500 tokens — same shape on the
  *     transition axis.
  *   - Neither is in `topByTokens` top 3 of the full audit registry —
  *     prevents effect-related spec bloat from silently inflating
@@ -101,13 +101,13 @@ class EffectToolSpecBudgetTest {
         assertTrue(row.toolCount == 1, "expected effect-only registry to hold 1 tool, got ${row.toolCount}")
     }
 
-    @Test fun transitionActionToolSpecBudgetUnder1500Tokens() = runTest {
+    @Test fun timelineActionToolSpecBudgetUnder1500Tokens() = runTest {
         val registry = effectOnlyRegistry(includeFilter = false, includeTransition = true)
         val all = registry.all()
-        val transitionEntry = all.firstOrNull { it.id == "transition_action" }
+        val transitionEntry = all.firstOrNull { it.id == "timeline_action" }
             ?: error(
-                "transition_action not registered — wiring drift; expected ID " +
-                    "'transition_action' in the effect-only audit registry",
+                "timeline_action not registered — wiring drift; expected ID " +
+                    "'timeline_action' in the effect-only audit registry",
             )
         val schemaJson = io.talevia.core.JsonConfig.default.encodeToString(
             kotlinx.serialization.json.JsonElement.serializer(),
@@ -116,12 +116,12 @@ class EffectToolSpecBudgetTest {
         val bytes = transitionEntry.id.length + transitionEntry.helpText.length + schemaJson.length
         val tokens = (bytes + 2) / 4
         println(
-            "[m4-#4] transition_action spec_bytes=$bytes estimated_tokens=$tokens " +
+            "[m4-#4] timeline_action spec_bytes=$bytes estimated_tokens=$tokens " +
                 "(gate: ≤ $maxPerEffectToolTokens)",
         )
         assertTrue(
             tokens <= maxPerEffectToolTokens,
-            "M4 #4: transition_action spec is $tokens tokens — exceeds the per-tool effect ceiling " +
+            "M4 #4: timeline_action spec is $tokens tokens — exceeds the per-tool effect ceiling " +
                 "of $maxPerEffectToolTokens. Trim helpText / property descriptions / split inner " +
                 "schemas before merging.",
         )
@@ -165,9 +165,9 @@ class EffectToolSpecBudgetTest {
                 "Either trim filter_action's schema/helpText or document an explicit exception.",
         )
         assertTrue(
-            "transition_action" !in top3,
-            "M4 #4: transition_action landed in top-3 (top3=$top3) — effect tools are bloating the " +
-                "budget. Either trim transition_action's schema/helpText or document an explicit exception.",
+            "timeline_action" !in top3,
+            "M4 #4: timeline_action landed in top-3 (top3=$top3) — effect tools are bloating the " +
+                "budget. Either trim timeline_action's schema/helpText or document an explicit exception.",
         )
     }
 
@@ -175,7 +175,7 @@ class EffectToolSpecBudgetTest {
      * Build a tiny registry holding only the named effect dispatchers,
      * so `computeToolSpecBudget` returns a deterministic snapshot for
      * the per-tool gate. Mirrors the production constructors —
-     * [FilterActionTool] / [TransitionActionTool] both take a
+     * [FilterActionTool] / [TimelineActionTool] both take a
      * [io.talevia.core.domain.ProjectStore].
      */
     private fun effectOnlyRegistry(
@@ -185,7 +185,7 @@ class EffectToolSpecBudgetTest {
         val registry = ToolRegistry()
         val projects = ProjectStoreTestKit.create()
         if (includeFilter) registry.register(FilterActionTool(projects))
-        if (includeTransition) registry.register(TransitionActionTool(projects))
+        if (includeTransition) registry.register(TimelineActionTool(projects))
         return registry
     }
 

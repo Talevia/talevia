@@ -13,7 +13,7 @@ import kotlin.uuid.ExperimentalUuidApi
 import kotlin.uuid.Uuid
 
 /**
- * Per-verb handlers + helpers for [TrackActionTool]. Extracted from the
+ * Per-verb handlers + helpers for [TimelineActionTool]. Extracted from the
  * dispatcher so each new verb adds its body here rather than padding the
  * tool's own class with another `executeX` method — see cycle's commit
  * for the LOC growth axis (every action verb adds 5–15 LOC of params to
@@ -21,10 +21,10 @@ import kotlin.uuid.Uuid
  *
  * All four handlers share the contract:
  *  - take `(store, input, ctx)` so they're stateless w.r.t. the calling
- *    [TrackActionTool] instance — no implicit `this` capture.
+ *    [TimelineActionTool] instance — no implicit `this` capture.
  *  - run a single `store.mutate` and emit a `Part.TimelineSnapshot`
  *    (so `revert_timeline` / undo can step back).
- *  - return a fully-populated [TrackActionTool.Output] with `action`
+ *  - return a fully-populated [TimelineActionTool.Output] with `action`
  *    stamped — the dispatcher does no post-processing.
  *
  * Helpers ([generateCopyId], [cloneClip], [rebuildTrackWithNewId],
@@ -36,9 +36,9 @@ import kotlin.uuid.Uuid
 internal suspend fun executeAdd(
     store: ProjectStore,
     pid: ProjectId,
-    input: TrackActionTool.Input,
+    input: TimelineActionTool.Input,
     ctx: ToolContext,
-): ToolResult<TrackActionTool.Output> {
+): ToolResult<TimelineActionTool.Output> {
     val trackKindRaw = input.trackKind
         ?: error("trackKind is required when action=add")
     val normalisedKind = trackKindRaw.trim().lowercase()
@@ -71,9 +71,9 @@ internal suspend fun executeAdd(
         title = "add $normalisedKind track",
         outputForLlm = "Added empty $normalisedKind track $newId to project ${pid.value} " +
             "($totalCount total track(s)). Timeline snapshot: ${snapshotId.value}",
-        data = TrackActionTool.Output(
+        data = TimelineActionTool.Output(
             projectId = pid.value,
-            action = "add",
+            action = "add_track",
             trackId = newId,
             trackKind = normalisedKind,
             totalTrackCount = totalCount,
@@ -85,11 +85,11 @@ internal suspend fun executeAdd(
 internal suspend fun executeRemove(
     store: ProjectStore,
     pid: ProjectId,
-    input: TrackActionTool.Input,
+    input: TimelineActionTool.Input,
     ctx: ToolContext,
-): ToolResult<TrackActionTool.Output> {
+): ToolResult<TimelineActionTool.Output> {
     require(input.trackIds.isNotEmpty()) { "trackIds must not be empty" }
-    val results = mutableListOf<TrackActionTool.RemoveItemResult>()
+    val results = mutableListOf<TimelineActionTool.RemoveItemResult>()
 
     val updated = store.mutate(pid) { project ->
         var tracks = project.timeline.tracks
@@ -105,7 +105,7 @@ internal suspend fun executeRemove(
             val kind = trackKind(target)
             val droppedClips = target.clips.size
             tracks = tracks.filter { it.id.value != trackId }
-            results += TrackActionTool.RemoveItemResult(
+            results += TimelineActionTool.RemoveItemResult(
                 trackId = trackId,
                 trackKind = kind,
                 droppedClipCount = droppedClips,
@@ -124,9 +124,9 @@ internal suspend fun executeRemove(
     return ToolResult(
         title = "remove ${results.size} track(s)",
         outputForLlm = summary,
-        data = TrackActionTool.Output(
+        data = TimelineActionTool.Output(
             projectId = pid.value,
-            action = "remove",
+            action = "remove_track",
             results = results,
             forced = input.force,
             snapshotId = snapshotId.value,
@@ -138,11 +138,11 @@ internal suspend fun executeRemove(
 internal suspend fun executeDuplicate(
     store: ProjectStore,
     pid: ProjectId,
-    input: TrackActionTool.Input,
+    input: TimelineActionTool.Input,
     ctx: ToolContext,
-): ToolResult<TrackActionTool.Output> {
+): ToolResult<TimelineActionTool.Output> {
     require(input.items.isNotEmpty()) { "items must not be empty when action=duplicate" }
-    val results = mutableListOf<TrackActionTool.DuplicateItemResult>()
+    val results = mutableListOf<TimelineActionTool.DuplicateItemResult>()
 
     val updated = store.mutate(pid) { project ->
         var tracks = project.timeline.tracks
@@ -168,7 +168,7 @@ internal suspend fun executeDuplicate(
             val cloned: Track = rebuildTrackWithNewId(source, TrackId(chosenId), clonedClips)
 
             tracks = tracks + cloned
-            results += TrackActionTool.DuplicateItemResult(
+            results += TimelineActionTool.DuplicateItemResult(
                 sourceTrackId = item.sourceTrackId,
                 newTrackId = chosenId,
                 clipCount = clonedClips.size,
@@ -181,9 +181,9 @@ internal suspend fun executeDuplicate(
     return ToolResult(
         title = "duplicate ${results.size} track(s)",
         outputForLlm = "Duplicated ${results.size} track(s). Snapshot: ${snapshotId.value}",
-        data = TrackActionTool.Output(
+        data = TimelineActionTool.Output(
             projectId = pid.value,
-            action = "duplicate",
+            action = "duplicate_track",
             duplicateResults = results,
             snapshotId = snapshotId.value,
         ),
@@ -193,9 +193,9 @@ internal suspend fun executeDuplicate(
 internal suspend fun executeReorder(
     store: ProjectStore,
     pid: ProjectId,
-    input: TrackActionTool.Input,
+    input: TimelineActionTool.Input,
     ctx: ToolContext,
-): ToolResult<TrackActionTool.Output> {
+): ToolResult<TimelineActionTool.Output> {
     require(input.trackIds.isNotEmpty()) {
         "trackIds must not be empty when action=reorder — nothing to reorder. " +
             "Omit this tool entirely if the order is already correct."
@@ -229,9 +229,9 @@ internal suspend fun executeReorder(
         title = "reorder tracks (${input.trackIds.size} pinned)",
         outputForLlm = "Track order is now: ${newOrderOut.joinToString(", ")}. " +
             "Timeline snapshot: ${snapshotId.value}",
-        data = TrackActionTool.Output(
+        data = TimelineActionTool.Output(
             projectId = pid.value,
-            action = "reorder",
+            action = "reorder_track",
             newOrder = newOrderOut,
             snapshotId = snapshotId.value,
         ),

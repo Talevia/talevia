@@ -70,8 +70,7 @@ import io.talevia.core.tool.builtin.video.FilterActionTool
 import io.talevia.core.tool.builtin.video.ImportMediaTool
 import io.talevia.core.tool.builtin.video.RelinkAssetTool
 import io.talevia.core.tool.builtin.video.RevertTimelineTool
-import io.talevia.core.tool.builtin.video.TrackActionTool
-import io.talevia.core.tool.builtin.video.TransitionActionTool
+import io.talevia.core.tool.builtin.video.TimelineActionTool
 import io.talevia.core.tool.builtin.web.WebFetchTool
 import io.talevia.core.tool.builtin.web.WebSearchTool
 
@@ -185,8 +184,7 @@ fun ToolRegistry.registerClipAndTrackTools(
     register(ClipActionTool(projects))
     register(FilterActionTool(projects))
     register(AddSubtitlesTool(projects))
-    register(TransitionActionTool(projects))
-    register(TrackActionTool(projects))
+    register(TimelineActionTool(projects))
     register(RevertTimelineTool(sessions, projects))
     register(ClearTimelineTool(projects))
 }
