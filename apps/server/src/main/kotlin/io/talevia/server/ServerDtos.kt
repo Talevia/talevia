@@ -101,6 +101,7 @@ internal fun eventName(e: BusEvent): String = when (e) {
     is BusEvent.ProviderWarmup -> "provider.warmup"
     is BusEvent.AigcJobProgress -> "aigc.job.progress"
     is BusEvent.ToolSpecBudgetWarning -> "tool.spec.budget.warning"
+    is BusEvent.ToolStreamingPart -> "tool.streaming.part"
 }
 
 /**
@@ -196,6 +197,10 @@ data class BusEventDto(
     val thresholdTokensBudget: Int? = null,
     /** Set for `tool.spec.budget.warning` — number of tools registered when the warning fired. */
     val toolCount: Int? = null,
+    /** Set for `tool.streaming.part` — incremental text the tool emitted. */
+    val streamChunk: String? = null,
+    /** Set for `tool.streaming.part` — running token count if the tool can estimate. */
+    val streamDoneTokens: Int? = null,
 ) {
     companion object {
         fun from(e: BusEvent): BusEventDto = when (e) {
@@ -348,6 +353,14 @@ data class BusEventDto(
                 estimatedTokens = e.estimatedTokens,
                 thresholdTokensBudget = e.threshold,
                 toolCount = e.toolCount,
+            )
+            is BusEvent.ToolStreamingPart -> BusEventDto(
+                "tool.streaming.part",
+                e.sessionId.value,
+                callId = e.callId.value,
+                toolId = e.toolId,
+                streamChunk = e.chunk,
+                streamDoneTokens = e.doneTokens,
             )
         }
     }

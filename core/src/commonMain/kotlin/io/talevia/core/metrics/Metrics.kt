@@ -133,6 +133,12 @@ class EventBusMetricsSink(
                     val tag = if (event.hit) "hit" else "miss"
                     registry.increment("aigc.cache.${event.toolId}.$tag.total")
                 }
+                // Per-tool streaming-chunk counter so dashboards can
+                // separate "tools that stream" from "tools that don't"
+                // without re-scraping the base counter by label.
+                if (event is BusEvent.ToolStreamingPart) {
+                    registry.increment("tool.streaming.${event.toolId}.parts")
+                }
                 // AigcCostRecorded additionally feeds a cents gauge so dashboards
                 // can render "spend this session" without re-reading the lockfile.
                 if (event is BusEvent.AigcCostRecorded) {
@@ -208,6 +214,12 @@ class EventBusMetricsSink(
             BusEvent.AigcProgressPhase.Failed -> "aigc.job.failed"
         }
         is BusEvent.ToolSpecBudgetWarning -> "tool.spec.budget.warning"
+        // `agent-tool-streaming-text-delta` (cycle 35): per-tool
+        // streaming counter so dashboards can answer "which tools
+        // emit chunks vs. atomic ToolResults?" without re-scraping.
+        // Per-event base counter increments below regardless; the
+        // toolId-tagged counter only fires for streaming events.
+        is BusEvent.ToolStreamingPart -> "tool.streaming.part"
     }
 
     /**

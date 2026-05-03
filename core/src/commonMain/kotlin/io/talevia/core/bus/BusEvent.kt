@@ -398,4 +398,52 @@ sealed interface BusEvent {
     ) : BusEvent {
         val exceededBy: Int get() = estimatedTokens - threshold
     }
+
+    /**
+     * Streaming chunk emitted by a tool while its `execute()` is still
+     * running — the partial-output event surface long-running text-
+     * generators (e.g. a future `draft_script`, the LLM-routed
+     * `synthesize_speech`, an interactive prompt-fold) can publish so
+     * UIs render incremental progress instead of a black-hole spinner.
+     *
+     * `agent-tool-streaming-text-delta` (cycle 35). Today's
+     * [ToolResult] is atomic — `tool.execute()` returns once with the
+     * final body. For chunked generation the user sees nothing until
+     * the whole response lands, which on long flows (script
+     * composition, multi-paragraph prompt fold) reads as "stuck".
+     * This event lets a tool emit `[chunk_0, chunk_1, ..., final
+     * ToolResult]` while keeping the existing dispatch contract
+     * intact: subscribers that don't care about streaming (lockfile,
+     * cost, replay) ignore the chunks; subscribers that DO (CLI's
+     * Renderer, desktop chat panel, server SSE) render them inline.
+     *
+     * **No production emitter ships with this cycle.** Bullet text
+     * said "ship event surface + metrics arm; first emitter 留下次"
+     * — this lays the wiring (event class, metrics counter, server
+     * SSE arm) so the first chunk-emitting tool can land without
+     * having to bolt the surface on alongside its provider integration.
+     *
+     * @property sessionId The session that issued the dispatch (for
+     *   per-session SSE filtering).
+     * @property callId Mirror of [PartDelta.partId] correlation —
+     *   pairs to the tool-call's `Part.Tool` so multi-tool sessions
+     *   can fan out the chunks to the right UI surface.
+     * @property toolId Which tool emitted this chunk.
+     * @property chunk The incremental text. Concatenating all
+     *   chunks for a `(sessionId, callId)` pair across the dispatch
+     *   reconstructs the streaming body verbatim — the final
+     *   [ToolResult.outputForLlm] may be the same string OR a
+     *   condensed summary; emitter's choice.
+     * @property doneTokens Tokens emitted so far if the tool can
+     *   estimate (LLM-routed tools have provider-side counts; ad-hoc
+     *   tools don't). Pairs with the per-tool budget for "this
+     *   tool has spent X / Y tokens" UI hints.
+     */
+    data class ToolStreamingPart(
+        override val sessionId: SessionId,
+        val callId: CallId,
+        val toolId: String,
+        val chunk: String,
+        val doneTokens: Int? = null,
+    ) : SessionEvent
 }
