@@ -164,6 +164,46 @@ class ProjectActionDispatcherToolTest {
         assertNull(result.pinResult)
     }
 
+    @Test fun snapshotKindRoutesToProjectSnapshotActionAndPopulatesSnapshotResult() = runTest {
+        val (dispatcher, pid) = dispatcherWithProject()
+        val result = dispatcher.execute(
+            ProjectActionDispatcherTool.Input.Snapshot(
+                ProjectSnapshotActionTool.Input(
+                    action = "save",
+                    projectId = pid.value,
+                    label = "before-edit",
+                ),
+            ),
+            ctx(),
+        ).data
+        assertEquals("snapshot", result.kind)
+        assertNotNull(result.snapshotResult)
+        assertEquals("save", result.snapshotResult!!.action)
+        assertEquals("before-edit", result.snapshotResult!!.label)
+        assertNull(result.lifecycleResult)
+        assertNull(result.maintenanceResult)
+        assertNull(result.pinResult)
+    }
+
+    @Test fun maintenanceKindRoutesToProjectMaintenanceActionAndPopulatesMaintenanceResult() = runTest {
+        val (dispatcher, pid) = dispatcherWithProject()
+        val result = dispatcher.execute(
+            ProjectActionDispatcherTool.Input.Maintenance(
+                ProjectMaintenanceActionTool.Input(
+                    action = "prune-lockfile",
+                    projectId = pid.value,
+                ),
+            ),
+            ctx(),
+        ).data
+        assertEquals("maintenance", result.kind)
+        assertNotNull(result.maintenanceResult)
+        assertEquals("prune-lockfile", result.maintenanceResult!!.action)
+        assertNull(result.lifecycleResult)
+        assertNull(result.pinResult)
+        assertNull(result.snapshotResult)
+    }
+
     @Test fun permissionFromRoutesByKindToUnderlyingTool() {
         val store = ProjectStoreTestKit.create()
         val lifecycle = ProjectLifecycleActionTool(store)
