@@ -43,6 +43,7 @@ import io.talevia.core.tool.builtin.project.ExportProjectTool
 import io.talevia.core.tool.builtin.project.ForkProjectTool
 import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
+import io.talevia.core.tool.builtin.project.ProjectActionDispatcherTool
 import io.talevia.core.tool.builtin.project.ProjectLifecycleActionTool
 import io.talevia.core.tool.builtin.project.ProjectMaintenanceActionTool
 import io.talevia.core.tool.builtin.project.ProjectPinActionTool
@@ -202,13 +203,21 @@ fun ToolRegistry.registerProjectTools(
 ) {
     register(ExportTool(projects, engine))
     register(ExportDryRunTool(projects))
-    register(ProjectLifecycleActionTool(projects, sessions = sessions))
+    val lifecycle = ProjectLifecycleActionTool(projects, sessions = sessions)
+    val maintenance = ProjectMaintenanceActionTool(projects, engine)
+    val pin = ProjectPinActionTool(projects)
+    val snapshot = ProjectSnapshotActionTool(projects)
+    register(lifecycle)
+    register(maintenance)
+    register(pin)
+    register(snapshot)
+    // Cycle 61: introduce kind-discriminated `project_action` dispatcher
+    // alongside the four underlying tools (AIGC arc phase 1 precedent —
+    // both surfaces stay registered until phase 2 unregisters originals).
+    register(ProjectActionDispatcherTool(lifecycle, maintenance, pin, snapshot))
     register(ListProjectsTool(projects))
     register(ProjectQueryTool(projects))
     register(RegenerateStaleClipsTool(projects, this))
-    register(ProjectMaintenanceActionTool(projects, engine))
-    register(ProjectPinActionTool(projects))
-    register(ProjectSnapshotActionTool(projects))
     register(ForkProjectTool(projects, this))
     register(DiffProjectsTool(projects))
     register(ExportProjectTool(projects))

@@ -181,12 +181,19 @@ final class AppContainer {
         registry.register(tool: ClearTimelineTool(store: self.projects))
         // `create_from_template` is now `project_action(action="create_from_template")`;
         // `state` / `validation` / `stale_clips` are now `project_query(select=…)`.
-        registry.register(tool: ProjectLifecycleActionTool(projects: self.projects, sessions: self.sessions, clock: clock))
+        let lifecycle = ProjectLifecycleActionTool(projects: self.projects, sessions: self.sessions, clock: clock)
+        let maintenance = ProjectMaintenanceActionTool(projects: self.projects, engine: self.engine, clock: clock)
+        let pin = ProjectPinActionTool(projects: self.projects)
+        let snapshot = ProjectSnapshotActionTool(projects: self.projects, clock: clock)
+        registry.register(tool: lifecycle)
+        registry.register(tool: maintenance)
+        registry.register(tool: pin)
+        registry.register(tool: snapshot)
+        // Cycle 61: kind-discriminated `project_action` dispatcher
+        // alongside the four underlying tools (phase 1a-2 impl).
+        registry.register(tool: ProjectActionDispatcherTool(lifecycle: lifecycle, maintenance: maintenance, pin: pin, snapshot: snapshot))
         registry.register(tool: ListProjectsTool(projects: self.projects))
         registry.register(tool: ProjectQueryTool(projects: self.projects, clock: clock))
-        registry.register(tool: ProjectMaintenanceActionTool(projects: self.projects, engine: self.engine, clock: clock))
-        registry.register(tool: ProjectPinActionTool(projects: self.projects))
-        registry.register(tool: ProjectSnapshotActionTool(projects: self.projects, clock: clock))
         registry.register(tool: ForkProjectTool(projects: self.projects, registry: registry))
         registry.register(tool: DiffProjectsTool(projects: self.projects))
         registry.register(tool: ExportProjectTool(projects: self.projects))
