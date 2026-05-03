@@ -1,6 +1,7 @@
 package io.talevia.core.agent
 
 import io.talevia.core.bus.BusEvent
+import io.talevia.core.metrics.MetricsRegistry
 import io.talevia.core.tool.ToolRegistry
 import io.talevia.core.tool.builtin.session.query.computeToolSpecBudget
 
@@ -34,6 +35,17 @@ import io.talevia.core.tool.builtin.session.query.computeToolSpecBudget
  */
 class ToolSpecBudgetMonitor(
     private val threshold: Int = DEFAULT_THRESHOLD,
+    /**
+     * Optional metrics sink — when present, [check] writes the current
+     * registry budget as gauge-semantic counters
+     * (`agent.tool_spec_budget.tokens` and `agent.tool_spec_budget.tools`)
+     * on every call. `perf-tool-spec-budget-runtime-metric` (cycle 50)
+     * replaces the cycle-cadence audit-test re-runs with a Prometheus-
+     * scrapeable gauge so the `debt-shrink-tool-spec-surface` trigger
+     * gate ("audit token > 15,500") becomes observable continuously
+     * rather than at repopulate-only refresh points.
+     */
+    private val metrics: MetricsRegistry? = null,
 ) {
     private var lastWasOver: Boolean = false
 
@@ -48,10 +60,24 @@ class ToolSpecBudgetMonitor(
      * never wire a registry get a silent monitor; the runtime path is
      * still correct because the audit test catches a zero-spec regression
      * separately.
+     *
+     * Side effect: when the [metrics] sink is wired, every call writes
+     * the current `(estimatedTokens, toolCount)` pair into the registry
+     * as gauges — even when no warning fires (so the scrape captures
+     * stable-state values too). Mixing this with the bus-event path is
+     * intentional: `BusEvent.ToolSpecBudgetWarning` is the
+     * threshold-crossing alert, the gauge is the continuous time series.
      */
-    fun check(registry: ToolRegistry?): BusEvent.ToolSpecBudgetWarning? {
+    suspend fun check(registry: ToolRegistry?): BusEvent.ToolSpecBudgetWarning? {
         if (registry == null) return null
         val row = computeToolSpecBudget(registry)
+        // Always-write the gauge — gives the scrape a stable read even
+        // on under-threshold turns. The sink is null in tests / minimal
+        // wirings, so the suspension cost is gated.
+        metrics?.let { sink ->
+            sink.set("agent.tool_spec_budget.tokens", row.estimatedTokens.toLong())
+            sink.set("agent.tool_spec_budget.tools", row.toolCount.toLong())
+        }
         val isOver = row.estimatedTokens > threshold
         return if (isOver && !lastWasOver) {
             lastWasOver = true

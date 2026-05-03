@@ -42,6 +42,23 @@ class MetricsRegistry {
     }
 
     /**
+     * Gauge-semantic write — overwrites whatever the counter map currently
+     * holds for [name]. Used for absolute-value metrics (current
+     * tool-spec-budget tokens, current session count, etc.) where
+     * monotonic increment doesn't fit. Stored in the same map as
+     * [increment] outputs because the project's minimalist scrape format
+     * doesn't differentiate counter / gauge — naming convention does
+     * (`agent.tool_spec_budget.tokens` reads as a gauge by convention).
+     *
+     * Mixing `increment` and `set` calls on the same name is undefined
+     * behaviour (later `set` wipes the increment history); callers are
+     * expected to use one or the other per metric.
+     */
+    suspend fun set(name: String, value: Long) {
+        mutex.withLock { counters[name] = value }
+    }
+
+    /**
      * Record a latency observation (in milliseconds) for the named histogram.
      * The name's ring buffer retains the most recent [HISTOGRAM_CAP_PER_NAME]
      * observations; overflow evicts the oldest.

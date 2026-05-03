@@ -150,7 +150,7 @@ class Agent(
      * tests want to assert hysteresis explicitly; pass an instance with
      * a no-op registry hook to disable the lane entirely.
      */
-    private val toolSpecBudgetMonitor: ToolSpecBudgetMonitor = ToolSpecBudgetMonitor(),
+    private val toolSpecBudgetMonitor: ToolSpecBudgetMonitor = ToolSpecBudgetMonitor(metrics = metrics),
 ) : AutoCloseable {
 
     private val log = Loggers.get("agent")
