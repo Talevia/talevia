@@ -199,4 +199,75 @@ class LockfileTest {
         val empty = Lockfile.EMPTY.stream().toList()
         assertEquals(0, empty.size)
     }
+
+    @Test fun sizeAndIsEmptyAndLastOrNullReflectAppendOnlyState() {
+        // Cycle 57 phase 2b-1b-2 added `size` / `isEmpty()` /
+        // `lastOrNull()` as O(1) member methods so the lazy impl can
+        // track count + tail without materialising the entry list.
+        // Pin the contract: each method tracks the append-only ledger
+        // truthfully across an empty start, single append, and
+        // multi-append fresh state.
+        assertEquals(0, Lockfile.EMPTY.size)
+        assertEquals(true, Lockfile.EMPTY.isEmpty())
+        assertNull(Lockfile.EMPTY.lastOrNull())
+
+        val one = Lockfile.EMPTY.append(entry("h1", "asset-1"))
+        assertEquals(1, one.size)
+        assertEquals(false, one.isEmpty())
+        assertEquals("h1", one.lastOrNull()?.inputHash)
+
+        val three = one
+            .append(entry("h2", "asset-2"))
+            .append(entry("h3", "asset-3"))
+        assertEquals(3, three.size)
+        assertEquals(false, three.isEmpty())
+        // Append-only ledger: lastOrNull is the most-recently-appended.
+        assertEquals("h3", three.lastOrNull()?.inputHash)
+    }
+
+    @Test fun filterEntriesPreservesOrderAndImmutability() {
+        // Cycle 59 phase 2b-1c-1 added `filterEntries(predicate)` as
+        // the typed mutation API replacing
+        // `lockfile.copy(entries = lockfile.entries.filter(predicate))`.
+        // Pin the contract: filtering preserves insertion order, returns
+        // a new lockfile (originals untouched), and matches the
+        // predicate truthfully on each entry.
+        val a = entry("h1", "asset-1")
+        val b = entry("h2", "asset-2")
+        val c = entry("h3", "asset-3")
+        val before = Lockfile.EMPTY.append(a).append(b).append(c)
+        val after = before.filterEntries { it.inputHash != "h2" }
+
+        assertEquals(listOf(a, c), after.entries, "filterEntries preserves insertion order minus rejected entries")
+        // Immutability: the original lockfile is untouched.
+        assertEquals(listOf(a, b, c), before.entries, "filterEntries must not mutate the receiver")
+        // Empty predicate edge: filtering everything out yields a still-valid empty lockfile.
+        val emptyAfter = before.filterEntries { false }
+        assertEquals(0, emptyAfter.size)
+        assertEquals(true, emptyAfter.isEmpty())
+        // Identity edge: predicate that accepts all returns same logical sequence.
+        val keepAll = before.filterEntries { true }
+        assertEquals(before.entries, keepAll.entries)
+    }
+
+    @Test fun mapEntriesPreservesOrderAndAppliesTransform() {
+        // Cycle 59 phase 2b-1c-1 added `mapEntries(transform)` as
+        // the typed mutation API for in-place rewrites — used by
+        // `Lockfile.rewriteSourceBinding` (id renames in the source DAG).
+        // Pin the contract: each entry runs through the transform; order
+        // is preserved; the receiver is unmutated.
+        val a = entry("h1", "asset-1")
+        val b = entry("h2", "asset-2")
+        val before = Lockfile.EMPTY.append(a).append(b)
+        // Transform: bump every entry's seed by 1.
+        val after = before.mapEntries { it.copy(provenance = it.provenance.copy(seed = it.provenance.seed + 1)) }
+
+        assertEquals(2, after.size)
+        assertEquals("h1", after.entries[0].inputHash, "mapEntries preserves order — first remains first")
+        assertEquals(43L, after.entries[0].provenance.seed, "transform applied to first entry")
+        assertEquals(43L, after.entries[1].provenance.seed, "transform applied to second entry")
+        // Immutability: original entries unchanged.
+        assertEquals(42L, before.entries[0].provenance.seed)
+        assertEquals(42L, before.entries[1].provenance.seed)
+    }
 }
