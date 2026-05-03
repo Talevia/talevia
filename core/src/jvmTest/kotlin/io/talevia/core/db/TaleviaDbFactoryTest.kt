@@ -72,6 +72,127 @@ class TaleviaDbFactoryTest {
     }
 
     @Test
+    fun `explicit path argument wins over env`() = runTest {
+        // Cycle 81 follow-up: kdoc states "Explicit [path] argument wins"
+        // is precedence rule #1. Passing a different path explicitly must
+        // override TALEVIA_DB_PATH.
+        val opened = TaleviaDbFactory.open(
+            env = mapOf("TALEVIA_DB_PATH" to "/tmp/should-not-win.db"),
+            path = ":memory:",
+        )
+        try {
+            assertEquals(":memory:", opened.path, "explicit path argument must override env")
+        } finally {
+            opened.driver.close()
+        }
+    }
+
+    @Test
+    fun `TALEVIA_DB_PATH wins over TALEVIA_MEDIA_DIR`() = runTest {
+        // Kdoc precedence: TALEVIA_DB_PATH (#2) wins over
+        // TALEVIA_MEDIA_DIR (#3). Pin so a future env-resolution refactor
+        // doesn't accidentally swap them.
+        val tmp = kotlin.io.path.createTempDirectory("taleviadb-precedence-").toFile()
+        try {
+            val opened = TaleviaDbFactory.open(
+                env = mapOf(
+                    "TALEVIA_DB_PATH" to ":memory:",
+                    "TALEVIA_MEDIA_DIR" to tmp.absolutePath,
+                ),
+            )
+            try {
+                assertEquals(":memory:", opened.path, "TALEVIA_DB_PATH must win over TALEVIA_MEDIA_DIR")
+            } finally {
+                opened.driver.close()
+            }
+        } finally {
+            tmp.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `blank TALEVIA_DB_PATH falls through to media dir`() = runTest {
+        // The `takeIf { it.isNotBlank() }` chain in resolvePathFromEnv
+        // means an empty / whitespace TALEVIA_DB_PATH is treated as
+        // unset, falling through to TALEVIA_MEDIA_DIR. Pin so a deploy
+        // setting TALEVIA_DB_PATH="" doesn't accidentally pin to
+        // in-memory and lose persistence.
+        val tmp = kotlin.io.path.createTempDirectory("taleviadb-blank-").toFile()
+        try {
+            val opened = TaleviaDbFactory.open(
+                env = mapOf(
+                    "TALEVIA_DB_PATH" to "",
+                    "TALEVIA_MEDIA_DIR" to tmp.absolutePath,
+                ),
+            )
+            try {
+                assertEquals(java.io.File(tmp, "talevia.db").absolutePath, opened.path)
+            } finally {
+                opened.driver.close()
+            }
+        } finally {
+            tmp.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `whitespace-only TALEVIA_DB_PATH also falls through`() = runTest {
+        // `isNotBlank()` rejects whitespace-only too. Pin separately
+        // from the empty-string case to anchor `String.isBlank()`
+        // semantics — a future refactor switching to `isNotEmpty()`
+        // would silently regress.
+        val tmp = kotlin.io.path.createTempDirectory("taleviadb-whitespace-").toFile()
+        try {
+            val opened = TaleviaDbFactory.open(
+                env = mapOf(
+                    "TALEVIA_DB_PATH" to "   ",
+                    "TALEVIA_MEDIA_DIR" to tmp.absolutePath,
+                ),
+            )
+            try {
+                assertEquals(java.io.File(tmp, "talevia.db").absolutePath, opened.path)
+            } finally {
+                opened.driver.close()
+            }
+        } finally {
+            tmp.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `blank TALEVIA_MEDIA_DIR with no DB_PATH falls through to in-memory`() = runTest {
+        // Both blank → null → in-memory default. The "safe default for
+        // tests" branch from the kdoc.
+        val opened = TaleviaDbFactory.open(
+            env = mapOf(
+                "TALEVIA_DB_PATH" to "",
+                "TALEVIA_MEDIA_DIR" to "  ",
+            ),
+        )
+        try {
+            assertEquals(":memory:", opened.path, "all-blank env defaults to in-memory")
+        } finally {
+            opened.driver.close()
+        }
+    }
+
+    @Test
+    fun `case-insensitive memory literal accepts MIXED-case`() = runTest {
+        // Pin the kdoc's "case-insensitive" promise. A regression
+        // making it case-sensitive would mismatch CI configs that
+        // pass `MEMORY` or `Memory`.
+        val a = TaleviaDbFactory.open(env = mapOf("TALEVIA_DB_PATH" to "MEMORY"))
+        val b = TaleviaDbFactory.open(env = mapOf("TALEVIA_DB_PATH" to ":Memory:"))
+        try {
+            assertEquals(":memory:", a.path)
+            assertEquals(":memory:", b.path)
+        } finally {
+            a.driver.close()
+            b.driver.close()
+        }
+    }
+
+    @Test
     fun `schema-version downgrade refuses to open`() = runTest {
         val tmp = kotlin.io.path.createTempDirectory("taleviadb-downgrade-").toFile()
         val dbPath = java.io.File(tmp, "talevia.db").absolutePath
