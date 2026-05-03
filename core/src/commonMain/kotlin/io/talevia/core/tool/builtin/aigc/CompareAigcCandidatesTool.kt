@@ -25,7 +25,7 @@ import kotlinx.serialization.serializer
  * one `Candidate` per model. Each underlying dispatch runs through the
  * normal lockfile path, so every successful candidate lands a lockfile
  * entry (unpinned — the caller picks a winner via
- * `project_pin_action(target=lockfile_entry)`). The LLM and UI compare side-by-side
+ * `project_action(kind="pin", args={target=lockfile_entry})`). The LLM and UI compare side-by-side
  * instead of the user running five separate `generate_image` calls by
  * hand.
  *
@@ -90,7 +90,7 @@ class CompareAigcCandidatesTool(
             "(generate_image | generate_music | generate_video | synthesize_speech | " +
             "upscale_asset) in parallel across the supplied models, using identical " +
             "baseInput fields. Each successful candidate lands an unpinned lockfile entry via " +
-            "the underlying tool — pin the winner with project_pin_action(target=lockfile_entry). Per-candidate " +
+            "the underlying tool — pin the winner with project_action(kind=\"pin\", args={target=lockfile_entry}). Per-candidate " +
             "errors don't cancel siblings; the Output carries successes + failures side-by-side. " +
             "baseInput must NOT include a `model` field — this tool injects it per candidate."
     override val inputSerializer: KSerializer<Input> = serializer()
@@ -189,7 +189,7 @@ class CompareAigcCandidatesTool(
             title = "compare ${input.toolId} x ${input.models.size} models",
             outputForLlm = "Ran ${input.toolId} with ${input.models.size} candidate model(s): " +
                 "$successes ok / $errors error. $assetSummary. Pin the winner with " +
-                "project_pin_action(target=lockfile_entry) (lockfile entries were appended unpinned).",
+                "project_action(kind=\"pin\", args={target=lockfile_entry}) (lockfile entries were appended unpinned).",
             data = Output(
                 toolId = input.toolId,
                 candidates = candidates,

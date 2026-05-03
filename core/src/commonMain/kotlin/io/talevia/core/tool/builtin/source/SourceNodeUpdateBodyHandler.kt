@@ -33,7 +33,7 @@ import kotlinx.serialization.json.buildJsonObject
  * The handler does not emit a `Part.TimelineSnapshot` — body edits
  * touch zero `Clip.sourceBinding` fields, so `revert_timeline` would
  * be a no-op anyway. Project-level undo for source edits stays in
- * `project_snapshot_action`.
+ * `project_action(kind="snapshot")`.
  */
 internal suspend fun executeSourceUpdateBody(
     projects: ProjectStore,

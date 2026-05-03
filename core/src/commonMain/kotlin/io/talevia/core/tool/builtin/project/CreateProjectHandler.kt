@@ -14,7 +14,7 @@ import kotlinx.datetime.Clock
 import okio.Path.Companion.toPath
 
 /**
- * `project_lifecycle_action(action="create")` handler — bootstrap a fresh project
+ * `project_action(kind="lifecycle", args={action="create"})` handler — bootstrap a fresh project
  * with empty timeline / assets / source DAG. Behaviour preserved from
  * the legacy `CreateProjectTool`:
  *

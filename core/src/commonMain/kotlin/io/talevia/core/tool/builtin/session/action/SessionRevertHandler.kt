@@ -27,7 +27,7 @@ import io.talevia.core.tool.builtin.session.SessionActionTool
  *  - Publishes `BusEvent.SessionReverted` so UIs refresh atomically.
  *
  * **Destructive.** Hard revert — no way to un-revert via tools. The
- * `project_snapshot_action(action=save)` family covers project-level
+ * `project_action(kind="snapshot", args={action="save"})` family covers project-level
  * undo; this verb is explicitly for the session half.
  *
  * **Not cancel-safe.** [SessionRevert] does NOT assert the session

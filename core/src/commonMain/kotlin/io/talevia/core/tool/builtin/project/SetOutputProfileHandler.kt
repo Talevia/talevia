@@ -8,7 +8,7 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 
 /**
- * `project_lifecycle_action(action="set_output_profile")` handler — patch a
+ * `project_action(kind="lifecycle", args={action="set_output_profile"})` handler — patch a
  * project's [io.talevia.core.domain.OutputProfile]. Behaviour preserved
  * from the legacy `SetOutputProfileTool`:
  *

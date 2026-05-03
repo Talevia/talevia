@@ -152,7 +152,7 @@ private fun JsonObjectBuilder.sharedProps() {
             "How many distinct variants to generate (default 1, max ${AigcGenerateTool.MAX_VARIANT_COUNT}). " +
                 "Each variant lands as its own lockfile entry — useful when the user wants to pick from " +
                 "several options. N variants = N provider calls = N × cost; pin the chosen one with " +
-                "project_pin_action(target=lockfile_entry).",
+                "project_action(kind=\"pin\", args={target=lockfile_entry}).",
         )
     }
 }

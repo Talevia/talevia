@@ -27,7 +27,7 @@ import kotlinx.serialization.serializer
  * fresh provider call happens. The new generation lands a second lockfile
  * entry (unpinned) alongside the original, leaving the original intact for
  * comparison. The agent (or UI) can then pin the preferred asset via
- * `project_pin_action(target=lockfile_entry)` or delete the loser.
+ * `project_action(kind="pin", args={target=lockfile_entry})` or delete the loser.
  *
  * **What this tool verifies.**
  *
@@ -111,7 +111,7 @@ class ReplayLockfileTool(
             "synthesize_speech / upscale_asset) is dispatched with the original inputs and the " +
             "lockfile cache is bypassed, so a fresh provider call happens even though an entry " +
             "already exists. The new generation lands an unpinned lockfile entry next to the " +
-            "original; pin the winner with project_pin_action(target=lockfile_entry). Use this to verify provider " +
+            "original; pin the winner with project_action(kind=\"pin\", args={target=lockfile_entry}). Use this to verify provider " +
             "determinism or re-roll a past generation without reconstructing inputs by hand. " +
             "Fails if the entry pre-dates baseInputs capture or the original tool id isn't " +
             "registered in this container."
@@ -217,7 +217,7 @@ class ReplayLockfileTool(
             title = "replay lockfile ${entry.toolId}",
             outputForLlm = "Replayed ${entry.toolId}: original asset ${entry.assetId.value} → " +
                 "new asset ${newEntry.assetId.value}$driftNote. Both entries are in the " +
-                "lockfile; pin the winner with project_pin_action(target=lockfile_entry).",
+                "lockfile; pin the winner with project_action(kind=\"pin\", args={target=lockfile_entry}).",
             data = Output(
                 originalInputHash = entry.inputHash,
                 toolId = entry.toolId,
