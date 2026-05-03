@@ -8,7 +8,7 @@ import io.talevia.core.tool.ToolResult
  * mirror of [io.talevia.core.tool.query.QuerySelect].
  *
  * The 8 `*ActionTool` dispatchers (FilterActionTool, ClipActionTool,
- * TimelineActionTool, SessionActionTool, ProjectActionTool,
+ * TimelineActionTool, SessionActionTool, ProjectLifecycleActionTool,
  * SourceNodeActionTool, ClipActionTool, ProjectMaintenanceActionTool,
  * ProjectPinActionTool, ProjectSnapshotActionTool) all encode their verbs
  * inline as `when (input.action) { "x" -> executeX(...) ; ... }` arm-trees.

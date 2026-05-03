@@ -38,7 +38,7 @@ class ProjectToolsTest {
         projectId: String? = null,
         resolutionPreset: String? = null,
         fps: Int? = null,
-    ) = ProjectActionTool.Input(
+    ) = ProjectLifecycleActionTool.Input(
         action = "create",
         title = title,
         projectId = projectId,
@@ -48,7 +48,7 @@ class ProjectToolsTest {
 
     @Test fun createProjectSlugsTitleAndPersistsDefaults() = runTest {
         val rig = rig()
-        val tool = ProjectActionTool(rig.store)
+        val tool = ProjectLifecycleActionTool(rig.store)
         val out = tool.execute(createInput(title = "Graduation Vlog 2026"), rig.ctx).data
         val create = assertNotNull(out.createResult)
         assertEquals("proj-graduation-vlog-2026", out.projectId)
@@ -63,7 +63,7 @@ class ProjectToolsTest {
 
     @Test fun createProjectAcceptsResolutionAndFpsOverrides() = runTest {
         val rig = rig()
-        val tool = ProjectActionTool(rig.store)
+        val tool = ProjectLifecycleActionTool(rig.store)
         val out = tool.execute(
             createInput(title = "promo", resolutionPreset = "4k", fps = 60),
             rig.ctx,
@@ -76,7 +76,7 @@ class ProjectToolsTest {
 
     @Test fun createProjectRejectsUnknownPreset() = runTest {
         val rig = rig()
-        val tool = ProjectActionTool(rig.store)
+        val tool = ProjectLifecycleActionTool(rig.store)
         assertFailsWith<IllegalArgumentException> {
             tool.execute(createInput(title = "x", resolutionPreset = "8k"), rig.ctx)
         }
@@ -84,7 +84,7 @@ class ProjectToolsTest {
 
     @Test fun createProjectFailsLoudOnDuplicateId() = runTest {
         val rig = rig()
-        val tool = ProjectActionTool(rig.store)
+        val tool = ProjectLifecycleActionTool(rig.store)
         tool.execute(createInput(title = "Mei", projectId = "proj-mei"), rig.ctx)
         val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(createInput(title = "Mei v2", projectId = "proj-mei"), rig.ctx)
@@ -94,15 +94,15 @@ class ProjectToolsTest {
 
     @Test fun createProjectRejectsBlankTitle() = runTest {
         val rig = rig()
-        val tool = ProjectActionTool(rig.store)
+        val tool = ProjectLifecycleActionTool(rig.store)
         assertFailsWith<IllegalStateException> {
-            tool.execute(ProjectActionTool.Input(action = "create"), rig.ctx)
+            tool.execute(ProjectLifecycleActionTool.Input(action = "create"), rig.ctx)
         }
     }
 
     @Test fun listProjectsReturnsCatalogMetadata() = runTest {
         val rig = rig()
-        val create = ProjectActionTool(rig.store)
+        val create = ProjectLifecycleActionTool(rig.store)
         create.execute(createInput(title = "Alpha"), rig.ctx)
         create.execute(createInput(title = "Beta"), rig.ctx)
 
@@ -126,7 +126,7 @@ class ProjectToolsTest {
         // whole-project orientation snapshot; the new sourceRevision +
         // renderCacheEntryCount fields preserve the prior tool's surface.
         val rig = rig()
-        ProjectActionTool(rig.store).execute(
+        ProjectLifecycleActionTool(rig.store).execute(
             createInput(title = "snap", resolutionPreset = "720p", fps = 24),
             rig.ctx,
         )
@@ -171,10 +171,10 @@ class ProjectToolsTest {
 
     @Test fun deleteProjectRemovesRowAndReportsTitle() = runTest {
         val rig = rig()
-        val tool = ProjectActionTool(rig.store)
+        val tool = ProjectLifecycleActionTool(rig.store)
         tool.execute(createInput(title = "doomed"), rig.ctx)
         val out = tool.execute(
-            ProjectActionTool.Input(action = "delete", projectId = "proj-doomed"),
+            ProjectLifecycleActionTool.Input(action = "delete", projectId = "proj-doomed"),
             rig.ctx,
         ).data
         val delete = assertNotNull(out.deleteResult)
@@ -185,8 +185,8 @@ class ProjectToolsTest {
     @Test fun deleteProjectFailsLoudWhenMissing() = runTest {
         val rig = rig()
         assertFailsWith<IllegalStateException> {
-            ProjectActionTool(rig.store).execute(
-                ProjectActionTool.Input(action = "delete", projectId = "proj-ghost"),
+            ProjectLifecycleActionTool(rig.store).execute(
+                ProjectLifecycleActionTool.Input(action = "delete", projectId = "proj-ghost"),
                 rig.ctx,
             )
         }
@@ -195,8 +195,8 @@ class ProjectToolsTest {
     @Test fun deleteRequiresProjectId() = runTest {
         val rig = rig()
         assertFailsWith<IllegalStateException> {
-            ProjectActionTool(rig.store).execute(
-                ProjectActionTool.Input(action = "delete"),
+            ProjectLifecycleActionTool(rig.store).execute(
+                ProjectLifecycleActionTool.Input(action = "delete"),
                 rig.ctx,
             )
         }
@@ -205,8 +205,8 @@ class ProjectToolsTest {
     @Test fun unknownActionFailsLoud() = runTest {
         val rig = rig()
         val ex = assertFailsWith<IllegalStateException> {
-            ProjectActionTool(rig.store).execute(
-                ProjectActionTool.Input(action = "frobnicate"),
+            ProjectLifecycleActionTool(rig.store).execute(
+                ProjectLifecycleActionTool.Input(action = "frobnicate"),
                 rig.ctx,
             )
         }
@@ -246,7 +246,7 @@ class ProjectToolsTest {
 
     @Test fun createProjectWithCjkTitleSucceedsViaUuidFallback() = runTest {
         val rig = rig()
-        val tool = ProjectActionTool(rig.store)
+        val tool = ProjectLifecycleActionTool(rig.store)
         val out = tool.execute(createInput(title = "新视频项目"), rig.ctx).data
         // Id is a UUID (no `proj-` prefix), and the project is retrievable.
         assertTrue(!out.projectId.startsWith("proj-"))
@@ -255,7 +255,7 @@ class ProjectToolsTest {
 
     @Test fun createProjectAutoBindsSessionWhenSessionStoreProvided() = runTest {
         // Reproduces the user-reported flow: model calls
-        // `project_action(action="create")` and immediately needs the session
+        // `project_lifecycle_action(action="create")` and immediately needs the session
         // bound to the new project. Pre-fix the model had to call
         // `switch_project` afterwards, which the mid-run guard rejected
         // because the agent was still `AwaitingTool` for the create dispatch.
@@ -290,7 +290,7 @@ class ProjectToolsTest {
             messages = emptyList(),
             publishEvent = { publishedEvents.add(it) },
         )
-        val tool = ProjectActionTool(rigStore, sessions = sessions)
+        val tool = ProjectLifecycleActionTool(rigStore, sessions = sessions)
 
         val out = tool.execute(createInput(title = "Bound"), ctx).data
         val pid = ProjectId(out.projectId)
@@ -338,7 +338,7 @@ class ProjectToolsTest {
             messages = emptyList(),
             publishEvent = { publishedEvents.add(it) },
         )
-        ProjectActionTool(rigStore, sessions = sessions).execute(
+        ProjectLifecycleActionTool(rigStore, sessions = sessions).execute(
             createInput(title = "Foo", projectId = "proj-foo"),
             ctx,
         )

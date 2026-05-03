@@ -8,7 +8,7 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 
 /**
- * `project_action(action="set_output_profile")` handler — patch a
+ * `project_lifecycle_action(action="set_output_profile")` handler — patch a
  * project's [io.talevia.core.domain.OutputProfile]. Behaviour preserved
  * from the legacy `SetOutputProfileTool`:
  *
@@ -24,9 +24,9 @@ import io.talevia.core.tool.ToolResult
  */
 internal suspend fun executeSetOutputProfile(
     projects: ProjectStore,
-    input: ProjectActionTool.Input,
+    input: ProjectLifecycleActionTool.Input,
     @Suppress("UNUSED_PARAMETER") ctx: ToolContext,
-): ToolResult<ProjectActionTool.Output> {
+): ToolResult<ProjectLifecycleActionTool.Output> {
     val rawId = input.projectId
         ?: error("action=set_output_profile requires `projectId`")
     val pid = ProjectId(rawId)
@@ -85,10 +85,10 @@ internal suspend fun executeSetOutputProfile(
     } else {
         updated.frameRate.numerator / updated.frameRate.denominator
     }
-    val data = ProjectActionTool.Output(
+    val data = ProjectLifecycleActionTool.Output(
         projectId = pid.value,
         action = "set_output_profile",
-        setOutputProfileResult = ProjectActionTool.SetOutputProfileResult(
+        setOutputProfileResult = ProjectLifecycleActionTool.SetOutputProfileResult(
             updatedFields = changed,
             resolutionWidth = updated.resolution.width,
             resolutionHeight = updated.resolution.height,

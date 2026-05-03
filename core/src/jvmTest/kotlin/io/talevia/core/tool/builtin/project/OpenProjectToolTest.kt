@@ -46,9 +46,9 @@ class OpenProjectToolTest {
         // Pre-condition: the fresh store doesn't know about this id yet.
         assertEquals(null, freshStore.get(originalId))
 
-        val tool = ProjectActionTool(freshStore)
+        val tool = ProjectLifecycleActionTool(freshStore)
         val result = tool.execute(
-            ProjectActionTool.Input(action = "open", path = path.toString()),
+            ProjectLifecycleActionTool.Input(action = "open", path = path.toString()),
             ctx(),
         )
 
@@ -61,10 +61,10 @@ class OpenProjectToolTest {
 
     @Test fun openMissingPathThrows() = runTest {
         val (store, _) = ProjectStoreTestKit.createWithFs()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         assertFailsWith<Throwable> {
             tool.execute(
-                ProjectActionTool.Input(action = "open", path = "/projects/does-not-exist"),
+                ProjectLifecycleActionTool.Input(action = "open", path = "/projects/does-not-exist"),
                 ctx(),
             )
         }
@@ -75,10 +75,10 @@ class OpenProjectToolTest {
         // Create the directory but no talevia.json inside.
         val emptyDir = "/projects/empty".toPath()
         fs.createDirectories(emptyDir)
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         assertFailsWith<Throwable> {
             tool.execute(
-                ProjectActionTool.Input(action = "open", path = emptyDir.toString()),
+                ProjectLifecycleActionTool.Input(action = "open", path = emptyDir.toString()),
                 ctx(),
             )
         }
@@ -86,10 +86,10 @@ class OpenProjectToolTest {
 
     @Test fun blankPathFailsLoud() = runTest {
         val (store, _) = ProjectStoreTestKit.createWithFs()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         assertFailsWith<IllegalArgumentException> {
             tool.execute(
-                ProjectActionTool.Input(action = "open", path = "  "),
+                ProjectLifecycleActionTool.Input(action = "open", path = "  "),
                 ctx(),
             )
         }
@@ -97,9 +97,9 @@ class OpenProjectToolTest {
 
     @Test fun missingPathFailsLoud() = runTest {
         val (store, _) = ProjectStoreTestKit.createWithFs()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         assertFailsWith<IllegalStateException> {
-            tool.execute(ProjectActionTool.Input(action = "open"), ctx())
+            tool.execute(ProjectLifecycleActionTool.Input(action = "open"), ctx())
         }
     }
 }

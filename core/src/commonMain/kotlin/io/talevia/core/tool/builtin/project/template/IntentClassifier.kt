@@ -2,7 +2,7 @@ package io.talevia.core.tool.builtin.project.template
 
 /**
  * Keyword-bag classifier that maps a free-form user intent to one of the
- * five genre template ids. Used by `project_action(action="create_from_template")` when
+ * five genre template ids. Used by `project_lifecycle_action(action="create_from_template")` when
  * `template = "auto"` — the agent surfaces it for novice VISION §5.4
  * flows where the user doesn't know which template matches.
  *

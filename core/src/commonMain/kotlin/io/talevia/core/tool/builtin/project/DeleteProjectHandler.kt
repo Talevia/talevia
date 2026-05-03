@@ -6,7 +6,7 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 
 /**
- * `project_action(action="delete")` handler — drop a project from the
+ * `project_lifecycle_action(action="delete")` handler — drop a project from the
  * catalog (and, with `deleteFiles=true`, the on-disk bundle). Behaviour
  * preserved from the legacy `DeleteProjectTool`: fail loud on missing
  * id; default keeps the bundle on disk so an accidental delete never
@@ -14,9 +14,9 @@ import io.talevia.core.tool.ToolResult
  */
 internal suspend fun executeDeleteProject(
     projects: ProjectStore,
-    input: ProjectActionTool.Input,
+    input: ProjectLifecycleActionTool.Input,
     @Suppress("UNUSED_PARAMETER") ctx: ToolContext,
-): ToolResult<ProjectActionTool.Output> {
+): ToolResult<ProjectLifecycleActionTool.Output> {
     val rawId = input.projectId
         ?: error("action=delete requires `projectId`")
     val pid = ProjectId(rawId)
@@ -25,10 +25,10 @@ internal suspend fun executeDeleteProject(
     val onDiskPath = projects.pathOf(pid)?.toString()
     projects.delete(pid, deleteFiles = input.deleteFiles)
 
-    val data = ProjectActionTool.Output(
+    val data = ProjectLifecycleActionTool.Output(
         projectId = pid.value,
         action = "delete",
-        deleteResult = ProjectActionTool.DeleteResult(
+        deleteResult = ProjectLifecycleActionTool.DeleteResult(
             title = meta.title,
             filesDeleted = input.deleteFiles && onDiskPath != null,
             path = onDiskPath,

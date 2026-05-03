@@ -69,7 +69,7 @@ class ImportProjectFromJsonTool(
         val force: Boolean = false,
         /**
          * Optional filesystem path for the imported bundle. See
-         * [ProjectActionTool.Input.path] (action="create") for semantics.
+         * [ProjectLifecycleActionTool.Input.path] (action="create") for semantics.
          */
         val path: String? = null,
     )

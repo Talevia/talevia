@@ -57,7 +57,7 @@ class SetOutputProfileToolTest {
         videoBitrate: Long? = null,
         audioBitrate: Long? = null,
         container: String? = null,
-    ) = ProjectActionTool.Input(
+    ) = ProjectLifecycleActionTool.Input(
         action = "set_output_profile",
         projectId = projectId,
         resolutionWidth = resolutionWidth,
@@ -72,9 +72,9 @@ class SetOutputProfileToolTest {
 
     private suspend fun execSetOutput(
         store: FileProjectStore,
-        i: ProjectActionTool.Input,
-    ): ProjectActionTool.SetOutputProfileResult {
-        val out = ProjectActionTool(store).execute(i, ctx()).data
+        i: ProjectLifecycleActionTool.Input,
+    ): ProjectLifecycleActionTool.SetOutputProfileResult {
+        val out = ProjectLifecycleActionTool(store).execute(i, ctx()).data
         return assertNotNull(out.setOutputProfileResult)
     }
 
@@ -124,7 +124,7 @@ class SetOutputProfileToolTest {
     @Test fun rejectsEmptyInput() = runTest {
         val (store, pid) = fixture()
         val ex = assertFailsWith<IllegalArgumentException> {
-            ProjectActionTool(store).execute(input(pid.value), ctx())
+            ProjectLifecycleActionTool(store).execute(input(pid.value), ctx())
         }
         assertTrue(ex.message!!.contains("at least one field"))
     }
@@ -132,21 +132,21 @@ class SetOutputProfileToolTest {
     @Test fun rejectsWidthWithoutHeight() = runTest {
         val (store, pid) = fixture()
         assertFailsWith<IllegalArgumentException> {
-            ProjectActionTool(store).execute(input(pid.value, resolutionWidth = 3840), ctx())
+            ProjectLifecycleActionTool(store).execute(input(pid.value, resolutionWidth = 3840), ctx())
         }
     }
 
     @Test fun rejectsHeightWithoutWidth() = runTest {
         val (store, pid) = fixture()
         assertFailsWith<IllegalArgumentException> {
-            ProjectActionTool(store).execute(input(pid.value, resolutionHeight = 2160), ctx())
+            ProjectLifecycleActionTool(store).execute(input(pid.value, resolutionHeight = 2160), ctx())
         }
     }
 
     @Test fun rejectsNonPositiveResolution() = runTest {
         val (store, pid) = fixture()
         assertFailsWith<IllegalArgumentException> {
-            ProjectActionTool(store).execute(
+            ProjectLifecycleActionTool(store).execute(
                 input(pid.value, resolutionWidth = 0, resolutionHeight = 1080),
                 ctx(),
             )
@@ -156,28 +156,28 @@ class SetOutputProfileToolTest {
     @Test fun rejectsNonPositiveFps() = runTest {
         val (store, pid) = fixture()
         assertFailsWith<IllegalArgumentException> {
-            ProjectActionTool(store).execute(input(pid.value, fps = 0), ctx())
+            ProjectLifecycleActionTool(store).execute(input(pid.value, fps = 0), ctx())
         }
     }
 
     @Test fun rejectsBlankCodec() = runTest {
         val (store, pid) = fixture()
         assertFailsWith<IllegalArgumentException> {
-            ProjectActionTool(store).execute(input(pid.value, videoCodec = "   "), ctx())
+            ProjectLifecycleActionTool(store).execute(input(pid.value, videoCodec = "   "), ctx())
         }
     }
 
     @Test fun rejectsNonPositiveBitrate() = runTest {
         val (store, pid) = fixture()
         assertFailsWith<IllegalArgumentException> {
-            ProjectActionTool(store).execute(input(pid.value, audioBitrate = -1), ctx())
+            ProjectLifecycleActionTool(store).execute(input(pid.value, audioBitrate = -1), ctx())
         }
     }
 
     @Test fun rejectsMissingProject() = runTest {
         val (store, _) = fixture()
         val ex = assertFailsWith<IllegalStateException> {
-            ProjectActionTool(store).execute(input("nope", fps = 60), ctx())
+            ProjectLifecycleActionTool(store).execute(input("nope", fps = 60), ctx())
         }
         assertTrue(ex.message!!.contains("not found"))
     }
@@ -185,7 +185,7 @@ class SetOutputProfileToolTest {
     @Test fun timelineAuthoringResolutionIsUntouched() = runTest {
         val (store, pid) = fixture()
         val beforeTimeline = store.get(pid)!!.timeline
-        ProjectActionTool(store).execute(
+        ProjectLifecycleActionTool(store).execute(
             input(pid.value, resolutionWidth = 3840, resolutionHeight = 2160, fps = 60),
             ctx(),
         )
@@ -197,8 +197,8 @@ class SetOutputProfileToolTest {
     @Test fun rejectsMissingProjectId() = runTest {
         val (store, _) = fixture()
         assertFailsWith<IllegalStateException> {
-            ProjectActionTool(store).execute(
-                ProjectActionTool.Input(action = "set_output_profile", fps = 30),
+            ProjectLifecycleActionTool(store).execute(
+                ProjectLifecycleActionTool.Input(action = "set_output_profile", fps = 30),
                 ctx(),
             )
         }

@@ -76,7 +76,7 @@ class RemoveAssetToolTest {
     }
 
     private fun input(projectId: String, assetId: String, force: Boolean = false) =
-        ProjectActionTool.Input(
+        ProjectLifecycleActionTool.Input(
             action = "remove_asset",
             projectId = projectId,
             assetId = assetId,
@@ -85,7 +85,7 @@ class RemoveAssetToolTest {
 
     @Test fun removesUnusedAsset() = runTest {
         val (store, pid) = fixture()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(input(pid.value, "v-unused"), ctx()).data
         val remove = assertNotNull(out.removeAssetResult)
         assertEquals(true, remove.removed)
@@ -96,7 +96,7 @@ class RemoveAssetToolTest {
 
     @Test fun refusesWhenAssetInUse() = runTest {
         val (store, pid) = fixture()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val ex = assertFailsWith<IllegalStateException> {
             tool.execute(input(pid.value, "v-used"), ctx())
         }
@@ -109,7 +109,7 @@ class RemoveAssetToolTest {
 
     @Test fun forceRemovesInUseAssetAndReportsDependents() = runTest {
         val (store, pid) = fixture()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(input(pid.value, "v-used", force = true), ctx()).data
         val remove = assertNotNull(out.removeAssetResult)
         assertEquals(true, remove.removed)
@@ -125,7 +125,7 @@ class RemoveAssetToolTest {
 
     @Test fun rejectsMissingAsset() = runTest {
         val (store, pid) = fixture()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val ex = assertFailsWith<IllegalStateException> {
             tool.execute(input(pid.value, "nope"), ctx())
         }
@@ -134,7 +134,7 @@ class RemoveAssetToolTest {
 
     @Test fun rejectsMissingProject() = runTest {
         val (store, _) = fixture()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val ex = assertFailsWith<IllegalStateException> {
             tool.execute(input("nope", "x"), ctx())
         }
@@ -144,7 +144,7 @@ class RemoveAssetToolTest {
 
     @Test fun removalIsPersisted() = runTest {
         val (store, pid) = fixture()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         tool.execute(input(pid.value, "v-unused"), ctx())
         // Fetch a second time: asset should be gone.
         val ex = assertFailsWith<IllegalStateException> {
@@ -155,10 +155,10 @@ class RemoveAssetToolTest {
 
     @Test fun missingAssetIdFailsLoud() = runTest {
         val (store, pid) = fixture()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         assertFailsWith<IllegalStateException> {
             tool.execute(
-                ProjectActionTool.Input(action = "remove_asset", projectId = pid.value),
+                ProjectLifecycleActionTool.Input(action = "remove_asset", projectId = pid.value),
                 ctx(),
             )
         }

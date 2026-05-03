@@ -107,7 +107,7 @@ private class TaleviaCli : CliktCommand(name = "talevia") {
  * id surfaced. Anything else falls through to the existing Clikt-managed flow
  * (`talevia [--resume]`).
  *
- * The agent-loop equivalent is `project_action(action="open")`; the CLI
+ * The agent-loop equivalent is `project_lifecycle_action(action="open")`; the CLI
  * subcommand here calls the store directly because it runs before the
  * REPL spins up an agent context.
  */

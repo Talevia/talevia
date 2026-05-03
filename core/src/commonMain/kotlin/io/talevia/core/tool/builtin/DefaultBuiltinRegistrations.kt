@@ -43,7 +43,7 @@ import io.talevia.core.tool.builtin.project.ExportProjectTool
 import io.talevia.core.tool.builtin.project.ForkProjectTool
 import io.talevia.core.tool.builtin.project.ImportProjectFromJsonTool
 import io.talevia.core.tool.builtin.project.ListProjectsTool
-import io.talevia.core.tool.builtin.project.ProjectActionTool
+import io.talevia.core.tool.builtin.project.ProjectLifecycleActionTool
 import io.talevia.core.tool.builtin.project.ProjectMaintenanceActionTool
 import io.talevia.core.tool.builtin.project.ProjectPinActionTool
 import io.talevia.core.tool.builtin.project.ProjectQueryTool
@@ -202,7 +202,7 @@ fun ToolRegistry.registerProjectTools(
 ) {
     register(ExportTool(projects, engine))
     register(ExportDryRunTool(projects))
-    register(ProjectActionTool(projects, sessions = sessions))
+    register(ProjectLifecycleActionTool(projects, sessions = sessions))
     register(ListProjectsTool(projects))
     register(ProjectQueryTool(projects))
     register(RegenerateStaleClipsTool(projects, this))

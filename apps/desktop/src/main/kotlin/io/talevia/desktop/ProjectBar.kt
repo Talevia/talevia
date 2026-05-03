@@ -148,7 +148,7 @@ fun ProjectBar(
                         menuExpanded = false
                         val title = "Narrative ${kotlinx.datetime.Clock.System.now()}".take(40)
                         dispatch(
-                            "project_action",
+                            "project_lifecycle_action",
                             buildJsonObject {
                                 put("action", "create_from_template")
                                 put("title", title)
@@ -168,7 +168,7 @@ fun ProjectBar(
                         menuExpanded = false
                         val title = "Vlog ${kotlinx.datetime.Clock.System.now()}".take(40)
                         dispatch(
-                            "project_action",
+                            "project_lifecycle_action",
                             buildJsonObject {
                                 put("action", "create_from_template")
                                 put("title", title)

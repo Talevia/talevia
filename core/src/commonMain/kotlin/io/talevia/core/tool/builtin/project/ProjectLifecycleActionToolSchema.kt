@@ -8,7 +8,7 @@ import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonObject
 
 /**
- * JSON schema surface for [ProjectActionTool]. Extracted to its own file
+ * JSON schema surface for [ProjectLifecycleActionTool]. Extracted to its own file
  * to mirror `ClipActionToolSchema.kt` / `ProjectQueryToolSchema.kt` —
  * keeps the dispatcher class focused on shape + business logic and lets
  * the schema grow (per-action enums, future verbs) without re-puffing

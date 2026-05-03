@@ -6,7 +6,7 @@ import io.talevia.core.tool.ToolResult
 import okio.Path.Companion.toPath
 
 /**
- * `project_action(action="open")` handler — register an existing
+ * `project_lifecycle_action(action="open")` handler — register an existing
  * Talevia bundle on this machine. Behaviour preserved from the legacy
  * `OpenProjectTool`: requires a non-blank absolute path to a directory
  * containing `talevia.json`; the store loads the project (refreshing
@@ -15,19 +15,19 @@ import okio.Path.Companion.toPath
  */
 internal suspend fun executeOpenProject(
     projects: ProjectStore,
-    input: ProjectActionTool.Input,
+    input: ProjectLifecycleActionTool.Input,
     @Suppress("UNUSED_PARAMETER") ctx: ToolContext,
-): ToolResult<ProjectActionTool.Output> {
+): ToolResult<ProjectLifecycleActionTool.Output> {
     val rawPath = input.path
         ?: error("action=open requires `path`")
     require(rawPath.isNotBlank()) { "open: path must not be blank" }
     val project = projects.openAt(rawPath.toPath())
     val title = projects.summary(project.id)?.title ?: project.id.value
 
-    val data = ProjectActionTool.Output(
+    val data = ProjectLifecycleActionTool.Output(
         projectId = project.id.value,
         action = "open",
-        openResult = ProjectActionTool.OpenResult(title = title),
+        openResult = ProjectLifecycleActionTool.OpenResult(title = title),
     )
     return ToolResult(
         title = "open project $title",

@@ -10,7 +10,7 @@ import kotlinx.serialization.json.putJsonObject
 /**
  * JSON schema surface for [SessionActionTool]. Extracted to its own
  * file in cycle 150 to mirror `ClipActionToolSchema.kt` /
- * `ProjectActionToolSchema.kt` / `SourceNodeActionToolSchema.kt` —
+ * `ProjectLifecycleActionToolSchema.kt` / `SourceNodeActionToolSchema.kt` —
  * keeps the dispatcher class focused on shape + business logic and
  * lets the schema grow (per-action enums, future verbs) without
  * re-puffing the tool body past R.5.4's 800 LOC strong-P0 threshold.

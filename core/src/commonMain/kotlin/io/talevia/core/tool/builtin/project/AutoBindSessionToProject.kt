@@ -14,7 +14,7 @@ import kotlinx.datetime.Clock
  * rejects rebinds while the agent is `Generating` / `AwaitingTool` /
  * `Compacting` — the next turn's `ToolContext.currentProjectId` would
  * otherwise change under its feet. That guard is correct for *external*
- * rebinds, but `project_action create` / `create_from_template` running
+ * rebinds, but `project_lifecycle_action create` / `create_from_template` running
  * inside `AwaitingTool` is an *internal* rebind: the model just minted a
  * project precisely to start working in it. Forcing it to call
  * `switch_project` afterwards always trips the guard (we are still
@@ -28,7 +28,7 @@ import kotlinx.datetime.Clock
  * watch, so UI / metrics sinks see one binding change, not zero.
  *
  * - `sessions == null` → no-op (test rigs / legacy compositions that
- *   construct `ProjectActionTool` without a session store).
+ *   construct `ProjectLifecycleActionTool` without a session store).
  * - Same-id is a no-op (the session was already bound here, e.g. an
  *   idempotent re-create with `projectId` echoing the current binding).
  */

@@ -68,10 +68,10 @@ import kotlinx.serialization.serializer
  *
  * The class itself carries only the LLM-facing surface: nested data
  * classes for input / per-action output payloads, the JSON schema
- * (extracted to `ProjectActionToolSchema.kt`), the tool metadata, the
+ * (extracted to `ProjectLifecycleActionToolSchema.kt`), the tool metadata, the
  * permission dispatcher, and the six-way `when` in [execute].
  */
-class ProjectActionTool(
+class ProjectLifecycleActionTool(
     private val projects: ProjectStore,
     /**
      * Optional session store. When provided, `action="create"` /
@@ -84,7 +84,7 @@ class ProjectActionTool(
      */
     private val sessions: SessionStore? = null,
     private val clock: Clock = Clock.System,
-) : Tool<ProjectActionTool.Input, ProjectActionTool.Output> {
+) : Tool<ProjectLifecycleActionTool.Input, ProjectLifecycleActionTool.Output> {
 
     @Serializable data class Input(
         /**
@@ -230,7 +230,7 @@ class ProjectActionTool(
         val removeAssetResult: RemoveAssetResult? = null,
     )
 
-    override val id: String = "project_action"
+    override val id: String = "project_lifecycle_action"
     override val helpText: String =
         "Seven-way project lifecycle verb dispatching on `action`: " +
             "`create` + title (resolutionPreset?, fps?, projectId?, path?) bootstraps a project " +

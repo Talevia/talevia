@@ -1,7 +1,7 @@
 package io.talevia.core.tool.builtin.project
 
 /**
- * Default-id derivation for `project_action(action="create")` and friends.
+ * Default-id derivation for `project_lifecycle_action(action="create")` and friends.
  *
  * "Graduation Vlog 2026" → `proj-graduation-vlog-2026`. Stable + reversible
  * enough that the LLM rarely needs to invent its own id.

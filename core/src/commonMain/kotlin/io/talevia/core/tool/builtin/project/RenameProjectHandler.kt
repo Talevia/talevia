@@ -6,7 +6,7 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 
 /**
- * `project_action(action="rename")` handler — change a project's
+ * `project_lifecycle_action(action="rename")` handler — change a project's
  * human-readable title. Behaviour preserved from the legacy
  * `RenameProjectTool`: projectId never changes; non-destructive (no
  * timeline / asset / source / lockfile mutation); a no-op if the title
@@ -15,9 +15,9 @@ import io.talevia.core.tool.ToolResult
  */
 internal suspend fun executeRenameProject(
     projects: ProjectStore,
-    input: ProjectActionTool.Input,
+    input: ProjectLifecycleActionTool.Input,
     @Suppress("UNUSED_PARAMETER") ctx: ToolContext,
-): ToolResult<ProjectActionTool.Output> {
+): ToolResult<ProjectLifecycleActionTool.Output> {
     val rawId = input.projectId
         ?: error("action=rename requires `projectId`")
     val newTitle = input.title
@@ -31,10 +31,10 @@ internal suspend fun executeRenameProject(
         return ToolResult(
             title = "rename project ${pid.value}",
             outputForLlm = "Project ${pid.value} already titled \"$newTitle\"; no change.",
-            data = ProjectActionTool.Output(
+            data = ProjectLifecycleActionTool.Output(
                 projectId = pid.value,
                 action = "rename",
-                renameResult = ProjectActionTool.RenameResult(
+                renameResult = ProjectLifecycleActionTool.RenameResult(
                     previousTitle = before.title,
                     title = before.title,
                 ),
@@ -43,10 +43,10 @@ internal suspend fun executeRenameProject(
     }
 
     projects.setTitle(pid, newTitle)
-    val data = ProjectActionTool.Output(
+    val data = ProjectLifecycleActionTool.Output(
         projectId = pid.value,
         action = "rename",
-        renameResult = ProjectActionTool.RenameResult(
+        renameResult = ProjectLifecycleActionTool.RenameResult(
             previousTitle = before.title,
             title = newTitle,
         ),

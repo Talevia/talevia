@@ -64,7 +64,7 @@ internal typealias FilterActionVerb =
  *     reaches into ProviderRegistry — that's the bigger context tuple.
  *  5. `ClipActionTool` (set_* verbs) — bulk set ops; dispatch context =
  *     `(ProjectStore, ProjectId)`.
- *  6. `ProjectActionTool` — fork / pin / pin-list / clear /
+ *  6. `ProjectLifecycleActionTool` — fork / pin / pin-list / clear /
  *     export-snapshot; dispatch context = `(ProjectStore, FileSystem?)`.
  *  7. `ProjectMaintenanceActionTool` / `ProjectPinActionTool` /
  *     `ProjectSnapshotActionTool` — three smaller dispatchers with

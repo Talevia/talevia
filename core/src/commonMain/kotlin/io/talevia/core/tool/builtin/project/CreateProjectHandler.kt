@@ -14,7 +14,7 @@ import kotlinx.datetime.Clock
 import okio.Path.Companion.toPath
 
 /**
- * `project_action(action="create")` handler — bootstrap a fresh project
+ * `project_lifecycle_action(action="create")` handler — bootstrap a fresh project
  * with empty timeline / assets / source DAG. Behaviour preserved from
  * the legacy `CreateProjectTool`:
  *
@@ -30,9 +30,9 @@ internal suspend fun executeCreateProject(
     projects: ProjectStore,
     sessions: SessionStore?,
     clock: Clock,
-    input: ProjectActionTool.Input,
+    input: ProjectLifecycleActionTool.Input,
     ctx: ToolContext,
-): ToolResult<ProjectActionTool.Output> {
+): ToolResult<ProjectLifecycleActionTool.Output> {
     val title = input.title?.takeIf { it.isNotBlank() }
         ?: error("action=create requires non-blank `title`")
     val resolution = parseCreateResolution(input.resolutionPreset)
@@ -61,10 +61,10 @@ internal suspend fun executeCreateProject(
 
     autoBindSessionToProject(sessions, clock, ctx, pid)
 
-    val data = ProjectActionTool.Output(
+    val data = ProjectLifecycleActionTool.Output(
         projectId = pid.value,
         action = "create",
-        createResult = ProjectActionTool.CreateResult(
+        createResult = ProjectLifecycleActionTool.CreateResult(
             title = title,
             resolutionWidth = resolution.width,
             resolutionHeight = resolution.height,

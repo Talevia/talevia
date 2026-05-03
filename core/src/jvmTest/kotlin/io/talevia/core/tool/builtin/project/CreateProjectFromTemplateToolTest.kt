@@ -39,9 +39,9 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun narrativeSeedsSixNodesAndWiresDag() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(
-            ProjectActionTool.Input(
+            ProjectLifecycleActionTool.Input(
                 action = "create_from_template",
                 title = "My Short",
                 template = "narrative",
@@ -73,9 +73,9 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun vlogSeedsFourNodes() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(
-            ProjectActionTool.Input(
+            ProjectLifecycleActionTool.Input(
                 action = "create_from_template",
                 title = "Graduation",
                 template = "vlog",
@@ -98,10 +98,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun unknownTemplateFailsLoud() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(
-                ProjectActionTool.Input(action = "create_from_template", title = "T", template = "mv"),
+                ProjectLifecycleActionTool.Input(action = "create_from_template", title = "T", template = "mv"),
                 ctx(),
             )
         }
@@ -110,14 +110,14 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun duplicateProjectIdFailsLoud() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         tool.execute(
-            ProjectActionTool.Input(action = "create_from_template", title = "a", template = "narrative", projectId = "p-dup"),
+            ProjectLifecycleActionTool.Input(action = "create_from_template", title = "a", template = "narrative", projectId = "p-dup"),
             ctx(),
         )
         val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(
-                ProjectActionTool.Input(action = "create_from_template", title = "b", template = "vlog", projectId = "p-dup"),
+                ProjectLifecycleActionTool.Input(action = "create_from_template", title = "b", template = "vlog", projectId = "p-dup"),
                 ctx(),
             )
         }
@@ -126,9 +126,9 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun resolutionAndFpsParsed() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(
-            ProjectActionTool.Input(
+            ProjectLifecycleActionTool.Input(
                 action = "create_from_template",
                 title = "t",
                 template = "vlog",
@@ -145,9 +145,9 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun autoSlugFromTitleWhenProjectIdOmitted() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(
-            ProjectActionTool.Input(action = "create_from_template", title = "My Graduation Vlog", template = "vlog"),
+            ProjectLifecycleActionTool.Input(action = "create_from_template", title = "My Graduation Vlog", template = "vlog"),
             ctx(),
         ).data
         // Slug must be derived from the title (lower-case, hyphenated) and must be non-blank.
@@ -158,9 +158,9 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun adSeedsFourNodesAndWiresParents() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(
-            ProjectActionTool.Input(
+            ProjectLifecycleActionTool.Input(
                 action = "create_from_template",
                 title = "Spring Sale",
                 template = "ad",
@@ -188,9 +188,9 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun musicMvSeedsFourNodesAndSkipsTrack() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(
-            ProjectActionTool.Input(
+            ProjectLifecycleActionTool.Input(
                 action = "create_from_template",
                 title = "Neon Dreams",
                 template = "musicmv",
@@ -220,9 +220,9 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun tutorialSeedsFourNodes() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(
-            ProjectActionTool.Input(
+            ProjectLifecycleActionTool.Input(
                 action = "create_from_template",
                 title = "Setup Guide",
                 template = "tutorial",
@@ -250,10 +250,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun titlePreservedInProjectRecord() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val title = "Cinematic Short Film"
         tool.execute(
-            ProjectActionTool.Input(action = "create_from_template", title = title, template = "narrative", projectId = "p-title"),
+            ProjectLifecycleActionTool.Input(action = "create_from_template", title = title, template = "narrative", projectId = "p-title"),
             ctx(),
         )
         val summaries = store.listSummaries()
@@ -266,9 +266,9 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun autoTemplateClassifiesNarrativeFromStoryKeywords() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(
-            ProjectActionTool.Input(
+            ProjectLifecycleActionTool.Input(
                 action = "create_from_template",
                 title = "Short Story",
                 template = "auto",
@@ -290,9 +290,9 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun autoTemplateClassifiesMusicMvFromMusicKeyword() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(
-            ProjectActionTool.Input(
+            ProjectLifecycleActionTool.Input(
                 action = "create_from_template",
                 title = "Debut MV",
                 template = "auto",
@@ -307,9 +307,9 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun autoTemplateClassifiesTutorial() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(
-            ProjectActionTool.Input(
+            ProjectLifecycleActionTool.Input(
                 action = "create_from_template",
                 title = "Sourdough 101",
                 template = "auto",
@@ -324,9 +324,9 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun autoTemplateFallsBackToNarrativeOnEmptySignal() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(
-            ProjectActionTool.Input(
+            ProjectLifecycleActionTool.Input(
                 action = "create_from_template",
                 title = "Mystery Project",
                 template = "auto",
@@ -343,10 +343,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun autoTemplateRejectsBlankIntent() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(
-                ProjectActionTool.Input(
+                ProjectLifecycleActionTool.Input(
                     action = "create_from_template",
                     title = "No Intent",
                     template = "auto",
@@ -361,10 +361,10 @@ class CreateProjectFromTemplateToolTest {
 
     @Test fun autoTemplateRejectsMissingIntent() = runTest {
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val ex = assertFailsWith<IllegalArgumentException> {
             tool.execute(
-                ProjectActionTool.Input(
+                ProjectLifecycleActionTool.Input(
                     action = "create_from_template",
                     title = "Missing Intent",
                     template = "auto",
@@ -380,9 +380,9 @@ class CreateProjectFromTemplateToolTest {
         // Intent with strong vlog signal, but explicit template = "ad" still wins
         // — regression guard against auto-mode leaking into explicit calls.
         val store = newStore()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
         val out = tool.execute(
-            ProjectActionTool.Input(
+            ProjectLifecycleActionTool.Input(
                 action = "create_from_template",
                 title = "Explicit Ad",
                 template = "ad",

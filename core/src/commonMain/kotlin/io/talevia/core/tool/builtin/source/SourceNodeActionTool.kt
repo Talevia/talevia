@@ -344,7 +344,7 @@ class SourceNodeActionTool(
 
     /**
      * Schema lives in [SourceNodeActionToolSchema] (extracted cycle 136
-     * to mirror `ClipActionToolSchema.kt` / `ProjectActionToolSchema.kt`
+     * to mirror `ClipActionToolSchema.kt` / `ProjectLifecycleActionToolSchema.kt`
      * — keeps this file under the long-file threshold while letting the
      * schema grow with future verbs without re-puffing the dispatcher).
      */

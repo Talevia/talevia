@@ -34,7 +34,7 @@ class RenameProjectToolTest {
         return Triple(store, pid, project)
     }
 
-    private fun renameInput(projectId: String, title: String) = ProjectActionTool.Input(
+    private fun renameInput(projectId: String, title: String) = ProjectLifecycleActionTool.Input(
         action = "rename",
         projectId = projectId,
         title = title,
@@ -44,7 +44,7 @@ class RenameProjectToolTest {
     fun renames_existing_project() = runTest {
         val (store, pid, project) = fixture()
         store.upsert("Old Title", project)
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
 
         val result = tool.execute(renameInput(pid.value, "New Title"), ctx())
 
@@ -61,7 +61,7 @@ class RenameProjectToolTest {
         val (store, pid, project) = fixture()
         store.upsert("Old", project)
         val before = store.get(pid)!!
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
 
         tool.execute(renameInput(pid.value, "New"), ctx())
 
@@ -73,7 +73,7 @@ class RenameProjectToolTest {
     fun no_op_when_title_identical() = runTest {
         val (store, pid, project) = fixture()
         store.upsert("Same", project)
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
 
         val result = tool.execute(renameInput(pid.value, "Same"), ctx())
 
@@ -85,7 +85,7 @@ class RenameProjectToolTest {
     @Test
     fun rejects_missing_project() = runTest {
         val (store, _, _) = fixture()
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
 
         assertFailsWith<IllegalStateException> {
             tool.execute(renameInput("no-such-project", "X"), ctx())
@@ -96,7 +96,7 @@ class RenameProjectToolTest {
     fun rejects_blank_title() = runTest {
         val (store, pid, project) = fixture()
         store.upsert("Old", project)
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
 
         assertFailsWith<IllegalArgumentException> {
             tool.execute(renameInput(pid.value, "  "), ctx())
@@ -107,7 +107,7 @@ class RenameProjectToolTest {
     fun rename_persists_across_list_summaries() = runTest {
         val (store, pid, project) = fixture()
         store.upsert("First", project)
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
 
         tool.execute(renameInput(pid.value, "Second"), ctx())
 
@@ -121,11 +121,11 @@ class RenameProjectToolTest {
     fun rejects_missing_title() = runTest {
         val (store, pid, project) = fixture()
         store.upsert("Old", project)
-        val tool = ProjectActionTool(store)
+        val tool = ProjectLifecycleActionTool(store)
 
         assertFailsWith<IllegalStateException> {
             tool.execute(
-                ProjectActionTool.Input(action = "rename", projectId = pid.value),
+                ProjectLifecycleActionTool.Input(action = "rename", projectId = pid.value),
                 ctx(),
             )
         }

@@ -21,10 +21,12 @@ import kotlinx.datetime.Clock
 import okio.Path.Companion.toPath
 
 /**
- * `project_action(action="create_from_template", …)` dispatch handler.
+ * `project_lifecycle_action(action="create_from_template", …)` dispatch handler.
  *
  * Cycle 140 absorbed the standalone `create_project_from_template` tool
- * into the project_action dispatcher, mirroring the precedent set by
+ * into the project_lifecycle_action dispatcher (formerly `project_action`,
+ * renamed cycle 60 to free the namespace for a kind-discriminated
+ * dispatcher per cycle 55 design), mirroring the precedent set by
  * the cycle 137-139 fold series (`describe_source_node` → `source_query`,
  * `find_stale_clips` / `validate_project` → `project_query`). Same
  * Atomic semantics as before: the tool composes the genre helpers in
@@ -47,9 +49,9 @@ internal suspend fun executeCreateFromTemplate(
     projects: ProjectStore,
     sessions: SessionStore?,
     clock: Clock,
-    input: ProjectActionTool.Input,
+    input: ProjectLifecycleActionTool.Input,
     ctx: ToolContext,
-): ToolResult<ProjectActionTool.Output> {
+): ToolResult<ProjectLifecycleActionTool.Output> {
     val title = input.title
     require(!title.isNullOrBlank()) { "title must not be blank for action='create_from_template'" }
     val rawTemplate = input.template
@@ -96,7 +98,7 @@ internal suspend fun executeCreateFromTemplate(
 
     autoBindSessionToProject(sessions, clock, ctx, pid)
 
-    val result = ProjectActionTool.CreateFromTemplateResult(
+    val result = ProjectLifecycleActionTool.CreateFromTemplateResult(
         title = title,
         template = resolved.template,
         resolutionWidth = resolution.width,
@@ -116,7 +118,7 @@ internal suspend fun executeCreateFromTemplate(
             "from ${resolved.template} template$inferenceNote.$bindNote Seeded ${seededIds.size} source node(s): " +
             "${seededIds.joinToString(", ")}. Fill in TODO placeholders via update_* tools " +
             "before the first AIGC call.",
-        data = ProjectActionTool.Output(
+        data = ProjectLifecycleActionTool.Output(
             projectId = pid.value,
             action = "create_from_template",
             createFromTemplateResult = result,

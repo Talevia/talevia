@@ -8,7 +8,7 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 
 /**
- * `project_action(action="remove_asset")` handler — drop a
+ * `project_lifecycle_action(action="remove_asset")` handler — drop a
  * [io.talevia.core.domain.MediaAsset] from
  * [io.talevia.core.domain.Project.assets]. Behaviour preserved from
  * the legacy `RemoveAssetTool`:
@@ -25,9 +25,9 @@ import io.talevia.core.tool.ToolResult
  */
 internal suspend fun executeRemoveAsset(
     projects: ProjectStore,
-    input: ProjectActionTool.Input,
+    input: ProjectLifecycleActionTool.Input,
     @Suppress("UNUSED_PARAMETER") ctx: ToolContext,
-): ToolResult<ProjectActionTool.Output> {
+): ToolResult<ProjectLifecycleActionTool.Output> {
     val rawProjectId = input.projectId
         ?: error("action=remove_asset requires `projectId`")
     val rawAssetId = input.assetId
@@ -65,10 +65,10 @@ internal suspend fun executeRemoveAsset(
         p.copy(assets = p.assets.filter { it.id != targetId })
     }
 
-    val data = ProjectActionTool.Output(
+    val data = ProjectLifecycleActionTool.Output(
         projectId = pid.value,
         action = "remove_asset",
-        removeAssetResult = ProjectActionTool.RemoveAssetResult(
+        removeAssetResult = ProjectLifecycleActionTool.RemoveAssetResult(
             assetId = targetId.value,
             removed = true,
             dependentClips = dependentClips,
