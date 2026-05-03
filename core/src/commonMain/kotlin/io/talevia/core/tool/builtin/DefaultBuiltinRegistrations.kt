@@ -62,7 +62,6 @@ import io.talevia.core.tool.builtin.video.AddSubtitlesTool
 import io.talevia.core.tool.builtin.video.AutoSubtitleClipTool
 import io.talevia.core.tool.builtin.video.ClearTimelineTool
 import io.talevia.core.tool.builtin.video.ClipActionTool
-import io.talevia.core.tool.builtin.video.ClipSetActionTool
 import io.talevia.core.tool.builtin.video.ConsolidateMediaIntoBundleTool
 import io.talevia.core.tool.builtin.video.ExportDryRunTool
 import io.talevia.core.tool.builtin.video.ExportTool
@@ -184,7 +183,6 @@ fun ToolRegistry.registerClipAndTrackTools(
     sessions: SessionStore,
 ) {
     register(ClipActionTool(projects))
-    register(ClipSetActionTool(projects))
     register(FilterActionTool(projects))
     register(AddSubtitlesTool(projects))
     register(TransitionActionTool(projects))

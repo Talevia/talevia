@@ -8,7 +8,8 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 
 /**
- * `field="sourceBinding"` handler extracted from [ClipSetActionTool].
+ * `action="set_sourceBinding"` handler. Absorbed into [ClipActionTool]
+ * in cycle 44 (`debt-tool-consolidation-clip-action-phase1`).
  *
  * Set-swap semantics: replaces the clip's `sourceBinding` set entirely
  * with the provided one. Pre-commit guard that every new id exists in
@@ -19,15 +20,15 @@ import io.talevia.core.tool.ToolResult
 internal suspend fun executeClipSetSourceBinding(
     store: ProjectStore,
     pid: ProjectId,
-    input: ClipSetActionTool.Input,
+    input: ClipActionTool.Input,
     ctx: ToolContext,
-): ToolResult<ClipSetActionTool.Output> {
+): ToolResult<ClipActionTool.Output> {
     val items = input.sourceBindingItems
-        ?: error("field=sourceBinding requires `sourceBindingItems`")
-    rejectForeignClipSetFields("sourceBinding", input)
+        ?: error("action=set_sourceBinding requires `sourceBindingItems`")
+    rejectForeignClipActionFields("set_sourceBinding", input)
     require(items.isNotEmpty()) { "sourceBindingItems must not be empty" }
 
-    val results = mutableListOf<ClipSetActionTool.SourceBindingResult>()
+    val results = mutableListOf<ClipActionTool.SourceBindingResult>()
     val updated = store.mutate(pid) { project ->
         var tracks = project.timeline.tracks
         items.forEachIndexed { idx, item ->
@@ -53,7 +54,7 @@ internal suspend fun executeClipSetSourceBinding(
             }
             val rebuilt = track.clips.map { if (it.id == clip.id) rebound else it }
             tracks = tracks.map { if (it.id == track.id) withClips(track, rebuilt) else it }
-            results += ClipSetActionTool.SourceBindingResult(
+            results += ClipActionTool.SourceBindingResult(
                 clipId = item.clipId,
                 previousBinding = previousBinding,
                 newBinding = newBindingSet.map { it.value }.sorted(),
@@ -65,9 +66,9 @@ internal suspend fun executeClipSetSourceBinding(
     return ToolResult(
         title = "rebind × ${results.size}",
         outputForLlm = "Rebound source bindings on ${results.size} clip(s). Snapshot: ${snapshotId.value}",
-        data = ClipSetActionTool.Output(
+        data = ClipActionTool.Output(
             projectId = pid.value,
-            field = "sourceBinding",
+            action = "set_sourceBinding",
             snapshotId = snapshotId.value,
             sourceBindingResults = results,
         ),

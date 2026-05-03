@@ -30,6 +30,7 @@ internal val CLIP_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
                 JsonArray(
                     listOf(
                         "add", "remove", "duplicate", "move", "split", "trim", "replace", "fade", "edit_text",
+                        "set_volume", "set_transform", "set_sourceBinding",
                     ).map(::JsonPrimitive),
                 ),
             )
@@ -107,18 +108,56 @@ internal val CLIP_ACTION_INPUT_SCHEMA: JsonObject = buildJsonObject {
                 boolProp("italic")
             }
         }
+        putJsonObject("volumeItems") {
+            itemArray(
+                "set_volume: audio-clip volume multipliers (≥ 1 item).",
+                required = listOf("clipId", "volume"),
+            ) {
+                stringProp("clipId")
+                numberProp("volume", "Multiplier in [0, 4]. 1 = unchanged, 0 = mute.")
+            }
+        }
+        putJsonObject("transformItems") {
+            itemArray(
+                "set_transform: visual-transform partial overrides (≥ 1 field/item).",
+                required = listOf("clipId"),
+            ) {
+                stringProp("clipId")
+                numberProp("translateX")
+                numberProp("translateY")
+                numberProp("scaleX", "Horizontal scale; > 0. 1 = unchanged.")
+                numberProp("scaleY", "Vertical scale; > 0. 1 = unchanged.")
+                numberProp("rotationDeg", "Degrees; renderer takes mod 360.")
+                numberProp("opacity", "[0, 1]; 0 = transparent, 1 = opaque.")
+            }
+        }
+        putJsonObject("sourceBindingItems") {
+            itemArray(
+                "set_sourceBinding: full-replacement rebinds (≥ 1 item).",
+                required = listOf("clipId", "sourceBinding"),
+            ) {
+                stringProp("clipId")
+                putJsonObject("sourceBinding") {
+                    put("type", "array")
+                    putJsonObject("items") { put("type", "string") }
+                    put("description", "Source-node ids; empty list clears the binding.")
+                }
+            }
+        }
     }
     put("required", JsonArray(listOf(JsonPrimitive("action"))))
     put("additionalProperties", false)
 }
 
 // DSL helpers for the JSON Schema builders in this package. `internal`
-// (not file-private) because `ClipSetActionTool.kt` also calls them — two
-// file-private definitions of the same `JsonObjectBuilder` extension
-// signature in one package break Kotlin/Native's `$default`-arg
-// synthesizer (compile passes, link fails with an `IrSimpleFunction`
-// AssertionError on iOS framework link). One canonical `internal` copy
-// in this file avoids that collision.
+// (not file-private) because the merged-in set_* schema arms (cycle 44
+// `debt-tool-consolidation-clip-action-phase1`) and other video-package
+// schemas may also call them — two file-private definitions of the same
+// `JsonObjectBuilder` extension signature in one package break
+// Kotlin/Native's `$default`-arg synthesizer (compile passes, link
+// fails with an `IrSimpleFunction` AssertionError on iOS framework
+// link). One canonical `internal` copy in this file avoids that
+// collision.
 internal fun JsonObjectBuilder.stringProp(name: String, description: String? = null) = putJsonObject(name) {
     put("type", "string")
     if (description != null) put("description", description)

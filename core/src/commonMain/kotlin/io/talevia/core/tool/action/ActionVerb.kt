@@ -9,7 +9,7 @@ import io.talevia.core.tool.ToolResult
  *
  * The 8 `*ActionTool` dispatchers (FilterActionTool, ClipActionTool,
  * TrackActionTool, SessionActionTool, ProjectActionTool,
- * SourceNodeActionTool, ClipSetActionTool, ProjectMaintenanceActionTool,
+ * SourceNodeActionTool, ClipActionTool, ProjectMaintenanceActionTool,
  * ProjectPinActionTool, ProjectSnapshotActionTool) all encode their verbs
  * inline as `when (input.action) { "x" -> executeX(...) ; ... }` arm-trees.
  * Adding a verb edits the central dispatcher in 2-4 places: the `when`

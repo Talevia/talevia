@@ -62,7 +62,7 @@ internal typealias FilterActionVerb =
  *     export / revert / compact / etc.); dispatch context =
  *     `(SessionStore, ProviderRegistry?, Session)`. The compact verb
  *     reaches into ProviderRegistry — that's the bigger context tuple.
- *  5. `ClipSetActionTool` — bulk set ops; dispatch context =
+ *  5. `ClipActionTool` (set_* verbs) — bulk set ops; dispatch context =
  *     `(ProjectStore, ProjectId)`.
  *  6. `ProjectActionTool` — fork / pin / pin-list / clear /
  *     export-snapshot; dispatch context = `(ProjectStore, FileSystem?)`.

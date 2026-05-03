@@ -8,7 +8,8 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 
 /**
- * `field="transform"` handler extracted from [ClipSetActionTool].
+ * `action="set_transform"` handler. Absorbed into [ClipActionTool] in
+ * cycle 44 (`debt-tool-consolidation-clip-action-phase1`).
  *
  * Partial-override semantics: `translate*` / `scale*` / `rotationDeg`
  * / `opacity` are all optional; unspecified fields inherit from the
@@ -20,11 +21,11 @@ import io.talevia.core.tool.ToolResult
 internal suspend fun executeClipSetTransform(
     store: ProjectStore,
     pid: ProjectId,
-    input: ClipSetActionTool.Input,
+    input: ClipActionTool.Input,
     ctx: ToolContext,
-): ToolResult<ClipSetActionTool.Output> {
-    val items = input.transformItems ?: error("field=transform requires `transformItems`")
-    rejectForeignClipSetFields("transform", input)
+): ToolResult<ClipActionTool.Output> {
+    val items = input.transformItems ?: error("action=set_transform requires `transformItems`")
+    rejectForeignClipActionFields("set_transform", input)
     require(items.isNotEmpty()) { "transformItems must not be empty" }
     items.forEachIndexed { idx, item ->
         val overrides = listOfNotNull(
@@ -61,7 +62,7 @@ internal suspend fun executeClipSetTransform(
         }
     }
 
-    val results = mutableListOf<ClipSetActionTool.TransformResult>()
+    val results = mutableListOf<ClipActionTool.TransformResult>()
     val updated = store.mutate(pid) { project ->
         var tracks = project.timeline.tracks
         items.forEachIndexed { idx, item ->
@@ -90,7 +91,7 @@ internal suspend fun executeClipSetTransform(
                 }
             }
             tracks = tracks.map { if (it.id == track.id) withClips(track, rebuilt) else it }
-            results += ClipSetActionTool.TransformResult(
+            results += ClipActionTool.TransformResult(
                 clipId = item.clipId,
                 trackId = track.id.value,
                 oldTransform = base,
@@ -103,9 +104,9 @@ internal suspend fun executeClipSetTransform(
     return ToolResult(
         title = "set transform × ${results.size}",
         outputForLlm = "Set transforms on ${results.size} clip(s). Snapshot: ${snapshotId.value}",
-        data = ClipSetActionTool.Output(
+        data = ClipActionTool.Output(
             projectId = pid.value,
-            field = "transform",
+            action = "set_transform",
             snapshotId = snapshotId.value,
             transformResults = results,
         ),

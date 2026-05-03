@@ -29,7 +29,7 @@ class ClipSetActionVolumeTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: ClipSetActionTool,
+        val tool: ClipActionTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
         val emittedParts: MutableList<Part>,
@@ -37,7 +37,7 @@ class ClipSetActionVolumeTest {
 
     private suspend fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val tool = ClipSetActionTool(store)
+        val tool = ClipActionTool(store)
         val parts = mutableListOf<Part>()
         val ctx = ToolContext(
             sessionId = SessionId("s"),
@@ -59,10 +59,10 @@ class ClipSetActionVolumeTest {
         volume = volume,
     )
 
-    private fun single(clipId: String, volume: Float) = ClipSetActionTool.Input(
+    private fun single(clipId: String, volume: Float) = ClipActionTool.Input(
         projectId = "p",
-        field = "volume",
-        volumeItems = listOf(ClipSetActionTool.VolumeItem(clipId, volume)),
+        action = "set_volume",
+        volumeItems = listOf(ClipActionTool.VolumeItem(clipId, volume)),
     )
 
     @Test fun setsAudioClipVolumeAndPreservesOtherFields() = runTest {
@@ -78,7 +78,7 @@ class ClipSetActionVolumeTest {
         assertEquals("a1", only.trackId)
         assertEquals(1.0f, only.oldVolume)
         assertEquals(0.3f, only.newVolume)
-        assertEquals("volume", out.field)
+        assertEquals("set_volume", out.action)
 
         val refreshed = rig.store.get(rig.projectId)!!
         val updated = refreshed.timeline.tracks.single().clips.single() as Clip.Audio
@@ -130,13 +130,13 @@ class ClipSetActionVolumeTest {
             ),
         )
         val out = rig.tool.execute(
-            ClipSetActionTool.Input(
+            ClipActionTool.Input(
                 projectId = rig.projectId.value,
-                field = "volume",
+                action = "set_volume",
                 volumeItems = listOf(
-                    ClipSetActionTool.VolumeItem("c1", 0.2f),
-                    ClipSetActionTool.VolumeItem("c2", 0.5f),
-                    ClipSetActionTool.VolumeItem("c3", 2.0f),
+                    ClipActionTool.VolumeItem("c1", 0.2f),
+                    ClipActionTool.VolumeItem("c2", 0.5f),
+                    ClipActionTool.VolumeItem("c3", 2.0f),
                 ),
             ),
             rig.ctx,
@@ -164,12 +164,12 @@ class ClipSetActionVolumeTest {
         val before = rig.store.get(rig.projectId)!!
         assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                ClipSetActionTool.Input(
+                ClipActionTool.Input(
                     projectId = rig.projectId.value,
-                    field = "volume",
+                    action = "set_volume",
                     volumeItems = listOf(
-                        ClipSetActionTool.VolumeItem("c1", 0.2f),
-                        ClipSetActionTool.VolumeItem("ghost", 0.5f), // fails
+                        ClipActionTool.VolumeItem("c1", 0.2f),
+                        ClipActionTool.VolumeItem("ghost", 0.5f), // fails
                     ),
                 ),
                 rig.ctx,
@@ -268,12 +268,12 @@ class ClipSetActionVolumeTest {
             ),
         )
         rig.tool.execute(
-            ClipSetActionTool.Input(
+            ClipActionTool.Input(
                 projectId = rig.projectId.value,
-                field = "volume",
+                action = "set_volume",
                 volumeItems = listOf(
-                    ClipSetActionTool.VolumeItem("c1", 0.4f),
-                    ClipSetActionTool.VolumeItem("c2", 0.6f),
+                    ClipActionTool.VolumeItem("c1", 0.4f),
+                    ClipActionTool.VolumeItem("c2", 0.6f),
                 ),
             ),
             rig.ctx,
@@ -291,7 +291,7 @@ class ClipSetActionVolumeTest {
         )
         assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(
-                ClipSetActionTool.Input("p", field = "volume", volumeItems = emptyList()),
+                ClipActionTool.Input("p", action = "set_volume", volumeItems = emptyList()),
                 rig.ctx,
             )
         }
@@ -306,11 +306,11 @@ class ClipSetActionVolumeTest {
         )
         val ex = assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(
-                ClipSetActionTool.Input(
+                ClipActionTool.Input(
                     projectId = "p",
-                    field = "volume",
-                    volumeItems = listOf(ClipSetActionTool.VolumeItem("c1", 0.5f)),
-                    transformItems = listOf(ClipSetActionTool.TransformItem("c1", opacity = 0.3f)),
+                    action = "set_volume",
+                    volumeItems = listOf(ClipActionTool.VolumeItem("c1", 0.5f)),
+                    transformItems = listOf(ClipActionTool.TransformItem("c1", opacity = 0.3f)),
                 ),
                 rig.ctx,
             )
@@ -321,14 +321,14 @@ class ClipSetActionVolumeTest {
     @Test fun rejectsMissingVolumeItems() = runTest {
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline()))
         assertFailsWith<IllegalStateException> {
-            rig.tool.execute(ClipSetActionTool.Input("p", field = "volume"), rig.ctx)
+            rig.tool.execute(ClipActionTool.Input("p", action = "set_volume"), rig.ctx)
         }
     }
 
-    @Test fun rejectsUnknownField() = runTest {
+    @Test fun rejectsUnknownAction() = runTest {
         val rig = newRig(Project(id = ProjectId("p"), timeline = Timeline()))
         val ex = assertFailsWith<IllegalStateException> {
-            rig.tool.execute(ClipSetActionTool.Input("p", field = "bogus"), rig.ctx)
+            rig.tool.execute(ClipActionTool.Input("p", action = "bogus"), rig.ctx)
         }
         assertTrue("bogus" in ex.message!!, ex.message)
     }

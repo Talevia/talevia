@@ -31,7 +31,7 @@ class ClipSetActionTransformTest {
 
     private data class Rig(
         val store: FileProjectStore,
-        val tool: ClipSetActionTool,
+        val tool: ClipActionTool,
         val ctx: ToolContext,
         val projectId: ProjectId,
         val emittedParts: MutableList<Part>,
@@ -39,7 +39,7 @@ class ClipSetActionTransformTest {
 
     private suspend fun newRig(project: Project): Rig {
         val store = ProjectStoreTestKit.create()
-        val tool = ClipSetActionTool(store)
+        val tool = ClipActionTool(store)
         val parts = mutableListOf<Part>()
         val ctx = ToolContext(
             sessionId = SessionId("s"),
@@ -81,11 +81,11 @@ class ClipSetActionTransformTest {
         scaleY: Float? = null,
         rotationDeg: Float? = null,
         opacity: Float? = null,
-    ) = ClipSetActionTool.Input(
+    ) = ClipActionTool.Input(
         projectId = "p",
-        field = "transform",
+        action = "set_transform",
         transformItems = listOf(
-            ClipSetActionTool.TransformItem(clipId, translateX, translateY, scaleX, scaleY, rotationDeg, opacity),
+            ClipActionTool.TransformItem(clipId, translateX, translateY, scaleX, scaleY, rotationDeg, opacity),
         ),
     )
 
@@ -104,7 +104,7 @@ class ClipSetActionTransformTest {
         assertEquals(0.5f, only.newTransform.opacity)
         assertEquals(1f, only.newTransform.scaleX)
         assertEquals(0f, only.newTransform.translateX)
-        assertEquals("transform", out.field)
+        assertEquals("set_transform", out.action)
 
         val refreshed = rig.store.get(rig.projectId)!!
         val updated = refreshed.timeline.tracks.single().clips.single() as Clip.Video
@@ -198,12 +198,12 @@ class ClipSetActionTransformTest {
             ),
         )
         rig.tool.execute(
-            ClipSetActionTool.Input(
+            ClipActionTool.Input(
                 projectId = "p",
-                field = "transform",
+                action = "set_transform",
                 transformItems = listOf(
-                    ClipSetActionTool.TransformItem("c1", opacity = 0.3f),
-                    ClipSetActionTool.TransformItem("c2", scaleX = 2f, scaleY = 2f),
+                    ClipActionTool.TransformItem("c1", opacity = 0.3f),
+                    ClipActionTool.TransformItem("c2", scaleX = 2f, scaleY = 2f),
                 ),
             ),
             rig.ctx,
@@ -229,12 +229,12 @@ class ClipSetActionTransformTest {
             ),
         )
         rig.tool.execute(
-            ClipSetActionTool.Input(
+            ClipActionTool.Input(
                 projectId = "p",
-                field = "transform",
+                action = "set_transform",
                 transformItems = listOf(
-                    ClipSetActionTool.TransformItem("c1", opacity = 0.3f),
-                    ClipSetActionTool.TransformItem("c2", scaleX = 2f),
+                    ClipActionTool.TransformItem("c1", opacity = 0.3f),
+                    ClipActionTool.TransformItem("c2", scaleX = 2f),
                 ),
             ),
             rig.ctx,
@@ -260,12 +260,12 @@ class ClipSetActionTransformTest {
         val before = rig.store.get(rig.projectId)!!
         assertFailsWith<IllegalStateException> {
             rig.tool.execute(
-                ClipSetActionTool.Input(
+                ClipActionTool.Input(
                     projectId = "p",
-                    field = "transform",
+                    action = "set_transform",
                     transformItems = listOf(
-                        ClipSetActionTool.TransformItem("c1", opacity = 0.3f),
-                        ClipSetActionTool.TransformItem("ghost", opacity = 0.3f),
+                        ClipActionTool.TransformItem("c1", opacity = 0.3f),
+                        ClipActionTool.TransformItem("ghost", opacity = 0.3f),
                     ),
                 ),
                 rig.ctx,
@@ -376,11 +376,11 @@ class ClipSetActionTransformTest {
         )
         val ex = assertFailsWith<IllegalArgumentException> {
             rig.tool.execute(
-                ClipSetActionTool.Input(
+                ClipActionTool.Input(
                     projectId = "p",
-                    field = "transform",
-                    transformItems = listOf(ClipSetActionTool.TransformItem("c1", opacity = 0.3f)),
-                    volumeItems = listOf(ClipSetActionTool.VolumeItem("c1", 0.5f)),
+                    action = "set_transform",
+                    transformItems = listOf(ClipActionTool.TransformItem("c1", opacity = 0.3f)),
+                    volumeItems = listOf(ClipActionTool.VolumeItem("c1", 0.5f)),
                 ),
                 rig.ctx,
             )

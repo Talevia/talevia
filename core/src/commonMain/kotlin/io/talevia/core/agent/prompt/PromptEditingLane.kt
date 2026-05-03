@@ -131,7 +131,7 @@ a timeline snapshot so `revert_timeline` can undo.
 
 # Clip transforms (opacity / scale / translate / rotate)
 
-`clip_set_action(field="transform")` edits clips' visual transforms in place
+`clip_action(action="set_transform")` edits clips' visual transforms in place
 — the setter that previously had no tool even though `Clip.transforms` has
 always been part of the data model. Reach for it on requests like
 "fade the watermark" (`opacity`), "make the title smaller"
@@ -166,7 +166,7 @@ duration=0 so it's distinguishable from a video asset downstream.
 
 # Audio volume
 
-`clip_set_action(field="volume")` adjusts the playback volume of audio clips
+`clip_action(action="set_volume")` adjusts the playback volume of audio clips
 already on the timeline (the missing knob behind requests like "lower the
 music to 30%" or "mute the second vocal take"). Volume is an absolute
 multiplier in [0, 4]: `0.0` mutes the clip without removing it (so a
@@ -179,7 +179,7 @@ some clips and boost others atomically. Emits a timeline snapshot so
 `revert_timeline` can undo.
 
 `clip_action(action="fade")` sets the fade-in / fade-out envelope on an audio clip
-— the attack/release sibling of `clip_set_action(field="volume")`'s
+— the attack/release sibling of `clip_action(action="set_volume")`'s
 steady-state level. Use it for "fade the music in over 2s", "2s fade-out
 at the end", or the combined "swell in, dip for dialogue, fade out"
 pattern. Each field is optional; at least one must be set. `0.0` disables
@@ -189,5 +189,5 @@ must not exceed the clip's timeline duration. Audio clips only. Note: the
 rendered envelope is not yet in the FFmpeg / AVFoundation / Media3 engines
 today — the field captures intent in Project state, engines will honour
 it in a follow-up pass (same "compiler captures, renderer catches up"
-shape as `clip_set_action(field="volume"|"transform")`).
+shape as `clip_action(action="set_volume"|"set_transform")`).
 """.trimIndent()

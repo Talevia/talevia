@@ -7,24 +7,27 @@ import io.talevia.core.tool.ToolContext
 import io.talevia.core.tool.ToolResult
 
 /**
- * `field="volume"` handler extracted from [ClipSetActionTool].
+ * `action="set_volume"` handler. Absorbed into [ClipActionTool] in
+ * cycle 44 (`debt-tool-consolidation-clip-action-phase1`); previously
+ * lived under `ClipSetActionTool.field="volume"` (cycle 44 absorbed it) before that tool was
+ * merged into the unified `clip_action(action=...)` dispatcher.
  *
- * The field axis the parent class splits along: each `field=*` branch
+ * The verb axis the parent class splits along: each `set_*` branch
  * carries its own validation shape (volume is numeric + range-bounded,
  * transform is multi-field partial override, sourceBinding is a set
  * swap with source-DAG existence check) and its own result type. Per-
- * field files let each handler own its specific invariants without
+ * verb files let each handler own its specific invariants without
  * crowding a single class past the R.5.4 500-LOC threshold.
  */
 
 internal suspend fun executeClipSetVolume(
     store: ProjectStore,
     pid: ProjectId,
-    input: ClipSetActionTool.Input,
+    input: ClipActionTool.Input,
     ctx: ToolContext,
-): ToolResult<ClipSetActionTool.Output> {
-    val items = input.volumeItems ?: error("field=volume requires `volumeItems`")
-    rejectForeignClipSetFields("volume", input)
+): ToolResult<ClipActionTool.Output> {
+    val items = input.volumeItems ?: error("action=set_volume requires `volumeItems`")
+    rejectForeignClipActionFields("set_volume", input)
     require(items.isNotEmpty()) { "volumeItems must not be empty" }
     items.forEachIndexed { idx, item ->
         require(item.volume.isFinite()) {
@@ -33,13 +36,13 @@ internal suspend fun executeClipSetVolume(
         require(item.volume >= 0f) {
             "volumeItems[$idx]: volume must be >= 0 (got ${item.volume})"
         }
-        require(item.volume <= MAX_VOLUME) {
-            "volumeItems[$idx]: volume must be <= $MAX_VOLUME (got ${item.volume}); " +
+        require(item.volume <= ClipActionTool.MAX_VOLUME) {
+            "volumeItems[$idx]: volume must be <= ${ClipActionTool.MAX_VOLUME} (got ${item.volume}); " +
                 "clip-level gain beyond that belongs in mix-time staging."
         }
     }
 
-    val results = mutableListOf<ClipSetActionTool.VolumeResult>()
+    val results = mutableListOf<ClipActionTool.VolumeResult>()
     val updated = store.mutate(pid) { project ->
         var tracks = project.timeline.tracks
         items.forEachIndexed { idx, item ->
@@ -48,7 +51,7 @@ internal suspend fun executeClipSetVolume(
             } ?: error("volumeItems[$idx]: clip ${item.clipId} not found in project ${pid.value}")
             val (track, clip) = hit
             val audio = clip as? Clip.Audio ?: error(
-                "volumeItems[$idx]: set_clip_volumes only applies to audio clips; clip ${item.clipId} " +
+                "volumeItems[$idx]: set_volume only applies to audio clips; clip ${item.clipId} " +
                     "is a ${clip::class.simpleName}.",
             )
             val oldVolume = audio.volume
@@ -56,7 +59,7 @@ internal suspend fun executeClipSetVolume(
                 if (it.id == audio.id) audio.copy(volume = item.volume) else it
             }
             tracks = tracks.map { if (it.id == track.id) withClips(track, rebuilt) else it }
-            results += ClipSetActionTool.VolumeResult(
+            results += ClipActionTool.VolumeResult(
                 clipId = item.clipId,
                 trackId = track.id.value,
                 oldVolume = oldVolume,
@@ -69,9 +72,9 @@ internal suspend fun executeClipSetVolume(
     return ToolResult(
         title = "set volume × ${results.size}",
         outputForLlm = "Set volume on ${results.size} audio clip(s). Snapshot: ${snapshotId.value}",
-        data = ClipSetActionTool.Output(
+        data = ClipActionTool.Output(
             projectId = pid.value,
-            field = "volume",
+            action = "set_volume",
             snapshotId = snapshotId.value,
             volumeResults = results,
         ),

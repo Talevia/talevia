@@ -1,6 +1,7 @@
 package io.talevia.core.tool.builtin.video
 
 import io.talevia.core.domain.ProjectStore
+import io.talevia.core.domain.Transform
 import io.talevia.core.permission.PermissionSpec
 import io.talevia.core.tool.Tool
 import io.talevia.core.tool.ToolApplicability
@@ -57,6 +58,17 @@ import kotlinx.serialization.serializer
 class ClipActionTool(
     private val store: ProjectStore,
 ) : Tool<ClipActionTool.Input, ClipActionTool.Output> {
+
+    companion object {
+        /**
+         * Volume ceiling for `set_volume` items, absorbed from the
+         * pre-merger `ClipSetActionTool` (cycle 44 consolidation).
+         * Clip-level gain beyond 4× belongs in mix-time staging, not
+         * a per-clip multiplier — agents that need louder boost should
+         * route through `apply_filter(kind="volume")` instead.
+         */
+        const val MAX_VOLUME: Float = 4.0f
+    }
 
     /** One add request. Mirrors the legacy `AddClipTool.Item`. */
     @Serializable data class AddItem(
@@ -128,6 +140,42 @@ class ClipActionTool(
         val italic: Boolean? = null,
     )
 
+    /**
+     * One volume edit. Absorbed from the pre-merger `ClipSetActionTool.VolumeItem`
+     * (cycle 44). Used by `action="set_volume"`.
+     */
+    @Serializable data class VolumeItem(
+        val clipId: String,
+        /** Absolute multiplier in [0, 4]. 1.0 = unchanged, 0.0 = mute. */
+        val volume: Float,
+    )
+
+    /**
+     * One transform edit. Absorbed from the pre-merger
+     * `ClipSetActionTool.TransformItem` (cycle 44). Used by
+     * `action="set_transform"`.
+     */
+    @Serializable data class TransformItem(
+        val clipId: String,
+        val translateX: Float? = null,
+        val translateY: Float? = null,
+        val scaleX: Float? = null,
+        val scaleY: Float? = null,
+        val rotationDeg: Float? = null,
+        val opacity: Float? = null,
+    )
+
+    /**
+     * One source-binding rebind. Absorbed from the pre-merger
+     * `ClipSetActionTool.SourceBindingItem` (cycle 44). Used by
+     * `action="set_sourceBinding"`.
+     */
+    @Serializable data class SourceBindingItem(
+        val clipId: String,
+        /** Full replacement set of source-node ids. Empty list clears the binding. */
+        val sourceBinding: List<String>,
+    )
+
     @Serializable data class Input(
         /**
          * Optional — omit to default to the session's current project binding
@@ -160,6 +208,12 @@ class ClipActionTool(
         val fadeItems: List<FadeItem>? = null,
         /** Required when `action="edit_text"`. Per-text-clip body / style edits. */
         val editTextItems: List<EditTextItem>? = null,
+        /** Required when `action="set_volume"`. Audio-clip volume multipliers. */
+        val volumeItems: List<VolumeItem>? = null,
+        /** Required when `action="set_transform"`. Visual transform partial overrides. */
+        val transformItems: List<TransformItem>? = null,
+        /** Required when `action="set_sourceBinding"`. Full-replacement rebinds. */
+        val sourceBindingItems: List<SourceBindingItem>? = null,
     )
 
     @Serializable data class AddResult(
@@ -230,6 +284,26 @@ class ClipActionTool(
         val updatedFields: List<String>,
     )
 
+    @Serializable data class VolumeResult(
+        val clipId: String,
+        val trackId: String,
+        val oldVolume: Float,
+        val newVolume: Float,
+    )
+
+    @Serializable data class TransformResult(
+        val clipId: String,
+        val trackId: String,
+        val oldTransform: Transform,
+        val newTransform: Transform,
+    )
+
+    @Serializable data class SourceBindingResult(
+        val clipId: String,
+        val previousBinding: List<String>,
+        val newBinding: List<String>,
+    )
+
     @Serializable data class Output(
         val projectId: String,
         val action: String,
@@ -252,17 +326,25 @@ class ClipActionTool(
         val faded: List<FadeResult> = emptyList(),
         /** Populated when `action="edit_text"`. */
         val editedText: List<EditTextResult> = emptyList(),
+        /** Populated when `action="set_volume"`. */
+        val volumeResults: List<VolumeResult> = emptyList(),
+        /** Populated when `action="set_transform"`. */
+        val transformResults: List<TransformResult> = emptyList(),
+        /** Populated when `action="set_sourceBinding"`. */
+        val sourceBindingResults: List<SourceBindingResult> = emptyList(),
         /** `action="remove"` only — echoes the input `ripple` flag. */
         val rippled: Boolean = false,
     )
 
     override val id: String = "clip_action"
     override val helpText: String =
-        "9-verb clip dispatcher: add / remove / duplicate / move / split / trim / replace / fade / " +
-            "edit_text. Per-action *Items arrays + shapes in schema. All-or-nothing per call; one " +
-            "snapshot. text clips reject trim/replace; cross-kind trackId rejected. " +
-            "ripple (remove) closes gap, default false. edit_text needs ≥ 1 field/item; " +
-            "preserves clip ids / tracks / transforms / timeRanges; backgroundColor=\"\" clears."
+        "12-verb clip dispatcher: add / remove / duplicate / move / split / trim / replace / fade / " +
+            "edit_text / set_volume / set_transform / set_sourceBinding. Per-action *Items arrays + shapes in " +
+            "schema. All-or-nothing per call; one snapshot. text clips reject trim/replace; cross-kind " +
+            "trackId rejected. ripple (remove) closes gap, default false. edit_text needs ≥ 1 field/item; " +
+            "preserves clip ids / tracks / transforms / timeRanges; backgroundColor=\"\" clears. " +
+            "set_volume on audio clips (0..4 multiplier; 1 unchanged); set_transform partial-override " +
+            "(translate/scale/rotation/opacity); set_sourceBinding full-replacement set of source-node ids."
     override val inputSerializer: KSerializer<Input> = serializer()
     override val outputSerializer: KSerializer<Output> = serializer()
     override val permission: PermissionSpec = PermissionSpec.fixed("timeline.write")
@@ -282,9 +364,13 @@ class ClipActionTool(
             "replace" -> executeClipReplace(store, pid, input, ctx)
             "fade" -> executeClipFade(store, pid, input, ctx)
             "edit_text" -> executeClipEditText(store, pid, input, ctx)
+            "set_volume" -> executeClipSetVolume(store, pid, input, ctx)
+            "set_transform" -> executeClipSetTransform(store, pid, input, ctx)
+            "set_sourceBinding" -> executeClipSetSourceBinding(store, pid, input, ctx)
             else -> error(
                 "unknown action '${input.action}'; " +
-                    "accepted: add, remove, duplicate, move, split, trim, replace, fade, edit_text",
+                    "accepted: add, remove, duplicate, move, split, trim, replace, fade, edit_text, " +
+                    "set_volume, set_transform, set_sourceBinding",
             )
         }
     }
