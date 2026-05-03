@@ -203,17 +203,19 @@ fun ToolRegistry.registerProjectTools(
 ) {
     register(ExportTool(projects, engine))
     register(ExportDryRunTool(projects))
+    // Cycle 61 introduced the `project_action(kind=...)` dispatcher
+    // alongside the 4 underlying `project_*_action` tools. Cycle 63
+    // phase 2 unregisters the originals — only the dispatcher is now
+    // LLM-facing. Underlying tool classes are still constructed (the
+    // dispatcher needs them as routing targets) but their `register(...)`
+    // calls are removed, mirroring AIGC arc cycle 27. Test code that
+    // exercises the underlying tools directly (`ProjectXActionTool(store)
+    // .execute(...)`) keeps working — direct construction is independent
+    // of registry membership.
     val lifecycle = ProjectLifecycleActionTool(projects, sessions = sessions)
     val maintenance = ProjectMaintenanceActionTool(projects, engine)
     val pin = ProjectPinActionTool(projects)
     val snapshot = ProjectSnapshotActionTool(projects)
-    register(lifecycle)
-    register(maintenance)
-    register(pin)
-    register(snapshot)
-    // Cycle 61: introduce kind-discriminated `project_action` dispatcher
-    // alongside the four underlying tools (AIGC arc phase 1 precedent —
-    // both surfaces stay registered until phase 2 unregisters originals).
     register(ProjectActionDispatcherTool(lifecycle, maintenance, pin, snapshot))
     register(ListProjectsTool(projects))
     register(ProjectQueryTool(projects))

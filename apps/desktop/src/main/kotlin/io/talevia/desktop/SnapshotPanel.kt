@@ -94,10 +94,16 @@ fun SnapshotPanel(
     fun saveNow() {
         scope.launch {
             runCatching {
-                container.tools["project_snapshot_action"]!!.dispatch(
+                container.tools["project_action"]!!.dispatch(
                     buildJsonObject {
-                        put("projectId", projectId.value)
-                        put("action", "save")
+                        put("kind", "snapshot")
+                        put(
+                            "args",
+                            buildJsonObject {
+                                put("projectId", projectId.value)
+                                put("action", "save")
+                            },
+                        )
                     },
                     container.uiToolContext(projectId),
                 )
@@ -110,11 +116,17 @@ fun SnapshotPanel(
         restoring = snapshotId
         scope.launch {
             runCatching {
-                container.tools["project_snapshot_action"]!!.dispatch(
+                container.tools["project_action"]!!.dispatch(
                     buildJsonObject {
-                        put("projectId", projectId.value)
-                        put("action", "restore")
-                        put("snapshotId", snapshotId)
+                        put("kind", "snapshot")
+                        put(
+                            "args",
+                            buildJsonObject {
+                                put("projectId", projectId.value)
+                                put("action", "restore")
+                                put("snapshotId", snapshotId)
+                            },
+                        )
                     },
                     container.uiToolContext(projectId),
                 )

@@ -87,7 +87,10 @@ class TaleviaSystemPromptTest {
         // video assets and reference-image chaining into generate_image/video.
         "extract_frame",
         // Project-level named snapshots (VISION §3.4) — survive across chat sessions.
-        "project_snapshot_action",
+        // Cycle 63: phase 2 of project_action consolidation unregistered the four
+        // standalone project_*_action tools; the surface is now the
+        // kind-discriminated dispatcher.
+        "project_action(kind=\"snapshot\"",
         "project_query(select=snapshots)",
         // Fork — closes the third VISION §3.4 leg ("可分支").
         "fork_project",

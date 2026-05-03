@@ -44,6 +44,17 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 /**
+ * Wrap an underlying-tool input as a `project_action(kind, args)`
+ * dispatcher payload. Cycle 63 phase 2: the four `project_*_action`
+ * tools no longer register; UI dispatches go through `project_action`
+ * with `kind` discriminating the underlying tool's args.
+ */
+private fun projectAction(kind: String, args: JsonObject): JsonObject = buildJsonObject {
+    put("kind", kind)
+    put("args", args)
+}
+
+/**
  * Top-of-window project bar — lets the user see the active project,
  * switch between stored projects, create / fork, save and restore
  * snapshots, or delete. Closes the VISION §3.4 "可版本化 / 可分支" gap
@@ -148,12 +159,15 @@ fun ProjectBar(
                         menuExpanded = false
                         val title = "Narrative ${kotlinx.datetime.Clock.System.now()}".take(40)
                         dispatch(
-                            "project_lifecycle_action",
-                            buildJsonObject {
-                                put("action", "create_from_template")
-                                put("title", title)
-                                put("template", "narrative")
-                            },
+                            "project_action",
+                            projectAction(
+                                "lifecycle",
+                                buildJsonObject {
+                                    put("action", "create_from_template")
+                                    put("title", title)
+                                    put("template", "narrative")
+                                },
+                            ),
                             "create narrative project",
                             after = {
                                 val latest = container.projects.listSummaries().maxByOrNull { it.createdAtEpochMs }
@@ -168,12 +182,15 @@ fun ProjectBar(
                         menuExpanded = false
                         val title = "Vlog ${kotlinx.datetime.Clock.System.now()}".take(40)
                         dispatch(
-                            "project_lifecycle_action",
-                            buildJsonObject {
-                                put("action", "create_from_template")
-                                put("title", title)
-                                put("template", "vlog")
-                            },
+                            "project_action",
+                            projectAction(
+                                "lifecycle",
+                                buildJsonObject {
+                                    put("action", "create_from_template")
+                                    put("title", title)
+                                    put("template", "vlog")
+                                },
+                            ),
                             "create vlog project",
                             after = {
                                 val latest = container.projects.listSummaries().maxByOrNull { it.createdAtEpochMs }
@@ -280,24 +297,30 @@ fun ProjectBar(
             onSave = {
                 val label = snapshotLabel.takeIf { it.isNotBlank() }
                 dispatch(
-                    "project_snapshot_action",
-                    buildJsonObject {
-                        put("projectId", activeProjectId.value)
-                        put("action", "save")
-                        if (label != null) put("label", label)
-                    },
+                    "project_action",
+                    projectAction(
+                        "snapshot",
+                        buildJsonObject {
+                            put("projectId", activeProjectId.value)
+                            put("action", "save")
+                            if (label != null) put("label", label)
+                        },
+                    ),
                     "save snapshot",
                 )
                 snapshotLabel = ""
             },
             onRestore = { snapshotId ->
                 dispatch(
-                    "project_snapshot_action",
-                    buildJsonObject {
-                        put("projectId", activeProjectId.value)
-                        put("action", "restore")
-                        put("snapshotId", snapshotId)
-                    },
+                    "project_action",
+                    projectAction(
+                        "snapshot",
+                        buildJsonObject {
+                            put("projectId", activeProjectId.value)
+                            put("action", "restore")
+                            put("snapshotId", snapshotId)
+                        },
+                    ),
                     "restore snapshot $snapshotId",
                 )
             },

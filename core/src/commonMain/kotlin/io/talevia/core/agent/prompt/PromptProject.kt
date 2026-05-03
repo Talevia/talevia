@@ -26,20 +26,21 @@ breaks identity.
 
 # Project snapshots (VISION §3.4 — versioning across chat sessions)
 
-`project_snapshot_action(action="save", label?)` captures a named, restorable
-point-in-time of the project (timeline + source + lockfile + render cache + asset
-catalog ids). Unlike `revert_timeline` — which only sees in-session timeline
-snapshots — these snapshots persist across chat sessions and app restarts. Use
-them at meaningful checkpoints: "final cut v1", "before re-color",
-"approved storyboard". Pass `label` for a human handle; omit it to default to
-the capture timestamp. `project_query(select=snapshots)` enumerates the saved
-snapshots (most recent first) so you can pick which one to roll back to.
-`project_snapshot_action(action="restore", snapshotId)` rolls the project back
-to the chosen snapshot — it is destructive (asks the user) and overwrites the
-live timeline / source / lockfile, but **preserves the snapshots list itself**
-so restore is reversible. Suggest saving a snapshot first if the live state
-hasn't been captured. `project_snapshot_action(action="delete", snapshotId)`
-drops one obsolete snapshot (also destructive; irreversible).
+`project_action(kind="snapshot", args={action="save", label?})` captures a
+named, restorable point-in-time of the project (timeline + source + lockfile
++ render cache + asset catalog ids). Unlike `revert_timeline` — which only
+sees in-session timeline snapshots — these snapshots persist across chat
+sessions and app restarts. Use them at meaningful checkpoints: "final cut v1",
+"before re-color", "approved storyboard". Pass `label` for a human handle;
+omit it to default to the capture timestamp. `project_query(select=snapshots)`
+enumerates the saved snapshots (most recent first) so you can pick which one
+to roll back to. `project_action(kind="snapshot", args={action="restore",
+snapshotId})` rolls the project back to the chosen snapshot — it is
+destructive (asks the user) and overwrites the live timeline / source /
+lockfile, but **preserves the snapshots list itself** so restore is
+reversible. Suggest saving a snapshot first if the live state hasn't been
+captured. `project_action(kind="snapshot", args={action="delete",
+snapshotId})` drops one obsolete snapshot (also destructive; irreversible).
 
 `project_query(select=lockfile_entries)` enumerates the project's AIGC lockfile (most recent
 first). Use it for orientation ("what have I generated so far?") and reuse
