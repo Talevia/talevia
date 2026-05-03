@@ -6,6 +6,7 @@ import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
+import io.talevia.core.domain.lockfile.EagerLockfile
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.domain.render.ClipRenderCache
@@ -180,7 +181,7 @@ class IncrementalPlanTest {
                 duration = 5.seconds,
             ),
             source = after,
-            lockfile = Lockfile(entries = listOf(entry)),
+            lockfile = EagerLockfile(entries = listOf(entry)),
         )
 
         val plan = project.incrementalPlan(setOf(SourceNodeId("mei")), output, engineId)
@@ -204,7 +205,7 @@ class IncrementalPlanTest {
                 duration = 5.seconds,
             ),
             source = source,
-            lockfile = Lockfile(entries = listOf(legacyEntry)),
+            lockfile = EagerLockfile(entries = listOf(legacyEntry)),
             // No cache entries → fingerprint lookup misses → render-stale.
             clipRenderCache = ClipRenderCache(),
         )
@@ -233,7 +234,7 @@ class IncrementalPlanTest {
                 duration = 5.seconds,
             ),
             source = source,
-            lockfile = Lockfile(entries = listOf(freshEntry)),
+            lockfile = EagerLockfile(entries = listOf(freshEntry)),
         )
         val fingerprint = fingerprintFor(coldProject, clip)
         val warmProject = coldProject.copy(
@@ -302,7 +303,7 @@ class IncrementalPlanTest {
                 duration = 15.seconds,
             ),
             source = source,
-            lockfile = Lockfile(entries = listOf(staleEntry, c2Entry, c3Entry)),
+            lockfile = EagerLockfile(entries = listOf(staleEntry, c2Entry, c3Entry)),
         )
         val c3Fingerprint = fingerprintFor(coldProject, c3)
         val warmProject = coldProject.copy(

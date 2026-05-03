@@ -14,6 +14,7 @@ import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectSnapshot
 import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
+import io.talevia.core.domain.lockfile.EagerLockfile
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.permission.PermissionDecision
@@ -86,7 +87,7 @@ class ProjectQueryLockfileDiffTest {
         entries: List<LockfileEntry> = emptyList(),
         snapshots: List<ProjectSnapshot> = emptyList(),
     ): Project {
-        var lockfile = Lockfile()
+        var lockfile: Lockfile = EagerLockfile()
         entries.forEach { lockfile = lockfile.append(it) }
         return Project(
             id = ProjectId(id),

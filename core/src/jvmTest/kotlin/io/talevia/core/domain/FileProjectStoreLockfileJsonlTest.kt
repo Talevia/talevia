@@ -2,6 +2,7 @@ package io.talevia.core.domain
 
 import io.talevia.core.AssetId
 import io.talevia.core.JsonConfig
+import io.talevia.core.domain.lockfile.EagerLockfile
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.platform.GenerationProvenance
@@ -55,7 +56,7 @@ class FileProjectStoreLockfileJsonlTest {
         val fs = FakeFileSystem()
         val bundleRoot = "/bundles/p1".toPath()
         fs.createDirectories(bundleRoot)
-        val lockfile = Lockfile(entries = listOf(entry("h1", "a-1"), entry("h2", "a-2"), entry("h3", "a-3")))
+        val lockfile = EagerLockfile(entries = listOf(entry("h1", "a-1"), entry("h2", "a-2"), entry("h3", "a-3")))
 
         writeLockfileJsonl(fs, bundleRoot, lockfile, json)
         val readBack = readLockfileJsonl(fs, bundleRoot, json)
@@ -181,7 +182,7 @@ class FileProjectStoreLockfileJsonlTest {
         val project = Project(
             id = pid,
             timeline = Timeline(),
-            lockfile = Lockfile(entries = listOf(entry("h-legacy", "a-legacy"))),
+            lockfile = EagerLockfile(entries = listOf(entry("h-legacy", "a-legacy"))),
         )
         val stored = StoredProject(
             schemaVersion = 1,

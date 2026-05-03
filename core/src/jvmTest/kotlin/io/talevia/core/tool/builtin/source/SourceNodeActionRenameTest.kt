@@ -15,6 +15,7 @@ import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.TimeRange
 import io.talevia.core.domain.Timeline
 import io.talevia.core.domain.Track
+import io.talevia.core.domain.lockfile.EagerLockfile
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.domain.source.SourceNode
@@ -304,7 +305,7 @@ class SourceNodeActionRenameTest {
         val project = Project(
             id = pid,
             timeline = Timeline(),
-            lockfile = Lockfile(entries = listOf(entry, unrelatedEntry)),
+            lockfile = EagerLockfile(entries = listOf(entry, unrelatedEntry)),
         )
         val rig = rig(project)
         rig.store.mutateSource(rig.pid) {

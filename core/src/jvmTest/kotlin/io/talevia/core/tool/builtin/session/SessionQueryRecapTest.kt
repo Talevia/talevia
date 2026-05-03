@@ -13,6 +13,7 @@ import io.talevia.core.domain.FileProjectStore
 import io.talevia.core.domain.Project
 import io.talevia.core.domain.ProjectStoreTestKit
 import io.talevia.core.domain.Timeline
+import io.talevia.core.domain.lockfile.EagerLockfile
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.permission.PermissionDecision
@@ -75,7 +76,7 @@ class SessionQueryRecapTest {
                 id = pid,
                 timeline = Timeline(tracks = emptyList()),
                 assets = emptyList(),
-                lockfile = Lockfile(entries = entries),
+                lockfile = EagerLockfile(entries = entries),
             ),
         )
         val sid = SessionId("s-focus")

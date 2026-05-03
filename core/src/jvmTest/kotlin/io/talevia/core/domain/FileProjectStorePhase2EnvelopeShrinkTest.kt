@@ -2,6 +2,7 @@ package io.talevia.core.domain
 
 import io.talevia.core.AssetId
 import io.talevia.core.JsonConfig
+import io.talevia.core.domain.lockfile.EagerLockfile
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.platform.GenerationProvenance
@@ -99,7 +100,7 @@ class FileProjectStorePhase2EnvelopeShrinkTest {
 
         // Seed entries.
         store.mutate(pid) { project ->
-            project.copy(lockfile = Lockfile(entries = listOf(entry("hA", "asset-A"), entry("hB", "asset-B"))))
+            project.copy(lockfile = EagerLockfile(entries = listOf(entry("hA", "asset-A"), entry("hB", "asset-B"))))
         }
 
         // Verify pure round-trip via the public API: get() should reload

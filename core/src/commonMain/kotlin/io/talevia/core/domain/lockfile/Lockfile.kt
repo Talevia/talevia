@@ -5,8 +5,12 @@ import io.talevia.core.MessageId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.domain.source.Modality
 import io.talevia.core.platform.GenerationProvenance
+import kotlinx.serialization.KSerializer
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.Transient
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlinx.serialization.json.JsonObject
 
 /**
@@ -14,6 +18,19 @@ import kotlinx.serialization.json.JsonObject
  * `package-lock.json` for the random compiler: the minimum set of facts that let a
  * future run ask "have we generated this exact artifact before? if so, reuse it
  * instead of re-calling the provider."
+ *
+ * **Sealed interface (cycle 59 phase 2b-1c-1).** `Lockfile` is the public API
+ * contract; [EagerLockfile] is the in-memory data-class impl that holds every
+ * entry as a `List<LockfileEntry>`. A future `LazyJsonlLockfile` impl will read
+ * `<bundleRoot>/lockfile.jsonl` on-demand for the `phase2-lazy-load` O(1)-open
+ * perf win documented in [io.talevia.core.domain.FileProjectStoreLockfileIO].
+ *
+ * Only [EagerLockfile] is `@Serializable` — the interface is plain Kotlin sealed
+ * so the JSON shape is unchanged from the pre-lift data class. Three sites
+ * encode/decode `EagerLockfile.serializer()` directly:
+ * - [io.talevia.core.tool.builtin.video.export.ExportToolFingerprint] for the
+ *   per-clip cache fingerprint (hash stable across the lift).
+ * - `LockfileEntriesBenchmark` and `LockfileByHashIndexTest` for round-trip.
  *
  * Keyed by a stable [LockfileEntry.inputHash] over the tool's canonical inputs
  * (tool id, effective prompt, model + version, seed, output dimensions, …).
@@ -23,92 +40,58 @@ import kotlinx.serialization.json.JsonObject
  * Ordered [List] rather than a [Map] so entries have a stable insertion order (useful
  * for UI rendering of "recent generations") and the serialized shape is append-only.
  * Lookups go through [findByInputHash] / [findByAssetId], which are O(1): both consult
- * the [byInputHash] / [byAssetId] transient indexes reconstructed from [entries] on
- * deserialize via the default-init pattern used by [io.talevia.core.domain.source.Source.byId].
+ * the [byInputHash] / [byAssetId] indexes (eager impl reconstructs them from
+ * [entries] on deserialize via the default-init pattern; lazy impl will compute
+ * them on first access).
  *
  * The append-only ledger allows duplicate hashes (a provider re-runs and happens to
  * produce the same hash twice). [findByInputHash] must return the **most recent** match
  * — Kotlin's [List.associateBy] overwrites duplicate keys with the later element, so
  * the last-wins semantic is preserved by the map.
  */
-@Serializable
-data class Lockfile(
-    val entries: List<LockfileEntry> = emptyList(),
-) {
+@Serializable(with = LockfileSerializer::class)
+sealed interface Lockfile {
     /**
-     * Hash → most recent [LockfileEntry] with that [LockfileEntry.inputHash].
-     *
-     * Reconstructed from [entries] on deserialize via the default lazy-init pattern
-     * used by [io.talevia.core.domain.source.Source.byId]. `associateBy` overwrites
-     * on duplicate keys, so the resulting entry is the last one in insertion order —
-     * matching the original `entries.lastOrNull { … }` semantic.
+     * Append-only entry list in insertion order. Bound-to-local sites
+     * (`val entries = lockfile.entries`) consume it as a `List` for random-access
+     * / sized iteration; lazy impls override to materialize on access. Bound-to-
+     * local migration to `stream()` is deferred to phase 2b-1c-3 once a concrete
+     * lazy impl exists to actually benefit.
      */
-    @Transient
-    val byInputHash: Map<String, LockfileEntry> = entries.associateBy { it.inputHash }
+    val entries: List<LockfileEntry>
 
-    /**
-     * Asset id → most recent [LockfileEntry] that produced that asset.
-     *
-     * Same reconstruction + last-wins guarantee as [byInputHash].
-     */
-    @Transient
-    val byAssetId: Map<AssetId, LockfileEntry> = entries.associateBy { it.assetId }
+    /** Hash → most recent [LockfileEntry] with that [LockfileEntry.inputHash]. */
+    val byInputHash: Map<String, LockfileEntry>
+
+    /** Asset id → most recent [LockfileEntry] that produced that asset. */
+    val byAssetId: Map<AssetId, LockfileEntry>
 
     /**
      * Lazy iteration over entries — `debt-lockfile-lazy-interface-O1-open`
-     * phase 2b-1a (cycle 48). Equivalent to `entries.asSequence()` today
-     * (the data class still materialises every entry on construction);
-     * exposing it as a method gives 30+ caller sites a forward-compatible
-     * API to migrate to in phase 2b-1b. Phase 2b-1c will swap the eager
-     * data class for an interface + lazy `LockfileFile` impl that reads
-     * entries from JSONL on-demand — at that point [stream] becomes
-     * actually-lazy without any caller change. Keeping the migration
-     * costless is the whole point of the phasing.
-     *
-     * **Why not a property + asSequence**: a method matches the typed
-     * `findByInputHash` / `findByAssetId` siblings; future
-     * `stream()` overloads (e.g. paginated / since-offset variants) get
-     * a natural method-overload home rather than living as extension
-     * helpers fragmented across modules.
+     * phase 2b-1a. Eager impl returns `entries.asSequence()`; lazy impl will
+     * yield entries as the JSONL is parsed line-by-line.
      */
-    fun stream(): Sequence<LockfileEntry> = entries.asSequence()
+    fun stream(): Sequence<LockfileEntry>
 
-    /**
-     * O(1) entry count without materialising a list view —
-     * `debt-lockfile-lazy-interface-phase2b1b-2` (cycle 57). Today it
-     * forwards to [List.size], but keeping size on the Lockfile API
-     * keeps the migration costless when phase 2b-1c swaps the eager
-     * list for a JSONL-backed impl that tracks count separately from
-     * the entry stream. `get()` (no backing field) keeps this out of
-     * the serialised shape.
-     */
-    val size: Int get() = entries.size
+    /** O(1) entry count. Lazy impl tracks count without materialising the list. */
+    val size: Int
 
-    /**
-     * Most-recent entry by insertion order — append-only ledger
-     * semantics mean `lastOrNull()` is the entry just `append`-ed.
-     * Forward-compat with phase 2b-1c lazy impl (a tail pointer
-     * survives without materialising the list).
-     */
-    fun lastOrNull(): LockfileEntry? = entries.lastOrNull()
+    /** Most-recent entry by insertion order — append-only ledger semantics. */
+    fun lastOrNull(): LockfileEntry?
 
-    /**
-     * O(1) emptiness check. Same forward-compat motive as [size] /
-     * [lastOrNull]: a lazy JSONL impl will know its own emptiness
-     * without iterating.
-     */
-    fun isEmpty(): Boolean = entries.isEmpty()
+    /** O(1) emptiness check. */
+    fun isEmpty(): Boolean
 
-    fun findByInputHash(hash: String): LockfileEntry? = byInputHash[hash]
+    fun findByInputHash(hash: String): LockfileEntry?
 
     /**
      * Look up the most recent entry that produced [assetId]. Used by stale-clip
      * detection to walk Clip → Asset → conditioning source nodes without
      * requiring `Clip.sourceBinding` to be threaded through `add_clip`.
      */
-    fun findByAssetId(assetId: AssetId): LockfileEntry? = byAssetId[assetId]
+    fun findByAssetId(assetId: AssetId): LockfileEntry?
 
-    fun append(entry: LockfileEntry): Lockfile = copy(entries = entries + entry)
+    fun append(entry: LockfileEntry): Lockfile
 
     /**
      * Flip the `pinned` flag on the most recent entry matching [inputHash].
@@ -124,7 +107,77 @@ data class Lockfile(
      * re-runs and happens to produce the same hash twice) stay untouched because
      * they are not the one a cache lookup would return.
      */
-    fun withEntryPinned(inputHash: String, pinned: Boolean): Lockfile {
+    fun withEntryPinned(inputHash: String, pinned: Boolean): Lockfile
+
+    /**
+     * Return a new lockfile keeping only entries for which [predicate] is true —
+     * the typed mutation API replacing
+     * `lockfile.copy(entries = lockfile.entries.filter(predicate))` (cycle 59).
+     * Eager impl forwards to `entries.filter(predicate)`; lazy impl can run the
+     * predicate against the stream and write a filtered JSONL.
+     */
+    fun filterEntries(predicate: (LockfileEntry) -> Boolean): Lockfile
+
+    /**
+     * Return a new lockfile with [transform] applied to each entry — the typed
+     * mutation API for in-place rewrites (e.g. id renames in
+     * [io.talevia.core.domain.source.rewriteSourceBinding]). Eager impl forwards
+     * to `entries.map(transform)`; lazy impl streams + writes the transformed
+     * JSONL.
+     */
+    fun mapEntries(transform: (LockfileEntry) -> LockfileEntry): Lockfile
+
+    companion object {
+        /**
+         * Empty lockfile sentinel. Returns an [EagerLockfile] — there's no useful
+         * "lazy zero-data" state, so eager is the natural identity element.
+         */
+        val EMPTY: Lockfile = EagerLockfile()
+    }
+}
+
+/**
+ * In-memory eager [Lockfile] impl — the only impl today. Serializable;
+ * [byInputHash] / [byAssetId] are reconstructed on deserialize via the
+ * `@Transient`-with-default-init pattern used by
+ * [io.talevia.core.domain.source.Source.byId].
+ */
+@Serializable
+data class EagerLockfile(
+    override val entries: List<LockfileEntry> = emptyList(),
+) : Lockfile {
+    /**
+     * Hash → most recent [LockfileEntry] with that [LockfileEntry.inputHash].
+     *
+     * `associateBy` overwrites on duplicate keys, so the resulting entry is the
+     * last one in insertion order — matching the original
+     * `entries.lastOrNull { … }` semantic.
+     */
+    @Transient
+    override val byInputHash: Map<String, LockfileEntry> = entries.associateBy { it.inputHash }
+
+    /**
+     * Asset id → most recent [LockfileEntry] that produced that asset.
+     * Same reconstruction + last-wins guarantee as [byInputHash].
+     */
+    @Transient
+    override val byAssetId: Map<AssetId, LockfileEntry> = entries.associateBy { it.assetId }
+
+    override fun stream(): Sequence<LockfileEntry> = entries.asSequence()
+
+    override val size: Int get() = entries.size
+
+    override fun lastOrNull(): LockfileEntry? = entries.lastOrNull()
+
+    override fun isEmpty(): Boolean = entries.isEmpty()
+
+    override fun findByInputHash(hash: String): LockfileEntry? = byInputHash[hash]
+
+    override fun findByAssetId(assetId: AssetId): LockfileEntry? = byAssetId[assetId]
+
+    override fun append(entry: LockfileEntry): Lockfile = copy(entries = entries + entry)
+
+    override fun withEntryPinned(inputHash: String, pinned: Boolean): Lockfile {
         val idx = entries.indexOfLast { it.inputHash == inputHash }
         if (idx < 0) return this
         val current = entries[idx]
@@ -132,9 +185,35 @@ data class Lockfile(
         return copy(entries = entries.toMutableList().apply { this[idx] = current.copy(pinned = pinned) })
     }
 
-    companion object {
-        val EMPTY: Lockfile = Lockfile()
+    override fun filterEntries(predicate: (LockfileEntry) -> Boolean): Lockfile =
+        copy(entries = entries.filter(predicate))
+
+    override fun mapEntries(transform: (LockfileEntry) -> LockfileEntry): Lockfile =
+        copy(entries = entries.map(transform))
+}
+
+/**
+ * Serializer adapter for `Lockfile` (sealed interface) → goes through
+ * `EagerLockfile.serializer()` so the JSON shape is unchanged from the pre-lift
+ * data class. Lazy impls materialize their entries to an `EagerLockfile` for
+ * encode (rare path — the envelope-shrink already replaces `lockfile` with
+ * `Lockfile.EMPTY` before write, so the only call site that hits a non-empty
+ * is `ExportToolFingerprint`'s hash, which has its own cast).
+ *
+ * Without this adapter, `@Serializable sealed interface` would default to
+ * polymorphic dispatch and emit a `"type": "EagerLockfile"` class discriminator
+ * — breaking on-disk JSON shape and forcing migrations of existing bundles.
+ */
+object LockfileSerializer : KSerializer<Lockfile> {
+    override val descriptor: SerialDescriptor = EagerLockfile.serializer().descriptor
+
+    override fun serialize(encoder: Encoder, value: Lockfile) {
+        val eager = value as? EagerLockfile ?: EagerLockfile(value.entries.toList())
+        EagerLockfile.serializer().serialize(encoder, eager)
     }
+
+    override fun deserialize(decoder: Decoder): Lockfile =
+        EagerLockfile.serializer().deserialize(decoder)
 }
 
 /**

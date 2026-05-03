@@ -102,7 +102,7 @@ internal suspend fun executeGcLockfile(
     val prunedSet: Set<LockfileEntry> = pruned.map { it.first }.toSet()
     if (prunedSet.isNotEmpty() && !input.dryRun) {
         projects.mutate(pid) { p ->
-            p.copy(lockfile = p.lockfile.copy(entries = p.lockfile.entries.filter { it !in prunedSet }))
+            p.copy(lockfile = p.lockfile.filterEntries { it !in prunedSet })
         }
     }
 

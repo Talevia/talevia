@@ -128,8 +128,10 @@ class LockfileByHashIndexTest {
             .append(entry("h1", "asset-2", seed = 2L)) // duplicate hash
             .append(entry("h2", "asset-3", seed = 3L))
 
-        val encoded = json.encodeToString(Lockfile.serializer(), original)
-        val decoded = json.decodeFromString(Lockfile.serializer(), encoded)
+        // Cast: append() returns the Lockfile interface; EagerLockfile is the
+        // only impl today, so the round-trip target is materialized as eager.
+        val encoded = json.encodeToString(EagerLockfile.serializer(), original as EagerLockfile)
+        val decoded = json.decodeFromString(EagerLockfile.serializer(), encoded)
 
         // The transient maps are rebuilt on deserialize.
         assertEquals(2, decoded.byInputHash.size, "byInputHash must be rebuilt on decode")

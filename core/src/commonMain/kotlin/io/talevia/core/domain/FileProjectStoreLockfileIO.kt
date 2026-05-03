@@ -1,5 +1,6 @@
 package io.talevia.core.domain
 
+import io.talevia.core.domain.lockfile.EagerLockfile
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import kotlinx.serialization.json.Json
@@ -123,5 +124,5 @@ internal fun readLockfileJsonl(
             )
         }
     }
-    return Lockfile(entries = entries)
+    return EagerLockfile(entries = entries)
 }

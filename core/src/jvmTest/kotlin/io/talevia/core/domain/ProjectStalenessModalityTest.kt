@@ -6,6 +6,7 @@ import io.talevia.core.JsonConfig
 import io.talevia.core.ProjectId
 import io.talevia.core.SourceNodeId
 import io.talevia.core.TrackId
+import io.talevia.core.domain.lockfile.EagerLockfile
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.domain.lockfile.ModalityHashes
@@ -107,7 +108,7 @@ class ProjectStalenessModalityTest {
             id = ProjectId("p"),
             timeline = Timeline(tracks = listOf(Track.Video(TrackId("v"), listOf(clip)))),
             source = Source(nodes = listOf(characterRefNode("mei", mei(voice = "nova")))),
-            lockfile = Lockfile(entries = listOf(entry)),
+            lockfile = EagerLockfile(entries = listOf(entry)),
         )
 
         val stale = now.staleClipsFromLockfile()
@@ -124,7 +125,7 @@ class ProjectStalenessModalityTest {
             id = ProjectId("p"),
             timeline = Timeline(tracks = listOf(Track.Audio(TrackId("a"), listOf(clip)))),
             source = Source(nodes = listOf(characterRefNode("mei", mei(visual = "short, blonde")))),
-            lockfile = Lockfile(entries = listOf(entry)),
+            lockfile = EagerLockfile(entries = listOf(entry)),
         )
 
         val stale = now.staleClipsFromLockfile()
@@ -142,7 +143,7 @@ class ProjectStalenessModalityTest {
             id = ProjectId("p"),
             timeline = Timeline(tracks = listOf(Track.Video(TrackId("v"), listOf(clip)))),
             source = Source(nodes = listOf(characterRefNode("mei", mei(visual = "short")))),
-            lockfile = Lockfile(entries = listOf(entry)),
+            lockfile = EagerLockfile(entries = listOf(entry)),
         )
 
         val stale = now.staleClipsFromLockfile()
@@ -159,7 +160,7 @@ class ProjectStalenessModalityTest {
             id = ProjectId("p"),
             timeline = Timeline(tracks = listOf(Track.Audio(TrackId("a"), listOf(clip)))),
             source = Source(nodes = listOf(characterRefNode("mei", mei(voice = "nova")))),
-            lockfile = Lockfile(entries = listOf(entry)),
+            lockfile = EagerLockfile(entries = listOf(entry)),
         )
 
         val stale = now.staleClipsFromLockfile()
@@ -186,7 +187,7 @@ class ProjectStalenessModalityTest {
                 ),
             ),
             source = Source(nodes = listOf(characterRefNode("mei", renamed))),
-            lockfile = Lockfile(entries = listOf(videoEntry, audioEntry)),
+            lockfile = EagerLockfile(entries = listOf(videoEntry, audioEntry)),
         )
 
         val stale = now.staleClipsFromLockfile()
@@ -225,7 +226,7 @@ class ProjectStalenessModalityTest {
             id = ProjectId("p"),
             timeline = Timeline(tracks = listOf(Track.Video(TrackId("v"), listOf(clip)))),
             source = Source(nodes = listOf(characterRefNode("mei", mei(voice = "nova")))),
-            lockfile = Lockfile(entries = listOf(legacyEntry)),
+            lockfile = EagerLockfile(entries = listOf(legacyEntry)),
         )
 
         val stale = now.staleClipsFromLockfile()

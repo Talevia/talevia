@@ -2,6 +2,7 @@ package io.talevia.core.bench
 
 import io.talevia.core.AssetId
 import io.talevia.core.JsonConfig
+import io.talevia.core.domain.lockfile.EagerLockfile
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.platform.GenerationProvenance
@@ -42,19 +43,19 @@ class LockfileEntriesBenchmark {
     @Test fun coldDeserializeScalesSublinearly() {
         val json = JsonConfig.default
         // Warm-up on a small ledger so JIT / reflection caches prime.
-        val warmup = Lockfile(entries = (0 until 100).map(::syntheticEntry))
-        val warmupText = json.encodeToString(Lockfile.serializer(), warmup)
-        repeat(3) { json.decodeFromString(Lockfile.serializer(), warmupText) }
+        val warmup = EagerLockfile(entries = (0 until 100).map(::syntheticEntry))
+        val warmupText = json.encodeToString(EagerLockfile.serializer(), warmup)
+        repeat(3) { json.decodeFromString(EagerLockfile.serializer(), warmupText) }
 
         for (size in listOf(500, 1000, 2000)) {
             val text = json.encodeToString(
-                Lockfile.serializer(),
-                Lockfile(entries = (0 until size).map(::syntheticEntry)),
+                EagerLockfile.serializer(),
+                EagerLockfile(entries = (0 until size).map(::syntheticEntry)),
             )
             val elapsed = measureTime {
                 // Repeat 3x per size so one GC stall doesn't dominate the
                 // printed number. Report the mean.
-                repeat(3) { json.decodeFromString(Lockfile.serializer(), text) }
+                repeat(3) { json.decodeFromString(EagerLockfile.serializer(), text) }
             } / 3
             AgentLoopBenchmark.report(
                 name = "lockfile.cold-decode.${size}-entries",

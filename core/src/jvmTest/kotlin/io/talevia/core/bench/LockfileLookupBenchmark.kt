@@ -1,6 +1,7 @@
 package io.talevia.core.bench
 
 import io.talevia.core.AssetId
+import io.talevia.core.domain.lockfile.EagerLockfile
 import io.talevia.core.domain.lockfile.Lockfile
 import io.talevia.core.domain.lockfile.LockfileEntry
 import io.talevia.core.platform.GenerationProvenance
@@ -31,7 +32,7 @@ class LockfileLookupBenchmark {
 
     @Test fun lookupOn500EntryLockfile() {
         val entries = (0 until 500).map { i -> syntheticEntry(i) }
-        val lockfile = Lockfile(entries = entries)
+        val lockfile = EagerLockfile(entries = entries)
 
         // Hash to hit on every lookup — choose the median so we're not
         // biased toward insertion-order cache effects (there are none today

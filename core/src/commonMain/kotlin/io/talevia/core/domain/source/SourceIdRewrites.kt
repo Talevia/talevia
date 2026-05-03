@@ -116,7 +116,7 @@ fun Timeline.rewriteSourceBinding(oldId: SourceNodeId, newId: SourceNodeId): Pai
  */
 fun Lockfile.rewriteSourceBinding(oldId: SourceNodeId, newId: SourceNodeId): Pair<Lockfile, Int> {
     var touched = 0
-    val rewritten = entries.map { entry ->
+    val rewritten = mapEntries { entry ->
         val inBinding = oldId in entry.sourceBinding
         val inHashes = oldId in entry.sourceContentHashes
         val inHashesByModality = oldId in entry.sourceContentHashesByModality
@@ -148,5 +148,5 @@ fun Lockfile.rewriteSourceBinding(oldId: SourceNodeId, newId: SourceNodeId): Pai
             )
         }
     }
-    return copy(entries = rewritten) to touched
+    return rewritten to touched
 }

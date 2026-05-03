@@ -52,6 +52,9 @@ internal fun fingerprintOf(timeline: Timeline, output: OutputSpec): String {
 internal fun provenanceOf(project: Project): ProvenanceManifest {
     val json = JsonConfig.default
     val timelineHash = fnv1a64Hex(json.encodeToString(Timeline.serializer(), project.timeline))
+    // Lockfile is a sealed interface with a custom serializer (LockfileSerializer)
+    // that delegates to EagerLockfile.serializer() — JSON shape unchanged across
+    // the cycle 59 interface lift, so the fingerprint hash stays stable.
     val lockfileHash = fnv1a64Hex(json.encodeToString(Lockfile.serializer(), project.lockfile))
     return ProvenanceManifest(
         projectId = project.id.value,

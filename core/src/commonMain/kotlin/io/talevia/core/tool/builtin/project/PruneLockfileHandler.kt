@@ -32,7 +32,7 @@ internal suspend fun executePruneLockfile(
 
     if (pruned.isNotEmpty() && !input.dryRun) {
         projects.mutate(pid) { p ->
-            p.copy(lockfile = p.lockfile.copy(entries = p.lockfile.entries.filter { it.assetId in liveAssetIds }))
+            p.copy(lockfile = p.lockfile.filterEntries { it.assetId in liveAssetIds })
         }
     }
 
