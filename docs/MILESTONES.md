@@ -1,6 +1,6 @@
 # Milestones
 
-> **Current: M7 — §4 跨平台编辑 GUI**
+> **Current: M8 — §3.4 協作 / 多用户 git 工作流**
 
 迭代聚焦的粗粒度指针。每个 milestone 对应 `docs/VISION.md` §3 的一个**核心赌注**。
 机制参考 media-engine 的 `docs/MILESTONES.md` + 三处本地化：**软优先级**（当前 M
@@ -21,7 +21,91 @@ bullet 打 tag；现有 bullet 不手动 backfill。
 
 
 
-## M7 — §4 跨平台编辑 GUI （VISION §4）
+## M8 — §3.4 協作 / 多用户 git 工作流 （VISION §3.4）
+
+**目标**：把 VISION §3.4 "项目即 git 仓库 / 多人协作" 这条赌注从
+"理论上可 push/pull" 推到 "两个用户对同一 bundle 并发编辑能干净
+merge"。今天 `FileProjectStore` 已经把项目落到 on-disk bundle，
+`talevia.json` + `lockfile.jsonl` + `media/` 都是 git-tracked 文件，
+所以 `git push` 已经 works for the byte layer。M8 解决的是
+**语义层**：两个分支同时编辑同一时间轴 / 同一 source node /
+mint 同 inputHash 的 lockfile entry 时，输出能 merge 成一个干净
+的 Project 而不是 byte-diff conflict。
+
+**Platform-priority 提示**：M8 大部分工作是 Core / CLI 端
+（merge logic, conflict semantics, `talevia merge` subcommand），
+fits the current platform-priority window (Mac CLI > Mac desktop)。
+desktop UI 端的冲突可视化是 opportunistic — 等 driver 出现 +
+core merge 落地后再加。
+
+**Driver 状态**：M6 → M7 promotion logic 当时记录 "M8 §3.4 协作
+继续 user-driver-gated"，M7 落地后 M8 仍处于 "等待真实 driver
+（多用户冲突报告）" 状态。本次 promotion 沿用 literal "亚军
+list 最靠前" 规则把 M8 升为 active 而非 reorder 到 M9，因为
+sequential 数字不允许跳：`> Current: M<N> → M<N+1>`，不能跳到
+M<N+2>。但**实质工作 driver 仍未出现** —— criteria 的第一条是
+显式的 driver-signal placeholder。在 driver 落地之前，M8 是
+"等位" 状态：BACKLOG 上 active feature work（如 `aigc-tool-streaming-
+first-emitter` / `debt-aigc-tool-consolidation-phase3b/3c` /
+`debt-lockfile-lazy-interface-O1-open` / `debt-split-*` 等）继续
+推进，driver 出现时再正式动 M8 §3.4 工作；这样既不违反 milestone
+sequential 规则，也不假装当前在做 §3.4 工作。
+
+### Exit criteria
+
+- [ ] Driver signal: 至少一个 user 报告（issue tracker / 对话 /
+  PR）描述多用户协作时遇到 byte-conflict / 语义冲突的具体场景
+  （例："我和 X 各自编辑同一 bundle 的 character_ref body, push
+  出现 talevia.json 字节冲突，没法解" 或同义）— *必须手动 tick
+  （driver 报告链接 / 引用 commit + 一句话场景）*
+- [ ] `talevia merge` CLI subcommand 落地：把两个 bundle 路径
+  merge 到第三个 bundle，每个语义层 (timeline / source DAG /
+  lockfile) 报告 conflict 还是干净 merge。grep: `MergeProjectTool` /
+  `MergeProjectAction` / `talevia merge` 在 `apps/cli/src/main` 出现
+- [ ] Timeline 三方 merge 语义：两个分支在同一 track 重叠时段
+  添加 clip / 同一 clip 的 timeRange 移动 → 输出保留两条 + 标记
+  conflict OR 按确定性规则干净 merge（例："最早的赢"）。grep:
+  `TimelineMerge` / `TimelineConflict` / `mergeTimelines` 等类 / 函数
+  在产品路径出现
+- [ ] Source-node body 三方 merge 语义：两个分支同时编辑同一
+  `SourceNode.body` 的 JSON 字段 → 不重叠路径自动合并，重叠路径
+  保留两条进 `SourceNode.MergeConflict` kind（或同义结构）。
+  grep: `SourceNodeMerge` / `core.consistency.merge_conflict` /
+  `mergeSourceNode` 等
+- [ ] Lockfile entry 三方 merge 语义：两分支 mint 相同 inputHash
+  但不同 assetId 的 entry → merge 选一 + 记 resolution entry 同时
+  保留 loser 的 provenance 链供回溯。grep: `LockfileMerge` /
+  `MergeResolution` / `LockfileEntry.MergeConflict` 等
+- [ ] Round-trip e2e: 两个 `FileProjectStore` clone 并发编辑同一
+  bundle，merge 后两端 `Project` 状态一致 + 冲突按上述规则呈现。
+  grep: `MergeRoundTripE2ETest` / `CollaborationMergeE2ETest` 或同义类
+  在 `apps/cli/src/test` / `apps/desktop/src/test` / `core/src/jvmTest`
+- [ ] Manual milestone exit summary：本文件 M8 block 末尾 append
+  `### M8 exit summary` 段，列剩余的 §3.4 gap（real-time presence /
+  per-track lock / branch-level project fork-and-merge UI / 等）
+  以便 M9 / 未来 M 接力 — *必须手动 tick（段落存在 + 三条以上
+  具体 gap）*
+
+### 亚军 milestones（未正式启动，仅作排序参考）
+
+- **M9 候选 — §3.3 / §5.5 cross-modal 深化**：M1 exit summary 列出
+  的 5 条 §3.3 接力（LoRA fine-tune 持久化 / 多 character 交互 /
+  跨模态一致性 / conflict detection / drift quantification）+ M3
+  exit summary cross-modal staleness 分区已落地的扩展（per-modality
+  regenerate batch / mode-flip 自动切换 e2e）。Core-only 工作，
+  platform-priority 友好；M8 driver 仍未出现期间，BACKLOG 上的
+  `m9-binding-conflict-detection-seed` 等 P2 bullet 充当过渡候补。
+- **M10 候选 — §6 (TBD)**：占位，M8 / M9 临近完成时再细化具体
+  赌注（candidates: 自动 export quality gate / cross-platform
+  agent-step trace ledger / 多 agent 协调）。
+
+---
+
+（已完成的 milestone 由 `iterate-gap` 的 §M auto-promote 步骤
+append 为 `## Completed — M<N> (<date>)` block，保留每条 criterion
+对应的 commit shorthash 作为历史快照。最近完成的放最上面。）
+
+## Completed — M7 (2026-05-02)
 
 **目标**：把 M3 已经在 jvmTest 守护的 "two paths, one project" 不变量从
 Core 层延伸到 UI 半边——desktop / iOS / Android timeline editor surface
@@ -31,23 +115,7 @@ Core 层延伸到 UI 半边——desktop / iOS / Android timeline editor surface
 timeline viewer，把 §4 双用户张力的 UI 半边从"理论存在"推到"用户可
 直接操作"。
 
-**Platform-priority 提示**：CLAUDE.md "Platform priority — 当前阶段" 仍把
-**Mac CLI > Mac desktop > iOS > Android**，desktop 推迟到 CLI parity 之后、
-iOS / Android 维持不退化。M7 大部分 criteria 是 Core / 跨平台 contract
-abstraction 工作（pure Core, doable now），desktop 部分是 opportunistic
-（trigger-gated bullets 已在 BACKLOG 列出，例 `desktop-agent-step-notice` /
-`desktop-live-render-preview`）；iOS / Android UI 工作真正落地需要等
-平台窗口打开（M3 / M5 exit summary 都已点出这一点）。M7 的 criteria 设
-计是：**让 Core 抽象 + 对齐 contract 先就位，desktop / mobile 实现按
-平台优先级窗口开放节奏陆续完成**——避免再做一次 cycle 9 的亚军
-reorder。
-
-选 §4 作 M7 的理由：existing 亚军 list head（cycle 9 53526289 的 M5→M6
-promotion 把 §5.7 perf 升到 M6，§4 GUI 退到 M7 候选）。M6 §5.7 perf
-baseline 已经把 Core 运行时预算轴收口完整，§4 GUI 是 VISION §3 系列
-赌注里仍未启动的最大一块。M8 候选（§3.4 协作）继续 user-driver-gated。
-
-### Exit criteria
+**Exit criteria 完成情况**：
 
 - [x] Cross-platform Project-mutation event surface：每次 `ProjectStore.mutate`
   落定后通过 `BusEvent.ProjectMutated`（或同名 / 同 intent 事件）通知所有
@@ -59,42 +127,96 @@ baseline 已经把 Core 运行时预算轴收口完整，§4 GUI 是 VISION §3 
   `TimelineViewer` / `RenderableTimeline` / 同义抽象，让 desktop / iOS /
   Android UI 不必各自重新解读 `Project.timeline`。Core 工作（actionable now，
   不被 platform-priority 阻塞）。grep: `TimelineViewer` / `RenderableTimeline`
-  / `TimelineSurface` 类型定义在产品路径出现 — cycle 2026-05-02 *本 commit*
+  / `TimelineSurface` 类型定义在产品路径出现 — cycle 2026-05-02 **1ea524ca**
+  (Core view-model) + **d000a439** (desktop migration)
 - [x] Desktop chat panel agent-step 订阅：BACKLOG P2 `desktop-agent-step-notice`
   落地——desktop 的 chat composable 订阅 `BusEvent.AgentRunStateChanged` 并
   渲染 `Step N · processing…`（cycle 2026-04-26 a0bd56eb CLI 半已落地；这条
   是 desktop 镜像）。Opportunistic per CLAUDE.md "Platform priority" — desktop
   UX work resumes trigger; criterion 跟着触发条件勾。grep: `apps/desktop` 下
-  对 `BusEvent.AgentRunStateChanged` 的 `collect` / `subscribe` — cycle 2026-05-02 *本 commit*
+  对 `BusEvent.AgentRunStateChanged` 的 `collect` / `subscribe` — cycle 2026-05-02 **8c6e0757**
 - [x] Two-paths shared source UI e2e：M3 #3 `CrossPathSourceSharedTest`
   (cycle 2026-04-26 cb5c5b7d) 是 jvmTest 级；M7 要求**通过 UI 命令路由层**
   跑同样的 round-trip——chat panel 发指令 + source-edit tool dispatch + 同一
   `Project` 状态被两端看到。可以是 Compose Desktop integration test 或者
   cross-app integration test。grep: `CrossPathSourceUiE2ETest` 或同义类
+  — cycle 2026-05-02 **a9d0d2e4**
+- [x] Manual milestone exit summary：见下方 `### M7 exit summary` 段。
   — cycle 2026-05-02 *本 commit*
-- [ ] Manual milestone exit summary：本文件 M7 block 末尾 append
-  `### M7 exit summary` 段，列剩余的 §4 gap（iOS native timeline editor /
-  Android Compose Multiplatform UI / desktop drag-drop edit / multi-character
-  scene composer / collaborative editing real-time presence 等）以便 M8 /
-  未来 M 接力 — *必须手动 tick（段落存在 + 三条以上具体 gap）*
 
-### 亚军 milestones（未正式启动，仅作排序参考）
+### M7 exit summary
 
-- **M8 候选 — §3.4 协作 / 多用户 git 工作流**：BACKLOG `re-evaluate-desktop-merge-
-  conflict-strategy` 等待用户 promote/demote/delete 决策；真正 driver 出现
-  （多用户报 conflict）后再升档。原列 M8 候选；M6→M7 promotion 不动。
-- **M9 候选 — §3.3 / §5.5 cross-modal 深化**：M1 exit summary 列出的 5 条
-  §3.3 接力（LoRA fine-tune 持久化 / 多 character 交互 / 跨模态一致性 /
-  conflict detection / drift quantification）+ M3 exit summary cross-modal
-  staleness 分区已落地的扩展（per-modality regenerate batch / mode-flip
-  自动切换 e2e）。Core-only 工作，platform-priority 友好；待 §4 GUI 推进
-  到一定程度后接力。
+M7 关起门来证明了**§4 跨平台编辑 GUI 的 4 条 evidence-based criteria
+全部落地** + Core 抽象先就位 / desktop 端先消费 / iOS Android 不退化
+的 platform-priority 节奏被尊重：
 
----
+- 23ebdc7f — `BusEvent.ProjectMutated` + UI 订阅（cross-platform
+  Project-mutation event surface）。
+- 1ea524ca — `RenderableTimeline` + `Timeline.toRenderable()` 在
+  core/commonMain 暴露（cross-platform timeline 只读 viewer contract）。
+- d000a439 — Compose Desktop `TimelinePanel.kt` 迁移到 RenderableTimeline.rows
+  消费 + `desktopGlyphFor(TrackKind)` 替代 inline track-kind 分支。
+- 8c6e0757 — desktop chat panel 订阅 `BusEvent.AgentRunStateChanged`
+  渲染 `Step N · processing…` chip。
+- a9d0d2e4 — `CrossPathSourceUiE2ETest` 在 apps/desktop/src/test
+  通过 UI 命令路由层验证 cross-path 不变量。
 
-（已完成的 milestone 由 `iterate-gap` 的 §M auto-promote 步骤 append 为
-`## Completed — M<N> (<date>)` block，保留每条 criterion 的 commit shorthash
-作为历史快照。最近完成的放最上面。）
+**§4 GUI 完整愿景里 M7+ 接力的 gap**（超出本 milestone 的工程学
+跑道，列给 M8 / M9 / 未来 M）：
+
+1. **iOS native timeline editor**: M3 / M5 exit summary 已经点过 —
+   iOS 平台窗口打开后，Compose Desktop 的 `TimelinePanel` 范式
+   要在 SwiftUI 端落地。`RenderableTimeline` 已经做了平台无关
+   抽象（cycle 19 1ea524ca），SwiftUI 实现只需要消费 rows。但
+   gestures（拖拽 / 多指缩放 / 长按删除）+ AVFoundation preview
+   的实时更新仍是 iOS-specific 工作。
+2. **Android Compose Multiplatform UI**: 对应 iOS 的 Android 半。
+   Compose Multiplatform 让 desktop UI 代码理论上可以直接复用，
+   但 Android 端的 file-system 访问 / 权限请求 / Media3 preview
+   集成仍需要 Android-specific 实装。等 Android 平台窗口打开。
+3. **Desktop drag-drop edit**: 当前 `TimelinePanel` 是 list-based
+   readonly + button-based edit；rich UX 需要鼠标拖拽 clip 调整
+   timeRange / 跨轨移动 / 滚轮缩放等。Compose Desktop pointer-input
+   API + 时间轴坐标系映射是 desktop-only 工作。
+4. **Multi-character scene composer**: 当用户描述 "两个角色在
+   咖啡馆对话" 时，desktop UI 应该能可视化两个 character_ref
+   绑定到同一 clip 的 sourceBinding，并且 inline 编辑每个角色的
+   细节。当前 `SourcePanel` 只列 source nodes，没有 scene-level
+   组合视图。
+5. **Collaborative editing real-time presence**: M8 §3.4 协作 /
+   多用户 git 工作流的 UI 半 — 多个用户同时打开同一 bundle 时
+   光标位置 / 谁在编辑哪条 source / 谁在 dispatching 哪个 tool
+   的实时显示。M8 driver 出现后接力。
+
+前 1–2 条受 iOS / Android 平台优先级窗口约束（CLAUDE.md "Platform
+priority" 当前 unblock desktop only）；3–4 是 desktop UX
+opportunistic 扩展；5 是 M8 §3.4 协作的 UI 半 — M8 driver
+appearance（多用户冲突报告）才会真正动它。M8 / M9 不扛全部，按
+平台优先级 + 用户决策结果挑。
+
+### M7 → M8 promotion logic
+
+M7 §4 GUI 4/4 evidence-based criteria + 1 manual exit 全部落地。
+按 §M.3 "亚军 list 最靠前" 规则把 §3.4 协作 / 多用户 git 工作流
+（亚军 list 第 1 条）升为 active M8。
+
+**Driver 状态告知**：M8 §3.4 至今仍处于 "等待真实 driver
+（多用户冲突报告）" 状态——M6 → M7 promotion logic 已经记录过
+这一点，M7 落地后情况未变（BACKLOG `re-evaluate-desktop-merge-
+conflict-strategy` 仍是 skip-tagged "meta bullet, driver-gated"
+条目）。但 sequential 数字规则不允许跳到 M9：`> Current: M<N> →
+M<N+1>` 是硬性规则。本次 promotion 因此把 M8 升为 active 但
+**criteria 第一条显式标 driver-signal placeholder** —— M8 在 driver
+落地之前是 "等位" 状态，BACKLOG 上的 active feature / debt work
+继续推进，driver 出现时再细化 / 启动 M8 §3.4 实质工作。
+
+不重排亚军 list（M9 cross-modal 留作 M8 后接力）的原因和
+M6→M7 promotion 一致：硬要把 M9 升上来违反 §R 硬规则 11
+"不凭空发明任务"，且 M9 cross-modal 工作的 BACKLOG 颗粒度仍是
+seed-level（`m9-binding-conflict-detection-seed` P2 而已），
+现在升为 active 也只是占位。让 M8 占住 sequential 位、M9 在
+亚军 list 待命、BACKLOG 上的 cross-cutting work 继续推进，
+是平衡 milestone-sequence + work-availability 的最干净选择。
 
 ## Completed — M6 (2026-05-02)
 
