@@ -70,7 +70,7 @@ class EnvProviderAuth(
         val DEFAULT_ENV_VARS: Map<String, List<String>> = mapOf(
             "anthropic" to listOf("ANTHROPIC_API_KEY"),
             "openai" to listOf("OPENAI_API_KEY"),
-            "google" to listOf("GEMINI_API_KEY", "GOOGLE_API_KEY"),
+            "gemini" to listOf("GEMINI_API_KEY", "GOOGLE_API_KEY"),
             "replicate" to listOf("REPLICATE_API_TOKEN"),
             "tavily" to listOf("TAVILY_API_KEY"),
             "volcano" to listOf("ARK_API_KEY"),

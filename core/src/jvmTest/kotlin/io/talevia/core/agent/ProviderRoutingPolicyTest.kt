@@ -30,7 +30,7 @@ class ProviderRoutingPolicyTest {
 
     private val anthropic = FakeProvider("anthropic")
     private val openai = FakeProvider("openai")
-    private val google = FakeProvider("google")
+    private val gemini = FakeProvider("gemini")
     private val unpricedA = FakeProvider("unpriced-a")
     private val unpricedB = FakeProvider("unpriced-b")
 
@@ -39,17 +39,17 @@ class ProviderRoutingPolicyTest {
     @Test fun registryOrderPreservesInputOrder() {
         val result = RegistryOrderPolicy.orderFallbacks(
             primary = anthropic,
-            fallbacks = listOf(openai, google, unpricedA),
+            fallbacks = listOf(openai, gemini, unpricedA),
         )
-        assertEquals(listOf(openai, google, unpricedA), result)
+        assertEquals(listOf(openai, gemini, unpricedA), result)
     }
 
     @Test fun registryOrderDropsPrimaryIfPresent() {
         val result = RegistryOrderPolicy.orderFallbacks(
             primary = anthropic,
-            fallbacks = listOf(anthropic, openai, google),
+            fallbacks = listOf(anthropic, openai, gemini),
         )
-        assertEquals(listOf(openai, google), result)
+        assertEquals(listOf(openai, gemini), result)
     }
 
     @Test fun registryOrderOnEmptyReturnsEmpty() {
@@ -71,14 +71,14 @@ class ProviderRoutingPolicyTest {
         // From LlmPricing (2026-04 snapshot) the per-provider cheapest
         // (input + output) cents / 1k tokens:
         //   openai    — gpt-4o-mini at 0.015 + 0.06 = 0.075
-        //   google    — gemini-2.5-flash at 0.0075 + 0.03 = 0.0375
+        //   gemini    — gemini-2.5-flash at 0.0075 + 0.03 = 0.0375
         //   anthropic — claude-haiku-4-5 at 0.1 + 0.5 = 0.6
-        // Expected ascending: google, openai, anthropic.
+        // Expected ascending: gemini, openai, anthropic.
         val result = CheapestFirstPolicy.orderFallbacks(
             primary = FakeProvider("primary-only"),
-            fallbacks = listOf(anthropic, openai, google),
+            fallbacks = listOf(anthropic, openai, gemini),
         )
-        assertEquals(listOf(google, openai, anthropic), result)
+        assertEquals(listOf(gemini, openai, anthropic), result)
     }
 
     @Test fun cheapestFirstPutsUnpricedLast() {
@@ -87,15 +87,15 @@ class ProviderRoutingPolicyTest {
         // alphabetic → unpriced-a before unpriced-b).
         val result = CheapestFirstPolicy.orderFallbacks(
             primary = FakeProvider("primary-only"),
-            fallbacks = listOf(unpricedB, anthropic, unpricedA, google),
+            fallbacks = listOf(unpricedB, anthropic, unpricedA, gemini),
         )
-        assertEquals(listOf(google, anthropic, unpricedA, unpricedB), result)
+        assertEquals(listOf(gemini, anthropic, unpricedA, unpricedB), result)
     }
 
     @Test fun cheapestFirstFiltersPrimary() {
         val result = CheapestFirstPolicy.orderFallbacks(
-            primary = google,
-            fallbacks = listOf(google, openai, anthropic),
+            primary = gemini,
+            fallbacks = listOf(gemini, openai, anthropic),
         )
         // Primary removed; rest ordered by cost (openai < anthropic).
         assertEquals(listOf(openai, anthropic), result)
@@ -112,7 +112,7 @@ class ProviderRoutingPolicyTest {
         // Same inputs → same output across repeated calls (sanity check
         // that ordering doesn't leak iteration-order randomness from the
         // underlying groupBy over LlmPricing.all()).
-        val input = listOf(anthropic, openai, google, unpricedA, unpricedB)
+        val input = listOf(anthropic, openai, gemini, unpricedA, unpricedB)
         val first = CheapestFirstPolicy.orderFallbacks(FakeProvider("p"), input)
         val second = CheapestFirstPolicy.orderFallbacks(FakeProvider("p"), input)
         assertEquals(first, second)

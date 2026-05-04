@@ -69,8 +69,8 @@ object LlmPricing {
         Entry(PROVIDER_OPENAI, "gpt-4o", 0.25, 1.0),
         Entry(PROVIDER_OPENAI, "gpt-4o-mini", 0.015, 0.06),
         // Google Gemini (2026-04 snapshot).
-        Entry(PROVIDER_GOOGLE, "gemini-2.5-pro", 0.125, 0.5),
-        Entry(PROVIDER_GOOGLE, "gemini-2.5-flash", 0.0075, 0.03),
+        Entry(PROVIDER_GEMINI, "gemini-2.5-pro", 0.125, 0.5),
+        Entry(PROVIDER_GEMINI, "gemini-2.5-flash", 0.0075, 0.03),
     )
 
     /** All priced (provider, model) pairs, in published-order. */
@@ -86,5 +86,5 @@ object LlmPricing {
 
     internal const val PROVIDER_ANTHROPIC = "anthropic"
     internal const val PROVIDER_OPENAI = "openai"
-    internal const val PROVIDER_GOOGLE = "google"
+    internal const val PROVIDER_GEMINI = "gemini"
 }

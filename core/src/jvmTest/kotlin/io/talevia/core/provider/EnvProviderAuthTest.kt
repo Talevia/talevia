@@ -54,14 +54,18 @@ class EnvProviderAuthTest {
         assertNull(a.apiKey("unicorn"))
     }
 
-    @Test fun googleHonoursBothAliases() {
+    @Test fun geminiHonoursBothAliases() {
+        // Cycle 312: provider id migrated "google" → "gemini"
+        // to align with GeminiProvider.id. Both env-var aliases
+        // (GEMINI_API_KEY, GOOGLE_API_KEY) still keyed under
+        // the canonical "gemini" provider.
         val withGemini = auth("GEMINI_API_KEY" to "gemini-key")
-        assertEquals(AuthStatus.Present, withGemini.authStatus("google"))
-        assertEquals("gemini-key", withGemini.apiKey("google"))
+        assertEquals(AuthStatus.Present, withGemini.authStatus("gemini"))
+        assertEquals("gemini-key", withGemini.apiKey("gemini"))
 
         val withGoogle = auth("GOOGLE_API_KEY" to "google-key")
-        assertEquals(AuthStatus.Present, withGoogle.authStatus("google"))
-        assertEquals("google-key", withGoogle.apiKey("google"))
+        assertEquals(AuthStatus.Present, withGoogle.authStatus("gemini"))
+        assertEquals("google-key", withGoogle.apiKey("gemini"))
     }
 
     @Test fun firstAliasWinsWhenBothSet() {
@@ -70,7 +74,7 @@ class EnvProviderAuthTest {
             "GOOGLE_API_KEY" to "google-second",
         )
         // DEFAULT_ENV_VARS lists GEMINI_API_KEY before GOOGLE_API_KEY.
-        assertEquals("gemini-first", a.apiKey("google"))
+        assertEquals("gemini-first", a.apiKey("gemini"))
     }
 
     @Test fun blankFirstAliasFallsThroughToSecond() {
@@ -78,8 +82,8 @@ class EnvProviderAuthTest {
             "GEMINI_API_KEY" to "",
             "GOOGLE_API_KEY" to "google-fallback",
         )
-        assertEquals(AuthStatus.Present, a.authStatus("google"))
-        assertEquals("google-fallback", a.apiKey("google"))
+        assertEquals(AuthStatus.Present, a.authStatus("gemini"))
+        assertEquals("google-fallback", a.apiKey("gemini"))
     }
 
     @Test fun providerIdsListsDefaults() {
@@ -87,7 +91,7 @@ class EnvProviderAuthTest {
         val ids = a.providerIds.toSet()
         assertTrue("anthropic" in ids, ids.toString())
         assertTrue("openai" in ids, ids.toString())
-        assertTrue("google" in ids, ids.toString())
+        assertTrue("gemini" in ids, ids.toString())
         assertTrue("replicate" in ids, ids.toString())
     }
 

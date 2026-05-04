@@ -63,9 +63,12 @@ class LlmPricingEntriesValueTest {
         assertEquals(4, openai.size, "OpenAI priced entries MUST be 4")
     }
 
-    @Test fun googleHasTwoPricedEntries() {
-        val google = LlmPricing.all().filter { it.providerId == "google" }
-        assertEquals(2, google.size, "Google priced entries MUST be 2")
+    @Test fun geminiHasTwoPricedEntries() {
+        // Cycle 312: providerId migrated "google" → "gemini"
+        // to align with GeminiProvider.id. Pre-cycle-312 the
+        // entries still answered to "google".
+        val gemini = LlmPricing.all().filter { it.providerId == "gemini" }
+        assertEquals(2, gemini.size, "Gemini priced entries MUST be 2")
     }
 
     // ── Anthropic exact rates ───────────────────────────────
@@ -130,7 +133,7 @@ class LlmPricingEntriesValueTest {
     // ── Google exact rates ──────────────────────────────────
 
     @Test fun gemini25ProExactRates() {
-        val pro = LlmPricing.find("google", "gemini-2.5-pro")
+        val pro = LlmPricing.find("gemini", "gemini-2.5-pro")
         assertNotNull(pro)
         assertEquals(0.125, pro.centsPer1kInputTokens, "Gemini 2.5 Pro input MUST be 0.125 ¢/1k")
         assertEquals(0.5, pro.centsPer1kOutputTokens)
@@ -141,7 +144,7 @@ class LlmPricingEntriesValueTest {
         // 0.0075 ¢/1k input is the cheapest entry in the
         // table. Drift would silently change which model
         // wins cost-sort comparisons.
-        val flash = LlmPricing.find("google", "gemini-2.5-flash")
+        val flash = LlmPricing.find("gemini", "gemini-2.5-flash")
         assertNotNull(flash)
         assertEquals(
             0.0075,
@@ -164,7 +167,7 @@ class LlmPricingEntriesValueTest {
             cheapest.modelId,
             "cheapest entry MUST be gemini-2.5-flash (drift in any rate that demotes it surfaces here)",
         )
-        assertEquals("google", cheapest.providerId)
+        assertEquals("gemini", cheapest.providerId)
     }
 
     @Test fun mostExpensiveOutputEntryIsClaudeOpus47() {
@@ -195,9 +198,10 @@ class LlmPricingEntriesValueTest {
 
     @Test fun everyEntryUsesOneOfThreeKnownProviderIds() {
         // Pin: provider ids in entries are exactly
-        // anthropic / openai / google. Drift to add a 4th
-        // provider via Entry would surface here.
-        val knownProviders = setOf("anthropic", "openai", "google")
+        // anthropic / openai / gemini. Drift to add a 4th
+        // provider via Entry would surface here. (Cycle 312
+        // migrated "google" → "gemini".)
+        val knownProviders = setOf("anthropic", "openai", "gemini")
         for (entry in LlmPricing.all()) {
             assertTrue(
                 entry.providerId in knownProviders,

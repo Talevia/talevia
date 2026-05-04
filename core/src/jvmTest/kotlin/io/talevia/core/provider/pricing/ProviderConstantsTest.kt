@@ -8,7 +8,7 @@ import kotlin.test.assertTrue
  * Direct tests for the provider id constants in
  * `core/src/commonMain/kotlin/io/talevia/core/provider/pricing/LlmPricing.kt:87-89`.
  * Cycle 280 audit: 0 test refs against [LlmPricing.PROVIDER_ANTHROPIC],
- * [LlmPricing.PROVIDER_OPENAI], or [LlmPricing.PROVIDER_GOOGLE].
+ * [LlmPricing.PROVIDER_OPENAI], or [LlmPricing.PROVIDER_GEMINI].
  *
  * Same audit-pattern fallback as cycles 207-279.
  *
@@ -67,24 +67,30 @@ class ProviderConstantsTest {
         )
     }
 
-    @Test fun providerGoogleIsLowercaseGoogle() {
+    @Test fun providerGeminiIsLowercaseGemini() {
+        // Cycle 312 renamed PROVIDER_GEMINI → PROVIDER_GEMINI
+        // and changed value "google" → "gemini" to align with
+        // GeminiProvider.id ("gemini") + SecretKeys.GEMINI
+        // canonical. Pre-cycle-312 pricing lookup silently
+        // failed because LlmPricing used "google" while every
+        // other layer used "gemini".
         assertEquals(
-            "google",
-            LlmPricing.PROVIDER_GOOGLE,
-            "PROVIDER_GOOGLE MUST be exactly 'google'",
+            "gemini",
+            LlmPricing.PROVIDER_GEMINI,
+            "PROVIDER_GEMINI MUST be exactly 'gemini' (cycle 312 alignment with GeminiProvider.id)",
         )
     }
 
     @Test fun threeProviderIdsAreDistinct() {
         // Marquee uniqueness pin: drift to merge two
-        // constants (e.g. typo'd PROVIDER_GOOGLE = "openai")
+        // constants (e.g. typo'd PROVIDER_GEMINI = "openai")
         // would silently combine the two providers' price
         // tables. Three distinct values is what the
         // dispatcher relies on.
         val ids = setOf(
             LlmPricing.PROVIDER_ANTHROPIC,
             LlmPricing.PROVIDER_OPENAI,
-            LlmPricing.PROVIDER_GOOGLE,
+            LlmPricing.PROVIDER_GEMINI,
         )
         assertEquals(
             3,
@@ -100,7 +106,7 @@ class ProviderConstantsTest {
         for ((name, value) in mapOf(
             "PROVIDER_ANTHROPIC" to LlmPricing.PROVIDER_ANTHROPIC,
             "PROVIDER_OPENAI" to LlmPricing.PROVIDER_OPENAI,
-            "PROVIDER_GOOGLE" to LlmPricing.PROVIDER_GOOGLE,
+            "PROVIDER_GEMINI" to LlmPricing.PROVIDER_GEMINI,
         )) {
             assertTrue(
                 value.isNotBlank(),
@@ -138,6 +144,6 @@ class ProviderConstantsTest {
         // still load-bearing for `AigcPricing.estimateCents`
         // when those providers grow AIGC-side rules.
         assertEquals("anthropic", LlmPricing.PROVIDER_ANTHROPIC)
-        assertEquals("google", LlmPricing.PROVIDER_GOOGLE)
+        assertEquals("gemini", LlmPricing.PROVIDER_GEMINI)
     }
 }

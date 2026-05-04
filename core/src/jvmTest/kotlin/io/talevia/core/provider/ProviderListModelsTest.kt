@@ -181,17 +181,16 @@ class ProviderListModelsTest {
     // ── Gemini provider ────────────────────────────────────
 
     @Test fun geminiProviderIdIsGemini() = runTest {
-        // Pin: Gemini provider's id is "gemini". Note: this
-        // diverges from cycle 280's PROVIDER_GOOGLE = "google"
-        // constant in LlmPricing — drift / divergence the
-        // pricing layer can't bridge across the two literals.
-        // Pin documents the observed value; if the divergence
-        // is bug-shaped, a future cycle will harmonise.
+        // Pin: Gemini provider's id is "gemini" — cycle 312
+        // harmonised LlmPricing.PROVIDER_GEMINI to the same
+        // literal (was "google" pre-cycle-312, which silently
+        // broke pricing lookup for every Gemini call). Drift
+        // here would re-introduce the same silent failure in
+        // CheapestFirstPolicy + EnvProviderAuth.
         assertEquals(
             "gemini",
             gemini().id,
-            "Gemini provider id is 'gemini' (NOT 'google'; mismatch with " +
-                "LlmPricing.PROVIDER_GOOGLE pinned cycle 280 — observed-but-uncoupled)",
+            "Gemini provider id is 'gemini' (matches LlmPricing.PROVIDER_GEMINI as of cycle 312)",
         )
     }
 
