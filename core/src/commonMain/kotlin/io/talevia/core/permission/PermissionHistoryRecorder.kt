@@ -92,6 +92,9 @@ class PermissionHistoryRecorder(
     private val ready = CompletableDeferred<Unit>()
 
     init {
+        require(capacityPerSession > 0) {
+            "capacityPerSession must be > 0 (got $capacityPerSession)"
+        }
         scope.launch {
             bus.events
                 .onSubscription { ready.complete(Unit) }

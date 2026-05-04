@@ -75,6 +75,9 @@ class RateLimitHistoryRecorder(
     private val ready = CompletableDeferred<Unit>()
 
     init {
+        require(capacityPerProvider > 0) {
+            "capacityPerProvider must be > 0 (got $capacityPerProvider)"
+        }
         scope.launch {
             bus.events
                 .onSubscription { ready.complete(Unit) }
