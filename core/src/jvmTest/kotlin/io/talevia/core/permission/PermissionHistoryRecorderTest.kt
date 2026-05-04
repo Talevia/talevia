@@ -37,7 +37,12 @@ class PermissionHistoryRecorderTest {
         sessionId: String,
         predicate: (List<PermissionHistoryRecorder.Entry>) -> Boolean,
     ) {
-        withTimeout(5.seconds) {
+        // 10s rather than 5s: the recorder's collector runs on
+        // Dispatchers.Default and gets starved under concurrent
+        // gradle daemon load (cycle 283 stop-hook caught a real
+        // 5s-window race after a 19-test compile-and-run). 10s
+        // still fails fast on real bugs.
+        withTimeout(10.seconds) {
             while (!predicate(recorder.snapshot(sessionId))) yield()
         }
     }
