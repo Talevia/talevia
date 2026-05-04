@@ -102,3 +102,59 @@ mitigation：fold/rename refactor 时显式 grep `apps/ios/Talevia` 看引用；
 mitigation：在 KMP common 层用 typealias / sealed registry 让 Swift 端按符号
 而非按构造名引用 tool（KMP 的 dispatcher pattern 是 Kotlin object，Swift 端
 能直接拿到 enum-like 接口）。
+
+
+## 2026-05-03 — dual-roster-drift-listmodels-llmpricing (cycle 313)
+
+**Observation**: Three real bugs in three cycles, all the same shape: an id
+that names a model OR a provider drifts between `LlmProvider.listModels()`
+and `LlmPricing.find()`. The lookup is nullable, so missing entries =
+silent uncosted calls (or, in cycle 312's case, silent demotion in
+`CheapestFirstPolicy` via "unknown pricing").
+
+- cycle 311 fixed `claude-haiku-4-5-20251001` (listModels) vs `claude-haiku-4-5`
+  (LlmPricing).
+- cycle 312 fixed `gemini` (GeminiProvider.id + canonical) vs `google`
+  (LlmPricing.PROVIDER_GOOGLE + EnvProviderAuth map key).
+- cycle 313 surfaces three more (banked as observation pins, not yet fixed
+  pending product decision):
+  - `gpt-4.1` listed but unpriced;
+  - `gpt-5.4` / `gpt-5.4-mini` priced under "openai" but reachable only
+    through `OpenAiCodexProvider` ("openai-codex") — same shape as 312;
+  - `gemini-2.0-flash` listed but unpriced.
+
+**Hard rule / VISION challenged**: CLAUDE.md §"Provider abstraction is
+SDK-agnostic" is satisfied at the *interface* layer (`LlmEvent` is provider-
+neutral) but the **model registry is duplicated across two flat tables**
+in different files. `listModels()` returns hardcoded `ModelInfo` lists in
+each `*Provider.kt`; `LlmPricing.kt` holds an independent hardcoded
+`Entry` list. There is no single source of truth coupling them, and no
+compile-time guarantee that they agree. Three drift bugs in three cycles
+suggest the duplicate-roster design will keep producing this bug class
+unless reified.
+
+**Resolution candidates** (left for next driver / repopulate cycle to
+weigh):
+
+1. **Single `ModelRegistry` with both ModelInfo + pricing** in one
+   declaration: each provider declares its full roster
+   `(modelId, contextWindow, capabilities, inputRate, outputRate)`
+   in one place; `listModels()` and `LlmPricing.find()` derive views
+   over it. Pricing-without-listing or listing-without-pricing become
+   compile-time impossible.
+
+2. **Cross-coupling pin tests** (cycle 313 banked these as
+   `ProviderListModelsLlmPricingCrossCouplingTest`): cheap, no
+   refactor, but every new model still needs both layers updated by
+   hand — the test only catches drift at PR time.
+
+3. **`Provider.pricing()` method** on the LlmProvider interface:
+   forces each provider to vend its pricing alongside its models.
+   Pricing entries can stop being a flat-file table; LlmPricing.find
+   becomes a registry-walk.
+
+The pin file is the cheap mitigation. The single-registry refactor is
+the structural fix; it has not been picked up because the BACKLOG has
+no driver beyond "we've shipped this bug 3 times" — but cycle 311/312/313
+together IS that driver, and the PAIN_POINTS append is meant to make
+that visible to the next architectural-debt sweep.
