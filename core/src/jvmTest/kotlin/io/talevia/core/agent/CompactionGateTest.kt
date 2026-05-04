@@ -32,6 +32,7 @@ import kotlinx.coroutines.test.TestResult
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.yield
 import kotlinx.datetime.Clock
 import kotlin.test.Test
@@ -135,9 +136,21 @@ class CompactionGateTest {
         }
         ready.await()
         body()
-        // Give the collector a tick to drain anything still in the buffer.
-        yield()
-        yield()
+        // Drain: poll until size stabilises. Under concurrent
+        // gradle / Stop-hook load, Dispatchers.Default can be
+        // starved more than a fixed two-yield window allows
+        // (cycle 291 stop-hook caught a real
+        // overThresholdPublishesCompactingThenGeneratingStates
+        // flake — collector hadn't received both state events
+        // before job.cancel fired). 2s ceiling still fails fast
+        // on a real bug.
+        withTimeoutOrNull(2.seconds) {
+            var lastSize = -1
+            while (captured.size != lastSize) {
+                lastSize = captured.size
+                repeat(4) { yield() }
+            }
+        }
         job.cancel()
         return captured.toList()
     }
