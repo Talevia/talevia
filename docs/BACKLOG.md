@@ -13,6 +13,8 @@
 
 ## P0 — 高杠杆、下一步就该动
 
+- **bug-gemini-google-provider-id-divergence** — `GeminiProvider.id = "gemini"` (`core/provider/gemini/GeminiProvider.kt:73`) but `LlmPricing.PROVIDER_GOOGLE = "google"` (`core/provider/pricing/LlmPricing.kt:89`). `CheapestFirstPolicy` looks up pricing via `provider.id`, so Gemini sorts as "unknown pricing" and gets demoted to last in the fallback chain — defeating its role as the cheapest provider. Cycle 311 fixed the parallel Anthropic Haiku divergence (one-line); Gemini is multi-touchpoint (LlmPricing constants + EnvProviderAuth.DEFAULT_ENV_VARS map key + SecretKeys.GOOGLE alias + provider id). **方向：** decide one canonical id for Google's provider lane (likely "gemini" since that's what GeminiProvider, SecretKeys.GEMINI canonical, and the log slug all use), then update LlmPricing's PROVIDER_GOOGLE → PROVIDER_GEMINI = "gemini" + EnvProviderAuth's "google" → "gemini" map key. Drop SecretKeys.GOOGLE alias OR keep as user-input alias only. Rubric §5.7 / §5.6。Milestone §later.
+
 ## P1 — 中优,做完 P0 再排
 
 - **debt-split-clip-action-tool-input-seed** — Cycle 44's clip_action consolidation grew the file from 291 → 377 LOC (+86 LOC for 3 new verbs + 6 new data classes + 3 new result types). Now 12 verbs, ~16 nullable Input fields, ~13 Output result lists. Pattern matches the SessionActionTool 606-LOC trajectory (14 verbs, 17 nullable fields). **方向：** observational. **触发条件：** ClipActionTool.kt ≥ 500 LOC OR verb count > 14 → split via the same sealed-Input phasing as session_action. Rubric §5.6 / §3a-3。Milestone §later. · skipped 2026-05-02: trigger 条件未触发 — 377 < 500 LOC, 12 < 14 verbs (cycle 65 no-change since cycle 62 repopulate). Re-evaluate when ClipAction grows past threshold.

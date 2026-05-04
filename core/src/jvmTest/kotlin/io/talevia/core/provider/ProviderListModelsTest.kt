@@ -89,9 +89,17 @@ class ProviderListModelsTest {
 
     @Test fun anthropicListModelsContainsClaudeHaiku45() = runTest {
         // Haiku doesn't support thinking — pin the
-        // capability difference.
-        val haiku = anthropic().listModels().find { it.id == "claude-haiku-4-5-20251001" }
-        assertNotNull(haiku)
+        // capability difference. Cycle 311 aligned the model
+        // id with LlmPricing's entry: dropped the
+        // "-20251001" date suffix (was a copy-paste error
+        // from Anthropic's dated-snapshot list — the alias
+        // is what the pricing entry uses, so dropping the
+        // suffix unblocks pricing lookup for Haiku).
+        val haiku = anthropic().listModels().find { it.id == "claude-haiku-4-5" }
+        assertNotNull(
+            haiku,
+            "claude-haiku-4-5 (alias, NOT dated suffix) MUST be in Anthropic listModels",
+        )
         assertEquals(200_000, haiku.contextWindow)
         assertTrue(haiku.supportsTools)
         assertEquals(
@@ -100,6 +108,26 @@ class ProviderListModelsTest {
             "claude-haiku-4-5 MUST NOT supportsThinking (capability differentiator from Opus/Sonnet)",
         )
         assertTrue(haiku.supportsImages)
+    }
+
+    @Test fun haikuListModelsIdMatchesLlmPricingEntryId() = runTest {
+        // Marquee cross-coupling pin (cycles 309-310 banked
+        // divergence resolution). Anthropic's listModels +
+        // LlmPricing entry MUST agree on the haiku model id
+        // so pricing lookup succeeds for every Haiku call.
+        // Drift surfaces as null pricing → silent uncosted
+        // entries.
+        val listModelsId = anthropic().listModels()
+            .single { it.id.startsWith("claude-haiku-") }
+            .id
+        val pricedId = io.talevia.core.provider.pricing.LlmPricing.all()
+            .single { it.providerId == "anthropic" && it.modelId.startsWith("claude-haiku-") }
+            .modelId
+        assertEquals(
+            listModelsId,
+            pricedId,
+            "AnthropicProvider listModels haiku id MUST equal LlmPricing haiku entry id",
+        )
     }
 
     // ── OpenAI provider ────────────────────────────────────

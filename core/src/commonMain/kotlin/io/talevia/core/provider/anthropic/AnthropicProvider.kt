@@ -57,7 +57,7 @@ class AnthropicProvider(
     override suspend fun listModels(): List<ModelInfo> = listOf(
         ModelInfo("claude-opus-4-7", "Claude Opus 4.7", contextWindow = 200_000, supportsTools = true, supportsThinking = true, supportsImages = true),
         ModelInfo("claude-sonnet-4-6", "Claude Sonnet 4.6", contextWindow = 200_000, supportsTools = true, supportsThinking = true, supportsImages = true),
-        ModelInfo("claude-haiku-4-5-20251001", "Claude Haiku 4.5", contextWindow = 200_000, supportsTools = true, supportsImages = true),
+        ModelInfo("claude-haiku-4-5", "Claude Haiku 4.5", contextWindow = 200_000, supportsTools = true, supportsImages = true),
     )
 
     override fun stream(request: LlmRequest): Flow<LlmEvent> = channelFlow {
