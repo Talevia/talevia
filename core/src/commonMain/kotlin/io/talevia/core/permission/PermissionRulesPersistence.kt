@@ -1,6 +1,7 @@
 package io.talevia.core.permission
 
 import io.talevia.core.JsonConfig
+import io.talevia.core.domain.randomSuffix
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
 import okio.FileSystem
@@ -96,7 +97,4 @@ class FilePermissionRulesPersistence(
             fs.atomicMove(tmp, path)
         }
     }
-
-    private fun randomSuffix(): String =
-        kotlin.random.Random.nextLong().toString(radix = 36).removePrefix("-")
 }
