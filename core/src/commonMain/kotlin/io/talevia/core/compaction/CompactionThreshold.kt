@@ -47,6 +47,26 @@ class PerModelCompactionThreshold(
     private val fallback: Int = DEFAULT_COMPACTION_TOKEN_THRESHOLD,
 ) : (ModelRef) -> Int {
 
+    init {
+        // Defensive: ratio outside [0.0, 1.0] would silently break
+        // compaction. Negative ratio yields negative threshold; the
+        // gate's `estimated <= threshold` check would fail on every
+        // turn (estimated >= 0 always > negative threshold), making
+        // compaction fire constantly. ratio > 1 makes the trigger
+        // exceed the model's actual context window, so compaction
+        // never fires until the provider returns a context-overflow
+        // error. Both pathological — fail loud at construction.
+        require(ratio in 0.0..1.0) {
+            "ratio must be in [0.0, 1.0] (got $ratio)"
+        }
+        // Negative fallback has the same "compaction always fires"
+        // shape as negative ratio. Pin: fallback is a token count,
+        // never negative.
+        require(fallback >= 0) {
+            "fallback must be >= 0 (got $fallback)"
+        }
+    }
+
     override operator fun invoke(ref: ModelRef): Int =
         contextWindowByRef[ref.providerId to ref.modelId]
             ?.let { (it * ratio).toInt() }

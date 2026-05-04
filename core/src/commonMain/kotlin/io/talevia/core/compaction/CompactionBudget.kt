@@ -101,6 +101,23 @@ class PerModelCompactionBudget(
     private val fallback: CompactionBudget = CompactionBudget.DEFAULT,
 ) : (ModelRef) -> CompactionBudget {
 
+    init {
+        // Defensive: keepRatio outside [0.0, 1.0] is pathological.
+        // < 0 → negative scaled budget → would fail [CompactionBudget.init]'s
+        // `pruneKeepTokens > 0` check downstream (after the
+        // `if (scaled <= 0) return fallback` guard) but pinning here
+        // catches the misconfiguration at construction time with a
+        // clearer error than "scaled <= 0 → silent fallback for every
+        // model". > 1.0 → keepRatio exceeds threshold ratio (0.85),
+        // inverting the trigger-thrash-protective gap that cycle 317
+        // pinned (>= 0.50).
+        // Note: protectUserTurns + fallback's CompactionBudget already
+        // validated by [CompactionBudget.init].
+        require(keepRatio in 0.0..1.0) {
+            "keepRatio must be in [0.0, 1.0] (got $keepRatio)"
+        }
+    }
+
     override operator fun invoke(ref: ModelRef): CompactionBudget {
         val window = contextWindowByRef[ref.providerId to ref.modelId] ?: return fallback
         // Guard against pathologically small or mis-reported context
