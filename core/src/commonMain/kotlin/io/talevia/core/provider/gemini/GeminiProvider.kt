@@ -223,13 +223,7 @@ class GeminiProvider(
         )
     }
 
-    private fun mapFinish(raw: String?, sawToolCall: Boolean): FinishReason = when (raw) {
-        "STOP" -> if (sawToolCall) FinishReason.TOOL_CALLS else FinishReason.END_TURN
-        "MAX_TOKENS" -> FinishReason.MAX_TOKENS
-        "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII" -> FinishReason.CONTENT_FILTER
-        null -> if (sawToolCall) FinishReason.TOOL_CALLS else FinishReason.STOP
-        else -> FinishReason.STOP
-    }
+    private fun mapFinish(raw: String?, sawToolCall: Boolean): FinishReason = mapGeminiFinishReason(raw, sawToolCall)
 
     internal fun buildRequestBody(request: LlmRequest): JsonObject = buildJsonObject {
         put("contents", buildContents(request.messages))
@@ -344,4 +338,29 @@ class GeminiProvider(
             }
         }
     }
+}
+
+/**
+ * Map Gemini's terminal `finishReason` string + the per-turn
+ * `sawToolCall` context onto Talevia's normalised [FinishReason].
+ * Mirrors [io.talevia.core.provider.anthropic.mapAnthropicStopReason]
+ * + [io.talevia.core.provider.openai.mapOpenAiFinishReason] — extracted
+ * to top-level `internal` so tests can pin each (raw, sawToolCall)
+ * combination directly. Two-input mapping is a richer drift surface
+ * than the single-input Anthropic / OpenAi mappers because the
+ * `sawToolCall` flag changes the resolution for the same `raw =
+ * "STOP"` value (TOOL_CALLS vs END_TURN); pinning matters more here.
+ *
+ * Drift in any branch silently misclassifies real production turns:
+ * dropping `"SPII"` from the safety-filter OR-list would route
+ * SPII-blocked responses through the default STOP fallback,
+ * making them indistinguishable from a normal completion in
+ * downstream cost / retry / UI logic.
+ */
+internal fun mapGeminiFinishReason(raw: String?, sawToolCall: Boolean): FinishReason = when (raw) {
+    "STOP" -> if (sawToolCall) FinishReason.TOOL_CALLS else FinishReason.END_TURN
+    "MAX_TOKENS" -> FinishReason.MAX_TOKENS
+    "SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII" -> FinishReason.CONTENT_FILTER
+    null -> if (sawToolCall) FinishReason.TOOL_CALLS else FinishReason.STOP
+    else -> FinishReason.STOP
 }

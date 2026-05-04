@@ -267,13 +267,7 @@ class OpenAiProvider(
         )
     }
 
-    private fun mapFinish(raw: String?): FinishReason = when (raw) {
-        "stop" -> FinishReason.STOP
-        "length" -> FinishReason.MAX_TOKENS
-        "tool_calls", "function_call" -> FinishReason.TOOL_CALLS
-        "content_filter" -> FinishReason.CONTENT_FILTER
-        else -> FinishReason.STOP
-    }
+    private fun mapFinish(raw: String?): FinishReason = mapOpenAiFinishReason(raw)
 
     /**
      * Extract the "try again in Xs" hint OpenAI puts in the 429 error body when
@@ -289,4 +283,25 @@ class OpenAiProvider(
         // Matches "Please try again in 3.363s" / "try again in 450ms" in OpenAI 429 bodies.
         private val retryHintRegex = Regex("""try again in (\d+(?:\.\d+)?)s""")
     }
+}
+
+/**
+ * Map OpenAI's terminal `finish_reason` string onto Talevia's normalised
+ * [FinishReason]. Mirrors [io.talevia.core.provider.anthropic.mapAnthropicStopReason]
+ * — extracted to top-level `internal` so tests can pin each raw-string
+ * variant directly without instantiating [OpenAiProvider]. Drift in any
+ * branch (e.g. dropping `"function_call"` from the TOOL_CALLS OR-list)
+ * silently misclassifies real production turns; pinning each variant
+ * explicitly catches drift the way cycle 311/312 caught provider-id
+ * divergence.
+ *
+ * Unknown / unmapped reasons fall back to [FinishReason.STOP] — the
+ * safest default, matching Anthropic's mapper convention.
+ */
+internal fun mapOpenAiFinishReason(raw: String?): FinishReason = when (raw) {
+    "stop" -> FinishReason.STOP
+    "length" -> FinishReason.MAX_TOKENS
+    "tool_calls", "function_call" -> FinishReason.TOOL_CALLS
+    "content_filter" -> FinishReason.CONTENT_FILTER
+    else -> FinishReason.STOP
 }
