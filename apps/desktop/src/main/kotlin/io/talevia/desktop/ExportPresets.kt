@@ -66,13 +66,3 @@ internal fun FpsDropdown(selected: FpsPreset, onSelect: (FpsPreset) -> Unit) {
         }
     }
 }
-
-/**
- * Default model id per provider, for the Chat panel's first turn when the
- * user hasn't explicitly chosen a model.
- */
-internal fun defaultModelFor(providerId: String): String = when (providerId) {
-    "anthropic" -> "claude-opus-4-7"
-    "openai" -> "gpt-5.4-mini"
-    else -> "default"
-}

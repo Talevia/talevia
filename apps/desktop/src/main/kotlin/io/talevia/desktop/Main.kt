@@ -26,8 +26,10 @@ import kotlin.uuid.ExperimentalUuidApi
  *  - [AppRoot] — three-column composition root.
  *  - [ChatPanel] — agent-driven chat surface + session switcher.
  *  - [DesktopShortcutHolder] — window-level cmd+E/S/R key dispatch.
- *  - [ResolutionDropdown] / [FpsDropdown] / [defaultModelFor] —
- *    export preset UI + provider-default model picker.
+ *  - [ResolutionDropdown] / [FpsDropdown] — export preset UI.
+ *    (Provider-default model picker now lives in
+ *    `io.talevia.core.provider.defaultModelFor` since cycle 274's
+ *    `debt-consolidate-defaultModelFor-three-copies`.)
  *  - [SectionTitle] / [openExternallyIfExists] / [resolveOpenablePath] /
  *    [desktopEnvWithDefaults] — shared helpers.
  */

@@ -15,6 +15,7 @@ import io.talevia.core.ProjectId
 import io.talevia.core.SessionId
 import io.talevia.core.agent.RunInput
 import io.talevia.core.bus.BusEvent
+import io.talevia.core.provider.defaultModelFor
 import io.talevia.core.session.Message
 import io.talevia.core.session.ModelRef
 import io.talevia.core.session.Part

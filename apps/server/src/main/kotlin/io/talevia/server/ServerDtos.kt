@@ -67,12 +67,6 @@ import kotlinx.serialization.Serializable
     val reason: String? = null,
 )
 
-internal fun defaultModelFor(providerId: String): String = when (providerId) {
-    "anthropic" -> "claude-opus-4-7"
-    "openai" -> "gpt-5.4-mini"
-    else -> "default"
-}
-
 // ─── SSE event serialisation ───
 
 /** Human-readable event name for SSE `event:` lines. */

@@ -1,5 +1,6 @@
 package io.talevia.cli.repl
 
+import io.talevia.core.provider.defaultModelFor
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
